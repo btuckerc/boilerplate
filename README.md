@@ -19,29 +19,40 @@ A comprehensive collection of scripts and configurations for setting up and mana
 
 ```
 .
-├── config/                 # Configuration files
-│   ├── .vscode/           # VSCode settings
-│   │   ├── settings.json
-│   │   └── snippets/
-│   ├── alacritty-config
-│   ├── catppuccin-mocha.toml
-│   └── starship.toml
-├── setup/                 # Environment setup scripts
-│   ├── setup-go          # Go environment setup
-│   └── setup-py          # Python environment setup
-├── templates/            # Project templates
-│   ├── go/              # Go project templates
-│   └── python/          # Python project templates
-├── utils/               # Utility scripts
-│   ├── common.sh        # Shared shell functions
-│   ├── readme.sh        # README generator
-│   └── tree.sh          # Directory tree generator
-├── setup-git            # Git configuration
-├── setup-tailwind       # Tailwind CSS setup
-├── setup-tailwind-beta  # Tailwind CSS beta setup
-├── bashrc              # Shell configuration
-├── bash_profile        # Shell profile
-└── lexicon.md          # Command reference and tips
+├── LICENSE                     # 
+├── README.md                   # 
+├── applications-list.md        # 
+├── bash_profile                # Shell profile
+├── bashrc                      # Shell configuration
+├── config                      # Configuration files
+│   ├── .vscode/                # VSCode settings
+│   │   ├── settings.json       # 
+│   │   └── snippets/           # 
+│   ├── alacritty-config        # 
+│   ├── catppuccin-mocha.toml   # 
+│   └── starship.toml           # 
+├── init-project                # 
+├── lexicon.md                  # Command reference and tips
+├── setup                       # Environment setup scripts
+│   ├── setup-go                # Go environment setup
+│   └── setup-py                # Python environment setup
+├── setup-git                   # Git configuration
+├── setup-supabase              # Supabase configuration
+├── setup-tailwind              # Tailwind CSS setup
+├── setup-tailwind-beta         # Tailwind CSS beta setup
+├── templates                   # Project templates
+│   ├── go                      # Go project templates
+│   │   ├── README.md           # 
+│   │   └── main.go             # 
+│   └── python                  # Python project templates
+│       ├── README.md           # 
+│       └── requirements.txt    # 
+├── utils                       # Utility scripts
+│   ├── common.sh               # Shared shell functions
+│   ├── readme.sh               # README generator
+│   └── tree.sh                 # Directory tree generator
+├── vimrc                       # 
+└── vscode-shortcuts.pdf        # 
 ```
 
 ## Features

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Copyright (c) $(date +%Y) ${USER^}
+# Copyright (c) 2024 Tucker Craig
 # See LICENSE file for full license details.
 
 # Get the absolute directory of the current script

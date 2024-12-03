@@ -1,0 +1,153 @@
+#!/bin/bash
+# Copyright (c) 2024 Tucker Craig
+# See LICENSE file for full license details.
+
+# Get the absolute directory of the current script
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Source common utilities
+source "$SCRIPT_DIR/utils/common.sh"
+
+# Function to show usage
+show_usage() {
+    cat << EOF
+Initialize a new project with standard boilerplate.
+
+Usage: 
+    $(basename "$0") [options] [name]
+    $(basename "$0") [options] -n/--name <name>
+
+Arguments:
+    name                Project name (optional if in empty directory)
+
+Options:
+    -l, --lang <lang>  Project language [default: python]
+                       Supported: python (or py), go (or golang)
+    -n, --name <name>  Project name (alternative to positional argument)
+    -h, --help         Show this help message
+
+Examples:
+    $(basename "$0") my-project              # Python project named 'my-project'
+    $(basename "$0") -l go my-project        # Go project named 'my-project'
+    $(basename "$0") --lang python           # Python project in current directory
+    $(basename "$0") -n api -l go            # Go project named 'api'
+
+Notes:
+    - If no name is provided and the current directory is empty (ignoring hidden files),
+      the current directory name will be used as the project name.
+    - The script will create a new directory for the project unless using an empty
+      directory.
+EOF
+    exit 1
+}
+
+# Parse command line arguments
+LANGUAGE="python"  # Default to Python
+PROJECT_NAME=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -l|--lang|--language)
+            if [ -z "$2" ]; then
+                echo "Error: Language argument is required"
+                show_usage
+            fi
+            LANGUAGE="$2"
+            shift 2
+            ;;
+        -n|--name)
+            if [ -z "$2" ]; then
+                echo "Error: Name argument is required"
+                show_usage
+            fi
+            PROJECT_NAME="$2"
+            shift 2
+            ;;
+        -h|--help)
+            show_usage
+            ;;
+        -*)
+            echo "Error: Unknown option: $1"
+            show_usage
+            ;;
+        *)
+            if [ -z "$PROJECT_NAME" ]; then
+                PROJECT_NAME="$1"
+            else
+                echo "Error: Project name already specified as '$PROJECT_NAME'"
+                show_usage
+            fi
+            shift
+            ;;
+    esac
+done
+
+# Normalize language input
+case "$LANGUAGE" in
+    py|python)
+        LANGUAGE="python"
+        SETUP_SCRIPT="$SCRIPT_DIR/setup/setup-py"
+        TEMPLATE_DIR="$SCRIPT_DIR/templates/python"
+        ;;
+    go|golang)
+        LANGUAGE="go"
+        SETUP_SCRIPT="$SCRIPT_DIR/setup/setup-go"
+        TEMPLATE_DIR="$SCRIPT_DIR/templates/go"
+        ;;
+    *)
+        echo "Error: Unsupported language: $LANGUAGE"
+        show_usage
+        ;;
+esac
+
+# Check if setup script exists
+if [ ! -f "$SETUP_SCRIPT" ]; then
+    echo "Error: Setup script not found at $SETUP_SCRIPT"
+    exit 1
+fi
+
+# Handle project directory
+if [ -z "$PROJECT_NAME" ]; then
+    # No project name provided, check if current directory is empty
+    if is_directory_empty "$(pwd)"; then
+        PROJECT_NAME=$(basename "$(pwd)")
+        echo "Using current directory for project: $PROJECT_NAME"
+    else
+        echo "Error: Current directory is not empty and no project name provided"
+        show_usage
+    fi
+else
+    # Create new directory for project
+    mkdir -p "$PROJECT_NAME"
+    cd "$PROJECT_NAME" || { echo "Error: Failed to create and navigate to $PROJECT_NAME"; exit 1; }
+    echo "Created project directory: $PROJECT_NAME"
+fi
+
+# Run the setup script first
+chmod +x "$SETUP_SCRIPT"
+"$SETUP_SCRIPT"
+
+# Copy and process templates
+copy_templates "$TEMPLATE_DIR" "$(pwd)" "$PROJECT_NAME"
+
+# Language-specific initialization
+case "$LANGUAGE" in
+    python)
+        # Create virtual environment
+        python3 -m venv venv || { echo "Error: Failed to create virtual environment"; exit 1; }
+        echo "Created virtual environment at venv/"
+        ;;
+    go)
+        # Initialize Go module
+        read -p "Enter the module name (e.g., github.com/username/project): " module_name
+        go mod init "$module_name" || { echo "Error: Failed to initialize Go module"; exit 1; }
+        echo "Initialized Go module: $module_name"
+        ;;
+esac
+
+# Initialize Git repository
+git init || { echo "Error: Failed to initialize Git repository"; exit 1; }
+git add . || { echo "Error: Failed to add files to Git"; exit 1; }
+git commit -m "Initial commit" || { echo "Error: Failed to commit changes"; exit 1; }
+
+echo "✨ $LANGUAGE project '$PROJECT_NAME' initialized successfully!"

@@ -1,0 +1,22 @@
+{
+    "Custom class": {
+        "scope": "python",
+        "prefix": "cc",
+        "body": [
+            "class ${1:ClassName}(${2:inherits}):",
+            "\tdef __init__(self, ${3:arg}):",
+            "\t\tself.$3 = $3",
+            "\t$255",
+        ],
+        "description": "BTC - Make a blank class."
+    },
+    "Custom method": {
+        "scope": "python",
+        "prefix": "$method",
+        "body": [
+            "def ${1:method}(self, ${2:arg}):",
+            "\t${3:pass}",
+        ],
+        "description": "BTC - Make a blank method."
+    },
+}

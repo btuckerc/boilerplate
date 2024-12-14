@@ -35,3 +35,4 @@ alias vim="nvim"
 alias practice="nvim +VimBeGood"
 
 alias vde="deactivate"
+alias v.="vim ."

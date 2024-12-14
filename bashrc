@@ -25,35 +25,7 @@ fi
 if [ -f "$ALIASES_FILE" ]; then
     source "$ALIASES_FILE"
 else
-    echo "Creating $ALIASES_FILE with default aliases..."
-    cat <<'EOF' > "$ALIASES_FILE"
-# Default aliases
-
-# Colorful and convenient ls
-alias ls='ls --color=auto'
-alias ll='ls -alF'
-alias la='ls -A'
-alias l='ls -CF'
-
-# Git shortcuts
-alias gst="git status"
-alias gpl="git pull"
-alias gps="git push"
-alias gcm="git commit -m"
-
-# Python environment
-alias va="source venv/bin/activate"
-
-# MySQL management
-alias sql_start="sudo /etc/init.d/mysql start"
-alias sql_stop="sudo /etc/init.d/mysql stop"
-alias sql="mysql --user='root' --password=''"
-
-# Miscellaneous
-alias rot13="tr 'A-Za-z' 'N-ZA-Mn-za-m'"
-alias dunnet="emacs -batch -l dunnet"
-EOF
-    source "$ALIASES_FILE"
+    touch "$ALIASES_FILE"
 fi
 
 # Pyenv setup for managing Python versions

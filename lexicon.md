@@ -138,6 +138,66 @@ launchctl unload ~/Library/LaunchAgents/com.user.task.plist
 - `ctrl+k`: Delete from cursor to end of line.
 - `ctrl+u`: Delete from cursor to start of line.
 
+## Command History and Reuse
+- `!!`: Run the last command
+- `!$`: Use the last argument of the previous command
+- `!*`: Use all arguments of the previous command
+- `!string`: Run the most recent command that starts with "string"
+- `!number`: Run command number 'number' from history
+- `!-n`: Run the command n commands ago
+- `^old^new`: Quick substitution - replace 'old' with 'new' in the previous command
+- **History Navigation**:
+  - `history`: Show command history
+  - `history n`: Show last n commands
+  - `ctrl+r`: Reverse search (press multiple times to cycle through matches)
+  - `ctrl+s`: Forward search through history (if enabled)
+  - Up/Down arrows: Navigate through previous commands
+  - `fc`: Open last command in editor
+- **History Shortcuts**:
+  - `$_`: Last argument of the previous command
+  - `!#`: Entire current command line typed so far
+  - `!:n`: nth argument of previous command (0 is command, 1 is first argument)
+  - `!:n-m`: Arguments n through m of previous command
+- **History Settings**:
+  ```bash
+  # Add to ~/.bashrc or ~/.zshrc
+  export HISTSIZE=10000        # Number of commands in memory
+  export HISTFILESIZE=10000    # Number of commands in history file
+  export HISTCONTROL=ignoredups:erasedups  # Don't store duplicates
+  shopt -s histappend         # Append to history instead of overwriting
+  ```
+
+## Additional Bash Tips
+- **Directory Stack**:
+  - `pushd directory`: Push directory onto stack and cd to it
+  - `popd`: Pop directory from stack and cd to it
+  - `dirs -v`: View directory stack
+- **Brace Expansion**:
+  - `mkdir -p project/{src,test,docs}`: Create multiple directories
+  - `cp file{,.bak}`: Quick backup (expands to: cp file file.bak)
+  - `touch file{1..5}.txt`: Create file1.txt through file5.txt
+- **Parameter Expansion**:
+  - `${variable:-default}`: Use default if variable is unset
+  - `${variable:=default}`: Set default if variable is unset
+  - `${#variable}`: Length of variable
+  - `${variable#pattern}`: Remove shortest match from start
+  - `${variable##pattern}`: Remove longest match from start
+  - `${variable%pattern}`: Remove shortest match from end
+  - `${variable%%pattern}`: Remove longest match from end
+- **Quick Substitution**:
+  - `^error^correction`: Replace first occurrence
+  - `!!:gs/error/correction/`: Replace all occurrences
+- **Useful Aliases**:
+  ```bash
+  # Add to ~/.bashrc or ~/.zshrc
+  alias ll='ls -la'
+  alias ..='cd ..'
+  alias ...='cd ../..'
+  alias mkdir='mkdir -p'
+  alias h='history'
+  alias grep='grep --color=auto'
+  ```
+
 ---
 
 ## VIM

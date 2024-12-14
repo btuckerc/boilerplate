@@ -51,3 +51,5 @@ opt.undofile = true
 opt.updatetime = 50
 
 opt.colorcolumn = "80"
+
+opt.shell = "/bin/bash"

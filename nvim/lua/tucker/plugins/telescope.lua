@@ -9,25 +9,34 @@ return {
   config = function()
     local telescope = require("telescope")
     local actions = require("telescope.actions")
+    local keymap = vim.keymap -- for conciseness
 
     local builtin = require('telescope.builtin')
-    vim.keymap.set('n', '<leader>pf', builtin.find_files, {})
-    vim.keymap.set('n', '<C-p>', builtin.git_files, {})
-    vim.keymap.set('n', '<leader>pws', function()
+    keymap.set('n', '<leader>pf', builtin.find_files, {})
+    keymap.set('n', '<C-p>', builtin.git_files, {})
+    keymap.set('n', '<leader>pws', function()
         local word = vim.fn.expand("<cword>")
         builtin.grep_string({ search = word })
     end)
-    vim.keymap.set('n', '<leader>pWs', function()
+    keymap.set('n', '<leader>pWs', function()
         local word = vim.fn.expand("<cWORD>")
         builtin.grep_string({ search = word })
     end)
-    vim.keymap.set('n', '<leader>ps', function()
+    keymap.set('n', '<leader>ps', function()
         builtin.grep_string({ search = vim.fn.input("Grep > ") })
     end)
-    vim.keymap.set('n', '<leader>vh', builtin.help_tags, {})
+    keymap.set('n', '<leader>vh', builtin.help_tags, {})
 
     telescope.setup({
       defaults = {
+        pickers = {
+            find_files = {
+                theme = "ivy"
+            }
+        },
+        extensions = {
+            fzf = {}
+        },
         path_display = { "smart" },
         mappings = {
           i = {
@@ -40,9 +49,6 @@ return {
     })
 
     telescope.load_extension("fzf")
-
-    -- set keymaps
-    local keymap = vim.keymap -- for conciseness
 
     keymap.set("n", "<leader>ff", "<cmd>Telescope find_files<cr>", { desc = "Fuzzy find files in cwd" })
     keymap.set("n", "<leader>fr", "<cmd>Telescope oldfiles<cr>", { desc = "Fuzzy find recent files" })

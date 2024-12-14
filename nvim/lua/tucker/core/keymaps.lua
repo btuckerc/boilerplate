@@ -31,3 +31,8 @@ keymap.set("n", "<leader>tn", "<cmd>tabn<CR>", { desc = "Go to next tab" }) --  
 keymap.set("n", "<leader>tp", "<cmd>tabp<CR>", { desc = "Go to previous tab" }) --  go to previous tab
 keymap.set("n", "<leader>tf", "<cmd>tabnew %<CR>", { desc = "Open current buffer in new tab" }) --  move current buffer to new tab
 
+-- Remap dd to delete without saving to the clipboard
+keymap.set("n", "dd", '"_dd', { desc = "Delete line without affecting clipboard" })
+keymap.set("n", "<leader>d", '"+dd', { desc = "Delete line and yank to clipboard" })
+keymap.set("n", "dG", '"_dG', { desc = "Delete to end of file without affecting clipboard" })
+

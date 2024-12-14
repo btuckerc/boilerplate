@@ -31,7 +31,7 @@
     "editor.minimap.enabled": true,
     "editor.bracketPairColorization.enabled": true,
     "editor.guides.bracketPairs": true,
-    "editor.fontFamily": "JetBrainsMono Nerd Font",
+    "editor.fontFamily": "MesloLGM Nerd Font",
     "editor.fontSize": 16,
     "editor.fontLigatures": true,
     "editor.accessibilitySupport": "off",
@@ -74,7 +74,7 @@
         "editor.formatOnType": true,
         "editor.wordBasedSuggestions": "off",
         "editor.codeActionsOnSave": {
-            "source.organizeImports": true
+            "source.organizeImports": "explicit"
         },
         "python.formatting.provider": "black",
         "python.formatting.blackArgs": [
@@ -94,19 +94,19 @@
         "diffEditor.ignoreTrimWhitespace": false
     },
     "[typescript]": {
-        "editor.defaultFormatter": "esbenp.prettier-vscode",
+        "editor.defaultFormatter": "vscode.typescript-language-features",
         "editor.formatOnSave": true,
         "editor.codeActionsOnSave": {
-            "source.organizeImports": true,
-            "source.fixAll.eslint": true
+            "source.organizeImports": "explicit",
+            "source.fixAll.eslint": "explicit"
         }
     },
     "[javascript]": {
-        "editor.defaultFormatter": "esbenp.prettier-vscode",
+        "editor.defaultFormatter": "vscode.typescript-language-features",
         "editor.formatOnSave": true,
         "editor.codeActionsOnSave": {
-            "source.organizeImports": true,
-            "source.fixAll.eslint": true
+            "source.organizeImports": "explicit",
+            "source.fixAll.eslint": "explicit"
         }
     },
     "typescript.updateImportsOnFileMove.enabled": "always",
@@ -123,11 +123,11 @@
         "typescriptreact": "javascript"
     },
     "[go]": {
+        "editor.defaultFormatter": "golang.go",
         "editor.formatOnSave": true,
         "editor.codeActionsOnSave": {
-            "source.organizeImports": true
-        },
-        "editor.defaultFormatter": "golang.go"
+            "source.organizeImports": "explicit"
+        }
     },
     "go.formatTool": "goimports",
     "go.lintTool": "golangci-lint",

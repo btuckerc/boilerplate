@@ -187,16 +187,6 @@ launchctl unload ~/Library/LaunchAgents/com.user.task.plist
 - **Quick Substitution**:
   - `^error^correction`: Replace first occurrence
   - `!!:gs/error/correction/`: Replace all occurrences
-- **Useful Aliases**:
-  ```bash
-  # Add to ~/.bashrc or ~/.zshrc
-  alias ll='ls -la'
-  alias ..='cd ..'
-  alias ...='cd ../..'
-  alias mkdir='mkdir -p'
-  alias h='history'
-  alias grep='grep --color=auto'
-  ```
 
 ---
 

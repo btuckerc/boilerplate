@@ -19,4 +19,36 @@
         ],
         "description": "BTC - Make a blank method."
     },
+    "if __name__ == '__main__'": {
+        "prefix": "main",
+        "body": [
+            "if __name__ == '__main__':",
+            "\t$1"
+        ]
+    },
+    "Try/Except": {
+        "prefix": "try",
+        "body": [
+            "try:",
+            "\t${1:pass}",
+            "except ${2:Exception} as ${3:e}:",
+            "\t${4:pass}"
+        ]
+    },
+    "Property": {
+        "prefix": "prop",
+        "body": [
+            "@property",
+            "def ${1:name}(self):",
+            "\treturn self._${1:name}"
+        ]
+    },
+    "Logger": {
+        "prefix": "logger",
+        "body": [
+            "import logging",
+            "logger = logging.getLogger(__name__)",
+            "$1"
+        ]
+    }
 }

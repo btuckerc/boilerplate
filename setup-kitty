@@ -1,0 +1,108 @@
+#!/bin/bash
+# Copyright (c) 2024 Tucker Craig
+# See LICENSE file for full license details.
+
+# Get the absolute directory of the current script
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Source common utilities
+source "$SCRIPT_DIR/utils/common.sh"
+
+# Function to show usage
+show_usage() {
+    cat << EOF
+NAME
+    $(basename "$0") - Set up Kitty terminal configuration
+
+SYNOPSIS
+    $(basename "$0") [OPTIONS]
+
+DESCRIPTION
+    Sets up Kitty terminal configuration with sensible defaults and themes.
+    Backs up existing configuration and installs new settings.
+
+OPTIONS
+    -f, --force
+        Overwrite existing configuration without backup
+
+    -t, --theme THEME
+        Specify theme to use [default: nord]
+        Available: nord, catppuccin-mocha
+
+    -h, --help
+        Display this help message and exit
+
+EXAMPLES
+    $(basename "$0")
+        Set up Kitty with default Nord theme
+
+    $(basename "$0") -f
+        Force setup without backup
+
+    $(basename "$0") -t catppuccin-mocha
+        Set up with Catppuccin Mocha theme
+
+NOTES
+    - Backs up existing configuration to ~/.config/kitty.bak
+    - Installs Nord theme by default
+    - Creates necessary directories if they don't exist
+EOF
+    exit 1
+}
+
+# Default values
+FORCE=false
+THEME="nord"
+KITTY_CONFIG_DIR="$HOME/.config/kitty"
+BACKUP_DIR="$HOME/.config/kitty.bak"
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -f|--force)
+            FORCE=true
+            shift
+            ;;
+        -t|--theme)
+            if [ -z "$2" ]; then
+                echo "Error: Theme name is required"
+                show_usage
+            fi
+            THEME="$2"
+            shift 2
+            ;;
+        -h|--help)
+            show_usage
+            ;;
+        *)
+            echo "Error: Unknown option: $1"
+            show_usage
+            ;;
+    esac
+done
+
+# Check if Kitty is installed
+if ! check_command kitty; then
+    echo "Installing Kitty..."
+    install_brew_package kitty
+fi
+
+# Backup existing configuration if it exists
+if [[ -d "$KITTY_CONFIG_DIR" && "$FORCE" != true ]]; then
+    echo "Backing up existing Kitty configuration..."
+    if [[ -d "$BACKUP_DIR" ]]; then
+        rm -rf "$BACKUP_DIR"
+    fi
+    mv "$KITTY_CONFIG_DIR" "$BACKUP_DIR"
+fi
+
+# Create config directory
+mkdir -p "$KITTY_CONFIG_DIR"
+
+# Copy configuration files
+echo "Installing Kitty configuration..."
+cp "$SCRIPT_DIR/config/kitty.conf" "$KITTY_CONFIG_DIR/"
+cp "$SCRIPT_DIR/config/$THEME.conf" "$KITTY_CONFIG_DIR/theme.conf"
+
+echo "✨ Kitty configuration installed successfully!"
+echo "Please restart Kitty terminal to apply changes." 

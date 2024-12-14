@@ -7,28 +7,50 @@
 # Function to show usage
 show_usage() {
     cat << EOF
-Generate a directory tree structure.
+NAME
+    $(basename "$0") - Generate a directory tree structure
 
-Usage: 
-    $(basename "$0") [options] [directory]
+SYNOPSIS
+    $(basename "$0") [OPTIONS] [DIRECTORY]
 
-Arguments:
-    directory             Directory to generate tree for [default: current directory]
+DESCRIPTION
+    Creates a visual tree representation of a directory structure, with support
+    for depth limits, exclusion patterns, and documentation placeholders.
 
-Options:
-    -d, --depth <n>      Maximum depth to traverse [default: unlimited]
-    -e, --exclude <pat>  Exclude pattern (e.g., "node_modules|.git")
-    -p, --placeholder    Add aligned comment placeholders (#) for documentation
-    -h, --help          Show this help message
+ARGUMENTS
+    DIRECTORY
+        Directory to generate tree for [default: current directory]
 
-Examples:
-    $(basename "$0")                    # Basic tree of current directory
-    $(basename "$0") ~/projects/app     # Tree of specific directory
-    $(basename "$0") -d 2               # Limit depth to 2 levels
-    $(basename "$0") -e "node_modules"  # Exclude node_modules
-    $(basename "$0") -p                 # Add aligned comment placeholders
+OPTIONS
+    -d, --depth DEPTH
+        Maximum depth to traverse [default: unlimited]
 
-Notes:
+    -e, --exclude PATTERN
+        Exclude pattern (e.g., "node_modules|.git")
+
+    -p, --placeholder
+        Add aligned comment placeholders (#) for documentation
+
+    -h, --help
+        Display this help message and exit
+
+EXAMPLES
+    $(basename "$0")
+        Basic tree of current directory
+
+    $(basename "$0") ~/projects/app
+        Tree of specific directory
+
+    $(basename "$0") -d 2
+        Limit depth to 2 levels
+
+    $(basename "$0") -e "node_modules"
+        Exclude node_modules directory
+
+    $(basename "$0") -p
+        Add aligned comment placeholders
+
+NOTES
     - Hidden files and directories are excluded by default
     - Use -p to add placeholders for your own documentation
     - Comments will be aligned with at least 2 spaces after the longest line

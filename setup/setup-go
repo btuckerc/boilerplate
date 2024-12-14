@@ -31,18 +31,29 @@ source "$SCRIPT_DIR/../utils/common.sh"
 # Function to show usage
 show_usage() {
     cat << EOF
-Set up Go development environment.
+NAME
+    $(basename "$0") - Set up Go development environment
 
-Usage: 
-    $(basename "$0") [options]
+SYNOPSIS
+    $(basename "$0") [OPTIONS]
 
-Options:
-    -h, --help  Show this help message
+DESCRIPTION
+    Sets up a Go development environment by installing and configuring Go and its
+    dependencies using Homebrew. Ensures all necessary tools are available.
 
-Notes:
+OPTIONS
+    -h, --help
+        Display this help message and exit
+
+EXAMPLES
+    $(basename "$0")
+        Set up Go development environment with default settings
+
+NOTES
     - Will install Homebrew if not present
     - Installs latest version of Go via Homebrew
     - Installs Git if not present
+    - Updates shell configuration as needed
 EOF
     exit 1
 }

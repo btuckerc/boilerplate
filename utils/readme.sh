@@ -9,24 +9,38 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Function to show usage
 show_usage() {
     cat << EOF
-Generate a README.md file for a project directory.
+NAME
+    $(basename "$0") - Generate a README.md file for a project directory
 
-Usage: 
-    $(basename "$0") [options] [directory]
+SYNOPSIS
+    $(basename "$0") [OPTIONS] [DIRECTORY]
 
-Arguments:
-    directory             Directory to generate README for [default: current directory]
+DESCRIPTION
+    Generates a comprehensive README.md file for a project directory, including
+    project structure, setup instructions, and optional MIT license.
 
-Options:
-    -f, --force          Overwrite existing README.md
-    -h, --help          Show this help message
+ARGUMENTS
+    DIRECTORY
+        Directory to generate README for [default: current directory]
 
-Examples:
-    $(basename "$0")                    # Generate README in current directory
-    $(basename "$0") ~/projects/app     # Generate README in specific directory
-    $(basename "$0") -f                 # Overwrite existing README.md
+OPTIONS
+    -f, --force
+        Overwrite existing README.md if it exists
 
-Notes:
+    -h, --help
+        Display this help message and exit
+
+EXAMPLES
+    $(basename "$0")
+        Generate README in current directory
+
+    $(basename "$0") ~/projects/app
+        Generate README in specific directory
+
+    $(basename "$0") -f
+        Overwrite existing README.md in current directory
+
+NOTES
     - Will prompt for project name if not obvious from directory name
     - Will ask whether to include MIT license
     - Uses tree.sh to generate directory structure

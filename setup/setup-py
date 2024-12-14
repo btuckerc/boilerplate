@@ -28,28 +28,41 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Source common utilities
 source "$SCRIPT_DIR/../utils/common.sh"
 
-# Default Python version
-DEFAULT_PYTHON_VERSION="3.13"
+# Default Python version (latest stable)
+DEFAULT_PYTHON_VERSION="3.12"
 
 # Function to show usage
 show_usage() {
     cat << EOF
-Set up Python development environment.
+NAME
+    $(basename "$0") - Set up Python development environment
 
-Usage: 
-    $(basename "$0") [options]
+SYNOPSIS
+    $(basename "$0") [OPTIONS]
 
-Options:
-    -v, --version <ver>  Python version to install [default: $DEFAULT_PYTHON_VERSION]
-                        Format: 3.X or 3.X.X
-    -h, --help          Show this help message
+DESCRIPTION
+    Sets up a Python development environment using pyenv for version management.
+    Installs and configures the specified Python version or uses system default.
 
-Examples:
-    $(basename "$0")              # Install Python $DEFAULT_PYTHON_VERSION
-    $(basename "$0") -v 3.12      # Install Python 3.12.x (latest patch)
-    $(basename "$0") --version 3.11.6  # Install specific version
+OPTIONS
+    -v, --version VERSION
+        Python version to install [default: $DEFAULT_PYTHON_VERSION]
+        Format: 3.X or 3.X.X (e.g., 3.11 or 3.11.5)
 
-Notes:
+    -h, --help
+        Display this help message and exit
+
+EXAMPLES
+    $(basename "$0")
+        Install default Python version ($DEFAULT_PYTHON_VERSION)
+
+    $(basename "$0") -v 3.11
+        Install Python 3.11.x (latest patch)
+
+    $(basename "$0") --version 3.11.6
+        Install specific Python version 3.11.6
+
+NOTES
     - Uses pyenv to manage Python versions
     - Will install Homebrew and pyenv if not present
     - Updates shell configuration for pyenv
@@ -64,7 +77,7 @@ get_latest_patch_version() {
 }
 
 # Parse command line arguments
-PYTHON_VERSION="$DEFAULT_PYTHON_VERSION"
+PYTHON_VERSION="$DEFAULT_PYTHON_VERSION"  # Use default version if none specified
 
 while [[ $# -gt 0 ]]; do
     case $1 in

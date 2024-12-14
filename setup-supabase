@@ -17,28 +17,48 @@ handle_error() {
 # Function to show usage
 show_usage() {
     cat << EOF
-Set up a Supabase project with interactive configuration.
+NAME
+    $(basename "$0") - Set up a Supabase project with interactive configuration
 
-Usage: 
-    $(basename "$0") [options] [project-name]
+SYNOPSIS
+    $(basename "$0") [OPTIONS] [PROJECT_NAME]
 
-Arguments:
-    project-name          Name for your Supabase project [default: current directory name]
+DESCRIPTION
+    Sets up a new Supabase project with interactive configuration options.
+    Supports both local development and cloud deployment setups.
 
-Options:
-    -h, --help          Show this help message
-    -l, --local         Set up only local development environment
-    -f, --force         Skip confirmation prompts
+ARGUMENTS
+    PROJECT_NAME
+        Name for your Supabase project [default: current directory name]
 
-Examples:
-    $(basename "$0")              # Interactive setup in current directory
-    $(basename "$0") my-app       # Create new project named 'my-app'
-    $(basename "$0") -l           # Local development setup only
+OPTIONS
+    -l, --local
+        Set up only local development environment
 
-Notes:
+    -f, --force
+        Skip confirmation prompts
+
+    -h, --help
+        Display this help message and exit
+
+EXAMPLES
+    $(basename "$0")
+        Interactive setup in current directory
+
+    $(basename "$0") my-app
+        Create new project named 'my-app'
+
+    $(basename "$0") -l
+        Local development setup only
+
+    $(basename "$0") -f my-app
+        Create project 'my-app' without confirmation prompts
+
+NOTES
     - Requires Docker for local development
     - Will create .env file with necessary configurations
     - Can integrate with existing projects
+    - Supports both local and cloud deployments
 EOF
     exit 1
 }

@@ -11,32 +11,60 @@ source "$SCRIPT_DIR/utils/common.sh"
 # Function to show usage
 show_usage() {
     cat << EOF
-Initialize a new project with standard boilerplate.
+NAME
+    $(basename "$0") - Initialize a new project with standard boilerplate
 
-Usage: 
-    $(basename "$0") [options] [name]
-    $(basename "$0") [options] -n/--name <name>
+SYNOPSIS
+    $(basename "$0") [DIRECTORY] [OPTIONS]
+    $(basename "$0") [OPTIONS] -d DIRECTORY
 
-Arguments:
-    name                Project name (optional if in empty directory)
+DESCRIPTION
+    Creates a new project directory with standard boilerplate code and configuration.
+    Supports multiple programming languages and development environments.
 
-Options:
-    -l, --lang <lang>  Project language [default: python]
-                       Supported: python (or py), go (or golang)
-    -n, --name <name>  Project name (alternative to positional argument)
-    -h, --help         Show this help message
+ARGUMENTS
+    DIRECTORY
+        Project directory (use '.' for current directory). Can be provided as first
+        argument or with -d flag.
 
-Examples:
-    $(basename "$0") my-project              # Python project named 'my-project'
-    $(basename "$0") -l go my-project        # Go project named 'my-project'
-    $(basename "$0") --lang python           # Python project in current directory
-    $(basename "$0") -n api -l go            # Go project named 'api'
+OPTIONS
+    -d, --directory DIRECTORY
+        Alternative way to specify project directory
 
-Notes:
-    - If no name is provided and the current directory is empty (ignoring hidden files),
-      the current directory name will be used as the project name.
-    - The script will create a new directory for the project unless using an empty
-      directory.
+    -l, --lang LANGUAGE
+        Project programming language [default: python]
+        Supported: python (or py), go (or golang)
+
+    -n, --name NAME
+        Project name [default: directory name]
+
+    -v, --python-version VERSION
+        Python version for Python projects [optional]
+        Format: 3.X or 3.X.X (e.g., 3.11 or 3.11.5)
+
+    -h, --help
+        Display this help message and exit
+
+EXAMPLES
+    $(basename "$0") .
+        Create Python project in current directory
+
+    $(basename "$0") my-project -v 3.11
+        Create Python 3.11 project in ./my-project
+
+    $(basename "$0") . -l go
+        Create Go project in current directory
+
+    $(basename "$0") api -l python -v 3.12
+        Create Python 3.12 project in ./api
+
+    $(basename "$0") -d . -n custom-name
+        Create project in current directory with custom name
+
+NOTES
+    - Directory will be created if it doesn't exist
+    - If no name is provided, the directory name will be used
+    - Python version is optional; system default will be used if not specified
 EOF
     exit 1
 }
@@ -44,6 +72,14 @@ EOF
 # Parse command line arguments
 LANGUAGE="python"  # Default to Python
 PROJECT_NAME=""
+PROJECT_DIR=""
+PYTHON_VERSION=""
+
+# Check if first argument is a directory path and not an option
+if [[ $# -gt 0 && ! "$1" =~ ^- ]]; then
+    PROJECT_DIR="$1"
+    shift
+fi
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -63,24 +99,41 @@ while [[ $# -gt 0 ]]; do
             PROJECT_NAME="$2"
             shift 2
             ;;
+        -d|--directory)
+            if [ -z "$2" ]; then
+                echo "Error: Directory argument is required"
+                show_usage
+            fi
+            if [ -n "$PROJECT_DIR" ]; then
+                echo "Error: Directory already specified as '$PROJECT_DIR'"
+                show_usage
+            fi
+            PROJECT_DIR="$2"
+            shift 2
+            ;;
+        -v|--python-version)
+            if [ -z "$2" ]; then
+                echo "Error: Python version is required"
+                show_usage
+            fi
+            PYTHON_VERSION="$2"
+            shift 2
+            ;;
         -h|--help)
             show_usage
             ;;
-        -*)
+        *)
             echo "Error: Unknown option: $1"
             show_usage
             ;;
-        *)
-            if [ -z "$PROJECT_NAME" ]; then
-                PROJECT_NAME="$1"
-            else
-                echo "Error: Project name already specified as '$PROJECT_NAME'"
-                show_usage
-            fi
-            shift
-            ;;
     esac
 done
+
+# Validate required arguments
+if [ -z "$PROJECT_DIR" ]; then
+    echo "Error: Directory must be specified either as first argument or with -d/--directory"
+    show_usage
+fi
 
 # Normalize language input
 case "$LANGUAGE" in
@@ -107,25 +160,37 @@ if [ ! -f "$SETUP_SCRIPT" ]; then
 fi
 
 # Handle project directory
-if [ -z "$PROJECT_NAME" ]; then
-    # No project name provided, check if current directory is empty
-    if is_directory_empty "$(pwd)"; then
-        PROJECT_NAME=$(basename "$(pwd)")
-        echo "Using current directory for project: $PROJECT_NAME"
-    else
-        echo "Error: Current directory is not empty and no project name provided"
-        show_usage
+if [ "$PROJECT_DIR" = "." ]; then
+    if ! is_directory_empty "$(pwd)"; then
+        echo "Error: Current directory is not empty"
+        exit 1
+    fi
+    PROJECT_DIR="$(pwd)"
+    if [ -z "$PROJECT_NAME" ]; then
+        PROJECT_NAME=$(basename "$PROJECT_DIR")
     fi
 else
-    # Create new directory for project
-    mkdir -p "$PROJECT_NAME"
-    cd "$PROJECT_NAME" || { echo "Error: Failed to create and navigate to $PROJECT_NAME"; exit 1; }
-    echo "Created project directory: $PROJECT_NAME"
+    # Create new directory for project if it doesn't exist
+    mkdir -p "$PROJECT_DIR"
+    cd "$PROJECT_DIR" || { echo "Error: Failed to navigate to $PROJECT_DIR"; exit 1; }
+    if [ -z "$PROJECT_NAME" ]; then
+        PROJECT_NAME=$(basename "$PROJECT_DIR")
+    fi
+    echo "Using directory: $PROJECT_DIR"
 fi
 
-# Run the setup script first
-chmod +x "$SETUP_SCRIPT"
-"$SETUP_SCRIPT"
+# Run the setup script with the specified Python version (if provided)
+if [ "$LANGUAGE" = "python" ]; then
+    chmod +x "$SETUP_SCRIPT"
+    if [ -n "$PYTHON_VERSION" ]; then
+        "$SETUP_SCRIPT" --version "$PYTHON_VERSION"
+    else
+        "$SETUP_SCRIPT"  # Run without version for default behavior
+    fi
+else
+    chmod +x "$SETUP_SCRIPT"
+    "$SETUP_SCRIPT"
+fi
 
 # Copy and process templates
 copy_templates "$TEMPLATE_DIR" "$(pwd)" "$PROJECT_NAME"
@@ -150,4 +215,4 @@ git init || { echo "Error: Failed to initialize Git repository"; exit 1; }
 git add . || { echo "Error: Failed to add files to Git"; exit 1; }
 git commit -m "Initial commit" || { echo "Error: Failed to commit changes"; exit 1; }
 
-echo "✨ $LANGUAGE project '$PROJECT_NAME' initialized successfully!"
+echo "✨ $LANGUAGE project '$PROJECT_NAME' initialized successfully in $PROJECT_DIR!"

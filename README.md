@@ -35,8 +35,8 @@ A comprehensive collection of scripts and configurations for setting up and mana
 │   ├── kitty.conf                             # 
 │   ├── nord.conf                              # 
 │   └── starship.toml                          # 
-├── init-project                               # 
-├── lexicon.md                                 # 
+├── init-project                               # Project init script
+├── lexicon.md                                 # Command reference
 ├── nvim                                       # nvim config
 │   ├── init.lua                               # 
 │   ├── lazy-lock.json                         # 

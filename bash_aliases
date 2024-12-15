@@ -36,3 +36,5 @@ alias practice="nvim +VimBeGood"
 
 alias vde="deactivate"
 alias v.="vim ."
+
+alias lg="lazygit"

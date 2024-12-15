@@ -23,8 +23,12 @@ alias gb='git branch '
 alias gc='git commit'
 alias gd='git diff'
 
-if [ -f $(brew --prefix)/etc/bash_completion ]; then
-  . $(brew --prefix)/etc/bash_completion
+if [ -f ~/.fzf.bash ]; then
+    source ~/.fzf.bash
+fi
+
+if [[ -r "/usr/share/bash-completion/bash_completion" ]]; then
+    . /usr/share/bash-completion/bash_completion
 fi
 
 if [ -f ~/.bashrc ]; then

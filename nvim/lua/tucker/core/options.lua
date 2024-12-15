@@ -1,7 +1,15 @@
 vim.g.netrw_liststyle = 3
 vim.g.netrw_browse_split = 3
---vim.g.netrw_banner = 0
-vim.g.netrw_winsize = 25
+vim.g.netrw_banner = 0
+vim.g.netrw_winsize = 20
+vim.g.netrw_preview = 1
+
+-- Keep the current directory and the browsing directory synced.
+vim.g.netrw_keepdir = 0
+
+-- Show directories first (sorting)
+vim.g.netrw_sort_sequence = [[[\/]$,*]]
+vim.g.netrw_sizestyle = "H"
 
 local opt = vim.opt
 

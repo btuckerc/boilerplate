@@ -4,17 +4,22 @@ A comprehensive collection of scripts and configurations for setting up and mana
 
 ## Quick Start
 
+Initialize your macOS development environment:
 ```bash
-# Initialize a new macOS environment
+# Clone repository with submodules
+git clone --recursive https://github.com/YOUR_USERNAME/boilerplate.git
+
+# Or if already cloned, initialize submodules
+git submodule update --init --recursive
+
+# Run setup script
 ./utils/init-mac
+```
 
-# Set up Python environment
+Set up development tools:
+```bash
 ./setup/setup-py
-
-# Create a new Python project
 ./init-project my-project
-
-# Generate a README
 ./utils/readme.sh
 ```
 
@@ -37,6 +42,9 @@ A comprehensive collection of scripts and configurations for setting up and mana
 │   │   └── snippets/                          # Code snippets
 │   ├── kitty/                                 # Kitty configuration
 │   │   └── kitty.conf                         # Kitty terminal config
+│   ├── tmux/                                  # Tmux configuration
+│   │   └── plugins/                           # Tmux plugins
+│   │       └── tpm/                           # Tmux Plugin Manager (submodule)
 │   ├── alacritty-config                       # Alacritty terminal config
 │   ├── catppuccin-mocha.conf                  # Catppuccin theme for terminals
 │   ├── catppuccin-mocha.toml                  # Catppuccin theme config
@@ -201,6 +209,11 @@ Modern setup with:
 - Multiple themes
 - Alacritty config
 - Starship prompt
+- Tmux configuration with TPM (Tmux Plugin Manager)
+  - Automatic plugin installation
+  - Sensible defaults
+  - Session management (resurrect & continuum)
+  - System clipboard integration (yank)
 
 ## Development
 
@@ -208,6 +221,32 @@ Modern setup with:
 - macOS (primary support)
 - Git
 - Bash 3.2+ or Zsh
+
+### Installation
+
+1. Clone the repository with submodules:
+```bash
+git clone --recursive https://github.com/YOUR_USERNAME/boilerplate.git
+```
+
+2. If you've already cloned the repository, initialize submodules:
+```bash
+git submodule update --init --recursive
+```
+
+3. Run the setup script:
+```bash
+./utils/init-mac
+```
+
+### Submodules
+This repository uses Git submodules for certain components:
+- TPM (Tmux Plugin Manager) - `config/tmux/plugins/tpm`
+
+To update submodules to their latest versions:
+```bash
+git submodule update --remote
+```
 
 ### Contributing
 1. Fork the repository

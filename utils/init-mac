@@ -29,6 +29,33 @@ print_error() {
     echo -e "${RED}✗ $1${NC}"
 }
 
+# Function to handle existing dotfiles
+handle_existing_file() {
+    local target_file="$1"
+    local file_type="$2"
+    local backup=false
+
+    if [ -L "$target_file" ]; then
+        if confirm "Existing $file_type symlink found at $target_file. Would you like to replace it?"; then
+            rm "$target_file"
+            backup=true
+        else
+            print_warning "$file_type symlink unchanged"
+            return 1
+        fi
+    elif [ -f "$target_file" ]; then
+        if confirm "Existing $file_type found at $target_file. Would you like to backup and replace it?"; then
+            mv "$target_file" "$target_file.bak.$(date +%Y%m%d_%H%M%S)"
+            print_warning "Existing $file_type backed up"
+            backup=true
+        else
+            print_warning "$file_type unchanged"
+            return 1
+        fi
+    fi
+    return 0
+}
+
 # Function to show usage
 show_usage() {
     cat << EOF
@@ -200,34 +227,16 @@ setup_shell() {
         files_to_link=("zshrc" "zprofile" "zsh_aliases")
     fi
     
-    local any_existing=false
+    # Create symlinks from dotfiles directory
     for file in "${files_to_link[@]}"; do
-        if [ -e "$HOME/.$file" ]; then
-            any_existing=true
-            break
-        fi
-    done
-    
-    if [ "$any_existing" = true ]; then
-        if ! confirm "Existing shell configuration files found. Would you like to backup and replace them?"; then
-            print_warning "Shell configuration skipped"
-            return
-        fi
-        
-        # Backup existing files
-        for file in "${files_to_link[@]}"; do
-            if [ -e "$HOME/.$file" ]; then
-                backup_file="$HOME/.$file.bak.$(date +%Y%m%d_%H%M%S)"
-                mv "$HOME/.$file" "$backup_file"
-                print_warning "Backed up $HOME/.$file to $backup_file"
+        if [ -f "$REPO_DIR/dotfiles/$file" ]; then
+            if handle_existing_file "$HOME/.$file" "$file configuration"; then
+                ln -sf "$REPO_DIR/dotfiles/$file" "$HOME/.$file"
+                print_success "Linked $file from dotfiles directory"
             fi
-        done
-    fi
-    
-    # Create symlinks
-    for file in "${files_to_link[@]}"; do
-        ln -sf "$REPO_DIR/$file" "$HOME/.$file"
-        print_success "Linked $file"
+        else
+            print_error "File $file not found in dotfiles directory"
+        fi
     done
     
     print_success "Shell configuration complete"
@@ -334,14 +343,9 @@ setup_neovim() {
         print_warning "Neovim already installed"
     fi
     
-    if [ -d ~/.config/nvim ]; then
-        if confirm "Existing Neovim configuration found. Would you like to backup and replace it?"; then
-            mv ~/.config/nvim ~/.config/nvim.bak.$(date +%Y%m%d_%H%M%S)
-            print_warning "Existing Neovim configuration backed up"
-        else
-            print_warning "Neovim configuration skipped"
-            return
-        fi
+    # Handle existing neovim configuration
+    if ! handle_existing_file "$HOME/.config/nvim" "Neovim configuration directory"; then
+        return
     fi
     
     mkdir -p ~/.config
@@ -365,18 +369,40 @@ setup_tmux() {
         print_warning "Tmux already installed"
     fi
     
-    if [ -f ~/.tmux.conf ]; then
-        if confirm "Existing Tmux configuration found. Would you like to backup and replace it?"; then
-            mv ~/.tmux.conf ~/.tmux.conf.bak.$(date +%Y%m%d_%H%M%S)
-            print_warning "Existing Tmux configuration backed up"
+    # Handle existing tmux configuration
+    if ! handle_existing_file "$HOME/.tmux.conf" "tmux configuration"; then
+        return
+    fi
+    
+    # Link tmux.conf from new location
+    ln -sf "$REPO_DIR/config/tmux/tmux.conf" ~/.tmux.conf
+    print_success "Tmux configuration linked"
+    
+    # Set up TPM
+    local tpm_dir="$HOME/.tmux/plugins/tpm"
+    if [ -d "$tpm_dir" ]; then
+        if confirm "Existing TPM installation found. Would you like to replace it?"; then
+            rm -rf "$tpm_dir"
         else
-            print_warning "Tmux configuration skipped"
+            print_warning "TPM setup skipped"
             return
         fi
     fi
     
-    ln -sf "$REPO_DIR/tmux.conf" ~/.tmux.conf
-    print_success "Tmux configuration linked"
+    # Create .tmux/plugins directory if it doesn't exist
+    mkdir -p "$HOME/.tmux/plugins"
+    
+    # Link TPM from our config
+    ln -sf "$REPO_DIR/config/tmux/plugins/tpm" "$tpm_dir"
+    print_success "TPM linked"
+    
+    # Install plugins
+    if confirm "Would you like to install Tmux plugins now?"; then
+        "$tpm_dir/bin/install_plugins"
+        print_success "Tmux plugins installed"
+    else
+        print_warning "Plugin installation skipped. You can install them later with prefix + I"
+    fi
 }
 
 # Main setup

@@ -1,100 +1,25 @@
-add_newline = true
+#add_newline = true
 
-format = """
-[ T ](bg:#a3aed2 fg:#090c0c)\
-[](bg:#769ff0 fg:#a3aed2)\
-$directory\
-[](fg:#769ff0 bg:#394260)\
-$git_branch\
-$git_status\
-[](fg:#394260 bg:#212736)\
-$nodejs\
-$rust\
-$golang\
-$php\
-$python\
-[](fg:#212736)\
-[$time $cmd_duration]()\
-\n$character"""
+# A simpler format: directory followed by a character
+format = "$directory $character "
 
 [directory]
-style = "fg:#e3e5e5 bg:#769ff0"
-format = "[ $path ]($style)"
-truncation_length = 4
+# Just a foreground color—no background—so it doesn't look blocky
+style = "fg:#7aa2f7"  # A nice Tokyonight blue
+format = "$path"
+truncation_length = 3
 truncation_symbol = "…/"
 
-[directory.substitutions]
-"Documents" = "󰈙 "
-"Downloads" = " "
-"Music" = " "
-"Pictures" = " "
-
+# Remove backgrounds and complex formatting from Git too, at least initially
 [git_branch]
-symbol = ""
-style = "bg:#394260"
-format = '[[ $symbol $branch ](fg:#769ff0 bg:#394260)]($style)'
+symbol = " "
+style = "fg:#7aa2f7"
+format = "$symbol$branch"
+disabled = true  # Disable for now; re-enable later once you like the look
 
 [git_status]
-style = "bg:#394260"
-format = '[[($all_status$ahead_behind )](fg:#769ff0 bg:#394260)]($style)'
-
-[nodejs]
-symbol = ""
-style = "bg:#212736"
-format = '[[ $symbol ($version) ](fg:#769ff0 bg:#212736)]($style)'
-
-[rust]
-symbol = ""
-style = "bg:#212736"
-format = '[[ $symbol ($version) ](fg:#769ff0 bg:#212736)]($style)'
-
-[golang]
-symbol = ""
-style = "bg:#212736"
-format = '[[ $symbol ($version) ](fg:#769ff0 bg:#212736)]($style)'
-
-[php]
-symbol = ""
-style = "bg:#212736"
-format = '[[ $symbol ($version) ](fg:#769ff0 bg:#212736)]($style)'
-
-[time]
-disabled = true
-time_format = "%R" # Hour:Minute Format
-style = ""
-format = ' $time'
+disabled = true  # Same as above, keep it simple at first
 
 [character]
-success_symbol = '[➜](bold green)'
-error_symbol = "[➜](bold red)"
-
-[cmd_duration]
-min_time = 1000
-style = 'bold yellow'
-format = '[$duration]($style)'
-
-[python]
-pyenv_version_name = true
-style = "yellow bold"
-format = "[ ${symbol}${pyenv_prefix}(${version} )${virtualenv}]($style)"
-
-[line_break]
-disabled = false
-
-[hostname]
-disabled = true
-
-[package]
-disabled = true
-
-[memory_usage]
-disabled = true
-
-[docker_context]
-disabled = true
-
-[username]
-disabled = true
-
-[gcloud]
-disabled = true
+success_symbol = "➜"
+error_symbol = "➜"

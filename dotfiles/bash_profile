@@ -31,23 +31,29 @@ if [[ -r "/usr/share/bash-completion/bash_completion" ]]; then
     . /usr/share/bash-completion/bash_completion
 fi
 
-if [ -f ~/.bashrc ]; then
-    source ~/.bashrc
-fi
-
-. "$HOME/.cargo/env"
-
-#export PATH="/opt/homebrew/opt/llvm/bin:$PATH"
-export PATH="$PATH:/Applications/Docker.app/Contents/Resources/bin/"
+# Environment setup
 export PYENV_ROOT="$HOME/.pyenv"
 [[ -d $PYENV_ROOT/bin ]] && export PATH="$PYENV_ROOT/bin:$PATH"
-eval "$(pyenv init -)"
 export PATH="/usr/local/opt/python@3.13/bin:$PATH"
-eval "$(pyenv init --path)"
 
-. "/Users/tucker/.deno/env"
+# Docker path
+export PATH="$PATH:/Applications/Docker.app/Contents/Resources/bin/"
 
-if [ -f ~/.secrets ]; then
-    source ~/.secrets
+# Initialize Homebrew
+eval "$(/opt/homebrew/bin/brew shellenv)"
+
+# Load Cargo
+[ -f "$HOME/.cargo/env" ] && source "$HOME/.cargo/env"
+
+# Load Deno
+[ -f "$HOME/.deno/env" ] && source "$HOME/.deno/env"
+
+# Load secrets if they exist
+[ -f ~/.secrets ] && source ~/.secrets
+
+# Source bashrc for login shells
+# This ensures all shell configurations are loaded
+if [ -f ~/.bashrc ]; then
+    source ~/.bashrc
 fi
 

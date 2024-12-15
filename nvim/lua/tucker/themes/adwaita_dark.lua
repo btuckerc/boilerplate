@@ -13,15 +13,19 @@ M.colors = {
     url_color = "#1a5fb4",
     cursor = "#deddda",
     cursor_text_color = "#1d1d1d",
+
+    -- Tab bar improvements
+    tab_bar_background = "#202020",        -- Slightly lighter dark background for the tab bar
+    active_tab_background = "#30353b",     -- Distinct active tab with a soft dark gray
+    active_tab_foreground = "#e6e6e6",     -- Brighter text for the active tab
+    inactive_tab_background = "#282828",   -- Darker background for inactive tabs
+    inactive_tab_foreground = "#7e7e7e",   -- Muted gray text for inactive tabs
+    tab_border_color = "#404040",          -- Subtle border between tabs
+
     active_border_color = "#4f4f4f",
     inactive_border_color = "#282828",
     bell_border_color = "#ed333b",
     visual_bell_color = "none",
-    active_tab_background = "#242424",
-    active_tab_foreground = "#fcfcfc",
-    inactive_tab_background = "#303030",
-    inactive_tab_foreground = "#b0afac",
-    tab_bar_background = "none",
     tab_bar_margin_color = "none",
 
     -- Colors

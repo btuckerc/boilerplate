@@ -1,12 +1,15 @@
 #!/bin/zsh
 
-# Prevent multiple sourcing
-if [[ -n "$_SHELLRC_SOURCED" ]]; then
-    return
-fi
-export _SHELLRC_SOURCED=true
+# Ensure Starship environment variables are set
+export STARSHIP_SHELL="zsh"
+export STARSHIP_CONFIG="$HOME/.config/starship.toml"
 
-# Load aliases
+# Load Starship prompt if installed (do this early to ensure proper initialization)
+if command -v starship >/dev/null; then
+    eval "$(starship init zsh)"
+fi
+
+# Load aliases (these should always be available)
 if [ -f "$HOME/.zsh_aliases" ]; then
     source "$HOME/.zsh_aliases"
 fi
@@ -102,11 +105,6 @@ setopt EXTENDED_GLOB       # Extended globbing capabilities
 
 # Load Homebrew
 eval "$(/opt/homebrew/bin/brew shellenv)"
-
-# Load Starship prompt if installed
-if command -v starship >/dev/null; then
-    eval "$(starship init zsh)"
-fi
 
 # Load FZF
 [ -f ~/.fzf.zsh ] && source ~/.fzf.zsh

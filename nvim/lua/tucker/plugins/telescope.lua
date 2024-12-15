@@ -25,7 +25,7 @@ return {
         keymap.set('n', '<leader>ps', function()
             builtin.grep_string({ search = vim.fn.input("Grep > ") })
         end)
-        keymap.set('n', '<leader>vh', builtin.help_tags, {})
+        keymap.set('n', '<leader>fh', builtin.help_tags, { desc = "Find help tags" })
 
         telescope.setup({
             defaults = {

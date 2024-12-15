@@ -34,7 +34,9 @@ fi
 if [ -f ~/.bashrc ]; then
     source ~/.bashrc
 fi
+
 . "$HOME/.cargo/env"
+
 #export PATH="/opt/homebrew/opt/llvm/bin:$PATH"
 export PATH="$PATH:/Applications/Docker.app/Contents/Resources/bin/"
 export PYENV_ROOT="$HOME/.pyenv"
@@ -42,3 +44,10 @@ export PYENV_ROOT="$HOME/.pyenv"
 eval "$(pyenv init -)"
 export PATH="/usr/local/opt/python@3.13/bin:$PATH"
 eval "$(pyenv init --path)"
+
+. "/Users/tucker/.deno/env"
+
+if [ -f ~/.secrets ]; then
+    source ~/.secrets
+fi
+

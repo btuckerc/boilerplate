@@ -3,7 +3,7 @@ vim.g.netrw_browse_split = 3
 --vim.g.netrw_banner = 0
 vim.g.netrw_winsize = 25
 
-local opt = vim.opt -- for conciseness
+local opt = vim.opt
 
 -- line numbers
 opt.relativenumber = true
@@ -22,9 +22,13 @@ opt.wrap = false
 -- cursor line
 opt.cursorline = true
 
-opt.scrolloff = 8
+-- opt.scrolloff = 8
+opt.scrolloff = 4
+opt.sidescrolloff = 8
 
 -- appearance
+opt.showtabline = 2
+opt.conceallevel = 0
 
 -- turn on termguicolors for nightfly colorscheme to work
 opt.termguicolors = true
@@ -35,7 +39,7 @@ opt.signcolumn = "yes"
 opt.backspace = "indent,eol,start"
 
 -- clipboard
-opt.clipboard:append("unnamedplus") -- use system clipboard as default register
+opt.clipboard:append("unnamedplus")
 
 -- split windows
 opt.splitright = true
@@ -48,7 +52,8 @@ opt.backup = false
 opt.undodir = os.getenv("HOME") .. "/.vim/undodir"
 opt.undofile = true
 
-opt.updatetime = 50
+-- opt.updatetime = 50
+opt.updatetime = 250
 
 opt.colorcolumn = "80"
 

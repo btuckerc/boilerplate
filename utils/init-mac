@@ -1,0 +1,303 @@
+#!/bin/bash
+# Copyright (c) 2024 Tucker Craig
+# See LICENSE file for full license details.
+
+# Get the absolute directory of the current script
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Color definitions
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Helper functions
+print_step() {
+    echo -e "${BLUE}==> $1${NC}"
+}
+
+print_success() {
+    echo -e "${GREEN}✓ $1${NC}"
+}
+
+print_warning() {
+    echo -e "${YELLOW}! $1${NC}"
+}
+
+print_error() {
+    echo -e "${RED}✗ $1${NC}"
+}
+
+# Function to show usage
+show_usage() {
+    cat << EOF
+NAME
+    $(basename "$0") - Initialize a new macOS development environment
+
+SYNOPSIS
+    $(basename "$0") [OPTIONS]
+
+DESCRIPTION
+    Sets up a new macOS development environment with standard configurations,
+    including shell setup, package installation, and development tools.
+
+OPTIONS
+    -s, --shell SHELL
+        Specify shell to use [default: current shell]
+        Supported: bash, zsh
+
+    -k, --skip-kitty
+        Skip Kitty terminal installation
+
+    -b, --skip-brew
+        Skip Homebrew installation
+
+    -h, --help
+        Display this help message and exit
+
+COMPONENTS
+    The script will set up the following:
+    - Shell configuration (Bash or Zsh)
+    - Homebrew package manager
+    - Kitty terminal emulator
+    - Custom fonts (Meslo Nerd Font)
+    - Neovim editor
+    - Tmux terminal multiplexer
+    - Development environment configurations
+
+EXAMPLES
+    $(basename "$0")
+        Run complete setup with current shell
+
+    $(basename "$0") -s zsh
+        Run setup and switch to Zsh shell
+
+    $(basename "$0") -k
+        Run setup without Kitty terminal installation
+
+NOTES
+    - Requires macOS
+    - Will create symlinks from dotfiles repository
+    - Will backup existing configurations
+    - Some operations may require sudo privileges
+EOF
+    exit 1
+}
+
+# Check if running on macOS
+if [[ $(uname) != "Darwin" ]]; then
+    print_error "This script is only for macOS!"
+    exit 1
+fi
+
+# Repository root directory
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Parse command line arguments
+SKIP_KITTY=false
+SKIP_BREW=false
+SHELL_CHOICE=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -s|--shell)
+            if [ -z "$2" ]; then
+                print_error "Shell argument is required"
+                show_usage
+            fi
+            SHELL_CHOICE="$2"
+            shift 2
+            ;;
+        -k|--skip-kitty)
+            SKIP_KITTY=true
+            shift
+            ;;
+        -b|--skip-brew)
+            SKIP_BREW=true
+            shift
+            ;;
+        -h|--help)
+            show_usage
+            ;;
+        *)
+            print_error "Unknown option: $1"
+            show_usage
+            ;;
+    esac
+done
+
+# Shell setup
+setup_shell() {
+    print_step "Shell Setup"
+    
+    # Detect current shell
+    current_shell=$(basename "$SHELL")
+    print_warning "Current shell is: $current_shell"
+    
+    if [ -z "$SHELL_CHOICE" ]; then
+        echo -e "${YELLOW}Would you like to:"
+        echo "1) Keep current shell ($current_shell)"
+        echo "2) Switch to Bash"
+        echo "3) Switch to Zsh${NC}"
+        read -p "Enter choice [1-3]: " shell_choice
+        
+        case $shell_choice in
+            1)
+                print_warning "Keeping $current_shell as default shell"
+                SHELL_CHOICE=$current_shell
+                ;;
+            2)
+                print_step "Switching to Bash..."
+                SHELL_CHOICE="bash"
+                ;;
+            3)
+                print_step "Switching to Zsh..."
+                SHELL_CHOICE="zsh"
+                ;;
+            *)
+                print_error "Invalid choice. Keeping current shell."
+                SHELL_CHOICE=$current_shell
+                ;;
+        esac
+    fi
+    
+    # Change shell if needed
+    if [ "$SHELL_CHOICE" != "$current_shell" ]; then
+        chsh -s "/bin/$SHELL_CHOICE"
+    fi
+    
+    # Symlink appropriate configuration files
+    if [[ "$SHELL_CHOICE" == "bash" ]]; then
+        ln -sf "$REPO_DIR/bashrc" ~/.bashrc
+        ln -sf "$REPO_DIR/bash_profile" ~/.bash_profile
+        ln -sf "$REPO_DIR/bash_aliases" ~/.bash_aliases
+    elif [[ "$SHELL_CHOICE" == "zsh" ]]; then
+        ln -sf "$REPO_DIR/zshrc" ~/.zshrc
+        ln -sf "$REPO_DIR/zprofile" ~/.zprofile
+        ln -sf "$REPO_DIR/zsh_aliases" ~/.zsh_aliases
+    fi
+    
+    print_success "Shell configuration complete"
+}
+
+# Homebrew installation
+setup_homebrew() {
+    if [ "$SKIP_BREW" = true ]; then
+        print_warning "Skipping Homebrew installation"
+        return
+    fi
+    
+    print_step "Installing Homebrew"
+    if ! command -v brew &> /dev/null; then
+        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+        print_success "Homebrew installed"
+    else
+        print_warning "Homebrew already installed"
+    fi
+}
+
+# Kitty terminal setup
+setup_kitty() {
+    if [ "$SKIP_KITTY" = true ]; then
+        print_warning "Skipping Kitty installation"
+        return
+    fi
+    
+    print_step "Setting up Kitty terminal"
+    
+    if ! command -v kitty &> /dev/null; then
+        brew install --cask kitty
+        print_success "Kitty installed"
+    else
+        print_warning "Kitty already installed"
+    fi
+    
+    if [ -f "$REPO_DIR/setup/setup-kitty" ]; then
+        bash "$REPO_DIR/setup/setup-kitty"
+    fi
+}
+
+# Font installation
+setup_fonts() {
+    print_step "Installing fonts"
+    
+    # Create local fonts directory if it doesn't exist
+    local fonts_dir="$HOME/Library/Fonts"
+    mkdir -p "$fonts_dir"
+    
+    # Install custom fonts from utils/fonts
+    local custom_fonts_dir="$SCRIPT_DIR/fonts"
+    if [ -d "$custom_fonts_dir" ]; then
+        print_step "Installing custom fonts from $custom_fonts_dir"
+        cp "$custom_fonts_dir"/*.ttf "$fonts_dir/" 2>/dev/null || true
+        cp "$custom_fonts_dir"/*.otf "$fonts_dir/" 2>/dev/null || true
+    fi
+    
+    # Clear font cache
+    atsutil databases -remove
+    
+    print_success "Fonts installed"
+}
+
+# Neovim setup
+setup_neovim() {
+    print_step "Setting up Neovim"
+    
+    if ! command -v nvim &> /dev/null; then
+        brew install neovim
+        print_success "Neovim installed"
+    else
+        print_warning "Neovim already installed"
+    fi
+    
+    mkdir -p ~/.config
+    
+    if [ -d ~/.config/nvim ]; then
+        mv ~/.config/nvim ~/.config/nvim.bak.$(date +%Y%m%d_%H%M%S)
+        print_warning "Existing Neovim configuration backed up"
+    fi
+    
+    ln -sf "$REPO_DIR/nvim" ~/.config/nvim
+    print_success "Neovim configuration linked"
+}
+
+# Tmux setup
+setup_tmux() {
+    print_step "Setting up Tmux"
+    
+    if ! command -v tmux &> /dev/null; then
+        brew install tmux
+        print_success "Tmux installed"
+    else
+        print_warning "Tmux already installed"
+    fi
+    
+    ln -sf "$REPO_DIR/tmux.conf" ~/.tmux.conf
+    print_success "Tmux configuration linked"
+}
+
+# Main setup
+main() {
+    print_step "Starting Mac setup script"
+    
+    # Create .hushlogin to disable "Last login" message
+    touch ~/.hushlogin
+    
+    # Run all setup functions
+    setup_shell
+    setup_homebrew
+    setup_kitty
+    setup_fonts
+    setup_neovim
+    setup_tmux
+    
+    print_success "Setup complete! Please restart your terminal for all changes to take effect."
+    
+    if [ "$SHELL_CHOICE" != "$current_shell" ]; then
+        print_warning "Shell changed to $SHELL_CHOICE. You'll need to log out and back in for the change to take effect."
+    fi
+}
+
+# Run main function
+main 

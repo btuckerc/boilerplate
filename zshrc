@@ -1,14 +1,4 @@
-# ~/.bashrc or ~/.zshrc
-
-# Detect shell type
-is_bash=false
-is_zsh=false
-
-if [ -n "$BASH_VERSION" ]; then
-    is_bash=true
-elif [ -n "$ZSH_VERSION" ]; then
-    is_zsh=true
-fi
+#!/bin/zsh
 
 # Prevent multiple sourcing
 if [[ -n "$_SHELLRC_SOURCED" ]]; then
@@ -16,34 +6,24 @@ if [[ -n "$_SHELLRC_SOURCED" ]]; then
 fi
 export _SHELLRC_SOURCED=true
 
-# Load .bash_aliases or .zsh_aliases if it exists, or initialize with default aliases
-ALIASES_FILE="$HOME/.bash_aliases"
-if $is_zsh; then
-    ALIASES_FILE="$HOME/.zsh_aliases"
+# Load aliases
+if [ -f "$HOME/.zsh_aliases" ]; then
+    source "$HOME/.zsh_aliases"
 fi
 
-if [ -f "$ALIASES_FILE" ]; then
-    source "$ALIASES_FILE"
-else
-    touch "$ALIASES_FILE"
-fi
-
-# Pyenv setup for managing Python versions
+# Pyenv setup
 if command -v pyenv >/dev/null; then
     export PYENV_ROOT="$HOME/.pyenv"
     export PATH="$PYENV_ROOT/bin:$PATH"
-
-    # Initialize pyenv
     eval "$(pyenv init --path)"
     eval "$(pyenv init -)"
-
-    # Initialize pyenv-virtualenv if available
+    
     if pyenv commands | grep -q virtualenv-init; then
         eval "$(pyenv virtualenv-init -)"
     fi
 fi
 
-# GitHub directory setup
+# Functions
 dev() {
     TARGET_DIR=~/Documents/GitHub
     if [ ! -d "$TARGET_DIR" ]; then
@@ -53,7 +33,6 @@ dev() {
     cd "$TARGET_DIR" || echo "$(date): Failed to navigate to $TARGET_DIR" >> ~/.shellrc_log
 }
 
-# Python virtual environment helper
 venv() {
     if [ ! -d "venv" ]; then
         echo "Creating virtual environment..."
@@ -85,13 +64,11 @@ ee() {
     fi
 }
 
-# Create an archive from a directory
+# Archive creation helpers
 mtar() { tar cvzf "${1%%/}.tar.gz"  "${1%%/}/"; }
-
-# Create a ZIP archive from a file/directory
 mzip() { zip -r "${1%%/}.zip" "$1" ; }
 
-# Swap two filenames around
+# File swap function
 swap() {
     local TMPFILE=tmp.$$
     [ $# -ne 2 ] && echo "swap: 2 arguments needed" && return 1
@@ -107,27 +84,42 @@ export DEV_DIR=~/Documents/GitHub
 export EDITOR="vim"
 export PATH="$PATH:$HOME/.local/bin"
 
-# Terminal resizing behavior
-if $is_bash; then
-    shopt -s checkwinsize
+# History settings (Zsh-specific)
+HISTFILE=~/.zsh_history
+HISTSIZE=10000
+SAVEHIST=10000
+setopt SHARE_HISTORY
+setopt HIST_IGNORE_DUPS
+setopt HIST_IGNORE_SPACE
+setopt EXTENDED_HISTORY
+setopt INC_APPEND_HISTORY
+
+# Zsh-specific settings
+setopt AUTO_CD              # If command is a directory path, cd into it
+setopt NO_CASE_GLOB        # Case insensitive globbing
+setopt NUMERIC_GLOB_SORT   # Sort filenames numerically when relevant
+setopt EXTENDED_GLOB       # Extended globbing capabilities
+
+# Load Homebrew
+eval "$(/opt/homebrew/bin/brew shellenv)"
+
+# Load Starship prompt if installed
+if command -v starship >/dev/null; then
+    eval "$(starship init zsh)"
 fi
 
-# Enhanced history management
-if $is_bash; then
-    shopt -s histappend
-    export PROMPT_COMMAND="history -a; history -c; history -r; $PROMPT_COMMAND"
-elif $is_zsh; then
-    setopt APPEND_HISTORY
-    setopt INC_APPEND_HISTORY
-    setopt SHARE_HISTORY
-fi
+# Load FZF
+[ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
 
-export HISTFILESIZE=10000
-export HISTSIZE=5000
-export HISTCONTROL=ignoreboth
-export HISTTIMEFORMAT="%F %T "
+# Load Cargo
+[ -f "$HOME/.cargo/env" ] && source "$HOME/.cargo/env"
+
+# Load Deno
+[ -f "$HOME/.deno/env" ] && source "$HOME/.deno/env"
+
+# Load secrets if they exist
+[ -f ~/.secrets ] && source ~/.secrets
 
 # Logging
 LOGFILE=~/.shellrc_log
-echo "$(date): Shell loaded by $SHELL" >> $LOGFILE
-. "/Users/tucker/.deno/env"
+echo "$(date): Zsh shell loaded" >> $LOGFILE

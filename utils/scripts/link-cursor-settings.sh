@@ -39,7 +39,7 @@ REPO_CONFIG_DIR="$REPO_ROOT/config/vscode"
 backup_and_symlink() {
     local source_file="$1"
     local target_file="$2"
-    local backup_file="${source_file}.backup-$(date +%Y%m%d_%H%M%S)"
+    local backup_file="${source_file}.bak-$(date +%Y%m%d_%H%M%S)"
 
     # Check if source file exists
     if [ ! -f "$source_file" ] && [ ! -L "$source_file" ]; then
@@ -85,4 +85,4 @@ done
 
 print_success "✨ Cursor settings have been linked to VSCode settings!"
 print_success "Your Cursor settings will now stay in sync with VSCode."
-print_warning "Note: You may need to restart Cursor for changes to take effect." 
+print_warning "Note: You may need to restart Cursor for changes to take effect."

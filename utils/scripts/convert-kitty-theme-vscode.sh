@@ -12,6 +12,9 @@ REPO_EXTENSION_DIR="$REPO_ROOT/config/vscode/extensions/current-theme"
 REPO_THEMES_DIR="$REPO_EXTENSION_DIR/themes"
 OUTPUT_THEME="$REPO_THEMES_DIR/current-theme.json"
 
+# Get current user for publisher ID
+CURRENT_USER=$(whoami)
+
 # Color definitions
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -80,25 +83,44 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Create necessary directories
-mkdir -p "$REPO_THEMES_DIR"
+# Function to safely write to a file
+safe_write() {
+    local target_file="$1"
+    local target_dir=$(dirname "$target_file")
 
-# Validate input file
-if [ ! -f "$KITTY_THEME" ]; then
-    print_error "Current theme not found: $KITTY_THEME"
-    exit 1
-fi
+    # Ensure directory exists
+    mkdir -p "$target_dir"
 
-# Check if output file exists and create backup if needed
-if [ -f "$OUTPUT_THEME" ]; then
-    backup_file="${OUTPUT_THEME}.bak.$(date +%Y%m%d_%H%M%S)"
-    print_warning "Output file exists, creating backup: $backup_file"
-    mv "$OUTPUT_THEME" "$backup_file"
-fi
+    # Remove any existing symlink or file
+    if [ -L "$target_file" ]; then
+        rm "$target_file"
+    elif [ -f "$target_file" ]; then
+        backup_file="${target_file}.bak-$(date +%Y%m%d_%H%M%S)"
+        print_warning "Backing up: $(basename "$target_file")"
+        cp "$target_file" "$backup_file"
+        rm "$target_file"
+    fi
+
+    # Create the new file
+    cat > "$target_file"
+
+    if [ $? -eq 0 ] && [ -s "$target_file" ]; then
+        print_success "Created: $(basename "$target_file")"
+        return 0
+    else
+        print_error "Failed to create: $(basename "$target_file")"
+        return 1
+    fi
+}
 
 print_step "Converting Kitty theme to VSCode theme"
-print_step "Input: $KITTY_THEME"
-print_step "Output: $OUTPUT_THEME"
+
+# Create necessary directories
+mkdir -p "$REPO_THEMES_DIR"
+mkdir -p "$REPO_EXTENSION_DIR"
+
+# Validate input file
+[ ! -f "$KITTY_THEME" ] && { print_error "Theme not found: $KITTY_THEME"; exit 1; }
 
 # Create a temporary file to store the processed colors
 tmp_file=$(mktemp)
@@ -142,7 +164,8 @@ get_color() {
 theme_name="Current Theme"
 
 # Generate the VSCode theme
-cat > "$OUTPUT_THEME" <<EOF
+print_step "Generating theme files"
+safe_write "$OUTPUT_THEME" <<EOF
 {
     "\$schema": "vscode://schemas/color-theme",
     "name": "$theme_name",
@@ -235,19 +258,16 @@ cat > "$OUTPUT_THEME" <<EOF
 }
 EOF
 
-print_success "Theme conversion complete"
-print_success "Output saved to: $OUTPUT_THEME"
-
-# Create package.json for the theme extension
-cat > "$REPO_EXTENSION_DIR/package.json" <<EOF
+# Create package.json
+safe_write "$REPO_EXTENSION_DIR/package.json" <<EOF
 {
     "name": "current-theme",
     "displayName": "Current Theme",
     "description": "Current theme converted from Kitty",
     "version": "1.0.0",
-    "publisher": "local",
+    "publisher": "$CURRENT_USER",
     "engines": {
-        "vscode": "^1.60.0"
+        "vscode": "^1.84.0"
     },
     "categories": [
         "Themes"
@@ -263,3 +283,12 @@ cat > "$REPO_EXTENSION_DIR/package.json" <<EOF
     }
 }
 EOF
+
+# Verify files were created
+if [ -f "$OUTPUT_THEME" ] && [ -f "$REPO_EXTENSION_DIR/package.json" ]; then
+    print_success "✨ Theme conversion complete"
+    print_warning "Run setup-vscode.sh to install the theme"
+else
+    print_error "Theme conversion failed"
+    exit 1
+fi

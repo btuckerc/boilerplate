@@ -140,12 +140,12 @@ fi
 case "$LANGUAGE" in
     py|python)
         LANGUAGE="python"
-        SETUP_SCRIPT="$REPO_ROOT/setup/setup-py"
+        SETUP_SCRIPT="$REPO_ROOT/setup/setup-py.sh"
         TEMPLATE_DIR="$REPO_ROOT/templates/python"
         ;;
     go|golang)
         LANGUAGE="go"
-        SETUP_SCRIPT="$REPO_ROOT/setup/setup-go"
+        SETUP_SCRIPT="$REPO_ROOT/setup/setup-go.sh"
         TEMPLATE_DIR="$REPO_ROOT/templates/go"
         ;;
     *)

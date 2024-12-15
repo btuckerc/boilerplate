@@ -288,9 +288,9 @@ setup_kitty() {
         print_warning "Kitty already installed"
     fi
 
-    if [ -f "$REPO_DIR/setup/setup-kitty" ]; then
+    if [ -f "$REPO_DIR/setup/setup-kitty.sh" ]; then
         if confirm "Would you like to configure Kitty terminal?"; then
-            bash "$REPO_DIR/setup/setup-kitty"
+            bash "$REPO_DIR/setup/setup-kitty.sh"
         else
             print_warning "Kitty configuration skipped"
         fi

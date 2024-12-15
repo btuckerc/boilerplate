@@ -5,7 +5,7 @@
     "workbench.preferredLightColorTheme": "Current Theme",
     "workbench.startupEditor": "newUntitledFile",
     "workbench.fontAliasing": "antialiased",
-    "window.titleBarStyle": "customButtonsOnHover",
+    "window.titleBarStyle": "custom",
     "window.nativeTabs": false,
     "window.commandCenter": false,
     "workbench.colorCustomizations": {

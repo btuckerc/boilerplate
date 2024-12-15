@@ -49,13 +49,13 @@ There are other setup tools you can explore as well:
 │           └── themes/                        # Theme files
 │               └── current-theme.lua          # Current theme
 ├── setup                                      # Environment setup scripts
-│   ├── setup-go                               # Go environment setup
-│   ├── setup-py                               # Python environment setup
-│   ├── setup-git                              # Git configuration setup
-│   ├── setup-kitty                            # Kitty terminal setup
-│   ├── setup-vscode                           # VSCode setup
-│   ├── setup-supabase                         # Supabase environment setup
-│   └── setup-tailwind                         # Tailwind CSS setup
+│   ├── setup-go.sh                            # Go environment setup
+│   ├── setup-py.sh                            # Python environment setup
+│   ├── setup-git.sh                           # Git configuration setup
+│   ├── setup-kitty.sh                         # Kitty terminal setup
+│   ├── setup-vscode.sh                        # VSCode setup
+│   ├── setup-supabase.sh                      # Supabase environment setup
+│   └── setup-tailwind.sh                      # Tailwind CSS setup
 ├── templates                                  # Project templates
 │   ├── go                                     # Go project template
 │   └── python                                 # Python project template
@@ -195,22 +195,46 @@ ln -s $(pwd)/zsh_aliases ~/.zsh_aliases
 - Recommended extensions
 - Automatic theme conversion from Kitty themes
 - Integrated theme extension management
+- Symlinked configuration for version control
+- Automatic backup of existing configurations
+- User-specific theme publisher ID
+
+```bash
+# Set up VSCode configuration
+./setup/setup-vscode.sh
+
+# Features:
+- Symlinks settings.json to repository
+- Sets up custom theme extension
+- Preserves existing extensions
+- Creates backups of existing configs
+- Manages theme conversion and updates
+```
 
 #### Theme Management
 ```bash
-# Convert Kitty theme to Neovim theme
-./utils/scripts/convert-kitty-theme-nvim.sh
-
 # Convert Kitty theme to VSCode theme
 ./utils/scripts/convert-kitty-theme-vscode.sh
+
+# Features:
+- Extracts colors from Kitty themes
+- Generates VSCode-compatible theme files
+- Creates proper extension structure
+- Uses current user as publisher ID
+- Sets up bidirectional symlinks
+- Preserves existing themes
+- Creates automatic backups
 ```
 
 The theme conversion scripts automatically:
 - Extract colors from Kitty themes
 - Generate compatible theme files
-- Set up proper symlinks
+- Set up proper symlinks for version control
 - Install as VSCode extension (for VSCode themes)
 - Update tab bar colors (for Neovim themes)
+- Create backups of existing configurations
+- Use system username as publisher ID
+- Enable bidirectional editing (changes reflect in both locations)
 
 #### Neovim Configuration
 Modern setup with:

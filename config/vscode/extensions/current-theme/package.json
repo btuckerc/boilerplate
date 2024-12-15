@@ -1,22 +1,25 @@
 {
-    "name": "current-theme",
-    "displayName": "Current Theme",
-    "description": "Current theme converted from Kitty",
-    "version": "1.0.0",
-    "publisher": "local",
-    "engines": {
-        "vscode": "^1.60.0"
-    },
-    "categories": [
-        "Themes"
-    ],
-    "contributes": {
-        "themes": [
-            {
-                "label": "Current Theme",
-                "uiTheme": "vs-dark",
-                "path": "./themes/current-theme.json"
-            }
-        ]
-    }
+	"name": "current-theme",
+	"displayName": "Current Theme",
+	"description": "Current theme converted from Kitty",
+	"version": "1.0.0",
+	"publisher": "tucker",
+	"engines": {
+		"vscode": "^1.84.0"
+	},
+	"categories": [
+		"Themes"
+	],
+	"contributes": {
+		"themes": [
+			{
+				"label": "Current Theme",
+				"uiTheme": "vs-dark",
+				"path": "./themes/current-theme.json"
+			}
+		]
+	},
+	"__metadata": {
+		"size": 3741
+	}
 }

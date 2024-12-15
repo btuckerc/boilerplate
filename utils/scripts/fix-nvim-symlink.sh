@@ -41,7 +41,7 @@ if [ -L "$NVIM_CONFIG_DIR" ]; then
     print_warning "Removing existing symlink at $NVIM_CONFIG_DIR"
     rm "$NVIM_CONFIG_DIR"
 elif [ -d "$NVIM_CONFIG_DIR" ]; then
-    backup_dir="${NVIM_CONFIG_DIR}.backup-$(date +%Y%m%d_%H%M%S)"
+    backup_dir="${NVIM_CONFIG_DIR}.bak-$(date +%Y%m%d_%H%M%S)"
     print_warning "Backing up existing directory to $backup_dir"
     mv "$NVIM_CONFIG_DIR" "$backup_dir"
 fi

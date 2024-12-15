@@ -6,17 +6,10 @@ A comprehensive collection of scripts and configurations for setting up and mana
 
 Initialize your macOS development environment:
 ```bash
-# Clone repository with submodules
-git clone --recursive https://github.com/YOUR_USERNAME/boilerplate.git
-
-# Or if already cloned, initialize submodules
-git submodule update --init --recursive
-
-# Run setup script
-./utils/init-mac
+git clone https://github.com/btuckerc/boilerplate.git && cd boilerplate && ./utils/init-mac
 ```
 
-Set up development tools:
+There are other setup tools you can explore as well:
 ```bash
 ./setup/setup-py
 ./init-project my-project
@@ -242,6 +235,11 @@ git submodule update --init --recursive
 ### Submodules
 This repository uses Git submodules for certain components:
 - TPM (Tmux Plugin Manager) - `config/tmux/plugins/tpm`
+
+Update TPM after installation:
+```bash
+git submodule update --init --recursive
+```
 
 To update submodules to their latest versions:
 ```bash

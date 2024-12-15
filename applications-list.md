@@ -1,20 +1,19 @@
 # List of Applications in my Workflow
 
 ## Editor
-VSCode
+Neovim
 
 ## Terminal
-Alacritty
+Kitty
 
 ## Web Browsing
 Arc
 
 ## Notetaking
-Notion
+Obsidian
 
 ## Productivity
-Tick Tick
+TickTick
 
 ## Music
 Spotify
-

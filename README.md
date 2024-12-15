@@ -19,40 +19,75 @@ A comprehensive collection of scripts and configurations for setting up and mana
 
 ```
 .
-├── LICENSE                     # 
-├── README.md                   # 
-├── applications-list.md        # 
-├── bash_profile                # Shell profile
-├── bashrc                      # Shell configuration
-├── config                      # Configuration files
-│   ├── .vscode/                # VSCode settings
-│   │   ├── settings.json       # 
-│   │   └── snippets/           # 
-│   ├── alacritty-config        # 
-│   ├── catppuccin-mocha.toml   # 
-│   └── starship.toml           # 
-├── init-project                # 
-├── lexicon.md                  # Command reference and tips
-├── setup                       # Environment setup scripts
-│   ├── setup-go                # Go environment setup
-│   └── setup-py                # Python environment setup
-├── setup-git                   # Git configuration
-├── setup-supabase              # Supabase configuration
-├── setup-tailwind              # Tailwind CSS setup
-├── setup-tailwind-beta         # Tailwind CSS beta setup
-├── templates                   # Project templates
-│   ├── go                      # Go project templates
-│   │   ├── README.md           # 
-│   │   └── main.go             # 
-│   └── python                  # Python project templates
-│       ├── README.md           # 
-│       └── requirements.txt    # 
-├── utils                       # Utility scripts
-│   ├── common.sh               # Shared shell functions
-│   ├── readme.sh               # README generator
-│   └── tree.sh                 # Directory tree generator
-├── vimrc                       # 
-└── vscode-shortcuts.pdf        # 
+├── LICENSE                                    # MIT License
+├── README.md                                  # This file
+├── applications-list.md                       # 
+├── bash_aliases                               # Bash aliases
+├── bash_profile                               # Shell profile
+├── bashrc                                     # Shell config
+├── config                                     # Config files
+│   ├── .vscode/                               # 
+│   │   ├── settings.json                      # 
+│   │   └── snippets/                          # 
+│   ├── alacritty-config                       # 
+│   ├── catppuccin-mocha.conf                  # 
+│   ├── catppuccin-mocha.toml                  # 
+│   ├── kitty.conf                             # 
+│   ├── nord.conf                              # 
+│   └── starship.toml                          # 
+├── init-project                               # 
+├── lexicon.md                                 # 
+├── nvim                                       # nvim config
+│   ├── init.lua                               # 
+│   ├── lazy-lock.json                         # 
+│   └── lua                                    # 
+│       └── tucker                             # 
+│           ├── core                           # 
+│           │   ├── init.lua                   # 
+│           │   ├── keymaps.lua                # 
+│           │   └── options.lua                # 
+│           ├── lazy.lua                       # 
+│           ├── plugins                        # 
+│           │   ├── colorscheme.lua            # 
+│           │   ├── init.lua                   # 
+│           │   ├── lazygit.lua                # 
+│           │   ├── linting.lua                # 
+│           │   ├── lsp                        # 
+│           │   │   ├── copilot.lua            # 
+│           │   │   ├── lspconfig.lua          # 
+│           │   │   ├── mason.lua              # 
+│           │   │   └── undotree.lua           # 
+│           │   ├── lualine.lua                # 
+│           │   ├── mason-tool-installer.lua   # 
+│           │   ├── nvim-cmp.lua               # 
+│           │   ├── telescope.lua              # 
+│           │   ├── treesitter.lua             # 
+│           │   ├── trouble.lua                # 
+│           │   ├── vimbegood.lua              # 
+│           │   └── which-key.lua              # 
+│           └── themes                         # 
+│               └── adwaita_dark.lua           # 
+├── setup                                      # env setups
+│   ├── setup-go                               # install go
+│   └── setup-py                               # install python
+├── setup-git                                  # install git
+├── setup-kitty                                # install kitty
+├── setup-supabase                             # install supabase
+├── setup-tailwind                             # install tailwind
+├── setup-tailwind-beta                        # 
+├── templates                                  # boilerplate
+│   ├── go                                     # 
+│   │   ├── README.md                          # 
+│   │   └── main.go                            # 
+│   └── python                                 # 
+│       ├── README.md                          # 
+│       └── requirements.txt                   # 
+├── utils                                      # util scripts
+│   ├── common.sh                              # 
+│   ├── convert-kitty-theme-nvim.sh            # 
+│   ├── readme.sh                              # 
+│   └── tree.sh                                # 
+└── vscode-shortcuts.pdf                       # shortcuts
 ```
 
 ## Features
@@ -83,8 +118,17 @@ A comprehensive collection of scripts and configurations for setting up and mana
 # Set up Git configuration (supports SSH/HTTPS)
 ./setup-git
 
-# Set up Tailwind CSS
+# Set up Kitty terminal with themes
+./setup-kitty
+
+# Set up Tailwind CSS (stable)
 ./setup-tailwind
+
+# Set up Tailwind CSS (beta features)
+./setup-tailwind-beta
+
+# Set up Supabase development environment
+./setup-supabase
 ```
 
 ### Utility Scripts
@@ -115,6 +159,61 @@ A comprehensive collection of scripts and configurations for setting up and mana
 # Force overwrite existing README
 ./utils/readme.sh -f
 ```
+
+#### Theme Conversion
+```bash
+# Convert Kitty terminal theme to Neovim theme
+./utils/convert-kitty-theme-nvim.sh input.conf output.lua
+
+# Convert included themes
+./utils/convert-kitty-theme-nvim.sh config/catppuccin-mocha.conf nvim/lua/tucker/themes/catppuccin.lua
+./utils/convert-kitty-theme-nvim.sh config/nord.conf nvim/lua/tucker/themes/nord.lua
+```
+
+### Project Templates
+The `templates/` directory contains starter templates for various languages:
+
+#### Python Template
+- Basic project structure
+- `requirements.txt` with common dependencies
+- Pre-configured virtual environment
+- Testing setup with pytest
+- README template with badges
+
+#### Go Template
+- Standard Go project layout
+- Go modules initialization
+- Basic main package
+- Example test file
+- Makefile for common operations
+- README template with badges
+
+### Editor Configuration
+
+#### Neovim Configuration
+The `nvim/` directory contains a modern Neovim configuration:
+- LSP support with Mason
+- Treesitter for syntax highlighting
+- Telescope for fuzzy finding
+- Custom keymaps and options
+- Multiple theme support
+- Git integration with Lazygit
+- Copilot integration
+- Completion with nvim-cmp
+
+#### VSCode Configuration
+The `config/.vscode/` directory includes:
+- Optimized settings.json
+- Custom snippets
+- Recommended extensions
+- Keyboard shortcuts (see vscode-shortcuts.pdf)
+
+### Terminal Configuration
+The `config/` directory includes:
+- Kitty terminal configuration
+- Multiple theme options (Catppuccin Mocha, Nord)
+- Alacritty configuration
+- Starship prompt customization
 
 ## Configuration
 

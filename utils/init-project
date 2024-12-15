@@ -4,9 +4,10 @@
 
 # Get the absolute directory of the current script
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Source common utilities
-source "$SCRIPT_DIR/utils/common.sh"
+source "$SCRIPT_DIR/common.sh"
 
 # Function to show usage
 show_usage() {
@@ -139,13 +140,13 @@ fi
 case "$LANGUAGE" in
     py|python)
         LANGUAGE="python"
-        SETUP_SCRIPT="$SCRIPT_DIR/setup/setup-py"
-        TEMPLATE_DIR="$SCRIPT_DIR/templates/python"
+        SETUP_SCRIPT="$REPO_ROOT/setup/setup-py"
+        TEMPLATE_DIR="$REPO_ROOT/templates/python"
         ;;
     go|golang)
         LANGUAGE="go"
-        SETUP_SCRIPT="$SCRIPT_DIR/setup/setup-go"
-        TEMPLATE_DIR="$SCRIPT_DIR/templates/go"
+        SETUP_SCRIPT="$REPO_ROOT/setup/setup-go"
+        TEMPLATE_DIR="$REPO_ROOT/templates/go"
         ;;
     *)
         echo "Error: Unsupported language: $LANGUAGE"

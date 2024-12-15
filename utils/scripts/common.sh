@@ -103,3 +103,70 @@ ensure_git() {
         install_brew_package git
     fi
 }
+
+# Function for single-key confirmation prompts
+confirm() {
+    local message="$1"
+    local default="${2:-n}"  # Default to 'n' if not specified
+
+    local prompt
+    if [ "$default" = "y" ]; then
+        prompt="[Y/n]"
+    else
+        prompt="[y/N]"
+    fi
+
+    echo -n "$message $prompt "
+
+    # Save current tty settings
+    local old_tty_settings
+    old_tty_settings=$(stty -g)
+
+    # Set tty to raw mode (-echo: don't echo typed characters)
+    stty raw -echo
+
+    # Read single character
+    local response
+    response=$(dd bs=1 count=1 2>/dev/null)
+
+    # Restore tty settings
+    stty "$old_tty_settings"
+
+    # Print newline since we didn't echo the user's input
+    echo
+
+    # Convert empty response to default
+    response=${response:-$default}
+
+    case "$response" in
+        [yY]) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Function to handle existing dotfiles
+handle_existing_file() {
+    local target_file="$1"
+    local file_type="$2"
+    local backup=false
+
+    if [ -L "$target_file" ]; then
+        if confirm "Existing $file_type symlink found at $target_file. Would you like to replace it?"; then
+            rm "$target_file"
+            backup=true
+        else
+            print_warning "$file_type symlink unchanged"
+            return 1
+        fi
+    elif [ -f "$target_file" ]; then
+        if confirm "Existing $file_type found at $target_file. Would you like to backup and replace it?"; then
+            mv "$target_file" "$target_file.bak.$(date +%Y%m%d_%H%M%S)"
+            print_warning "Existing $file_type backed up"
+            backup=true
+        else
+            print_warning "$file_type unchanged"
+            return 1
+        fi
+    fi
+    return 0
+}

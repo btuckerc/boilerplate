@@ -3,6 +3,17 @@
 # See LICENSE file for full license details.
 
 # Get the absolute directory of the current script
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+# Source common utilities
+COMMON_SCRIPT="$REPO_ROOT/utils/scripts/common.sh"
+if [ -f "$COMMON_SCRIPT" ]; then
+    source "$COMMON_SCRIPT"
+else
+    echo "Error: common.sh not found at: $COMMON_SCRIPT"
+    exit 1
+fi
 
 # Function to show usage
 show_usage() {
@@ -87,13 +98,13 @@ find_longest_line() {
     local dir="$1"
     local prefix="$2"
     local files=($(ls -A "$dir" | grep -Ev "$EXCLUDE_PATTERN" | sort))
-    
+
     for file in "${files[@]}"; do
         local length=$(get_line_length "$prefix" "$file")
         if (( length > LONGEST_LINE )); then
             LONGEST_LINE=$length
         fi
-        
+
         local path="$dir/$file"
         if [[ -d "$path" ]]; then
             find_longest_line "$path" "${prefix}│   "
@@ -106,7 +117,7 @@ while [[ $# -gt 0 ]]; do
     case $1 in
         -d|--depth)
             if [ -z "$2" ]; then
-                echo "Error: Depth argument is required"
+                print_error "Depth argument is required"
                 show_usage
             fi
             MAX_DEPTH="-L $2"
@@ -114,7 +125,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         -e|--exclude)
             if [ -z "$2" ]; then
-                echo "Error: Exclude pattern is required"
+                print_error "Exclude pattern is required"
                 show_usage
             fi
             EXCLUDE_PATTERN="$2"
@@ -128,7 +139,7 @@ while [[ $# -gt 0 ]]; do
             show_usage
             ;;
         -*)
-            echo "Error: Unknown option: $1"
+            print_error "Unknown option: $1"
             show_usage
             ;;
         *)
@@ -154,16 +165,16 @@ generate_tree() {
         local line_length=$(get_line_length "$prefix" "$file")
         local padding_length=$((LONGEST_LINE - line_length + MIN_PADDING))
         local padding=""
-        
+
         # Ensure we don't exceed MAX_LINE_LENGTH
         if (( LONGEST_LINE + MIN_PADDING + 2 > MAX_LINE_LENGTH )); then
             padding_length=$((MAX_LINE_LENGTH - line_length - 2))  # -2 for " #"
         fi
-        
+
         if (( padding_length > 0 )); then
             padding=$(printf "%*s" $padding_length "")
         fi
-        
+
         # Output the line
         if [[ $is_last == true ]]; then
             echo "${prefix}└── ${file}${padding}${ADD_PLACEHOLDERS:+ #}"
@@ -172,7 +183,7 @@ generate_tree() {
             echo "${prefix}├── ${file}${padding}${ADD_PLACEHOLDERS:+ #}"
             new_prefix="${prefix}│   "
         fi
-        
+
         if [[ -d "$path" ]]; then
             generate_tree "$path" "$new_prefix" "$is_last"
         fi
@@ -181,14 +192,16 @@ generate_tree() {
 
 # Start tree generation
 if [[ ! -d "$TARGET_DIR" ]]; then
-    echo "Error: Directory not found: $TARGET_DIR"
+    print_error "Directory not found: $TARGET_DIR"
     exit 1
 fi
 
 # If placeholders are requested, first find the longest line
 if [[ $ADD_PLACEHOLDERS == true ]]; then
+    print_step "Calculating line lengths..."
     find_longest_line "$TARGET_DIR" ""
 fi
 
+print_step "Generating tree structure..."
 echo "."
-generate_tree "$TARGET_DIR" "" true 
+generate_tree "$TARGET_DIR" "" true

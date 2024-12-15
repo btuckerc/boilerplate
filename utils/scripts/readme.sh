@@ -5,6 +5,16 @@
 
 # Get the absolute directory of the current script
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+# Source common utilities
+COMMON_SCRIPT="$REPO_ROOT/utils/scripts/common.sh"
+if [ -f "$COMMON_SCRIPT" ]; then
+    source "$COMMON_SCRIPT"
+else
+    echo "Error: common.sh not found at: $COMMON_SCRIPT"
+    exit 1
+fi
 
 # Function to show usage
 show_usage() {
@@ -63,7 +73,7 @@ while [[ $# -gt 0 ]]; do
             show_usage
             ;;
         -*)
-            echo "Error: Unknown option: $1"
+            print_error "Unknown option: $1"
             show_usage
             ;;
         *)
@@ -75,13 +85,13 @@ done
 
 # Check if target directory exists
 if [[ ! -d "$TARGET_DIR" ]]; then
-    echo "Error: Directory not found: $TARGET_DIR"
+    print_error "Directory not found: $TARGET_DIR"
     exit 1
 fi
 
 # Check if README.md already exists
 if [[ -f "$TARGET_DIR/README.md" ]] && [[ "$FORCE" != true ]]; then
-    echo "Error: README.md already exists. Use -f to overwrite."
+    print_error "README.md already exists. Use -f to overwrite."
     exit 1
 fi
 
@@ -94,14 +104,18 @@ PROJECT_NAME=${input:-$PROJECT_NAME}
 read -p "Project description: " PROJECT_DESCRIPTION
 
 # Ask about MIT license
-read -p "Include MIT license? [Y/n]: " include_license
-include_license=${include_license:-Y}
+if confirm "Include MIT license?" "y"; then
+    include_license=true
+else
+    include_license=false
+fi
 
 # Generate directory tree
-echo "Generating directory structure..."
+print_step "Generating directory structure..."
 TREE_OUTPUT=$("$SCRIPT_DIR/tree.sh" -p "$TARGET_DIR")
 
 # Generate README content
+print_step "Generating README.md..."
 cat > "$TARGET_DIR/README.md" << EOF
 # ${PROJECT_NAME}
 
@@ -146,7 +160,8 @@ Add usage instructions here.
 EOF
 
 # Add license if requested
-if [[ "${include_license,,}" =~ ^y ]]; then
+if [ "$include_license" = true ]; then
+    print_step "Adding MIT license..."
     cat >> "$TARGET_DIR/README.md" << EOF
 
 ## License
@@ -173,4 +188,4 @@ SOFTWARE.
 EOF
 fi
 
-echo "✨ README.md generated successfully!" 
+print_success "✨ README.md generated successfully!"

@@ -4,9 +4,16 @@
 
 # Get the absolute directory of the current script
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Source common utilities
-source "$SCRIPT_DIR/../utils/scripts/common.sh"
+COMMON_SCRIPT="$REPO_ROOT/utils/scripts/common.sh"
+if [ -f "$COMMON_SCRIPT" ]; then
+    source "$COMMON_SCRIPT"
+else
+    echo "Error: common.sh not found at: $COMMON_SCRIPT"
+    exit 1
+fi
 
 # Function to show usage
 show_usage() {
@@ -65,7 +72,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         -t|--theme)
             if [ -z "$2" ]; then
-                echo "Error: Theme name is required"
+                print_error "Theme name is required"
                 show_usage
             fi
             THEME="$2"
@@ -75,7 +82,7 @@ while [[ $# -gt 0 ]]; do
             show_usage
             ;;
         *)
-            echo "Error: Unknown option: $1"
+            print_error "Unknown option: $1"
             show_usage
             ;;
     esac
@@ -83,26 +90,27 @@ done
 
 # Check if Kitty is installed
 if ! check_command kitty; then
-    echo "Installing Kitty..."
+    print_step "Installing Kitty..."
     install_brew_package kitty
 fi
 
 # Backup existing configuration if it exists
 if [[ -d "$KITTY_CONFIG_DIR" && "$FORCE" != true ]]; then
-    echo "Backing up existing Kitty configuration..."
+    print_step "Backing up existing Kitty configuration..."
     if [[ -d "$BACKUP_DIR" ]]; then
         rm -rf "$BACKUP_DIR"
     fi
     mv "$KITTY_CONFIG_DIR" "$BACKUP_DIR"
+    print_success "Configuration backed up to $BACKUP_DIR"
 fi
 
 # Create config directory
 mkdir -p "$KITTY_CONFIG_DIR"
 
 # Copy configuration files
-echo "Installing Kitty configuration..."
+print_step "Installing Kitty configuration..."
 cp "$SCRIPT_DIR/config/kitty.conf" "$KITTY_CONFIG_DIR/"
 cp "$SCRIPT_DIR/config/$THEME.conf" "$KITTY_CONFIG_DIR/theme.conf"
 
-echo "✨ Kitty configuration installed successfully!"
-echo "Please restart Kitty terminal to apply changes." 
+print_success "✨ Kitty configuration installed successfully!"
+print_warning "Please restart Kitty terminal to apply changes."

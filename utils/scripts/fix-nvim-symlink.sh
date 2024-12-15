@@ -6,29 +6,14 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-# Color definitions
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
-# Helper functions
-print_step() {
-    echo -e "${BLUE}==> $1${NC}"
-}
-
-print_success() {
-    echo -e "${GREEN}✓ $1${NC}"
-}
-
-print_warning() {
-    echo -e "${YELLOW}! $1${NC}"
-}
-
-print_error() {
-    echo -e "${RED}✗ $1${NC}"
-}
+# Source common utilities
+COMMON_SCRIPT="$REPO_ROOT/utils/scripts/common.sh"
+if [ -f "$COMMON_SCRIPT" ]; then
+    source "$COMMON_SCRIPT"
+else
+    echo "Error: common.sh not found at: $COMMON_SCRIPT"
+    exit 1
+fi
 
 # Paths
 NVIM_CONFIG_DIR="$HOME/.config/nvim"

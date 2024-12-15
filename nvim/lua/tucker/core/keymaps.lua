@@ -64,21 +64,21 @@ map('n', '<C-l>', ':wincmd l<CR>', "Move to right window")
 map('v', '<A-j>', ':m .+1<CR>==', "Move text down")
 map('v', '<A-k>', ':m .-2<CR>==', "Move text up")
 
-local diagnostics_active = true
-map('n', '<leader>do', function()
-  diagnostics_active = not diagnostics_active
-
-  if diagnostics_active then
-    vim.diagnostic.enable(0)
-  else
-    vim.diagnostic.disable(0)
-  end
-end, "Toggle diagnostics")
+-- local diagnostics_active = true
+-- map('n', '<leader>do', function()
+--   diagnostics_active = not diagnostics_active
+--
+--   if diagnostics_active then
+--     vim.diagnostic.enable(0)
+--   else
+--     vim.diagnostic.disable(0)
+--   end
+-- end, "Toggle diagnostics")
 
 -- Diagnostic keymaps
 map('n', '[d', vim.diagnostic.goto_prev, 'Go to previous diagnostic message')
 map('n', ']d', vim.diagnostic.goto_next, 'Go to next diagnostic message')
-map('n', '<leader>d', vim.diagnostic.open_float, 'Open floating diagnostic message')
+-- map('n', '<leader>d', vim.diagnostic.open_float, 'Open floating diagnostic message')
 map('n', '<leader>q', vim.diagnostic.setloclist, 'Open diagnostics list')
 
 -- Save and load session

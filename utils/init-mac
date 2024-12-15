@@ -127,6 +127,27 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Helper function for confirmations
+confirm() {
+    local message="$1"
+    local default="${2:-n}"  # Default to 'n' if not specified
+    
+    local prompt
+    if [ "$default" = "y" ]; then
+        prompt="[Y/n]"
+    else
+        prompt="[y/N]"
+    fi
+    
+    read -p "$message $prompt " response
+    response=${response:-$default}  # Use default if empty
+    
+    case "$response" in
+        [yY][eE][sS]|[yY]) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 # Shell setup
 setup_shell() {
     print_step "Shell Setup"
@@ -164,19 +185,50 @@ setup_shell() {
     
     # Change shell if needed
     if [ "$SHELL_CHOICE" != "$current_shell" ]; then
-        chsh -s "/bin/$SHELL_CHOICE"
+        if confirm "Do you want to change your default shell to $SHELL_CHOICE?"; then
+            chsh -s "/bin/$SHELL_CHOICE"
+        else
+            print_warning "Shell change skipped"
+        fi
     fi
     
-    # Symlink appropriate configuration files
+    # Check for existing configurations and backup if needed
+    local files_to_link=()
     if [[ "$SHELL_CHOICE" == "bash" ]]; then
-        ln -sf "$REPO_DIR/bashrc" ~/.bashrc
-        ln -sf "$REPO_DIR/bash_profile" ~/.bash_profile
-        ln -sf "$REPO_DIR/bash_aliases" ~/.bash_aliases
+        files_to_link=("bashrc" "bash_profile" "bash_aliases")
     elif [[ "$SHELL_CHOICE" == "zsh" ]]; then
-        ln -sf "$REPO_DIR/zshrc" ~/.zshrc
-        ln -sf "$REPO_DIR/zprofile" ~/.zprofile
-        ln -sf "$REPO_DIR/zsh_aliases" ~/.zsh_aliases
+        files_to_link=("zshrc" "zprofile" "zsh_aliases")
     fi
+    
+    local any_existing=false
+    for file in "${files_to_link[@]}"; do
+        if [ -e "$HOME/.$file" ]; then
+            any_existing=true
+            break
+        fi
+    done
+    
+    if [ "$any_existing" = true ]; then
+        if ! confirm "Existing shell configuration files found. Would you like to backup and replace them?"; then
+            print_warning "Shell configuration skipped"
+            return
+        fi
+        
+        # Backup existing files
+        for file in "${files_to_link[@]}"; do
+            if [ -e "$HOME/.$file" ]; then
+                backup_file="$HOME/.$file.bak.$(date +%Y%m%d_%H%M%S)"
+                mv "$HOME/.$file" "$backup_file"
+                print_warning "Backed up $HOME/.$file to $backup_file"
+            fi
+        done
+    fi
+    
+    # Create symlinks
+    for file in "${files_to_link[@]}"; do
+        ln -sf "$REPO_DIR/$file" "$HOME/.$file"
+        print_success "Linked $file"
+    done
     
     print_success "Shell configuration complete"
 }
@@ -190,10 +242,19 @@ setup_homebrew() {
     
     print_step "Installing Homebrew"
     if ! command -v brew &> /dev/null; then
-        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-        print_success "Homebrew installed"
+        if confirm "Homebrew not found. Would you like to install it?"; then
+            /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+            print_success "Homebrew installed"
+        else
+            print_warning "Homebrew installation skipped"
+            SKIP_BREW=true
+        fi
     else
         print_warning "Homebrew already installed"
+        if confirm "Would you like to update Homebrew?"; then
+            brew update
+            print_success "Homebrew updated"
+        fi
     fi
 }
 
@@ -207,14 +268,23 @@ setup_kitty() {
     print_step "Setting up Kitty terminal"
     
     if ! command -v kitty &> /dev/null; then
-        brew install --cask kitty
-        print_success "Kitty installed"
+        if confirm "Kitty terminal not found. Would you like to install it?"; then
+            brew install --cask kitty
+            print_success "Kitty installed"
+        else
+            print_warning "Kitty installation skipped"
+            return
+        fi
     else
         print_warning "Kitty already installed"
     fi
     
     if [ -f "$REPO_DIR/setup/setup-kitty" ]; then
-        bash "$REPO_DIR/setup/setup-kitty"
+        if confirm "Would you like to configure Kitty terminal?"; then
+            bash "$REPO_DIR/setup/setup-kitty"
+        else
+            print_warning "Kitty configuration skipped"
+        fi
     fi
 }
 
@@ -229,15 +299,23 @@ setup_fonts() {
     # Install custom fonts from utils/fonts
     local custom_fonts_dir="$SCRIPT_DIR/fonts"
     if [ -d "$custom_fonts_dir" ]; then
-        print_step "Installing custom fonts from $custom_fonts_dir"
-        cp "$custom_fonts_dir"/*.ttf "$fonts_dir/" 2>/dev/null || true
-        cp "$custom_fonts_dir"/*.otf "$fonts_dir/" 2>/dev/null || true
+        if confirm "Would you like to install custom Meslo Nerd Fonts?"; then
+            print_step "Installing custom fonts from $custom_fonts_dir"
+            cp "$custom_fonts_dir"/*.ttf "$fonts_dir/" 2>/dev/null || true
+            cp "$custom_fonts_dir"/*.otf "$fonts_dir/" 2>/dev/null || true
+            
+            # Clear font cache
+            if confirm "Would you like to clear the font cache? (recommended after font installation)"; then
+                atsutil databases -remove
+                print_success "Font cache cleared"
+            fi
+            print_success "Fonts installed"
+        else
+            print_warning "Font installation skipped"
+        fi
+    else
+        print_error "Custom fonts directory not found at $custom_fonts_dir"
     fi
-    
-    # Clear font cache
-    atsutil databases -remove
-    
-    print_success "Fonts installed"
 }
 
 # Neovim setup
@@ -245,19 +323,28 @@ setup_neovim() {
     print_step "Setting up Neovim"
     
     if ! command -v nvim &> /dev/null; then
-        brew install neovim
-        print_success "Neovim installed"
+        if confirm "Neovim not found. Would you like to install it?"; then
+            brew install neovim
+            print_success "Neovim installed"
+        else
+            print_warning "Neovim installation skipped"
+            return
+        fi
     else
         print_warning "Neovim already installed"
     fi
     
-    mkdir -p ~/.config
-    
     if [ -d ~/.config/nvim ]; then
-        mv ~/.config/nvim ~/.config/nvim.bak.$(date +%Y%m%d_%H%M%S)
-        print_warning "Existing Neovim configuration backed up"
+        if confirm "Existing Neovim configuration found. Would you like to backup and replace it?"; then
+            mv ~/.config/nvim ~/.config/nvim.bak.$(date +%Y%m%d_%H%M%S)
+            print_warning "Existing Neovim configuration backed up"
+        else
+            print_warning "Neovim configuration skipped"
+            return
+        fi
     fi
     
+    mkdir -p ~/.config
     ln -sf "$REPO_DIR/nvim" ~/.config/nvim
     print_success "Neovim configuration linked"
 }
@@ -267,10 +354,25 @@ setup_tmux() {
     print_step "Setting up Tmux"
     
     if ! command -v tmux &> /dev/null; then
-        brew install tmux
-        print_success "Tmux installed"
+        if confirm "Tmux not found. Would you like to install it?"; then
+            brew install tmux
+            print_success "Tmux installed"
+        else
+            print_warning "Tmux installation skipped"
+            return
+        fi
     else
         print_warning "Tmux already installed"
+    fi
+    
+    if [ -f ~/.tmux.conf ]; then
+        if confirm "Existing Tmux configuration found. Would you like to backup and replace it?"; then
+            mv ~/.tmux.conf ~/.tmux.conf.bak.$(date +%Y%m%d_%H%M%S)
+            print_warning "Existing Tmux configuration backed up"
+        else
+            print_warning "Tmux configuration skipped"
+            return
+        fi
     fi
     
     ln -sf "$REPO_DIR/tmux.conf" ~/.tmux.conf
@@ -281,8 +383,33 @@ setup_tmux() {
 main() {
     print_step "Starting Mac setup script"
     
+    # Warn about potential changes
+    cat << EOF
+${YELLOW}This script will help you set up your macOS development environment.
+It can make the following changes:
+- Change your default shell
+- Install and configure Homebrew
+- Install and configure Kitty terminal
+- Install custom fonts
+- Install and configure Neovim
+- Install and configure Tmux
+- Create configuration symlinks
+
+You will be asked for confirmation before any changes are made.${NC}
+EOF
+    
+    if ! confirm "Would you like to proceed?" "n"; then
+        print_warning "Setup cancelled"
+        exit 0
+    fi
+    
     # Create .hushlogin to disable "Last login" message
-    touch ~/.hushlogin
+    if [ ! -f ~/.hushlogin ]; then
+        if confirm "Would you like to disable the 'Last login' terminal message?"; then
+            touch ~/.hushlogin
+            print_success "Created .hushlogin"
+        fi
+    fi
     
     # Run all setup functions
     setup_shell

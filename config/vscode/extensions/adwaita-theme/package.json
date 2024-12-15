@@ -1,0 +1,22 @@
+{
+    "name": "adwaita-theme",
+    "displayName": "Adwaita Theme",
+    "description": "Adwaita theme for VSCode",
+    "version": "1.0.0",
+    "publisher": "local",
+    "engines": {
+        "vscode": "^1.60.0"
+    },
+    "categories": [
+        "Themes"
+    ],
+    "contributes": {
+        "themes": [
+            {
+                "label": "Adwaita Dark",
+                "uiTheme": "vs-dark",
+                "path": "./themes/adwaita-dark.json"
+            }
+        ]
+    }
+}

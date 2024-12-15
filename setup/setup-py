@@ -26,7 +26,7 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Source common utilities
-source "$SCRIPT_DIR/../utils/common.sh"
+source "$SCRIPT_DIR/../utils/scripts/common.sh"
 
 # Default Python version (latest stable)
 DEFAULT_PYTHON_VERSION="3.12"

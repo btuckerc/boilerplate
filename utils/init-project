@@ -7,7 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Source common utilities
-source "$SCRIPT_DIR/common.sh"
+source "$SCRIPT_DIR/scripts/common.sh"
 
 # Function to show usage
 show_usage() {

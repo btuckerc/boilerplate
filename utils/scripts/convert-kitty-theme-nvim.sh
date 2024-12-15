@@ -4,6 +4,12 @@
 
 # Get the absolute directory of the current script
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+# Define paths
+KITTY_THEME="$REPO_ROOT/config/kitty/current-theme.conf"
+NVIM_THEMES_DIR="$REPO_ROOT/nvim/lua/tucker/themes"
+OUTPUT_THEME="$NVIM_THEMES_DIR/current-theme.lua"
 
 # Color definitions
 RED='\033[0;31m'
@@ -36,23 +42,20 @@ NAME
     $(basename "$0") - Convert Kitty terminal themes to Neovim themes
 
 SYNOPSIS
-    $(basename "$0") [OPTIONS] input-kitty-theme.conf output-nvim-theme.lua
+    $(basename "$0") [OPTIONS]
 
 DESCRIPTION
-    Converts a Kitty terminal theme configuration file to a Neovim theme with
+    Converts the current Kitty theme (current-theme.conf) to a Neovim theme with
     enhanced tab bar improvements. The script automatically calculates appropriate
     tab bar colors based on the background color.
-
-ARGUMENTS
-    input-kitty-theme.conf
-        Path to the input Kitty theme configuration file
-
-    output-nvim-theme.lua
-        Path where the converted Neovim theme will be saved
 
 OPTIONS
     -h, --help
         Display this help message and exit
+
+PATHS
+    Input:  $KITTY_THEME
+    Output: $OUTPUT_THEME
 
 THEME CONVERSION
     The script converts the following color attributes:
@@ -62,13 +65,6 @@ THEME CONVERSION
         * Tab bar background
         * Active/inactive tab colors
         * Tab borders
-
-EXAMPLES
-    $(basename "$0") mytheme.conf mytheme.lua
-        Convert mytheme.conf to a Neovim theme
-
-    $(basename "$0") ~/.config/kitty/themes/dark.conf ~/.config/nvim/lua/themes/dark.lua
-        Convert a Kitty theme to a Neovim theme with full paths
 
 NOTES
     - Input file must be a valid Kitty theme configuration
@@ -86,76 +82,106 @@ while [[ $# -gt 0 ]]; do
             show_usage
             ;;
         *)
-            break
+            print_error "Unknown argument: $1"
+            print_warning "Use -h or --help for usage information"
+            exit 1
             ;;
     esac
 done
 
-if [ "$#" -ne 2 ]; then
-    print_error "Invalid number of arguments"
-    print_warning "Usage: $(basename "$0") input-kitty-theme.conf output-nvim-theme.lua"
-    print_warning "Use -h or --help for more information"
-    exit 1
-fi
-
-input_file=$1
-output_file=$2
+# Create necessary directories
+mkdir -p "$NVIM_THEMES_DIR"
 
 # Validate input file
-if [ ! -f "$input_file" ]; then
-    print_error "Input file not found: $input_file"
+if [ ! -f "$KITTY_THEME" ]; then
+    print_error "Current theme not found: $KITTY_THEME"
     exit 1
 fi
 
 # Check if output file exists and create backup if needed
-if [ -f "$output_file" ]; then
-    backup_file="${output_file}.bak.$(date +%Y%m%d_%H%M%S)"
+if [ -f "$OUTPUT_THEME" ]; then
+    backup_file="${OUTPUT_THEME}.bak.$(date +%Y%m%d_%H%M%S)"
     print_warning "Output file exists, creating backup: $backup_file"
-    mv "$output_file" "$backup_file"
+    mv "$OUTPUT_THEME" "$backup_file"
 fi
 
 print_step "Converting Kitty theme to Neovim theme"
-print_step "Input: $input_file"
-print_step "Output: $output_file"
+print_step "Input: $KITTY_THEME"
+print_step "Output: $OUTPUT_THEME"
 
-# Extract basic colors from the Kitty theme
-declare -A colors
+# Create a temporary file to store the processed colors
+tmp_file=$(mktemp)
+trap 'rm -f "$tmp_file"' EXIT
 
-while IFS='=' read -r key value; do
-    key=$(echo "$key" | xargs)
-    value=$(echo "$value" | xargs)
-    case "$key" in
-        color[0-9]*) colors[$key]=$value ;;
-        background) colors[background]=$value ;;
-        foreground) colors[foreground]=$value ;;
-    esac
-done < "$input_file"
+# Extract colors from the Kitty theme
+while IFS= read -r line; do
+    # Skip comments and empty lines
+    [[ $line =~ ^#.*$ ]] && continue
+    [[ -z $line ]] && continue
+
+    # Extract key and value, properly handling multiple spaces
+    if [[ $line =~ ^[[:space:]]*([^[:space:]]+)[[:space:]]+([^[:space:]]+)[[:space:]]*$ ]]; then
+        key="${BASH_REMATCH[1]}"
+        value="${BASH_REMATCH[2]}"
+        # Skip system and none values
+        if [[ $value != "system" && $value != "none" ]]; then
+            echo "${key}=${value}" >> "$tmp_file"
+        fi
+    fi
+done < "$KITTY_THEME"
+
+# Debug: show contents of tmp_file
+echo "Contents of temp file:" >&2
+cat "$tmp_file" >&2
+
+# Function to get color value
+get_color() {
+    local color
+    color=$(grep "^$1=" "$tmp_file" | cut -d'=' -f2)
+    if [ -z "$color" ]; then
+        case $1 in
+            selection_background) echo "$(get_color background)" ;;
+            selection_foreground) echo "$(get_color foreground)" ;;
+            cursor) echo "$(get_color foreground)" ;;
+            cursor_text_color) echo "$(get_color background)" ;;
+            *) echo "#000000" ;;
+        esac
+    else
+        echo "$color"
+    fi
+}
 
 # Validate required colors
-if [ -z "${colors[background]}" ] || [ -z "${colors[foreground]}" ]; then
+if [ -z "$(get_color background)" ] || [ -z "$(get_color foreground)" ]; then
     print_error "Input theme missing required colors (background/foreground)"
     exit 1
 fi
 
 # Infer tab bar colors based on the background
-tab_bar_bg="${colors[background]}"
+tab_bar_bg="$(get_color background)"
 active_tab_bg=$(printf "#%02x%02x%02x" $((0x${tab_bar_bg:1:2} + 10)) $((0x${tab_bar_bg:3:2} + 10)) $((0x${tab_bar_bg:5:2} + 10)))
 inactive_tab_bg=$(printf "#%02x%02x%02x" $((0x${tab_bar_bg:1:2} - 10)) $((0x${tab_bar_bg:3:2} - 10)) $((0x${tab_bar_bg:5:2} - 10)))
-active_tab_fg="${colors[foreground]}"
+active_tab_fg="$(get_color foreground)"
 inactive_tab_fg="#7e7e7e" # Default muted gray for inactive tabs
 tab_border_color="#404040"
 
+# Get theme name from the input file
+theme_name=$(grep "^## name:" "$KITTY_THEME" | sed 's/^## name: //')
+if [ -z "$theme_name" ]; then
+    theme_name="Converted Kitty Theme"
+fi
+
 # Generate the Neovim theme
-cat > "$output_file" <<EOF
+cat > "$OUTPUT_THEME" <<EOF
 -- Converted Neovim Theme
--- Generated from Kitty theme: $input_file
+-- Generated from Kitty theme: $KITTY_THEME
 -- Generated on: $(date)
 
 local M = {}
 
 M.colors = {
-    background = "${colors[background]}",
-    foreground = "${colors[foreground]}",
+    background = "$(get_color background)",
+    foreground = "$(get_color foreground)",
 
     -- Tab bar improvements
     tab_bar_background = "$tab_bar_bg",
@@ -166,22 +192,22 @@ M.colors = {
     tab_border_color = "$tab_border_color",
 
     -- Colors
-    color0 = "${colors[color0]}",
-    color1 = "${colors[color1]}",
-    color2 = "${colors[color2]}",
-    color3 = "${colors[color3]}",
-    color4 = "${colors[color4]}",
-    color5 = "${colors[color5]}",
-    color6 = "${colors[color6]}",
-    color7 = "${colors[color7]}",
-    color8 = "${colors[color8]}",
-    color9 = "${colors[color9]}",
-    color10 = "${colors[color10]}",
-    color11 = "${colors[color11]}",
-    color12 = "${colors[color12]}",
-    color13 = "${colors[color13]}",
-    color14 = "${colors[color14]}",
-    color15 = "${colors[color15]}",
+    color0 = "$(get_color color0)",
+    color1 = "$(get_color color1)",
+    color2 = "$(get_color color2)",
+    color3 = "$(get_color color3)",
+    color4 = "$(get_color color4)",
+    color5 = "$(get_color color5)",
+    color6 = "$(get_color color6)",
+    color7 = "$(get_color color7)",
+    color8 = "$(get_color color8)",
+    color9 = "$(get_color color9)",
+    color10 = "$(get_color color10)",
+    color11 = "$(get_color color11)",
+    color12 = "$(get_color color12)",
+    color13 = "$(get_color color13)",
+    color14 = "$(get_color color14)",
+    color15 = "$(get_color color15)",
 }
 
 -- Function to apply the theme
@@ -204,4 +230,4 @@ return M
 EOF
 
 print_success "Theme conversion complete"
-print_success "Output saved to: $output_file"
+print_success "Output saved to: $OUTPUT_THEME"

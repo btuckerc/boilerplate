@@ -1,0 +1,22 @@
+{
+    "name": "current-theme",
+    "displayName": "Adwaita dark",
+    "description": "Current theme converted from Kitty",
+    "version": "1.0.0",
+    "publisher": "local",
+    "engines": {
+        "vscode": "^1.60.0"
+    },
+    "categories": [
+        "Themes"
+    ],
+    "contributes": {
+        "themes": [
+            {
+                "label": "Adwaita dark",
+                "uiTheme": "vs-dark",
+                "path": "./themes/current-theme.json"
+            }
+        ]
+    }
+}

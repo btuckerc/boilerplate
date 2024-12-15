@@ -11,9 +11,9 @@ git clone https://github.com/btuckerc/boilerplate.git && cd boilerplate && ./uti
 
 There are other setup tools you can explore as well:
 ```bash
-./setup/setup-py
-./init-project my-project
-./utils/readme.sh
+./setup/setup-vscode
+./utils/init-project my-project
+./utils/scripts/readme.sh
 ```
 
 ## Directory Structure
@@ -57,16 +57,20 @@ There are other setup tools you can explore as well:
 │   ├── go                                     # Go project template
 │   └── python                                 # Python project template
 ├── utils                                      # Utility scripts
-│   ├── common.sh                              # Common shell functions
-│   ├── convert-kitty-theme-nvim.sh            # Theme converter
+│   ├── init-mac                               # macOS environment setup
+│   ├── init-project                           # Project initialization
+│   ├── setup-vscode                           # VSCode configuration setup
 │   ├── fonts                                  # Custom font files
 │   │   ├── MesloLGLNerdFont-Bold.ttf          # Meslo Nerd Font Bold
 │   │   ├── MesloLGLNerdFont-BoldItalic.ttf    # Meslo Nerd Font Bold Italic
 │   │   ├── MesloLGLNerdFont-Italic.ttf        # Meslo Nerd Font Italic
 │   │   └── MesloLGLNerdFont-Regular.ttf       # Meslo Nerd Font Regular
-│   ├── init-mac                               # macOS environment setup
-│   ├── readme.sh                              # README generator
-│   └── tree.sh                                # Directory tree generator
+│   └── scripts                                # Shell script utilities
+│       ├── common.sh                          # Common shell functions
+│       ├── convert-kitty-theme-nvim.sh        # Theme converter
+│       ├── readme.sh                          # README generator
+│       ├── tree.sh                            # Directory tree generator
+│       └── bash-to-zsh.sh                     # Shell conversion utility
 └── vscode-shortcuts.pdf                       # VSCode keyboard shortcuts
 ```
 
@@ -150,17 +154,17 @@ ln -s $(pwd)/zsh_aliases ~/.zsh_aliases
 
 #### Directory Tree Generation
 ```bash
-./utils/tree.sh [-p] [-d DEPTH] [-e EXCLUDE]
+./utils/scripts/tree.sh [-p] [-d DEPTH] [-e EXCLUDE]
 ```
 
 #### README Generation
 ```bash
-./utils/readme.sh [DIRECTORY] [-f]
+./utils/scripts/readme.sh [DIRECTORY] [-f]
 ```
 
 #### Theme Conversion
 ```bash
-./utils/convert-kitty-theme-nvim.sh input.conf output.lua
+./utils/scripts/convert-kitty-theme-nvim.sh input.conf output.lua
 ```
 
 ### Project Templates

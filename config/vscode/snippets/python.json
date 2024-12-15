@@ -1,0 +1,52 @@
+{
+	"Custom class": {
+		"prefix": "cc",
+		"body": [
+			"class ${1:ClassName}(${2:inherits}):",
+			"\tdef __init__(self, ${3:arg}):",
+			"\t\tself.$3 = $3",
+			"\t$255",
+		],
+		"description": "BTC - Make a blank class."
+	},
+	"Custom method": {
+		"prefix": "$method",
+		"body": [
+			"def ${1:method}(self, ${2:arg}):",
+			"\t${3:pass}",
+		],
+		"description": "BTC - Make a blank method."
+	},
+	"if __name__ == '__main__'": {
+		"prefix": "main",
+		"body": [
+			"if __name__ == '__main__':",
+			"\t$1"
+		]
+	},
+	"Try/Except": {
+		"prefix": "try",
+		"body": [
+			"try:",
+			"\t${1:pass}",
+			"except ${2:Exception} as ${3:e}:",
+			"\t${4:pass}"
+		]
+	},
+	"Property": {
+		"prefix": "prop",
+		"body": [
+			"@property",
+			"def ${1:name}(self):",
+			"\treturn self._${1:name}"
+		]
+	},
+	"Logger": {
+		"prefix": "logger",
+		"body": [
+			"import logging",
+			"logger = logging.getLogger(__name__)",
+			"$1"
+		]
+	}
+}

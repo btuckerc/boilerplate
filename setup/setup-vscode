@@ -13,10 +13,11 @@ source "$SCRIPT_DIR/../utils/scripts/common.sh"
 VSCODE_CONFIG_DIR="$HOME/Library/Application Support/Code/User"
 VSCODE_EXTENSIONS_DIR="$HOME/.vscode/extensions"
 REPO_CONFIG_DIR="$REPO_ROOT/config/vscode"
-REPO_EXTENSION_DIR="$REPO_CONFIG_DIR/extensions/adwaita-theme"
+REPO_EXTENSION_DIR="$REPO_CONFIG_DIR/extensions/current-theme"
 
 # Create necessary directories
 mkdir -p "$REPO_CONFIG_DIR/snippets"
+mkdir -p "$VSCODE_CONFIG_DIR/themes"
 mkdir -p "$VSCODE_EXTENSIONS_DIR"
 
 # Function to backup and symlink a file
@@ -47,22 +48,13 @@ backup_and_symlink "$VSCODE_CONFIG_DIR/settings.json" "$REPO_CONFIG_DIR/settings
 
 # Handle theme extension
 echo "Setting up theme extension..."
-extension_dir="$VSCODE_EXTENSIONS_DIR/adwaita-theme"
+extension_dir="$VSCODE_EXTENSIONS_DIR/current-theme"
 if [ -d "$extension_dir" ]; then
     echo "Removing existing theme extension..."
     rm -rf "$extension_dir"
 fi
 echo "Installing theme extension..."
 ln -s "$REPO_EXTENSION_DIR" "$extension_dir"
-
-# Handle themes
-echo "Setting up themes..."
-for theme_file in "$REPO_CONFIG_DIR/themes"/*.json; do
-    if [ -f "$theme_file" ]; then
-        filename=$(basename "$theme_file")
-        backup_and_symlink "$VSCODE_CONFIG_DIR/themes/$filename" "$theme_file"
-    fi
-done
 
 # Handle snippets
 echo "Setting up snippets..."
@@ -74,5 +66,5 @@ for snippet_file in "$VSCODE_CONFIG_DIR/snippets"/*.json; do
 done
 
 echo "✨ VSCode configuration setup complete!"
-echo "Your settings and snippets are now linked to the repository."
+echo "Your settings, snippets, and theme extension are now linked to the repository."
 echo "Original files have been backed up with timestamp suffix."

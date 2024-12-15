@@ -30,48 +30,51 @@ There are other setup tools you can explore as well:
 ├── zprofile                                   # Zsh profile configuration
 ├── zshrc                                      # Zsh shell configuration
 ├── config                                     # Configuration files
-│   ├── .vscode/                               # VSCode configuration
-│   │   ├── settings.json                      # Editor settings
-│   │   └── snippets/                          # Code snippets
 │   ├── kitty/                                 # Kitty configuration
-│   │   └── kitty.conf                         # Kitty terminal config
-│   ├── tmux/                                  # Tmux configuration
-│   │   └── plugins/                           # Tmux plugins
-│   │       └── tpm/                           # Tmux Plugin Manager (submodule)
-│   ├── alacritty-config                       # Alacritty terminal config
-│   ├── catppuccin-mocha.conf                  # Catppuccin theme for terminals
-│   ├── catppuccin-mocha.toml                  # Catppuccin theme config
-│   ├── nord.conf                              # Nord theme for terminals
-│   └── starship.toml                          # Starship prompt config
-├── init-project                               # Project initialization script
-├── lexicon.md                                 # Command reference guide
+│   │   ├── kitty.conf                         # Kitty terminal config
+│   │   └── current-theme.conf                 # Current Kitty theme
+│   ├── vscode/                                # VSCode configuration
+│   │   ├── settings.json                      # Editor settings
+│   │   ├── snippets/                          # Code snippets
+│   │   └── extensions/                        # VSCode extensions
+│   │       └── current-theme/                 # Current theme extension
+│   └── tmux/                                  # Tmux configuration
+│       └── plugins/                           # Tmux plugins
+│           └── tpm/                           # Tmux Plugin Manager (submodule)
 ├── nvim                                       # Neovim configuration
+│   └── lua/                                   # Lua configuration files
+│       └── tucker/                            # Personal configuration
+│           └── core/                          # Core configuration
+│           └── plugins/                       # Plugin configuration
+│           └── themes/                        # Theme files
+│               └── current-theme.lua          # Current theme
 ├── setup                                      # Environment setup scripts
 │   ├── setup-go                               # Go environment setup
 │   ├── setup-py                               # Python environment setup
 │   ├── setup-git                              # Git configuration setup
 │   ├── setup-kitty                            # Kitty terminal setup
+│   ├── setup-vscode                           # VSCode setup
 │   ├── setup-supabase                         # Supabase environment setup
 │   └── setup-tailwind                         # Tailwind CSS setup
 ├── templates                                  # Project templates
 │   ├── go                                     # Go project template
 │   └── python                                 # Python project template
-├── utils                                      # Utility scripts
-│   ├── init-mac                               # macOS environment setup
-│   ├── init-project                           # Project initialization
-│   ├── setup-vscode                           # VSCode configuration setup
-│   ├── fonts                                  # Custom font files
-│   │   ├── MesloLGLNerdFont-Bold.ttf          # Meslo Nerd Font Bold
-│   │   ├── MesloLGLNerdFont-BoldItalic.ttf    # Meslo Nerd Font Bold Italic
-│   │   ├── MesloLGLNerdFont-Italic.ttf        # Meslo Nerd Font Italic
-│   │   └── MesloLGLNerdFont-Regular.ttf       # Meslo Nerd Font Regular
-│   └── scripts                                # Shell script utilities
-│       ├── common.sh                          # Common shell functions
-│       ├── convert-kitty-theme-nvim.sh        # Theme converter
-│       ├── readme.sh                          # README generator
-│       ├── tree.sh                            # Directory tree generator
-│       └── bash-to-zsh.sh                     # Shell conversion utility
-└── vscode-shortcuts.pdf                       # VSCode keyboard shortcuts
+└── utils                                      # Utility scripts
+    ├── init-mac                               # macOS environment setup
+    ├── init-project                           # Project initialization
+    ├── fonts                                  # Custom font files
+    │   ├── MesloLGLNerdFont-Bold.ttf          # Meslo Nerd Font Bold
+    │   ├── MesloLGLNerdFont-BoldItalic.ttf    # Meslo Nerd Font Bold Italic
+    │   ├── MesloLGLNerdFont-Italic.ttf        # Meslo Nerd Font Italic
+    │   └── MesloLGLNerdFont-Regular.ttf       # Meslo Nerd Font Regular
+    └── scripts                                # Shell script utilities
+        ├── common.sh                          # Common shell functions
+        ├── convert-kitty-theme-nvim.sh        # Theme converter for Neovim
+        ├── convert-kitty-theme-vscode.sh      # Theme converter for VSCode
+        ├── fix-nvim-symlink.sh                # Neovim symlink fixer
+        ├── readme.sh                          # README generator
+        ├── tree.sh                            # Directory tree generator
+        └── bash-to-zsh.sh                     # Shell conversion utility
 ```
 
 ## Features
@@ -185,6 +188,30 @@ ln -s $(pwd)/zsh_aliases ~/.zsh_aliases
 
 ### Editor Configuration
 
+#### VSCode Configuration
+- Optimized settings
+- Custom snippets
+- Keyboard shortcuts
+- Recommended extensions
+- Automatic theme conversion from Kitty themes
+- Integrated theme extension management
+
+#### Theme Management
+```bash
+# Convert Kitty theme to Neovim theme
+./utils/scripts/convert-kitty-theme-nvim.sh
+
+# Convert Kitty theme to VSCode theme
+./utils/scripts/convert-kitty-theme-vscode.sh
+```
+
+The theme conversion scripts automatically:
+- Extract colors from Kitty themes
+- Generate compatible theme files
+- Set up proper symlinks
+- Install as VSCode extension (for VSCode themes)
+- Update tab bar colors (for Neovim themes)
+
 #### Neovim Configuration
 Modern setup with:
 - LSP support (Mason)
@@ -192,14 +219,8 @@ Modern setup with:
 - Telescope
 - Git integration
 - Copilot
-- Custom themes
+- Custom themes with Kitty theme sync
 - Completion (nvim-cmp)
-
-#### VSCode Configuration
-- Optimized settings
-- Custom snippets
-- Keyboard shortcuts
-- Recommended extensions
 
 ### Terminal Configuration
 - Kitty terminal setup

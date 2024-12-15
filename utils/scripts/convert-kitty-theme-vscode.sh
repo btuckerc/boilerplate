@@ -110,11 +110,14 @@ while IFS= read -r line; do
     [[ $line =~ ^#.*$ ]] && continue
     [[ -z $line ]] && continue
 
-    # Extract key and value, handling spaces around equals sign
-    if [[ $line =~ ^[[:space:]]*([^[:space:]]+)[[:space:]]*=[[:space:]]*(.+)[[:space:]]*$ ]]; then
+    # Extract key and value, properly handling multiple spaces
+    if [[ $line =~ ^[[:space:]]*([^[:space:]]+)[[:space:]]+([^[:space:]]+)[[:space:]]*$ ]]; then
         key="${BASH_REMATCH[1]}"
         value="${BASH_REMATCH[2]}"
-        echo "${key}=${value}" >> "$tmp_file"
+        # Skip system and none values
+        if [[ $value != "system" && $value != "none" ]]; then
+            echo "${key}=${value}" >> "$tmp_file"
+        fi
     fi
 done < "$KITTY_THEME"
 
@@ -136,10 +139,7 @@ get_color() {
 }
 
 # Get theme name from the input file
-theme_name=$(grep "^## name:" "$KITTY_THEME" | sed 's/^## name: //')
-if [ -z "$theme_name" ]; then
-    theme_name="Converted Kitty Theme"
-fi
+theme_name="Current Theme"
 
 # Generate the VSCode theme
 cat > "$OUTPUT_THEME" <<EOF
@@ -242,7 +242,7 @@ print_success "Output saved to: $OUTPUT_THEME"
 cat > "$REPO_EXTENSION_DIR/package.json" <<EOF
 {
     "name": "current-theme",
-    "displayName": "$theme_name",
+    "displayName": "Current Theme",
     "description": "Current theme converted from Kitty",
     "version": "1.0.0",
     "publisher": "local",
@@ -255,7 +255,7 @@ cat > "$REPO_EXTENSION_DIR/package.json" <<EOF
     "contributes": {
         "themes": [
             {
-                "label": "$theme_name",
+                "label": "Current Theme",
                 "uiTheme": "vs-dark",
                 "path": "./themes/current-theme.json"
             }

@@ -1,8 +1,8 @@
 {
     "workbench.iconTheme": "vscode-icons",
-    "workbench.colorTheme": "Adwaita dark",
-    "workbench.preferredDarkColorTheme": "Adwaita dark",
-    "workbench.preferredLightColorTheme": "Adwaita light",
+    "workbench.colorTheme": "Current Theme",
+    "workbench.preferredDarkColorTheme": "Current Theme",
+    "workbench.preferredLightColorTheme": "Current Theme",
     "workbench.startupEditor": "newUntitledFile",
     "workbench.fontAliasing": "antialiased",
     "window.titleBarStyle": "customButtonsOnHover",

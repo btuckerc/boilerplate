@@ -8,7 +8,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 # Define paths
 KITTY_THEME="$REPO_ROOT/config/kitty/current-theme.conf"
-NVIM_THEMES_DIR="$REPO_ROOT/nvim/lua/tucker/themes"
+NVIM_THEMES_DIR="$REPO_ROOT/config/nvim/lua/tucker/themes"
 OUTPUT_THEME="$NVIM_THEMES_DIR/current-theme.lua"
 
 # Color definitions

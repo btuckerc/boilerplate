@@ -77,6 +77,10 @@ There are other setup tools you can explore as well:
         └── bash-to-zsh.sh                     # Shell conversion utility
 ```
 
+## TODO
+- [ ] make sure brew install glow
+- [ ] make sure starship can be installed
+
 ## Features
 
 ### macOS Environment Setup

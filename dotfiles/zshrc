@@ -82,6 +82,21 @@ swap() {
     mv "$TMPFILE" "$2"
 }
 
+# New note helper function
+nn() {
+  # Check if an argument is provided
+  if [ -z "$1" ]; then
+    echo "Error: No filename provided."
+    return 1
+  fi
+
+  # Use only the first argument, ignore others
+  local filename="$1.md"
+
+  # Open the new file in Vim
+  vim "$filename"
+}
+
 # Environment variables
 export DEV_DIR=~/Documents/GitHub
 export EDITOR="vim"

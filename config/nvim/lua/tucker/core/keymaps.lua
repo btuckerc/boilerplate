@@ -14,7 +14,7 @@ map({ 'n', 'v' }, '<Space>', '<Nop>', "Disable space default behavior")
 map("i", "jk", "<ESC>", "Exit insert mode with jk")
 
 -- clear search highlights
-map("n", "<leader>nh", ":nohl<CR>", "Clear search highlights")
+map("n", "<leader>h", ":nohl<CR>", "Clear search highlights")
 
 -- delete single character without copying into register
 map("n", "x", '"_x', "Delete character without copying to register")

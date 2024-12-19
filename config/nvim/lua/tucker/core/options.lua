@@ -31,7 +31,7 @@ opt.wrap = false
 opt.cursorline = true
 
 -- opt.scrolloff = 8
-opt.scrolloff = 4
+opt.scrolloff = 8
 opt.sidescrolloff = 8
 
 -- appearance

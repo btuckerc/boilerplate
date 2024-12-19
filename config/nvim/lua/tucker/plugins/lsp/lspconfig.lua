@@ -1,6 +1,7 @@
 return {
     "neovim/nvim-lspconfig",
     dependencies = {
+        "saghen/blink.cmp",
         "stevearc/conform.nvim",
         "williamboman/mason.nvim",
         "williamboman/mason-lspconfig.nvim",
@@ -37,12 +38,13 @@ return {
             }
         })
         local cmp = require('cmp')
-        local cmp_lsp = require("cmp_nvim_lsp")
-        local capabilities = vim.tbl_deep_extend(
-            "force",
-            {},
-            vim.lsp.protocol.make_client_capabilities(),
-            cmp_lsp.default_capabilities())
+        -- local cmp_lsp = require("cmp_nvim_lsp")
+        -- local capabilities = vim.tbl_deep_extend(
+            -- "force",
+            -- {},
+            -- vim.lsp.protocol.make_client_capabilities(),
+            -- cmp_lsp.default_capabilities())
+        local capabilities = require('blink.cmp').get_lsp_capabilities()
 
         require("fidget").setup({})
         require("mason").setup()
@@ -94,27 +96,6 @@ return {
 
         local cmp_select = { behavior = cmp.SelectBehavior.Select }
 
-        cmp.setup({
-            snippet = {
-                expand = function(args)
-                    require('luasnip').lsp_expand(args.body)
-                end,
-            },
-            mapping = {
-                ['<C-p>'] = cmp.mapping.select_prev_item(cmp_select),
-                ['<C-n>'] = cmp.mapping.select_next_item(cmp_select),
-                ['<C-y>'] = cmp.mapping.confirm({ select = true }),
-                ['<C-Space>'] = cmp.mapping.complete(),
-            },
-            sources = {
-                { name = 'nvim_lsp' },
-                { name = 'luasnip' },
-                { name = 'buffer' },
-                { name = 'path' },
-            },
-        })
-
-        -- LSP Attach Configuration (moved outside of cmp.setup)
         vim.api.nvim_create_autocmd('LspAttach', {
             group = vim.api.nvim_create_augroup('lsp-attach', { clear = true }),
             callback = function(event)

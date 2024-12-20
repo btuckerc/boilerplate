@@ -12,20 +12,18 @@ return {
         "hrsh7th/nvim-cmp",
         "L3MON4D3/LuaSnip",
         "saadparwaiz1/cmp_luasnip",
-        -- "j-hui/fidget.nvim",
-        -- NOTE: `opts = {}` is the same as calling `require('fidget').setup({})`
         {
             'j-hui/fidget.nvim',
             tag = 'v1.4.0',
             opts = {
                 progress = {
                     display = {
-                        done_icon = '✓', -- Icon shown when all LSP progress tasks are complete
+                        done_icon = '✓',
                     },
                 },
                 notification = {
                     window = {
-                        winblend = 0, -- Background color opacity in the notification window
+                        winblend = 0,
                     },
                 },
             },
@@ -33,108 +31,82 @@ return {
     },
 
     config = function()
-        require("conform").setup({
+        -- Local requires for better organization
+        local conform = require("conform")
+        local cmp = require('cmp')
+        local fidget = require("fidget")
+        local lspconfig = require("lspconfig")
+        local telescope_builtin = require('telescope.builtin')
+
+        -- Setup formatters
+        conform.setup({
             formatters_by_ft = {
             }
         })
-        local cmp = require('cmp')
-        -- local cmp_lsp = require("cmp_nvim_lsp")
-        -- local capabilities = vim.tbl_deep_extend(
-            -- "force",
-            -- {},
-            -- vim.lsp.protocol.make_client_capabilities(),
-            -- cmp_lsp.default_capabilities())
+
+        -- Get LSP capabilities from blink
         local capabilities = require('blink.cmp').get_lsp_capabilities()
 
-        require("fidget").setup({})
-        require("mason").setup()
-        require("mason-lspconfig").setup({
-            ensure_installed = {
-                "lua_ls",
-                "rust_analyzer",
-                "gopls",
-            },
-            handlers = {
-                function(server_name) -- default handler (optional)
-                    require("lspconfig")[server_name].setup {
-                        capabilities = capabilities
-                    }
-                end,
+        -- Setup Fidget for LSP progress
+        fidget.setup({})
 
-                zls = function()
-                    local lspconfig = require("lspconfig")
-                    lspconfig.zls.setup({
-                        root_dir = lspconfig.util.root_pattern(".git", "build.zig", "zls.json"),
-                        settings = {
-                            zls = {
-                                enable_inlay_hints = true,
-                                enable_snippets = true,
-                                warn_style = true,
-                            },
-                        },
-                    })
-                    vim.g.zig_fmt_parse_errors = 0
-                    vim.g.zig_fmt_autosave = 0
+        -- LSP server configurations
+        local function setup_lsp_keymaps(event)
+            local map = function(keys, func, desc)
+                vim.keymap.set('n', keys, func, { buffer = event.buf, desc = 'LSP: ' .. desc })
+            end
 
-                end,
-                ["lua_ls"] = function()
-                    local lspconfig = require("lspconfig")
-                    lspconfig.lua_ls.setup {
-                        capabilities = capabilities,
-                        settings = {
-                            Lua = {
-                                runtime = { version = "Lua 5.1" },
-                                diagnostics = {
-                                    globals = { "bit", "vim", "it", "describe", "before_each", "after_each" },
-                                }
-                            }
-                        }
-                    }
-                end,
-            }
-        })
+            -- Telescope-based mappings
+            map('gd', telescope_builtin.lsp_definitions, '[G]oto [D]efinition')
+            map('gr', telescope_builtin.lsp_references, '[G]oto [R]eferences')
+            map('gI', telescope_builtin.lsp_implementations, '[G]oto [I]mplementation')
+            map('<leader>D', telescope_builtin.lsp_type_definitions, 'Type [D]efinition')
+            map('<leader>ds', telescope_builtin.lsp_document_symbols, '[D]ocument [S]ymbols')
+            map('<leader>ws', telescope_builtin.lsp_dynamic_workspace_symbols, '[W]orkspace [S]ymbols')
 
-        local cmp_select = { behavior = cmp.SelectBehavior.Select }
+            -- LSP buffer mappings
+            map('<leader>rn', vim.lsp.buf.rename, '[R]e[n]ame')
+            map('<leader>ca', vim.lsp.buf.code_action, '[C]ode [A]ction')
+            map('K', vim.lsp.buf.hover, 'Hover Documentation')
+            map('gD', vim.lsp.buf.declaration, '[G]oto [D]eclaration')
+            map('<leader>wa', vim.lsp.buf.add_workspace_folder, '[W]orkspace [A]dd Folder')
+            map('<leader>wr', vim.lsp.buf.remove_workspace_folder, '[W]orkspace [R]emove Folder')
+            map('<leader>wl', function()
+                print(vim.inspect(vim.lsp.buf.list_workspace_folders()))
+            end, '[W]orkspace [L]ist Folders')
+        end
 
+        -- Setup document highlight
+        local function setup_document_highlight(client, bufnr)
+            if client.server_capabilities.documentHighlightProvider then
+                local group = vim.api.nvim_create_augroup("lsp_document_highlight", { clear = true })
+                vim.api.nvim_create_autocmd({ "CursorHold", "CursorHoldI" }, {
+                    group = group,
+                    buffer = bufnr,
+                    callback = vim.lsp.buf.document_highlight,
+                })
+                vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI" }, {
+                    group = group,
+                    buffer = bufnr,
+                    callback = vim.lsp.buf.clear_references,
+                })
+            end
+        end
+
+        -- LSP attach configuration
         vim.api.nvim_create_autocmd('LspAttach', {
             group = vim.api.nvim_create_augroup('lsp-attach', { clear = true }),
             callback = function(event)
-                local map = function(keys, func, desc)
-                    vim.keymap.set('n', keys, func, { buffer = event.buf, desc = 'LSP: ' .. desc })
-                end
-
-                map('gd', require('telescope.builtin').lsp_definitions, '[G]oto [D]efinition')
-                map('gr', require('telescope.builtin').lsp_references, '[G]oto [R]eferences')
-                map('gI', require('telescope.builtin').lsp_implementations, '[G]oto [I]mplementation')
-                map('<leader>D', require('telescope.builtin').lsp_type_definitions, 'Type [D]efinition')
-                map('<leader>ds', require('telescope.builtin').lsp_document_symbols, '[D]ocument [S]ymbols')
-                map('<leader>ws', require('telescope.builtin').lsp_dynamic_workspace_symbols, '[W]orkspace [S]ymbols')
-                map('<leader>rn', vim.lsp.buf.rename, '[R]e[n]ame')
-                map('<leader>ca', vim.lsp.buf.code_action, '[C]ode [A]ction')
-                map('K', vim.lsp.buf.hover, 'Hover Documentation')
-                map('gD', vim.lsp.buf.declaration, '[G]oto [D]eclaration')
-                map('<leader>wa', vim.lsp.buf.add_workspace_folder, '[W]orkspace [A]dd Folder')
-                map('<leader>wr', vim.lsp.buf.remove_workspace_folder, '[W]orkspace [R]emove Folder')
-                map('<leader>wl', function()
-                    print(vim.inspect(vim.lsp.buf.list_workspace_folders()))
-                end, '[W]orkspace [L]ist Folders')
-
+                setup_lsp_keymaps(event)
                 local client = vim.lsp.get_client_by_id(event.data.client_id)
-                if client and client.server_capabilities.documentHighlightProvider then
-                    vim.api.nvim_create_autocmd({ 'CursorHold', 'CursorHoldI' }, {
-                        buffer = event.buf,
-                        callback = vim.lsp.buf.document_highlight,
-                    })
-                    vim.api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI' }, {
-                        buffer = event.buf,
-                        callback = vim.lsp.buf.clear_references,
-                    })
+                if client then
+                    setup_document_highlight(client, event.buf)
                 end
             end,
         })
 
+        -- Configure diagnostics
         vim.diagnostic.config({
-            -- update_in_insert = true,
             float = {
                 focusable = false,
                 style = "minimal",
@@ -144,5 +116,39 @@ return {
                 prefix = "",
             },
         })
+
+        -- Server-specific configurations
+        local servers = {
+            lua_ls = {
+                settings = {
+                    Lua = {
+                        runtime = { version = "Lua 5.1" },
+                        diagnostics = {
+                            globals = { "bit", "vim", "it", "describe", "before_each", "after_each" },
+                        }
+                    }
+                }
+            },
+            zls = {
+                root_dir = lspconfig.util.root_pattern(".git", "build.zig", "zls.json"),
+                settings = {
+                    zls = {
+                        enable_inlay_hints = true,
+                        enable_snippets = true,
+                        warn_style = true,
+                    },
+                },
+                on_attach = function()
+                    vim.g.zig_fmt_parse_errors = 0
+                    vim.g.zig_fmt_autosave = 0
+                end,
+            },
+        }
+
+        -- Setup each LSP server
+        for server, config in pairs(servers) do
+            config.capabilities = capabilities
+            lspconfig[server].setup(config)
+        end
     end
 }

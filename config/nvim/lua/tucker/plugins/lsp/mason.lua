@@ -4,13 +4,10 @@ return {
         "williamboman/mason-lspconfig.nvim",
     },
     config = function()
-        -- import mason
         local mason = require("mason")
-
-        -- import mason-lspconfig
         local mason_lspconfig = require("mason-lspconfig")
 
-        -- enable mason and configure icons
+        -- Enable mason and configure icons
         mason.setup({
             ui = {
                 icons = {
@@ -21,22 +18,56 @@ return {
             },
         })
 
+        -- Configure LSP servers to install
         mason_lspconfig.setup({
-            -- list of servers for mason to install
             ensure_installed = {
+                "lua_ls",
+                "rust_analyzer",
+                "gopls",
+                "zls",
                 "ts_ls",
                 "html",
                 "cssls",
                 "tailwindcss",
                 "svelte",
-                "lua_ls",
                 "graphql",
                 "emmet_ls",
                 "prismals",
                 "pyright",
-                "pylint", -- python linter
-                "eslint_d", -- js linter
+            },
+            automatic_installation = true,
+            handlers = {
+                ["lua_ls"] = function()
+                    require("lspconfig").lua_ls.setup({
+                        settings = {
+                            Lua = {
+                                runtime = { version = "LuaJIT" },
+                                diagnostics = {
+                                    globals = { "vim" },
+                                },
+                                workspace = {
+                                    library = vim.api.nvim_get_runtime_file("", true),
+                                    checkThirdParty = false,
+                                },
+                                telemetry = { enable = false },
+                            },
+                        },
+                    })
+                end,
             },
         })
+
+        -- Install other tools (linters, formatters, debuggers)
+        local other_tools = {
+            "pylint",    -- python linter
+            "eslint_d", -- javascript linter
+        }
+
+        for _, tool in ipairs(other_tools) do
+            local package = require("mason-registry").get_package(tool)
+            if not package:is_installed() then
+                package:install()
+            end
+        end
     end,
 }

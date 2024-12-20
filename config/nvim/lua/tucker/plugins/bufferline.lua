@@ -5,7 +5,8 @@ return {
         'nvim-tree/nvim-web-devicons',
     },
     config = function()
-        require('bufferline').setup {
+        local bufferline = require('bufferline')
+        bufferline.setup {
             options = {
                 mode = 'buffers',
                 themable = true,

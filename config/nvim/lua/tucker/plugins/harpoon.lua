@@ -31,7 +31,7 @@ return {
     -- end, { desc = 'Open harpoon window' })
 
     -- Default UI
-    vim.keymap.set('n', '<leader>M', function()
+    vim.keymap.set('n', '<C-e>', function()
       harpoon.ui:toggle_quick_menu(harpoon:list())
     end)
 

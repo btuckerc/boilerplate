@@ -86,3 +86,6 @@ map('n', '<leader>ss', ':mksession! .session.vim<CR>', 'Save session')
 map('n', '<leader>sl', ':source .session.vim<CR>', 'Load session')
 
 map('n', '<leader>L', ':Lazy<CR>', 'Lazy load plugins')
+
+map('n', '[' , ':bprev<CR>', 'Previous buffer')
+map('n', ']' , ':bnext<CR>', 'Next buffer')

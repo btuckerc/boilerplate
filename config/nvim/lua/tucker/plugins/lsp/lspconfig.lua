@@ -61,7 +61,7 @@ return {
             map('gr', telescope_builtin.lsp_references, '[G]oto [R]eferences')
             map('gI', telescope_builtin.lsp_implementations, '[G]oto [I]mplementation')
             map('<leader>D', telescope_builtin.lsp_type_definitions, 'Type [D]efinition')
-            map('<leader>ds', telescope_builtin.lsp_document_symbols, '[D]ocument [S]ymbols')
+            map('<leader>Ds', telescope_builtin.lsp_document_symbols, '[D]ocument [S]ymbols')
             map('<leader>ws', telescope_builtin.lsp_dynamic_workspace_symbols, '[W]orkspace [S]ymbols')
 
             -- LSP buffer mappings

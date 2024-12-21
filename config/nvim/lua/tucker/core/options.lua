@@ -13,6 +13,11 @@ vim.g.netrw_sizestyle = "H"
 
 local opt = vim.opt
 
+-- hl
+opt.inccommand = "split"
+opt.smartcase = true
+opt.ignorecase = true
+
 -- line numbers
 opt.relativenumber = true
 opt.number = true

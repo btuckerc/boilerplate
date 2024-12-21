@@ -97,9 +97,18 @@ nn() {
   vim "$filename"
 }
 
+function y() {
+	local tmp="$(mktemp -t "yazi-cwd.XXXXXX")" cwd
+	yazi "$@" --cwd-file="$tmp"
+	if cwd="$(command cat -- "$tmp")" && [ -n "$cwd" ] && [ "$cwd" != "$PWD" ]; then
+		builtin cd -- "$cwd"
+	fi
+	rm -f -- "$tmp"
+}
+
 # Environment variables
 export DEV_DIR=~/Documents/GitHub
-export EDITOR="vim"
+export EDITOR="nvim"
 export PATH="$PATH:$HOME/.local/bin"
 
 # History settings (Zsh-specific)

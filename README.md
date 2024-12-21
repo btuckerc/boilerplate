@@ -261,6 +261,12 @@ Modern setup with:
   - Session management (resurrect & continuum)
   - System clipboard integration (yank)
 
+### yazi Setup
+1. Install yazi
+```bash
+brew install yazi ffmpegthumbnailer ffmpeg sevenzip jq poppler fd ripgrep fzf zoxide imagemagick font-symbols-only-nerd-font
+```
+
 ## Development
 
 ### Prerequisites

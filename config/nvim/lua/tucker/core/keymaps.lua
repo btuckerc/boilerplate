@@ -23,19 +23,25 @@ map("n", "x", '"_x', "Delete character without copying to register")
 map("n", "<leader>+", "<C-a>", "Increment number")
 map("n", "<leader>-", "<C-x>", "Decrement number")
 
--- window management
-map("n", "<leader>sv", "<C-w>v", "Split window vertically")
-map("n", "<leader>sh", "<C-w>s", "Split window horizontally")
-map("n", "<leader>se", "<C-w>=", "Make splits equal size")
-map("n", "<leader>sx", "<cmd>close<CR>", "Close current split")
+-- window management (using 'w' prefix)
+map("n", "<leader>wv", "<C-w>v", "Split window vertically")
+map("n", "<leader>ws", "<C-w>s", "Split window horizontally")
+map("n", "<leader>we", "<C-w>=", "Make splits equal size")
+map("n", "<leader>wx", "<cmd>close<CR>", "Close current split")
 
+-- tab management
 map("n", "<leader>to", "<cmd>tabnew<CR>", "Open new tab")
 map("n", "<leader>tx", "<cmd>tabclose<CR>", "Close current tab")
 map("n", "<leader>tn", "<cmd>tabn<CR>", "Go to next tab")
 map("n", "<leader>tp", "<cmd>tabp<CR>", "Go to previous tab")
 map("n", "<leader>tf", "<cmd>tabnew %<CR>", "Open current buffer in new tab")
 
--- Remap dd to delete without saving to the clipboard
+-- buffer management
+map("n", "[b", ":bprev<CR>", "Previous buffer")
+map("n", "]b", ":bnext<CR>", "Next buffer")
+map("n", "<leader>bd", ":bdelete<CR>", "Delete buffer")
+
+-- clipboard management
 map("n", "dd", '"_dd', "Delete line without affecting clipboard")
 map("n", "<leader>d", '"+dd', "Delete line and yank to clipboard")
 map("n", "dG", '"_dG', "Delete to end of file without affecting clipboard")
@@ -64,28 +70,14 @@ map('n', '<C-l>', ':wincmd l<CR>', "Move to right window")
 map('v', '<A-j>', ':m .+1<CR>==', "Move text down")
 map('v', '<A-k>', ':m .-2<CR>==', "Move text up")
 
--- local diagnostics_active = true
--- map('n', '<leader>do', function()
---   diagnostics_active = not diagnostics_active
---
---   if diagnostics_active then
---     vim.diagnostic.enable(0)
---   else
---     vim.diagnostic.disable(0)
---   end
--- end, "Toggle diagnostics")
-
 -- Diagnostic keymaps
 map('n', '[d', vim.diagnostic.goto_prev, 'Go to previous diagnostic message')
 map('n', ']d', vim.diagnostic.goto_next, 'Go to next diagnostic message')
--- map('n', '<leader>d', vim.diagnostic.open_float, 'Open floating diagnostic message')
 map('n', '<leader>q', vim.diagnostic.setloclist, 'Open diagnostics list')
 
--- Save and load session
-map('n', '<leader>ss', ':mksession! .session.vim<CR>', 'Save session')
-map('n', '<leader>sl', ':source .session.vim<CR>', 'Load session')
+-- Session management (capital S to avoid conflicts)
+map('n', '<leader>Ss', ':mksession! .session.vim<CR>', 'Save session')
+map('n', '<leader>Sl', ':source .session.vim<CR>', 'Load session')
 
+-- Plugin management
 map('n', '<leader>L', ':Lazy<CR>', 'Lazy load plugins')
-
-map('n', '[' , ':bprev<CR>', 'Previous buffer')
-map('n', ']' , ':bnext<CR>', 'Next buffer')

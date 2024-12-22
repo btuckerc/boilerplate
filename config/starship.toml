@@ -1,25 +1,67 @@
-#add_newline = true
-
-# A simpler format: directory followed by a character
-format = "$directory $character "
+format = """$directory$git_branch$git_status$cmd_duration$line_break$character"""
 
 [directory]
 # Just a foreground color—no background—so it doesn't look blocky
 style = "fg:#7aa2f7"  # A nice Tokyonight blue
-format = "$path"
+format = "[$path]($style) "
 truncation_length = 3
-truncation_symbol = "…/"
+truncate_to_repo = true
 
-# Remove backgrounds and complex formatting from Git too, at least initially
 [git_branch]
-symbol = " "
-style = "fg:#7aa2f7"
-format = "$symbol$branch"
-disabled = true  # Disable for now; re-enable later once you like the look
+symbol = " "
+style = "fg:#bb9af7"
+format = "[$symbol$branch]($style) "
 
 [git_status]
-disabled = true  # Same as above, keep it simple at first
+style = "fg:#f7768e"
+format = '([$all_status$ahead_behind]($style))'
+conflicted = "="
+ahead = "⇡${count}"
+behind = "⇣${count}"
+diverged = "⇕⇡${ahead_count}⇣${behind_count}"
+untracked = "?${count}"
+stashed = "*"
+modified = "!${count}"
+staged = "+${count}"
+renamed = "»${count}"
+deleted = "✘${count}"
+
+[cmd_duration]
+min_time = 2000  # Show command duration if it exceeds 2 seconds
+format = "[(${duration})]($style) "
+style = "fg:#f6c177"
+
+[python]
+disabled = true
+
+[username]
+style_user = "fg:#7aa2f7"
+style_root = "red bold"
+format = "[$user]($style) "
+disabled = false
+show_always = false
+
+[hostname]
+ssh_only = true
+format = "[$hostname]($style) "
+style = "fg:#7aa2f7"
 
 [character]
-success_symbol = "➜"
-error_symbol = "➜"
+success_symbol = "[➜](fg:#9ece6a)"
+error_symbol = "[➜](fg:#f7768e)"
+
+# Disabled modules
+[aws]
+disabled = true
+
+[docker_context]
+disabled = true
+
+[package]
+disabled = true
+
+[nodejs]
+disabled = true
+
+[ruby]
+disabled = true

@@ -60,13 +60,13 @@ return {
             map('gd', telescope_builtin.lsp_definitions, '[G]oto [D]efinition')
             map('gr', telescope_builtin.lsp_references, '[G]oto [R]eferences')
             map('gI', telescope_builtin.lsp_implementations, '[G]oto [I]mplementation')
-            map('<leader>D', telescope_builtin.lsp_type_definitions, 'Type [D]efinition')
-            map('<leader>Ds', telescope_builtin.lsp_document_symbols, '[D]ocument [S]ymbols')
-            map('<leader>ws', telescope_builtin.lsp_dynamic_workspace_symbols, '[W]orkspace [S]ymbols')
+            map('<leader>lt', telescope_builtin.lsp_type_definitions, '[L]SP [T]ype Definition')
+            map('<leader>ls', telescope_builtin.lsp_document_symbols, '[L]SP Document [S]ymbols')
+            map('<leader>lS', telescope_builtin.lsp_dynamic_workspace_symbols, '[L]SP Workspace [S]ymbols')
 
             -- LSP buffer mappings
-            map('<leader>rn', vim.lsp.buf.rename, '[R]e[n]ame')
-            map('<leader>ca', vim.lsp.buf.code_action, '[C]ode [A]ction')
+            map('<leader>lr', vim.lsp.buf.rename, '[L]SP [R]ename')
+            map('<leader>la', vim.lsp.buf.code_action, '[L]SP Code [A]ction')
             map('K', vim.lsp.buf.hover, 'Hover Documentation')
             map('gD', vim.lsp.buf.declaration, '[G]oto [D]eclaration')
             map('<leader>wa', vim.lsp.buf.add_workspace_folder, '[W]orkspace [A]dd Folder')

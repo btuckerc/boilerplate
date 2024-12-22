@@ -15,8 +15,6 @@ return {
                 right_mouse_command = 'Bdelete! %d',
                 left_mouse_command = 'buffer %d',
                 middle_mouse_command = nil,
-                -- buffer_close_icon = '󰅖',
-                -- buffer_close_icon = '✗',
                 buffer_close_icon = '✕',
                 close_icon = '',
                 path_components = 1, -- Show only the file name without the directory
@@ -28,17 +26,15 @@ return {
                 tab_size = 21,
                 diagnostics = false,
                 diagnostics_update_in_insert = false,
-                -- color_icons = true,
                 show_buffer_icons = true,
                 show_buffer_close_icons = true,
                 show_close_icon = true,
                 persist_buffer_sort = true,
-                separator_style = { '│', '│' }, -- | "thick" | "thin" | { 'any', 'any' },
+                separator_style = { '│', '│' },
                 enforce_regular_tabs = true,
                 always_show_bufferline = true,
                 show_tab_indicators = false,
                 indicator = {
-                    -- icon = '▎',
                     style = 'none',
                 },
                 icon_pinned = '󰐃',
@@ -54,9 +50,5 @@ return {
                 },
             },
         }
-
-        -- Keymaps
-        vim.keymap.set("n", "<Tab>", "<Cmd>BufferLineCycleNext<CR>", {})
-        vim.keymap.set("n", "<S-Tab>", "<Cmd>BufferLineCyclePrev<CR>", {})
     end,
 }

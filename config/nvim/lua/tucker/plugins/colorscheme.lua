@@ -1,28 +1,55 @@
 return {
-    dir = "~/.config/nvim/lua/tucker/themes", -- Path to the directory where your theme resides
-    priority = 1000, -- Ensure it's loaded early
+  {
+    'EdenEast/nightfox.nvim',
+    lazy = false,
+    priority = 1000,
     config = function()
-        -- Load the current theme
-        local currenttheme = require("tucker.themes.current-theme")
+      require('nightfox').setup({
+        options = {
+          -- Compiled file's destination location
+          compile_path = vim.fn.stdpath("cache") .. "/nightfox",
+          compile_file_suffix = "_compiled", -- Compiled file suffix
+          transparent = true,     -- Disable setting background
+          terminal_colors = true,  -- Set terminal colors (vim.g.terminal_color_*) used in `:terminal`
+          dim_inactive = true,    -- Non focused panes set to alternative background
+          module_default = true,   -- Default enable value for modules
+          colorblind = {
+            enable = false,        -- Enable colorblind support
+            simulate_only = false, -- Only show simulated colorblind colors and not diff shifted
+            severity = {
+              protan = 0,          -- Severity [0,1] for protan (red)
+              deutan = 0,          -- Severity [0,1] for deutan (green)
+              tritan = 0,          -- Severity [0,1] for tritan (blue)
+            },
+          },
+          styles = {               -- Style to be applied to different syntax groups
+            comments = "NONE",     -- Value is any valid attr-list value `:help attr-list`
+            conditionals = "NONE",
+            constants = "NONE",
+            functions = "NONE",
+            keywords = "NONE",
+            numbers = "NONE",
+            operators = "NONE",
+            strings = "NONE",
+            types = "NONE",
+            variables = "NONE",
+          },
+          inverse = {             -- Inverse highlight for different types
+            match_paren = true,
+            visual = false,
+            search = false,
+          },
+          modules = {             -- List of various plugins and additional options
+            -- ...
+          },
+        },
+        palettes = {},
+        specs = {},
+        groups = {},
+      })
 
-        -- Add transparency logic
-        local transparent = true -- Set to true to enable transparency
-
-        -- Define colors based on transparency settings
-        local colors = {
-            bg = transparent and "NONE" or "#011628",
-            bg_dark = transparent and "NONE" or "#011423",
-        }
-
-        -- Set up global variables or overrides for the theme
-        vim.g.currenttheme_transparent = transparent
-        vim.g.currenttheme_colors = colors
-
-        -- Apply the theme using its existing API
-        currenttheme.apply({
-            transparent = transparent,
-            colors = colors,
-        })
+      -- setup must be called before loading
+      vim.cmd("colorscheme nordfox")
     end,
+  }
 }
-

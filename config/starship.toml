@@ -30,6 +30,7 @@ deleted = "✘${count}"
 min_time = 2000  # Show command duration if it exceeds 2 seconds
 format = "[(${duration})]($style) "
 style = "fg:#f6c177"
+disabled = true
 
 [python]
 disabled = true

@@ -1,4 +1,4 @@
-format = """$directory$git_branch$git_status$cmd_duration$line_break$character"""
+format = """$cmd_duration$line_break$directory$git_branch$git_status$line_break$character"""
 
 [directory]
 # Just a foreground color—no background—so it doesn't look blocky
@@ -30,7 +30,6 @@ deleted = "✘${count}"
 min_time = 2000  # Show command duration if it exceeds 2 seconds
 format = "[(${duration})]($style) "
 style = "fg:#f6c177"
-disabled = true
 
 [python]
 disabled = true

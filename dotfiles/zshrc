@@ -97,13 +97,26 @@ nn() {
   vim "$filename"
 }
 
-function y() {
+y() {
 	local tmp="$(mktemp -t "yazi-cwd.XXXXXX")" cwd
 	yazi "$@" --cwd-file="$tmp"
 	if cwd="$(command cat -- "$tmp")" && [ -n "$cwd" ] && [ "$cwd" != "$PWD" ]; then
 		builtin cd -- "$cwd"
 	fi
 	rm -f -- "$tmp"
+}
+
+# Key code helper
+showkey() {
+    echo "Press any key combination to see its key code (Ctrl+C to exit)"
+    while true; do
+        read -k 1 -s key
+        echo -n "Key pressed: "
+        printf '%q' "$key" | sed 's/\^/Ctrl+/g'
+        echo
+        echo -n "Hex: "
+        printf '%q' "$key" | xxd
+    done
 }
 
 # Environment variables
@@ -160,13 +173,49 @@ compinit
 
 # Better completion styles
 zstyle ':completion:*' menu select
-zstyle ':completion:*' matcher-list 'm:{a-zA-Z}={A-Za-z}' # Case insensitive completion
+zstyle ':completion:*' matcher-list 'm:{a-zA-Z}={A-Za-z}' 'r:|[._-]=* r:|=*' 'l:|=* r:|=*'   # Smart case matching and partial word completion
 zstyle ':completion:*' list-colors "${(s.:.)LS_COLORS}"   # Colored completion (using ls colors)
 zstyle ':completion:*' verbose yes
 zstyle ':completion:*' group-name ''
 zstyle ':completion:*:descriptions' format '%F{green}-- %d --%f'
 zstyle ':completion:*:messages' format '%F{purple}-- %d --%f'
 zstyle ':completion:*:warnings' format '%F{red}-- no matches found --%f'
+zstyle ':completion:*' file-sort modification reverse   # Sort by most recent first
+zstyle ':completion:*' use-cache on
+zstyle ':completion:*' cache-path "$HOME/.zcompcache"
+zstyle ':completion:*' special-dirs true               # Complete . and .. special directories
+zstyle ':completion:*:cd:*' tag-order local-directories directory-stack path-directories
+
+# Configure autosuggestions
+ZSH_AUTOSUGGEST_STRATEGY=(history completion)  # Try history first, then completion
+ZSH_AUTOSUGGEST_BUFFER_MAX_SIZE=20
+ZSH_AUTOSUGGEST_USE_ASYNC=1
+ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=244'
+ZSH_AUTOSUGGEST_MANUAL_REBIND=1  # Ensure suggestions stay visible after tab completion
+
+# Keybindings for accepting suggestions
+bindkey '^I' complete-word                 # Tab for normal zsh completion
+bindkey '^[[Z' forward-word               # Shift+Tab accepts one word
+bindkey '^ ' autosuggest-accept          # Shift+Space accepts the whole suggestion
+bindkey '^[[C' forward-char               # Right arrow accepts one character
+
+# Override tab completion to ensure ghost suggestions stay visible
+function _zsh_autosuggest_completion_bind_tab() {
+    zle complete-word
+    zle autosuggest-fetch
+}
+zle -N _zsh_autosuggest_completion_bind_tab
+bindkey '^I' _zsh_autosuggest_completion_bind_tab
+
+# Better history searching
+bindkey '^r' history-incremental-search-backward
+bindkey '^s' history-incremental-search-forward
+bindkey '^p' up-line-or-search
+bindkey '^n' down-line-or-search
+
+# Better word navigation
+# bindkey '^b' backward-word
+# bindkey '^w' forward-word
 
 # Additional Zsh settings
 setopt AUTO_PUSHD           # Push the current directory visited on the stack
@@ -178,29 +227,14 @@ setopt EXTENDED_GLOB       # Use extended globbing syntax
 setopt BANG_HIST          # Treat the '!' character specially during expansion
 setopt MULTIOS            # Write to multiple descriptors
 setopt INTERACTIVE_COMMENTS # Allow comments in interactive shells
+setopt COMPLETE_IN_WORD    # Complete from both ends of a word
+setopt ALWAYS_TO_END      # Move cursor to the end of a completed word
+setopt PATH_DIRS          # Perform path search even on command names with slashes
+setopt AUTO_MENU         # Show completion menu on a successive tab press
+setopt AUTO_LIST         # Automatically list choices on ambiguous completion
+setopt AUTO_PARAM_SLASH  # If completed parameter is a directory, add a trailing slash
+setopt NO_MENU_COMPLETE  # Do not autoselect the first completion entry
 
 # Load plugins (must be at the end of .zshrc)
 source /opt/homebrew/share/zsh-autosuggestions/zsh-autosuggestions.zsh
 source /opt/homebrew/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
-
-# Configure autosuggestions
-ZSH_AUTOSUGGEST_STRATEGY=(history completion)
-ZSH_AUTOSUGGEST_BUFFER_MAX_SIZE=20
-ZSH_AUTOSUGGEST_USE_ASYNC=1
-ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=244' # Slightly darker gray for better visibility
-
-# Keybindings for accepting suggestions
-bindkey '^I' autosuggest-accept      # Tab
-bindkey '^ ' autosuggest-accept      # Ctrl + Space
-bindkey '^f' forward-word            # Ctrl + F to move forward one word
-bindkey '^[[C' forward-char          # Right arrow to move forward one character
-
-# Better history searching
-bindkey '^r' history-incremental-search-backward
-bindkey '^s' history-incremental-search-forward
-bindkey '^p' up-line-or-search
-bindkey '^n' down-line-or-search
-
-# Better word navigation
-bindkey '^b' backward-word
-bindkey '^w' forward-word

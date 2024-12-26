@@ -5,8 +5,9 @@ return {
         require("mason-tool-installer").setup({
             ensure_installed = {
                 "pylint",
-                "eslint_d",
-                -- Add other tools you need here
+                -- "eslint_d",
+                "gopls",
+                "rust_analyzer",
             },
             -- Optional settings
             auto_update = false,
@@ -14,4 +15,3 @@ return {
         })
     end,
 }
-

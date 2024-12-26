@@ -150,5 +150,6 @@
         "default": "right",
         "jupyter-notebook": "left"
     },
-    "explorer.confirmDelete": false
+    "explorer.confirmDelete": false,
+    "go.toolsManagement.autoUpdate": true
 }

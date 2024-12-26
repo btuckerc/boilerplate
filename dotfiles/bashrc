@@ -122,3 +122,4 @@ eval "$(/opt/homebrew/bin/brew shellenv)"
 # Logging
 LOGFILE=~/.shellrc_log
 echo "$(date): Bash shell loaded" >> $LOGFILE
+. "$HOME/.cargo/env"

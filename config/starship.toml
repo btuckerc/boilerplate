@@ -47,8 +47,8 @@ format = "[$hostname]($style) "
 style = "fg:#7aa2f7"
 
 [character]
-success_symbol = "[➜](fg:#9ece6a)"
-error_symbol = "[➜](fg:#f7768e)"
+success_symbol = "[>](fg:#9ece6a)"
+error_symbol = "[>](fg:#f7768e)"
 
 # Disabled modules
 [aws]

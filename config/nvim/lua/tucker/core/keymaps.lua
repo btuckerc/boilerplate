@@ -81,3 +81,6 @@ map('n', '<leader>Sl', ':source .session.vim<CR>', 'Load session')
 
 -- Plugin management
 map('n', '<leader>L', ':Lazy<CR>', 'Lazy load plugins')
+
+-- Line wrapping
+map('n', ',', ':set wrap!<CR>', 'Toggle line wrapping')

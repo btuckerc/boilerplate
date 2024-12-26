@@ -1,6 +1,6 @@
 -- Converted Neovim Theme
 -- Generated from Kitty theme: /Users/tucker/Documents/GitHub/boilerplate/config/kitty/current-theme.conf
--- Generated on: Tue Dec 17 19:39:33 EST 2024
+-- Generated on: Thu Dec 26 17:45:36 EST 2024
 
 local M = {}
 
@@ -17,22 +17,22 @@ M.colors = {
     tab_border_color = "#404040",
 
     -- Colors
-    color0 = "#1d1d1d",
-    color1 = "#ed333b",
-    color2 = "#57e389",
-    color3 = "#ff7800",
-    color4 = "#62a0ea",
-    color5 = "#9141ac",
-    color6 = "#5bc8af",
-    color7 = "#deddda",
-    color8 = "#9a9996",
-    color9 = "#f66151",
-    color10 = "#8ff0a4",
-    color11 = "#ffa348",
-    color12 = "#99c1f1",
-    color13 = "#dc8add",
-    color14 = "#93ddc2",
-    color15 = "#f6f5f4",
+    color0 = "#151515",
+    color1 = "#ff8eaf",
+    color2 = "#a6e25f",
+    color3 = "#87a8af",
+    color4 = "#00c9f8",
+    color5 = "#e85b92",
+    color6 = "#5f868f",
+    color7 = "#d5f1f2",
+    color8 = "#696969",
+    color9 = "#ed4c7a",
+    color10 = "#a6e179",
+    color11 = "#ffdf6b",
+    color12 = "#79d2ff",
+    color13 = "#bb5d79",
+    color14 = "#f8e578",
+    color15 = "#e2f1f6",
 }
 
 -- Function to apply the theme

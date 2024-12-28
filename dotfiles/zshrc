@@ -84,11 +84,11 @@ swap() {
 
 # New note helper function
 nn() {
-  # Check if an argument is provided
-  if [ -z "$1" ]; then
-    echo "Error: No filename provided."
-    return 1
-  fi
+    # Check if an argument is provided
+    if [ -z "$1" ]; then
+        echo "Error: No filename provided."
+        return 1
+    fi
 
   # Use only the first argument, ignore others
   local filename="$1.md"
@@ -98,12 +98,15 @@ nn() {
 }
 
 y() {
-	local tmp="$(mktemp -t "yazi-cwd.XXXXXX")" cwd
-	yazi "$@" --cwd-file="$tmp"
-	if cwd="$(command cat -- "$tmp")" && [ -n "$cwd" ] && [ "$cwd" != "$PWD" ]; then
-		builtin cd -- "$cwd"
-	fi
-	rm -f -- "$tmp"
+    local tmp="$(mktemp -t "yazi-cwd.XXXXXX")" cwd
+    yazi "$@" --cwd-file="$tmp"
+    if cwd="$(command cat -- "$tmp")" && [ -n "$cwd" ] && [ "$cwd" != "$PWD" ]; then
+        builtin cd -- "$cwd"
+        if [ -n "$TMUX" ]; then
+            tmux refresh-client -c "$cwd"
+        fi
+    fi
+    rm -f -- "$tmp"
 }
 
 # Key code helper
@@ -117,6 +120,17 @@ showkey() {
         echo -n "Hex: "
         printf '%q' "$key" | xxd
     done
+}
+
+# tmux launcher
+t () {
+    if [[ -z $TMUX ]]; then
+        if tmux has-session -t T 2>/dev/null; then
+            tmux attach-session -t T
+        else
+            tmux new-session -s T
+        fi
+    fi
 }
 
 # Environment variables
@@ -188,10 +202,10 @@ zstyle ':completion:*:cd:*' tag-order local-directories directory-stack path-dir
 
 # Configure autosuggestions
 ZSH_AUTOSUGGEST_STRATEGY=(history completion)  # Try history first, then completion
-ZSH_AUTOSUGGEST_BUFFER_MAX_SIZE=20
-ZSH_AUTOSUGGEST_USE_ASYNC=1
-ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=244'
-ZSH_AUTOSUGGEST_MANUAL_REBIND=1  # Ensure suggestions stay visible after tab completion
+    ZSH_AUTOSUGGEST_BUFFER_MAX_SIZE=20
+    ZSH_AUTOSUGGEST_USE_ASYNC=1
+    ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=244'
+    ZSH_AUTOSUGGEST_MANUAL_REBIND=1  # Ensure suggestions stay visible after tab completion
 
 # Keybindings for accepting suggestions
 bindkey '^I' complete-word                 # Tab for normal zsh completion
@@ -240,10 +254,4 @@ source /opt/homebrew/share/zsh-autosuggestions/zsh-autosuggestions.zsh
 source /opt/homebrew/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
 
 # Auto-attach to "main" session in Tmux
-if [[ -z $TMUX ]]; then
-  if tmux has-session -t T 2>/dev/null; then
-    tmux attach-session -t T
-  else
-    tmux new-session -s main
-  fi
-fi
+t

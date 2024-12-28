@@ -36,6 +36,8 @@ map("n", "<leader>tn", "<cmd>tabn<CR>", "Go to next tab")
 map("n", "<leader>tp", "<cmd>tabp<CR>", "Go to previous tab")
 map("n", "<leader>tf", "<cmd>tabnew %<CR>", "Open current buffer in new tab")
 
+map("n", "<C-f>", ":bd<CR>:e .<CR>", "Open file browser")
+
 -- buffer management
 map("n", "[b", ":bprev<CR>", "Previous buffer")
 map("n", "]b", ":bnext<CR>", "Next buffer")

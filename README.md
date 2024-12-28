@@ -4,7 +4,12 @@ A comprehensive collection of scripts and configurations for setting up and mana
 
 ## Quick Start
 
-Initialize your macOS development environment:
+One-liner to get started (works even without git installed):
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/btuckerc/boilerplate/main/utils/scripts/bootstrap.sh)"
+```
+
+Or if you already have git, you can clone and run directly:
 ```bash
 git clone https://github.com/btuckerc/boilerplate.git && cd boilerplate && ./utils/init-mac
 ```

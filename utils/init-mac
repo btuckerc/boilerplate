@@ -35,11 +35,11 @@ OPTIONS
         Specify shell to use [default: current shell]
         Supported: bash, zsh
 
-    -k, --skip-kitty
-        Skip Kitty terminal installation
-
     -b, --skip-brew
         Skip Homebrew installation
+
+    -g, --skip-ghostty
+        Skip Ghostty installation
 
     -h, --help
         Display this help message and exit
@@ -48,7 +48,7 @@ COMPONENTS
     The script will set up the following:
     - Shell configuration (Bash or Zsh)
     - Homebrew package manager
-    - Kitty terminal emulator
+    - Ghostty terminal emulator
     - Custom fonts (Meslo Nerd Font)
     - Neovim editor
     - Tmux terminal multiplexer
@@ -61,8 +61,11 @@ EXAMPLES
     $(basename "$0") -s zsh
         Run setup and switch to Zsh shell
 
-    $(basename "$0") -k
-        Run setup without Kitty terminal installation
+    $(basename "$0") -b
+        Run setup without Homebrew installation
+
+    $(basename "$0") -g
+        Run setup without Ghostty installation
 
 NOTES
     - Requires macOS
@@ -80,8 +83,8 @@ if [[ $(uname) != "Darwin" ]]; then
 fi
 
 # Parse command line arguments
-SKIP_KITTY=false
 SKIP_BREW=false
+SKIP_GHOSTTY=false
 SHELL_CHOICE=""
 
 while [[ $# -gt 0 ]]; do
@@ -94,12 +97,12 @@ while [[ $# -gt 0 ]]; do
             SHELL_CHOICE="$2"
             shift 2
             ;;
-        -k|--skip-kitty)
-            SKIP_KITTY=true
-            shift
-            ;;
         -b|--skip-brew)
             SKIP_BREW=true
+            shift
+            ;;
+        -g|--skip-ghostty)
+            SKIP_GHOSTTY=true
             shift
             ;;
         -h|--help)
@@ -225,36 +228,6 @@ setup_homebrew() {
     fi
 }
 
-# Kitty terminal setup
-setup_kitty() {
-    if [ "$SKIP_KITTY" = true ]; then
-        print_warning "Skipping Kitty installation"
-        return
-    fi
-
-    print_step "Setting up Kitty terminal"
-
-    if ! command -v kitty &> /dev/null; then
-        if confirm "Kitty terminal not found. Would you like to install it?"; then
-            brew install --cask kitty
-            print_success "Kitty installed"
-        else
-            print_warning "Kitty installation skipped"
-            return
-        fi
-    else
-        print_warning "Kitty already installed"
-    fi
-
-    if [ -f "$REPO_DIR/setup/setup-kitty.sh" ]; then
-        if confirm "Would you like to configure Kitty terminal?"; then
-            bash "$REPO_DIR/setup/setup-kitty.sh"
-        else
-            print_warning "Kitty configuration skipped"
-        fi
-    fi
-}
-
 # Font installation
 setup_fonts() {
     print_step "Installing fonts"
@@ -332,8 +305,12 @@ setup_tmux() {
         return
     fi
 
-    # Link tmux.conf from new location
-    ln -sf "$REPO_DIR/config/tmux/tmux.conf" ~/.tmux.conf
+    # Create .tmux directory if it doesn't exist
+    mkdir -p "$HOME/.tmux"
+
+    # Link both the config file and the config directory
+    ln -sf "$REPO_DIR/config/tmux/tmux.conf" "$HOME/.tmux.conf"
+    ln -sf "$REPO_DIR/config/tmux" "$HOME/.tmux"
     print_success "Tmux configuration linked"
 
     # Set up TPM
@@ -363,6 +340,128 @@ setup_tmux() {
     fi
 }
 
+# Starship setup
+setup_starship() {
+    print_step "Setting up Starship"
+
+    if ! command -v starship &> /dev/null; then
+        if confirm "Starship not found. Would you like to install it?"; then
+            brew install starship
+            print_success "Starship installed"
+        else
+            print_warning "Starship installation skipped"
+            return
+        fi
+    else
+        print_warning "Starship already installed"
+    fi
+
+    # Handle existing starship configuration
+    if ! handle_existing_file "$HOME/.config/starship.toml" "starship configuration"; then
+        return
+    fi
+
+    # Create .config directory if it doesn't exist
+    mkdir -p "$HOME/.config"
+
+    # Link starship configuration
+    ln -sf "$REPO_DIR/config/starship.toml" "$HOME/.config/starship.toml"
+    print_success "Starship configuration linked"
+}
+
+# Yazi setup
+setup_yazi() {
+    print_step "Setting up Yazi"
+
+    if ! command -v yazi &> /dev/null; then
+        if confirm "Yazi not found. Would you like to install it and its dependencies?"; then
+            brew install yazi ffmpegthumbnailer ffmpeg sevenzip jq poppler fd ripgrep fzf zoxide imagemagick font-symbols-only-nerd-font
+            print_success "Yazi and dependencies installed"
+        else
+            print_warning "Yazi installation skipped"
+            return
+        fi
+    else
+        print_warning "Yazi already installed"
+    fi
+
+    # Handle existing yazi configuration
+    if ! handle_existing_file "$HOME/.config/yazi" "yazi configuration"; then
+        return
+    fi
+
+    # Create .config directory if it doesn't exist
+    mkdir -p "$HOME/.config"
+
+    # Link yazi configuration
+    ln -sf "$REPO_DIR/config/yazi" "$HOME/.config/yazi"
+    print_success "Yazi configuration linked"
+}
+
+# Ghostty setup
+setup_ghostty() {
+    if [ "$SKIP_GHOSTTY" = true ]; then
+        print_warning "Skipping Ghostty installation"
+        return
+    fi
+
+    print_step "Setting up Ghostty"
+
+    if ! command -v ghostty &> /dev/null; then
+        if confirm "Ghostty not found. Would you like to install it?"; then
+            brew install --cask ghostty
+            print_success "Ghostty installed"
+        else
+            print_warning "Ghostty installation skipped"
+            return
+        fi
+    else
+        print_warning "Ghostty already installed"
+    fi
+
+    # Handle existing ghostty configuration
+    if ! handle_existing_file "$HOME/.config/ghostty" "ghostty configuration"; then
+        return
+    fi
+
+    # Create .config directory if it doesn't exist
+    mkdir -p "$HOME/.config"
+
+    # Link ghostty configuration
+    ln -sf "$REPO_DIR/config/ghostty" "$HOME/.config/ghostty"
+    print_success "Ghostty configuration linked"
+}
+
+# Zsh plugins setup
+setup_zsh_plugins() {
+    print_step "Setting up Zsh plugins"
+
+    if ! command -v brew &> /dev/null; then
+        print_error "Homebrew is required but not installed"
+        return
+    fi
+
+    # Install zsh-autosuggestions
+    if [ ! -f "/opt/homebrew/share/zsh-autosuggestions/zsh-autosuggestions.zsh" ]; then
+        if confirm "zsh-autosuggestions not found. Would you like to install it?"; then
+            brew install zsh-autosuggestions
+            print_success "zsh-autosuggestions installed"
+        else
+            print_warning "zsh-autosuggestions installation skipped"
+        fi
+    fi
+
+    # Install zsh-syntax-highlighting
+    if [ ! -f "/opt/homebrew/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh" ]; then
+        if confirm "zsh-syntax-highlighting not found. Would you like to install it?"; then
+            brew install zsh-syntax-highlighting
+            print_success "zsh-syntax-highlighting installed"
+        else
+            print_warning "zsh-syntax-highlighting installation skipped"
+        fi
+    fi
+}
+
 # Main setup
 main() {
     print_step "Starting Mac setup script"
@@ -373,10 +472,13 @@ ${YELLOW}This script will help you set up your macOS development environment.
 It can make the following changes:
 - Change your default shell
 - Install and configure Homebrew
-- Install and configure Kitty terminal
+- Install and configure Ghostty terminal
 - Install custom fonts
 - Install and configure Neovim
 - Install and configure Tmux
+- Install and configure Starship
+- Install and configure Yazi
+- Install Zsh plugins
 - Create configuration symlinks
 
 You will be asked for confirmation before any changes are made.${NC}
@@ -398,10 +500,13 @@ EOF
     # Run all setup functions
     setup_shell
     setup_homebrew
-    setup_kitty
+    setup_ghostty
     setup_fonts
     setup_neovim
     setup_tmux
+    setup_starship
+    setup_yazi
+    setup_zsh_plugins
 
     print_success "Setup complete! Please restart your terminal for all changes to take effect."
 

@@ -238,3 +238,12 @@ setopt NO_MENU_COMPLETE  # Do not autoselect the first completion entry
 # Load plugins (must be at the end of .zshrc)
 source /opt/homebrew/share/zsh-autosuggestions/zsh-autosuggestions.zsh
 source /opt/homebrew/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+
+# Auto-attach to "main" session in Tmux
+if [[ -z $TMUX ]]; then
+  if tmux has-session -t T 2>/dev/null; then
+    tmux attach-session -t T
+  else
+    tmux new-session -s main
+  fi
+fi

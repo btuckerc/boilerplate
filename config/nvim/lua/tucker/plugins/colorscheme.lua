@@ -19,9 +19,17 @@ return {
     vim.g.currenttheme_colors = colors
 
     -- Apply the theme using its existing API
-    currenttheme.apply({
-      transparent = transparent,
-      colors = colors,
-    })
+    currenttheme.apply()
+
+    if transparent then
+      vim.cmd [[
+        highlight Normal guibg=none
+        highlight NonText guibg=none
+        highlight Normal ctermbg=none
+        highlight NonText ctermbg=none
+        highlight CursorLine guibg=none ctermbg=none gui=underline
+        highlight ColorColumn ctermbg=none guibg=none gui=underline
+      ]]
+    end
   end,
 }

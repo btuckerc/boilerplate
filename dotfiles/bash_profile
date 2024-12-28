@@ -57,3 +57,5 @@ if [ -f ~/.bashrc ]; then
 fi
 
 . "$HOME/.cargo/env"
+eval "$(pyenv init --path)"
+eval "$(pyenv init -)"

@@ -41,6 +41,12 @@ OPTIONS
     -g, --skip-ghostty
         Skip Ghostty installation
 
+    -r, --skip-raycast
+        Skip Raycast installation
+
+    -m, --skip-mas
+        Skip Mac App Store CLI installation
+
     -h, --help
         Display this help message and exit
 
@@ -53,6 +59,8 @@ COMPONENTS
     - Neovim editor
     - Tmux terminal multiplexer
     - Development environment configurations
+    - Mac App Store CLI
+    - Raycast launcher
 
 EXAMPLES
     $(basename "$0")
@@ -66,6 +74,12 @@ EXAMPLES
 
     $(basename "$0") -g
         Run setup without Ghostty installation
+
+    $(basename "$0") -r
+        Run setup without Raycast installation
+
+    $(basename "$0") -m
+        Run setup without Mac App Store CLI installation
 
 NOTES
     - Requires macOS
@@ -85,6 +99,8 @@ fi
 # Parse command line arguments
 SKIP_BREW=false
 SKIP_GHOSTTY=false
+SKIP_RAYCAST=false
+SKIP_MAS=false
 SHELL_CHOICE=""
 
 while [[ $# -gt 0 ]]; do
@@ -103,6 +119,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         -g|--skip-ghostty)
             SKIP_GHOSTTY=true
+            shift
+            ;;
+        -r|--skip-raycast)
+            SKIP_RAYCAST=true
+            shift
+            ;;
+        -m|--skip-mas)
+            SKIP_MAS=true
             shift
             ;;
         -h|--help)
@@ -462,6 +486,64 @@ setup_zsh_plugins() {
     fi
 }
 
+# Mac App Store CLI setup
+setup_mas() {
+    if [ "$SKIP_MAS" = true ]; then
+        print_warning "Skipping Mac App Store CLI installation"
+        return
+    fi
+
+    print_step "Setting up Mac App Store CLI"
+
+    # Install mas (Mac App Store CLI)
+    if ! command -v mas &> /dev/null; then
+        if confirm "Mac App Store CLI not found. Would you like to install it?"; then
+            brew install mas
+            print_success "mas installed"
+        else
+            print_warning "mas installation skipped"
+            return
+        fi
+    else
+        print_warning "mas already installed"
+    fi
+}
+
+# Raycast setup
+setup_raycast() {
+    if [ "$SKIP_RAYCAST" = true ]; then
+        print_warning "Skipping Raycast installation"
+        return
+    fi
+
+    print_step "Setting up Raycast"
+
+    # Install Raycast
+    if ! command -v raycast &> /dev/null; then
+        if confirm "Raycast not found. Would you like to install it?"; then
+            brew install --cask raycast
+            print_success "Raycast installed"
+        else
+            print_warning "Raycast installation skipped"
+            return
+        fi
+    else
+        print_warning "Raycast already installed"
+    fi
+
+    # Configure Spotlight shortcut to none and set Raycast to cmd+space
+    if confirm "Would you like to set up Raycast as your default launcher (Cmd+Space)?"; then
+        # Disable Spotlight shortcut
+        defaults write com.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add 64 "{ enabled = 0; value = { parameters = (32, 49, 1048576); type = standard; }; }"
+
+        # Kill cfprefsd to ensure changes take effect
+        killall cfprefsd
+
+        print_success "Spotlight shortcut disabled"
+        print_warning "Please open Raycast and set Cmd+Space as its activation shortcut in Raycast's preferences"
+    fi
+}
+
 # Main setup
 main() {
     print_step "Starting Mac setup script"
@@ -479,6 +561,8 @@ It can make the following changes:
 - Install and configure Starship
 - Install and configure Yazi
 - Install Zsh plugins
+- Install Mac App Store CLI
+- Install and configure Raycast
 - Create configuration symlinks
 
 You will be asked for confirmation before any changes are made.${NC}
@@ -507,6 +591,8 @@ EOF
     setup_starship
     setup_yazi
     setup_zsh_plugins
+    setup_mas
+    setup_raycast
 
     print_success "Setup complete! Please restart your terminal for all changes to take effect."
 

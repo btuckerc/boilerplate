@@ -3,6 +3,7 @@ vim.g.mapleader = " "
 vim.g.maplocalleader = " "
 
 local set = vim.keymap.set
+local k = vim.keycode
 local function map(mode, lhs, rhs, desc)
     local opts = { noremap = true, silent = true, desc = desc }
     set(mode, lhs, rhs, opts)

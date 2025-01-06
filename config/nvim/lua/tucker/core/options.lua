@@ -43,7 +43,7 @@ opt.scrolloff = 8
 opt.sidescrolloff = 8
 
 -- appearance
-opt.showtabline = 2
+opt.showtabline = 0
 opt.conceallevel = 0
 
 -- turn on termguicolors for nightfly colorscheme to work

@@ -238,7 +238,11 @@ setup_homebrew() {
     if ! command -v brew &> /dev/null; then
         if confirm "Homebrew not found. Would you like to install it?"; then
             /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-            print_success "Homebrew installed"
+
+            # Source Homebrew
+            eval "$(/opt/homebrew/bin/brew shellenv)"
+
+            print_success "Homebrew installed and sourced"
         else
             print_warning "Homebrew installation skipped"
             SKIP_BREW=true
@@ -249,6 +253,11 @@ setup_homebrew() {
             brew update
             print_success "Homebrew updated"
         fi
+    fi
+
+    # Make sure Homebrew is in PATH even if it was already installed
+    if ! command -v brew &> /dev/null; then
+        eval "$(/opt/homebrew/bin/brew shellenv)"
     fi
 }
 

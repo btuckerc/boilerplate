@@ -29,6 +29,9 @@ opt.shiftwidth = 4
 opt.expandtab = true
 opt.smartindent = true
 
+-- Don't have `o` add a comment
+opt.formatoptions:remove "o"
+
 -- line wrapping
 opt.wrap = false
 
@@ -66,7 +69,7 @@ opt.undodir = os.getenv("HOME") .. "/.vim/undodir"
 opt.undofile = true
 
 -- opt.updatetime = 50
-opt.updatetime = 250
+opt.updatetime = 2000
 
 opt.colorcolumn = "80"
 

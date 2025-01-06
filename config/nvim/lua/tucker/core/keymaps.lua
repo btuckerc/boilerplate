@@ -2,9 +2,10 @@
 vim.g.mapleader = " "
 vim.g.maplocalleader = " "
 
+local set = vim.keymap.set
 local function map(mode, lhs, rhs, desc)
     local opts = { noremap = true, silent = true, desc = desc }
-    vim.keymap.set(mode, lhs, rhs, opts)
+    set(mode, lhs, rhs, opts)
 end
 
 -- Disable the spacebar key's default behavior in Normal and Visual modes
@@ -12,9 +13,21 @@ map({ 'n', 'v' }, '<Space>', '<Nop>', "Disable space default behavior")
 
 -- use jk to exit insert mode
 map("i", "jk", "<ESC>", "Exit insert mode with jk")
+map("i", "kj", "<ESC>", "Exit insert mode with jk")
 
 -- clear search highlights
 map("n", "<leader>h", ":nohl<CR>", "Clear search highlights")
+
+-- Toggle hlsearch if it's on, otherwise just do "enter"
+set("n", "<CR>", function()
+  ---@diagnostic disable-next-line: undefined-field
+  if vim.v.hlsearch == 1 then
+    vim.cmd.nohl()
+    return ""
+  else
+    return k "<CR>"
+  end
+end, { expr = true })
 
 -- delete single character without copying into register
 map("n", "x", '"_x', "Delete character without copying to register")
@@ -77,6 +90,9 @@ map('n', '[d', vim.diagnostic.goto_prev, 'Go to previous diagnostic message')
 map('n', ']d', vim.diagnostic.goto_next, 'Go to next diagnostic message')
 map('n', '<leader>q', vim.diagnostic.setloclist, 'Open diagnostics list')
 
+set("n", "<leader>x", "<cmd>.lua<CR>", { desc = "Execute the current line" })
+set("n", "<leader><leader>x", "<cmd>source %<CR>", { desc = "Execute the current file" })
+
 -- Session management (capital S to avoid conflicts)
 map('n', '<leader>Ss', ':mksession! .session.vim<CR>', 'Save session')
 map('n', '<leader>Sl', ':source .session.vim<CR>', 'Load session')
@@ -86,3 +102,8 @@ map('n', '<leader>L', ':Lazy<CR>', 'Lazy load plugins')
 
 -- Line wrapping
 map('n', ',', ':set wrap!<CR>', 'Toggle line wrapping')
+
+-- Toggle inlay hints
+set("n", "<space>tt", function()
+  vim.lsp.inlay_hint.enable(not vim.lsp.inlay_hint.is_enabled { bufnr = 0 }, { bufnr = 0 })
+end)

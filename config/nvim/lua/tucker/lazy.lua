@@ -20,4 +20,25 @@ require("lazy").setup(
     checker = {
       enabled = true,
       notify = false,
-    }})
+    },
+    performance = {
+      rtp = {
+        disabled_plugins = {
+          "gzip",
+          "matchit",
+          "matchparen",
+          "netrwPlugin",
+          "tarPlugin",
+          "tohtml",
+          "tutor",
+          "zipPlugin",
+        },
+      },
+    },
+    profiling = {
+      -- Enables extra stats on the lazy window (requires plenary.nvim)
+      loader = true,
+      -- Record max number of items for each event
+      require = true,
+    },
+  })

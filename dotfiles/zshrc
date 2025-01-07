@@ -210,7 +210,7 @@ ZSH_AUTOSUGGEST_STRATEGY=(history completion)  # Try history first, then complet
 # Keybindings for accepting suggestions
 bindkey '^I' complete-word                 # Tab for normal zsh completion
 bindkey '^ ' forward-word               # Control+Space accepts one word
-bindkey '^L' autosuggest-accept          # Control+L accepts the whole suggestion
+bindkey '^[l' autosuggest-accept          # Control+L accepts the whole suggestion
 bindkey '^[[C' forward-char               # Right arrow accepts one character
 
 # Override tab completion to ensure ghost suggestions stay visible

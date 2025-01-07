@@ -29,7 +29,7 @@ deleted = "✘${count}"
 [cmd_duration]
 min_time = 2000  # Show command duration if it exceeds 2 seconds
 format = "[(${duration})]($style) "
-style = "fg:#f6c177"
+style = "fg:#888888"
 
 [python]
 disabled = true
@@ -47,7 +47,7 @@ format = "[$hostname]($style) "
 style = "fg:#7aa2f7"
 
 [character]
-success_symbol = "[>](fg:#9ece6a)"
+success_symbol = "[>](fg:#A6F5F6)"
 error_symbol = "[>](fg:#f7768e)"
 
 # Disabled modules

@@ -1,8 +1,7 @@
 return {
   {
     "hrsh7th/nvim-cmp",
-    lazy = false,
-    priority = 100,
+    event = "InsertEnter",
     dependencies = {
       "onsails/lspkind.nvim",
       "hrsh7th/cmp-nvim-lsp",
@@ -22,7 +21,6 @@ return {
 
       require("copilot_cmp").setup()
 
-      --   require "custom.completion"
       vim.opt.completeopt = { "menu", "menuone", "noselect" }
       vim.opt.shortmess:append "c"
 
@@ -43,13 +41,13 @@ return {
           nvim_lua = "[api]",
           path = "[path]",
           luasnip = "[snip]",
+          copilot = "[ai]",
           gh_issues = "[issues]",
           tn = "[TabNine]",
           eruby = "[erb]",
         },
       }
 
-      -- Add tailwindcss-colorizer-cmp as a formatting source
       require("tailwindcss-colorizer-cmp").setup {
         color_square_width = 2,
       }
@@ -60,7 +58,6 @@ return {
         sources = {
           {
             name = "lazydev",
-            -- set group index to 0 to skip loading LuaLS completions as lazydev recommends it
             group_index = 0,
           },
           { name = "copilot" },
@@ -80,7 +77,6 @@ return {
           ),
         },
 
-        -- Enable luasnip to handle snippet expansion for nvim-cmp
         snippet = {
           expand = function(args)
             vim.snippet.expand(args.body)
@@ -91,12 +87,8 @@ return {
           fields = { "abbr", "kind", "menu" },
           expandable_indicator = true,
           format = function(entry, vim_item)
-            -- Lspkind setup for icons
             vim_item = kind_formatter(entry, vim_item)
-
-            -- Tailwind colorizer setup
             vim_item = require("tailwindcss-colorizer-cmp").formatter(entry, vim_item)
-
             return vim_item
           end,
         },
@@ -105,10 +97,7 @@ return {
           priority_weight = 2,
           comparators = {
             require("copilot_cmp.comparators").prioritize,
-
-            -- Below is the default comparitor list and order for nvim-cmp
             cmp.config.compare.offset,
-            -- cmp.config.compare.scopes, --this is commented in nvim-cmp too
             cmp.config.compare.exact,
             cmp.config.compare.score,
             cmp.config.compare.recently_used,
@@ -118,13 +107,6 @@ return {
             cmp.config.compare.length,
             cmp.config.compare.order,
           },
-        },
-        window = {
-          -- TODO: I don't like this at all for completion window, it takes up way too much space.
-          --  However, I think the docs one could be OK, but I need to fix the highlights for it
-          --
-          -- completion = cmp.config.window.bordered(),
-          -- documentation = cmp.config.window.bordered(),
         },
       }
 

@@ -1,4 +1,5 @@
 return {
+  {
   "kdheepak/lazygit.nvim",
   keys = {
     { "<leader>gg", "<cmd>LazyGit<CR>", desc = "Open LazyGit" },
@@ -11,4 +12,14 @@ return {
     vim.g.lazygit_config_file_path = ""
   end,
   cmd = { "LazyGit", "LazyGitCurrentFile" },
+  },
+  {
+    "lewis6991/gitsigns.nvim",
+    keys = {
+
+    },
+    config = function()
+      require("gitsigns").setup()
+    end,
+  }
 }

@@ -279,6 +279,11 @@ return {
       },
     }
 
+    local mason = require("mason")
+    local mason_lspconfig = require("mason-lspconfig")
+
+    -- Mason setup is now handled in mason-tool-installer.lua
+    -- We only need to handle the servers here
     local servers_to_install = vim.tbl_filter(function(key)
       local t = servers[key]
       if type(t) == "table" then
@@ -287,29 +292,6 @@ return {
         return t
       end
     end, vim.tbl_keys(servers))
-
-    local mason = require("mason")
-    local mason_lspconfig = require("mason-lspconfig")
-
-    -- Enable mason and configure icons
-    mason.setup({
-      ui = {
-        icons = {
-          package_installed = "✓",
-          package_pending = "➜",
-          package_uninstalled = "✗",
-        },
-      },
-    })
-    local ensure_installed = {
-      "stylua",
-      "lua_ls",
-      "pylint",
-      -- "tailwind-language-server",
-    }
-
-    vim.list_extend(ensure_installed, servers_to_install)
-    require("mason-tool-installer").setup { ensure_installed = ensure_installed }
 
     for name, config in pairs(servers) do
       if config == true then

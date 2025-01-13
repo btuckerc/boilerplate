@@ -83,11 +83,11 @@ map('n', '<Left>', ':vertical resize -2<CR>', "Resize window left")
 map('n', '<Right>', ':vertical resize +2<CR>', "Resize window right")
 
 -- Navigate between splits
-map('n', '<C-k>', ':wincmd k<CR>', "Move to upper window")
-map('n', '<C-j>', ':wincmd j<CR>', "Move to lower window")
-map('n', '<C-h>', ':wincmd h<CR>', "Move to left window")
-map('n', '<C-l>', ':wincmd l<CR>', "Move to right window")
-
+-- map('n', '<C-k>', ':wincmd k<CR>', "Move to upper window")
+-- map('n', '<C-j>', ':wincmd j<CR>', "Move to lower window")
+-- map('n', '<C-h>', ':wincmd h<CR>', "Move to left window")
+-- map('n', '<C-l>', ':wincmd l<CR>', "Move to right window")
+--
 -- Move text up and down
 map('v', '<A-j>', ':m .+1<CR>==', "Move text down")
 map('v', '<A-k>', ':m .-2<CR>==', "Move text up")

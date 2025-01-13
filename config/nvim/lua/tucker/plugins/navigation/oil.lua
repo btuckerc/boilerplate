@@ -17,7 +17,7 @@ return {
       -- Open parent directory in current window
       vim.keymap.set("n", "<C-o>", "<CMD>Oil<CR>", { desc = "Open parent directory" })
       -- Open parent directory in floating window
-      vim.keymap.set("n", "<leader>o", require("oil").toggle_float, { desc = "Open parent directory in floating window" })
+      vim.keymap.set("n", "<leader>e", require("oil").toggle_float, { desc = "Open parent directory in floating window" })
     end,
   },
 }

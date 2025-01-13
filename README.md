@@ -255,6 +255,37 @@ Modern setup with:
 - Custom themes with Kitty theme sync
 - Completion (nvim-cmp)
 
+Plugin directory structure:
+```
+lua/tucker/plugins/
+├── lsp/                  # Language Server Protocol and completion
+│   ├── mason-tool-installer.lua  # LSP and tool management
+│   ├── lspconfig.lua            # LSP configuration
+│   ├── completion.lua           # Completion setup
+│   ├── blink.lua               # LSP UI enhancements
+│   └── linting.lua             # Code linting
+├── navigation/            # File and code navigation
+│   ├── telescope.lua     # Fuzzy finder
+│   ├── harpoon.lua      # File navigation
+│   └── oil.lua          # File explorer
+├── editor/               # Core editing features
+│   ├── which-key.lua    # Keybinding help
+│   ├── treesitter.lua   # Syntax highlighting
+│   ├── undotree.lua     # Undo history
+│   └── cloak.lua        # Security features
+├── ui/                   # Visual elements
+│   ├── colorscheme.lua  # Theme configuration
+│   ├── statusline.lua   # Status line
+│   ├── nvim-colorizer.lua # Color highlighting
+│   └── ghostty.lua      # Terminal integration
+└── integrations/         # External tool integration
+    ├── git.lua          # Git commands and status
+    ├── markdown-preview.lua # Markdown preview
+    ├── tmux-navigator.lua # Tmux window navigation
+    ├── db.lua           # Database tools
+    └── obsidian.lua     # Note taking
+```
+
 ### Terminal Configuration
 - Kitty terminal setup
 - Multiple themes

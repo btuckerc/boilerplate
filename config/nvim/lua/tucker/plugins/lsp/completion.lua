@@ -1,6 +1,6 @@
 return {
   {
-    "hrsh7th/nvim-cmp",
+    "hrsh7th/nvim-cmp", -- tl;dr this plugin is the main plugin here
     event = "InsertEnter",
     dependencies = {
       "onsails/lspkind.nvim",
@@ -9,77 +9,101 @@ return {
       "hrsh7th/cmp-buffer",
       { "L3MON4D3/LuaSnip", build = "make install_jsregexp" },
       "saadparwaiz1/cmp_luasnip",
+      "rafamadriz/friendly-snippets",
       "roobert/tailwindcss-colorizer-cmp.nvim",
       "zbirenbaum/copilot.lua",
       "zbirenbaum/copilot-cmp",
     },
     config = function()
-      require("copilot").setup {
-        suggestion = { enabled = false },
-        panel = { enabled = false },
-      }
+      local cmp = require("cmp")
+      local lspkind = require("lspkind")
+      local copilot = require("copilot")
+      local copilot_cmp = require("copilot_cmp")
+      local tailwind_cmp = require("tailwindcss-colorizer-cmp")
+      local luasnip = require("luasnip")
 
-      require("copilot_cmp").setup()
+      -- Load VSCode-style snippets
+      require("luasnip.loaders.from_vscode").lazy_load()
 
+      -- Copilot setup
+      copilot.setup({ suggestion = { enabled = false }, panel = { enabled = false } })
+      copilot_cmp.setup()
+
+      -- Editor options
       vim.opt.completeopt = { "menu", "menuone", "noselect" }
-      vim.opt.shortmess:append "c"
+      vim.opt.shortmess:append("c")
 
-      local lspkind = require "lspkind"
-      lspkind.init {
-        symbol_map = {
-          Copilot = "",
-        },
-      }
-
+      -- LSP Kind setup
+      lspkind.init({ symbol_map = { Copilot = "" } })
       vim.api.nvim_set_hl(0, "CmpItemKindCopilot", { fg = "#6CC644" })
 
-      local kind_formatter = lspkind.cmp_format {
-        mode = "symbol_text",
-        menu = {
-          buffer = "[buf]",
-          nvim_lsp = "[LSP]",
-          nvim_lua = "[api]",
-          path = "[path]",
-          luasnip = "[snip]",
-          copilot = "[ai]",
-          gh_issues = "[issues]",
-          tn = "[TabNine]",
-          eruby = "[erb]",
-        },
+      -- Tailwind setup
+      tailwind_cmp.setup({ color_square_width = 2 })
+
+      -- Source menu labels
+      local menu_labels = {
+        buffer = "[buf]",
+        nvim_lsp = "[LSP]",
+        nvim_lua = "[api]",
+        path = "[path]",
+        luasnip = "[snip]",
+        copilot = "[ai]",
+        gh_issues = "[issues]",
+        tn = "[TabNine]",
+        eruby = "[erb]",
       }
 
-      require("tailwindcss-colorizer-cmp").setup {
-        color_square_width = 2,
-      }
+      -- Helper function for mappings
+      local map = function(keys, func, modes)
+        modes = modes or { "i", "c" }
+        return cmp.mapping(func, modes)
+      end
 
-      local cmp = require "cmp"
-
-      cmp.setup {
-        sources = {
-          {
-            name = "lazydev",
-            group_index = 0,
-          },
-          { name = "copilot" },
-          { name = "nvim_lsp" },
-          { name = "path" },
-          { name = "buffer" },
+      -- Main CMP setup
+      cmp.setup({
+        completion = {
+          completeopt = "menu,menuone,preview,noselect",
         },
+
+        sources = cmp.config.sources({
+          { name = "copilot", group_index = 1 },
+          { name = "nvim_lsp", group_index = 2 },
+          { name = "luasnip", group_index = 2 },
+          { name = "buffer", group_index = 3 },
+          { name = "path", group_index = 3 },
+        }),
+
         mapping = {
-          ["<C-j>"] = cmp.mapping.select_next_item { behavior = cmp.SelectBehavior.Insert },
-          ["<C-k>"] = cmp.mapping.select_prev_item { behavior = cmp.SelectBehavior.Insert },
-          ["<C-l>"] = cmp.mapping(
-            cmp.mapping.confirm {
-              behavior = cmp.ConfirmBehavior.Insert,
-              select = true,
-            },
-            { "i", "c" }
-          ),
+          -- Navigation
+          ["<C-j>"] = map(nil, function(fallback)
+            cmp.select_next_item({ behavior = cmp.SelectBehavior.Insert })
+          end),
+          ["<C-k>"] = map(nil, function(fallback)
+            cmp.select_prev_item({ behavior = cmp.SelectBehavior.Insert })
+          end),
+          ["<C-b>"] = map(nil, function(fallback)
+            cmp.scroll_docs(-4)
+          end),
+          ["<C-f>"] = map(nil, function(fallback)
+            cmp.scroll_docs(4)
+          end),
+          ["<C-Space>"] = map(nil, function(fallback)
+            cmp.complete()
+          end),
+          ["<C-e>"] = map(nil, function(fallback)
+            cmp.abort()
+          end),
+          ["<CR>"] = map(nil, function(fallback)
+            cmp.confirm({ select = false })
+          end),
+          ["<C-l>"] = map(nil, function(fallback)
+            cmp.confirm({ behavior = cmp.ConfirmBehavior.Insert, select = true })
+          end),
         },
 
         snippet = {
           expand = function(args)
-            vim.snippet.expand(args.body)
+            luasnip.lsp_expand(args.body)
           end,
         },
 
@@ -87,16 +111,22 @@ return {
           fields = { "abbr", "kind", "menu" },
           expandable_indicator = true,
           format = function(entry, vim_item)
-            vim_item = kind_formatter(entry, vim_item)
-            vim_item = require("tailwindcss-colorizer-cmp").formatter(entry, vim_item)
-            return vim_item
+            -- Apply LSP kind formatting
+            vim_item = lspkind.cmp_format({
+              mode = "symbol_text",
+              menu = menu_labels,
+              maxwidth = 50,
+              ellipsis_char = "...",
+            })(entry, vim_item)
+            -- Apply Tailwind formatting
+            return tailwind_cmp.formatter(entry, vim_item)
           end,
         },
 
         sorting = {
           priority_weight = 2,
           comparators = {
-            require("copilot_cmp.comparators").prioritize,
+            copilot_cmp.comparators.prioritize,
             cmp.config.compare.offset,
             cmp.config.compare.exact,
             cmp.config.compare.score,
@@ -108,9 +138,9 @@ return {
             cmp.config.compare.order,
           },
         },
-      }
+      })
 
-      -- Setup up vim-dadbod
+      -- SQL-specific setup
       cmp.setup.filetype({ "sql" }, {
         sources = {
           { name = "vim-dadbod-completion" },

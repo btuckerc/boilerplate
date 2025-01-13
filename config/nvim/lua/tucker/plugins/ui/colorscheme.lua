@@ -29,7 +29,7 @@ return {
         highlight NonText ctermbg=none
         highlight CursorLine guibg=none ctermbg=none gui=underline
         highlight ColorColumn ctermbg=none guibg=none gui=underline
-      ]]
+        ]]
     end
   end,
 }

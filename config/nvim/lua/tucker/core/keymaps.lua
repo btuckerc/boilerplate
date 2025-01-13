@@ -50,7 +50,13 @@ map("n", "<leader>tn", "<cmd>tabn<CR>", "Go to next tab")
 map("n", "<leader>tp", "<cmd>tabp<CR>", "Go to previous tab")
 map("n", "<leader>tf", "<cmd>tabnew %<CR>", "Open current buffer in new tab")
 
-map("n", "<C-f>", ":bd<CR>:e .<CR>", "Open file browser")
+-- Use current buffer's directory for file browser, fallback to cwd
+map("n", "<C-f>", function()
+  local buftype = vim.bo.buftype
+  local current_buf_dir = buftype == '' and vim.fn.expand('%:p:h') or vim.fn.getcwd()
+  vim.cmd('bd')
+  vim.cmd('e ' .. current_buf_dir)
+end, "Open file browser in current buffer's directory")
 
 -- buffer management
 map("n", "[b", ":bprev<CR>", "Previous buffer")

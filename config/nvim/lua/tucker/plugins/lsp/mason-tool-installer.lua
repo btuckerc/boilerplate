@@ -24,15 +24,23 @@ return {
         })
 
         require("mason-lspconfig").setup({
-            ensure_installed = {},
+            ensure_installed = {
+                "lua_ls",
+            },
             automatic_installation = true,
         })
 
         require("mason-tool-installer").setup({
             ensure_installed = {
+                "lua-language-server",
                 "pylint",
                 "gopls",
                 "rust_analyzer",
+                "luacheck",
+                "eslint_d",
+                "shellcheck",
+                "markdownlint",
+                "yamllint",
             },
             auto_update = false,
             run_on_start = true,

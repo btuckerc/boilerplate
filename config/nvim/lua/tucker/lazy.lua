@@ -14,7 +14,11 @@ vim.opt.rtp:prepend(lazypath)
 require("lazy").setup(
   {
     {import="tucker.plugins"},
-    {import="tucker.plugins.lsp"}
+    {import="tucker.plugins.lsp"},
+    {import="tucker.plugins.navigation"},
+    {import="tucker.plugins.editor"},
+    {import="tucker.plugins.ui"},
+    {import="tucker.plugins.integrations"}
   },
   {
     checker = {

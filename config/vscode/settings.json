@@ -37,7 +37,6 @@
         88,
         72
     ],
-    "editor.minimap.enabled": true,
     "editor.bracketPairColorization.enabled": true,
     "editor.guides.bracketPairs": true,
     "editor.fontFamily": "MesloLGM Nerd Font",
@@ -151,5 +150,7 @@
         "jupyter-notebook": "left"
     },
     "explorer.confirmDelete": false,
-    "go.toolsManagement.autoUpdate": true
+    "go.toolsManagement.autoUpdate": true,
+    "makefile.configureOnOpen": false,
+    "cursor.composer.showSuggestedFiles": false
 }

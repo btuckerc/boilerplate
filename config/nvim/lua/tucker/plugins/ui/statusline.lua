@@ -2,14 +2,14 @@ return {
   {
     "tjdevries/express_line.nvim",
     config = function()
-      local builtin = require "el.builtin"
-      local extensions = require "el.extensions"
-      local subscribe = require "el.subscribe"
-      local sections = require "el.sections"
+      local builtin = require("el.builtin")
+      local extensions = require("el.extensions")
+      local subscribe = require("el.subscribe")
+      local sections = require("el.sections")
 
       vim.opt.laststatus = 3
 
-      require("el").setup{
+      require("el").setup({
         generator = function()
           local segments = {}
 
@@ -53,7 +53,7 @@ return {
 
           return segments
         end,
-      }
+      })
     end,
   },
 }

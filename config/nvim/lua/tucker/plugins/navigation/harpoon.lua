@@ -3,56 +3,57 @@ return {
   branch = 'harpoon2',
   dependencies = { 'nvim-lua/plenary.nvim' },
   config = function()
-    local harpoon = require 'harpoon'
-    harpoon:setup()
+    local harpoon = require('harpoon')
+    local set = vim.keymap.set
+    local opts = { noremap = true, silent = true }
 
-    -- -- Use Telescope as a UI
-    -- local conf = require('telescope.config').values
-    -- local function toggle_telescope(harpoon_files)
-    --   local file_paths = {}
-    --   for _, item in ipairs(harpoon_files.items) do
-    --     table.insert(file_paths, item.value)
-    --   end
-    --
-    --   require('telescope.pickers')
-    --     .new({}, {
-    --       prompt_title = 'Harpoon',
-    --       finder = require('telescope.finders').new_table {
-    --         results = file_paths,
-    --       },
-    --       previewer = conf.file_previewer {},
-    --       sorter = conf.generic_sorter {},
-    --     })
-    --     :find()
-    -- end
-    --
-    -- vim.keymap.set('n', '<leader>M', function()
-    --   toggle_telescope(harpoon:list())
-    -- end, { desc = 'Open harpoon window' })
+    -- Configure harpoon
+    harpoon.setup({
+      global_settings = {
+        save_on_toggle = true,
+        save_on_change = true,
+        enter_on_sendcmd = true,
+        tmux_autoclose_windows = true,
+        excluded_filetypes = { 'harpoon' },
+        mark_branch = true,
+        tabline = true,
+        tabline_prefix = '   ',
+        tabline_suffix = '   ',
+      },
+      menu = {
+        width = vim.api.nvim_win_get_width(0) - 4,
+      },
+    })
 
-    -- Default UI
-    vim.keymap.set('n', '<C-e>', function()
+    -- Key mappings
+    -- Toggle quick menu
+    set('n', '<C-e>', function()
       harpoon.ui:toggle_quick_menu(harpoon:list())
-    end)
+    end, { desc = 'Toggle harpoon quick menu' })
 
-    vim.keymap.set('n', '<leader>m', function()
+    -- Add current file to harpoon list
+    set('n', '<leader>m', function()
       harpoon:list():add()
-    end)
+    end, { desc = 'Add file to harpoon list' })
+
+    -- Remove current file from harpoon list
+    set('n', '<leader>hr', function()
+      harpoon:list():remove()
+    end, { desc = 'Remove file from harpoon list' })
 
     -- Set <space>1..<space>5 be my shortcuts to moving to the files
     for _, idx in ipairs { 1, 2, 3, 4, 5 } do
-      vim.keymap.set("n", string.format("<space>%d", idx), function()
+      set("n", string.format("<leader>%d", idx), function()
         harpoon:list():select(idx)
-      end)
+      end, { desc = string.format("Go to harpoon file %d", idx) })
     end
 
     -- Toggle previous & next buffers stored within Harpoon list
-    vim.keymap.set('n', '<leader>p', function()
+    set('n', '<leader>p', function()
       harpoon:list():prev()
-    end)
-
-    vim.keymap.set('n', '<leader>n', function()
+    end, { desc = 'Navigate to previous file' })
+    set('n', '<leader>n', function()
       harpoon:list():next()
-    end)
+    end, { desc = 'Navigate to next file' })
   end,
 }

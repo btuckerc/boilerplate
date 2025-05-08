@@ -5,6 +5,7 @@ return {
         "williamboman/mason-lspconfig.nvim",
     },
     config = function()
+        -- Setup mason
         require("mason").setup({
             ui = {
                 icons = {
@@ -23,13 +24,16 @@ return {
             max_concurrent_installers = 10,
         })
 
+        -- Setup mason-lspconfig
         require("mason-lspconfig").setup({
             ensure_installed = {
                 "lua_ls",
+                "bashls",
             },
             automatic_installation = true,
         })
 
+        -- Setup mason-tool-installer
         require("mason-tool-installer").setup({
             ensure_installed = {
                 "lua-language-server",
@@ -41,6 +45,7 @@ return {
                 "shellcheck",
                 "markdownlint",
                 "yamllint",
+                "bash-language-server",
             },
             auto_update = false,
             run_on_start = true,

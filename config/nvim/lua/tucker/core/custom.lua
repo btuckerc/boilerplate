@@ -8,14 +8,20 @@ vim.api.nvim_create_autocmd('TextYankPost', {
   pattern = '*',
 })
 
--- Set kitty terminal padding to 0 when in nvim
-vim.api.nvim_create_autocmd({ 'VimEnter', 'VimLeave' }, {
-  group = vim.api.nvim_create_augroup('kitty_padding', { clear = true }),
-  callback = function(ev)
-    if ev.event == 'VimEnter' then
-      vim.fn.system('kitty @ set-spacing padding=0 margin=0')
-    else
-      vim.fn.system('kitty @ set-spacing padding=default margin=default')
-    end
-  end,
+-- Kitty terminal padding (commented out by default)
+--[[
+local kitty_group = vim.api.nvim_create_augroup('KittyPadding', { clear = true })
+vim.api.nvim_create_autocmd('VimEnter', {
+    callback = function()
+        vim.fn.system('kitty @ set-spacing padding=10')
+    end,
+    group = kitty_group
 })
+
+vim.api.nvim_create_autocmd('VimLeave', {
+    callback = function()
+        vim.fn.system('kitty @ set-spacing padding=0')
+    end,
+    group = kitty_group
+})
+--]]

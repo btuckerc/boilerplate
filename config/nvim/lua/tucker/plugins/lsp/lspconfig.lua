@@ -361,5 +361,12 @@ return {
         vim.diagnostic.config { virtual_text = true, virtual_lines = false }
       end
     end, { desc = "Toggle lsp_lines" })
+
+    -- Bash LSP
+    lspconfig.bashls.setup({
+        capabilities = capabilities,
+        on_attach = on_attach,
+        filetypes = { "sh", "bash" },
+    })
   end
 }

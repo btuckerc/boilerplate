@@ -76,10 +76,22 @@ return {
         mapping = {
           -- Navigation
           ["<C-j>"] = map(nil, function(fallback)
-            cmp.select_next_item({ behavior = cmp.SelectBehavior.Insert })
+            if cmp.visible() then
+              cmp.select_next_item({ behavior = cmp.SelectBehavior.Insert })
+            elseif luasnip.expand_or_jumpable() then
+              luasnip.expand_or_jump()
+            else
+              fallback()
+            end
           end),
           ["<C-k>"] = map(nil, function(fallback)
-            cmp.select_prev_item({ behavior = cmp.SelectBehavior.Insert })
+            if cmp.visible() then
+              cmp.select_prev_item({ behavior = cmp.SelectBehavior.Insert })
+            elseif luasnip.jumpable(-1) then
+              luasnip.jump(-1)
+            else
+              fallback()
+            end
           end),
           ["<C-b>"] = map(nil, function(fallback)
             cmp.scroll_docs(-4)
@@ -88,16 +100,50 @@ return {
             cmp.scroll_docs(4)
           end),
           ["<C-Space>"] = map(nil, function(fallback)
-            cmp.complete()
+            if cmp.visible() then
+              cmp.close()
+            else
+              cmp.complete()
+            end
           end),
           ["<C-e>"] = map(nil, function(fallback)
             cmp.abort()
           end),
           ["<CR>"] = map(nil, function(fallback)
-            cmp.confirm({ select = false })
+            if cmp.visible() then
+              if luasnip.expandable() then
+                luasnip.expand()
+              else
+                cmp.confirm({ select = false })
+              end
+            else
+              fallback()
+            end
           end),
           ["<C-l>"] = map(nil, function(fallback)
-            cmp.confirm({ behavior = cmp.ConfirmBehavior.Insert, select = true })
+            if cmp.visible() then
+              cmp.confirm({ behavior = cmp.ConfirmBehavior.Insert, select = true })
+            else
+              fallback()
+            end
+          end),
+          ["<Tab>"] = map(nil, function(fallback)
+            if cmp.visible() then
+              cmp.select_next_item()
+            elseif luasnip.expand_or_jumpable() then
+              luasnip.expand_or_jump()
+            else
+              fallback()
+            end
+          end),
+          ["<S-Tab>"] = map(nil, function(fallback)
+            if cmp.visible() then
+              cmp.select_prev_item()
+            elseif luasnip.jumpable(-1) then
+              luasnip.jump(-1)
+            else
+              fallback()
+            end
           end),
         },
 

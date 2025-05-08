@@ -152,5 +152,6 @@
     "explorer.confirmDelete": false,
     "go.toolsManagement.autoUpdate": true,
     "makefile.configureOnOpen": false,
-    "cursor.composer.showSuggestedFiles": false
+    "cursor.composer.showSuggestedFiles": false,
+    "git.openRepositoryInParentFolders": "always"
 }

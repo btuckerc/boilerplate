@@ -1,11 +1,11 @@
-background-opacity=0.80
-font-size=20
+background-opacity=0.60
+font-size=24
 theme=current-theme
-font-family='MesloLGL Nerd Font Mono'
-background-blur-radius=40
+font-family='BlexMono Nerd Font Mono'
+background-blur-radius=60
 window-padding-y=0,0
 window-padding-balance=true
-window-height=40
+window-height=24
 window-width=80
 confirm-close-surface=false
 macos-window-shadow=false

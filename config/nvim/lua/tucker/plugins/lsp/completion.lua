@@ -26,7 +26,11 @@ return {
       require("luasnip.loaders.from_vscode").lazy_load()
 
       -- Copilot setup
-      copilot.setup({ suggestion = { enabled = false }, panel = { enabled = false } })
+      copilot.setup({
+        node_command = "/opt/homebrew/bin/node",
+        suggestion = { enabled = false },
+        panel = { enabled = false },
+      })
       copilot_cmp.setup()
 
       -- Editor options

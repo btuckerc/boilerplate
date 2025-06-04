@@ -39,7 +39,7 @@
     ],
     "editor.bracketPairColorization.enabled": true,
     "editor.guides.bracketPairs": true,
-    "editor.fontFamily": "MesloLGM Nerd Font",
+    "editor.fontFamily": "BlexMono Nerd Font Mono",
     "editor.fontSize": 16,
     "editor.fontLigatures": true,
     "editor.accessibilitySupport": "off",

@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # Load aliases first (these should always be available)
-if [ -f "$HOME/.bash_aliases" ]; then
-    source "$HOME/.bash_aliases"
+if [ -f "$XDG_CONFIG_HOME/bash/aliases" ]; then
+    source "$XDG_CONFIG_HOME/bash/aliases"
 fi
 
 # Prevent multiple sourcing of the rest of the configuration

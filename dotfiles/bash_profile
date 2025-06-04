@@ -52,8 +52,8 @@ eval "$(/opt/homebrew/bin/brew shellenv)"
 
 # Source bashrc for login shells
 # This ensures all shell configurations are loaded
-if [ -f ~/.bashrc ]; then
-    source ~/.bashrc
+if [ -f $XDG_CONFIG_HOME/bash/rc ]; then
+    source $XDG_CONFIG_HOME/bash/rc
 fi
 
 . "$HOME/.cargo/env"

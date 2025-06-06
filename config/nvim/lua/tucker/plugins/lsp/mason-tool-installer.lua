@@ -61,6 +61,9 @@ return {
         "black",
         "isort",
 
+        -- Other
+        "lua-cjson",
+
         -- Debuggers
         "delve",
       },

@@ -3,7 +3,7 @@ return {
     'NvChad/nvim-colorizer.lua',
     config = function()
       require('colorizer').setup({
-        filetypes = { '*' }, -- Apply to all filetypes
+        filetypes = { 'css', 'javascript', 'typescript', 'html', 'lua', 'python' },
         user_default_options = {
           RGB = true,        -- Enable #RGB hex codes
           RRGGBB = true,     -- Enable #RRGGBB hex codes
@@ -20,4 +20,3 @@ return {
     end,
   },
 }
-

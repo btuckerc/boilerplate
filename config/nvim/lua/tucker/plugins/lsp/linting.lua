@@ -1,12 +1,14 @@
 return {
   "mfussenegger/nvim-lint",
-  event = { "BufReadPre", "BufNewFile" },
+  event = {
+    "BufReadPre",
+    "BufNewFile",
+  },
   config = function()
     local lint = require("lint")
-
     -- Configure linters for different filetypes
     lint.linters_by_ft = {
-      python = { "pylint" },
+      python = { "ruff" },
       javascript = { "eslint_d" },
       typescript = { "eslint_d" },
       lua = { "luacheck" },
@@ -33,14 +35,12 @@ return {
     end
 
     -- Setup auto-linting
-    vim.api.nvim_create_autocmd(
-      { "BufWritePost", "BufReadPost", "InsertLeave" },
-      {
-        group = group,
-        pattern = "*",
-        callback = try_lint,
-      }
-    )
+    vim.api.nvim_create_autocmd({ "BufEnter", "BufWritePost", "InsertLeave" }, {
+      group = group,
+      callback = function(args)
+        lint.try_lint(nil, { bufnr = args.buf })
+      end,
+    })
 
     -- Manual lint trigger
     vim.keymap.set("n", "<leader>ll", try_lint, { desc = "Trigger linting for current file" })

@@ -1,59 +1,39 @@
 return {
-  {
-    "tjdevries/express_line.nvim",
-    config = function()
-      local builtin = require("el.builtin")
-      local extensions = require("el.extensions")
-      local subscribe = require("el.subscribe")
-      local sections = require("el.sections")
+  "nvim-lualine/lualine.nvim",
+  dependencies = { "nvim-tree/nvim-web-devicons" },
+  config = function()
+    local function misery_task_count()
+      -- This function is to integrate your custom 'misery.scheduler'
+      local misery_ok, misery = pcall(require, "misery.scheduler")
+      if not misery_ok then return "" end
 
-      vim.opt.laststatus = 3
+      local task_count = #misery.tasks
+      if task_count > 0 then
+        return string.format("Tasks: %d", task_count)
+      end
+      return ""
+    end
 
-      require("el").setup({
-        generator = function()
-          local segments = {}
-
-          table.insert(segments, extensions.mode)
-          table.insert(segments, " ")
-          table.insert(
-            segments,
-            subscribe.buf_autocmd("el-git-branch", "BufEnter", function(win, buf)
-              local branch = extensions.git_branch(win, buf)
-              if branch then
-                return branch
-              end
-            end)
-          )
-          table.insert(
-            segments,
-            subscribe.buf_autocmd("el-git-changes", "BufWritePost", function(win, buf)
-              local changes = extensions.git_changes(win, buf)
-              if changes then
-                return changes
-              end
-            end)
-          )
-          table.insert(segments, function()
-            local task_count = #require("misery.scheduler").tasks
-            if task_count == 0 then
-              return ""
-            else
-              return string.format(" (Queued Events: %d)", task_count)
-            end
-          end)
-          table.insert(segments, sections.split)
-          table.insert(segments, "%f")
-          table.insert(segments, sections.split)
-          table.insert(segments, builtin.filetype)
-          table.insert(segments, "[")
-          table.insert(segments, builtin.line_with_width(3))
-          table.insert(segments, ":")
-          table.insert(segments, builtin.column_with_width(2))
-          table.insert(segments, "]")
-
-          return segments
-        end,
-      })
-    end,
-  },
+    require("lualine").setup({
+      options = {
+        icons_enabled = false,
+        theme = "auto",
+        component_separators = { left = ' ', right = ' '},
+        section_separators = { left = ' ', right = ' '},
+        disabled_filetypes = {
+          statusline = {},
+          winbar = {},
+        },
+        always_divide_middle = true,
+      },
+      sections = {
+        lualine_a = { "mode" },
+        lualine_b = { "branch", "diff", misery_task_count },
+        lualine_c = {},
+        lualine_x = { "filename" },
+        lualine_y = { "filetype" },
+        lualine_z = { "location" },
+      },
+    })
+  end,
 }

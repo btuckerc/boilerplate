@@ -75,8 +75,8 @@ return {
     })
 
     -- Load extensions
-    pcall(require("telescope").load_extension, "fzf")
-    pcall(require("telescope").load_extension, "ui-select")
+    telescope.load_extension("fzf")
+    telescope.load_extension("ui-select")
 
     -- Key mappings
     local set = vim.keymap.set

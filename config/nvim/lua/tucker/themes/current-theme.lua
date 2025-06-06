@@ -36,11 +36,12 @@ M.colors = {
 }
 
 -- Function to apply the theme
-function M.apply()
+function M.apply(transparent)
     local colors = M.colors
+    local bg = transparent and "NONE" or colors.background
 
     -- Basic highlights
-    vim.cmd("highlight Normal guifg=" .. colors.foreground .. " guibg=" .. colors.background)
+    vim.cmd("highlight Normal guifg=" .. colors.foreground .. " guibg=" .. bg)
 
     -- Tabline highlights
     vim.cmd("highlight TabLine guibg=" .. colors.inactive_tab_background .. " guifg=" .. colors.inactive_tab_foreground)

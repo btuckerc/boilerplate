@@ -21,9 +21,7 @@ return {
     'ObsidianSearch',
     'ObsidianLink',
     'ObsidianLinkNew',
-    'ObsidianBacklinks',
     'ObsidianTags',
-    'ObsidianQuickSwitch',
   },
   keys = {
     { "<leader>oo", "<cmd>ObsidianQuickSwitch<cr>", desc = "Quick Switch" },
@@ -158,20 +156,21 @@ return {
         highlight_text = { hl_group = "ObsidianHighlightText" },
         tags = { hl_group = "ObsidianTag" },
         hl_groups = {
-          ObsidianTodo = { bold = true, fg = "#f78c6c" },
-          ObsidianDone = { bold = true, fg = "#89ddff" },
-          ObsidianRightArrow = { bold = true, fg = "#f78c6c" },
-          ObsidianTilde = { bold = true, fg = "#ff5370" },
-          ObsidianBullet = { bold = true, fg = "#89ddff" },
-          ObsidianRefText = { underline = true, fg = "#c792ea" },
-          ObsidianExternal = { bold = true, fg = "#89ddff" },
-          ObsidianTag = { italic = true, fg = "#89ddff" },
-          ObsidianHighlightText = { bg = "#75662e" },
+          -- These groups are linked to standard highlights below
+          ObsidianTodo = { bold = true },
+          ObsidianDone = { bold = true },
+          ObsidianRightArrow = { bold = true },
+          ObsidianTilde = { bold = true },
+          ObsidianBullet = { bold = true },
+          ObsidianRefText = { underline = true },
+          ObsidianExternal = { bold = true },
+          ObsidianTag = { italic = true },
+          ObsidianHighlightText = {},
         },
       },
     })
 
-    -- Set up highlights
+    -- Link Obsidian highlights to standard theme highlights for consistency
     vim.cmd([[
       hi def link ObsidianTodo Todo
       hi def link ObsidianDone Comment

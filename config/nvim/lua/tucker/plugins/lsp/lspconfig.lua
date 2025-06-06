@@ -2,25 +2,15 @@ return {
   "neovim/nvim-lspconfig",
   event = { "BufReadPre", "BufNewFile" },
   dependencies = {
-    "saghen/blink.cmp",
-    "stevearc/conform.nvim",
+    "hrsh7th/nvim-cmp",
     "williamboman/mason.nvim",
     "williamboman/mason-lspconfig.nvim",
     "WhoIsSethDaniel/mason-tool-installer.nvim",
-    "hrsh7th/cmp-nvim-lsp",
-    "hrsh7th/cmp-buffer",
-    "hrsh7th/cmp-path",
-    "hrsh7th/cmp-cmdline",
-    "hrsh7th/nvim-cmp",
-    "L3MON4D3/LuaSnip",
     {
-      -- `lazydev` configures Lua LSP for your Neovim config, runtime and plugins
-      -- used for completion, annotations and signatures of Neovim apis
       "folke/lazydev.nvim",
       ft = "lua",
       opts = {},
     },
-    "saadparwaiz1/cmp_luasnip",
     {
       'j-hui/fidget.nvim',
       tag = 'v1.4.0',
@@ -38,18 +28,13 @@ return {
       },
     },
     { "https://git.sr.ht/~whynothugo/lsp_lines.nvim" },
-
-    -- Autoformatting
     "stevearc/conform.nvim",
-
-    -- Schema information
     "b0o/SchemaStore.nvim",
   },
 
   config = function()
     -- Local requires for better organization
     local conform = require("conform")
-    local cmp = require('cmp')
     local fidget = require("fidget")
     local lspconfig = require("lspconfig")
     local telescope_builtin = require('telescope.builtin')
@@ -80,16 +65,25 @@ return {
     -- Setup formatters
     conform.setup({
       formatters_by_ft = {
+        lua = { "stylua" },
+        go = { "gofmt", "goimports" },
+        python = { "isort", "black" },
+        rust = { "rustfmt" },
+        javascript = { "prettier" },
+        typescript = { "prettier" },
+        json = { "prettier" },
+        yaml = { "prettier" },
+        markdown = { "prettier" },
       }
     })
 
-    -- Get LSP capabilities from blink
-    local capabilities = require('blink.cmp').get_lsp_capabilities()
+    -- Get LSP capabilities from nvim-cmp
+    local capabilities = require('cmp_nvim_lsp').default_capabilities()
 
     -- Setup Fidget for LSP progress
     fidget.setup({})
 
-    -- LSP server configurations
+    -- Unified LSP keymap setup
     local function setup_lsp_keymaps(event)
       local map = function(keys, func, desc)
         vim.keymap.set('n', keys, func, { buffer = event.buf, desc = 'LSP: ' .. desc })
@@ -113,6 +107,12 @@ return {
       map('<leader>wl', function()
         print(vim.inspect(vim.lsp.buf.list_workspace_folders()))
       end, '[W]orkspace [L]ist Folders')
+
+      -- Additional mappings
+      map("<space>cr", vim.lsp.buf.rename, "Code Rename")
+      map("<space>ca", vim.lsp.buf.code_action, "Code Action")
+      map("<space>wd", telescope_builtin.lsp_document_symbols, "Workspace Document Symbols")
+      map("gT", vim.lsp.buf.type_definition, "Goto Type Definition")
     end
 
     -- Setup document highlight
@@ -132,45 +132,14 @@ return {
       end
     end
 
-    -- LSP attach configuration
-    vim.api.nvim_create_autocmd('LspAttach', {
-      group = vim.api.nvim_create_augroup('lsp-attach', { clear = true }),
-      callback = function(event)
-        setup_lsp_keymaps(event)
-        local client = vim.lsp.get_client_by_id(event.data.client_id)
-        if client then
-          setup_document_highlight(client, event.buf)
-        end
-      end,
-    })
-
-    -- Configure diagnostics
-    vim.diagnostic.config({
-      virtual_text = true,
-      signs = true,
-      underline = true,
-      update_in_insert = false,
-      severity_sort = true,
-      float = {
-        focusable = false,
-        style = "minimal",
-        border = "rounded",
-        source = "always",
-        header = "",
-        prefix = "",
-      },
-    })
-
-    -- Define diagnostic signs
-    local signs = { Error = " ", Warn = " ", Hint = " ", Info = " " }
-    for type, icon in pairs(signs) do
-      local hl = "DiagnosticSign" .. type
-      vim.fn.sign_define(hl, { text = icon, texthl = hl, numhl = hl })
-    end
+    -- Server-specific settings for disabling features
+    local disable_semantic_tokens = {
+      lua = true,
+    }
 
     -- Server-specific configurations
     local servers = {
-      bashls = true,
+      bashls = {},
       lua_ls = {
         settings = {
           Lua = {
@@ -182,7 +151,6 @@ return {
         }
       },
       rust_analyzer = {
-        cmd = { "rustup", "run", "stable", "rust-analyzer" },
         settings = {
           ['rust-analyzer'] = {
             checkOnSave = {
@@ -200,13 +168,19 @@ return {
             warn_style = true,
           },
         },
-        on_attach = function()
+        on_attach = function(client, bufnr)
           vim.g.zig_fmt_parse_errors = 0
           vim.g.zig_fmt_autosave = 0
         end,
       },
       ts_ls = {},
-      tailwindcss = {},
+      tailwindcss = {
+        init_options = {
+          userLanguages = {
+            templ = "html",
+          }
+        }
+      },
       gopls = {
         settings = {
           gopls = {
@@ -222,11 +196,8 @@ return {
           },
         },
       },
-      pyright = true,
+      pyright = {},
       jsonls = {
-        server_capabilities = {
-          documentFormattingProvider = false,
-        },
         settings = {
           json = {
             schemas = require("schemastore").json.schemas(),
@@ -238,118 +209,66 @@ return {
         settings = {
           yaml = {
             schemaStore = {
-              enable = false,
-              url = "",
+              enable = true,
+              url = "https://www.schemastore.org/api/json/catalog.json",
             },
-            -- schemas = require("schemastore").yaml.schemas(),
+            schemas = require("schemastore").yaml.schemas(),
           },
         },
       },
-      clangd = {
-        -- cmd = { "clangd", unpack(require("custom.clangd").flags) },
-        -- TODO: Could include cmd, but not sure those were all relevant flags.
-        --    looks like something i would have added while i was floundering
-        init_options = { clangdFileStatus = true },
-
-        filetypes = { "c" },
-      },
-
-      tailwindcss = {
-        init_options = {
-          userLanguages = {
-            elixir = "phoenix-heex",
-            eruby = "erb",
-            heex = "phoenix-heex",
-          },
-        },
-        filetypes = extend("tailwindcss", "filetypes", { "ocaml.mlx" }),
-        settings = {
-          tailwindCSS = {
-            experimental = {
-              classRegex = {
-                [[class: "([^"]*)]],
-                [[className="([^"]*)]],
-              },
-            },
-            includeLanguages = extend("tailwindcss", "settings.tailwindCSS.includeLanguages", {
-              ["ocaml.mlx"] = "html",
-            }),
-          },
-        },
-      },
+      clangd = {},
     }
 
-    local mason = require("mason")
-    local mason_lspconfig = require("mason-lspconfig")
+    -- LSP attach configuration
+    vim.api.nvim_create_autocmd('LspAttach', {
+      group = vim.api.nvim_create_augroup('user-lsp-attach', { clear = true }),
+      callback = function(event)
+        local bufnr = event.buf
+        local client = vim.lsp.get_client_by_id(event.data.client_id)
+        assert(client, "must have valid client")
 
-    -- Mason setup is now handled in mason-tool-installer.lua
-    -- We only need to handle the servers here
-    local servers_to_install = vim.tbl_filter(function(key)
-      local t = servers[key]
-      if type(t) == "table" then
-        return not t.manual_install
-      else
-        return t
-      end
-    end, vim.tbl_keys(servers))
+        -- Setup keymaps and features
+        setup_lsp_keymaps(event)
+        setup_document_highlight(client, bufnr)
 
-    for name, config in pairs(servers) do
-      if config == true then
-        config = {}
-      end
-      config = vim.tbl_deep_extend("force", {}, {
-        capabilities = capabilities,
-      }, config)
+        -- Set local omnifunc
+        vim.bo[bufnr].omnifunc = 'v:lua.vim.lsp.omnifunc'
 
-      lspconfig[name].setup(config)
-    end
-
-    local disable_semantic_tokens = {
-      lua = true,
-    }
-
-    vim.api.nvim_create_autocmd("LspAttach", {
-      callback = function(args)
-        local bufnr = args.buf
-        local client = assert(vim.lsp.get_client_by_id(args.data.client_id), "must have valid client")
-
-        local settings = servers[client.name]
-        if type(settings) ~= "table" then
-          settings = {}
-        end
-
-        local builtin = require "telescope.builtin"
-
-        vim.opt_local.omnifunc = "v:lua.vim.lsp.omnifunc"
-        vim.keymap.set("n", "gd", builtin.lsp_definitions, { buffer = 0 })
-        vim.keymap.set("n", "gr", builtin.lsp_references, { buffer = 0 })
-        vim.keymap.set("n", "gD", vim.lsp.buf.declaration, { buffer = 0 })
-        vim.keymap.set("n", "gT", vim.lsp.buf.type_definition, { buffer = 0 })
-        vim.keymap.set("n", "K", vim.lsp.buf.hover, { buffer = 0 })
-
-        vim.keymap.set("n", "<space>cr", vim.lsp.buf.rename, { buffer = 0 })
-        vim.keymap.set("n", "<space>ca", vim.lsp.buf.code_action, { buffer = 0 })
-        vim.keymap.set("n", "<space>wd", builtin.lsp_document_symbols, { buffer = 0 })
-
+        -- Disable semantic tokens for specific filetypes
         local filetype = vim.bo[bufnr].filetype
         if disable_semantic_tokens[filetype] then
           client.server_capabilities.semanticTokensProvider = nil
         end
 
-        -- Override server capabilities
-        if settings.server_capabilities then
-          for k, v in pairs(settings.server_capabilities) do
-            if v == vim.NIL then
-              ---@diagnostic disable-next-line: cast-local-type
-              v = nil
-            end
-
+        -- Override server capabilities if needed
+        local server_settings = servers[client.name]
+        if type(server_settings) == "table" and server_settings.server_capabilities then
+          for k, v in pairs(server_settings.server_capabilities) do
+            if v == vim.NIL then v = nil end
             client.server_capabilities[k] = v
           end
         end
       end,
     })
 
+    -- Configure diagnostics
+    vim.diagnostic.config({
+      virtual_text = false,
+      signs = true,
+      underline = true,
+      update_in_insert = false,
+      severity_sort = true,
+      float = {
+        focusable = false,
+        style = "minimal",
+        border = "rounded",
+        source = "always",
+        header = "",
+        prefix = "",
+      },
+    })
+
+    -- Let lsp_lines handle diagnostic signs
     require("lsp_lines").setup()
     vim.diagnostic.config { virtual_text = true, virtual_lines = false }
 
@@ -362,11 +281,16 @@ return {
       end
     end, { desc = "Toggle lsp_lines" })
 
-    -- Bash LSP
-    lspconfig.bashls.setup({
-        capabilities = capabilities,
-        on_attach = on_attach,
-        filetypes = { "sh", "bash" },
+    -- Setup servers with mason-lspconfig
+    local mason_lspconfig = require("mason-lspconfig")
+
+    mason_lspconfig.setup({
+      ensure_installed = vim.tbl_keys(servers)
     })
+
+    for server_name, server_config in pairs(servers) do
+      server_config.capabilities = capabilities
+      lspconfig[server_name].setup(server_config)
+    end
   end
 }

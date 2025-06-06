@@ -2,16 +2,23 @@ return {
   "nvim-treesitter/nvim-treesitter",
   build = ":TSUpdate",
   config = function()
+    -- Per a
+    local parser_config = require("nvim-treesitter.parsers").get_parser_configs()
+    parser_config.templ = {
+      install_info = {
+        url = "https://github.com/vrischmann/tree-sitter-templ",
+        files = { "src/parser.c", "src/scanner.c" },
+        branch = "main",
+      },
+    }
+
     ---@diagnostic disable-next-line: undefined-field
     local uv = vim.loop
 
-    ---@type TSConfig
-    local config = {
-      modules = {},
-      ignore_install = {},
+    require("nvim-treesitter.configs").setup({
       ensure_installed = {
         "vimdoc", "javascript", "typescript", "c", "lua", "rust",
-        "jsdoc", "bash", "markdown", "markdown_inline",
+        "go", "sql", "jsdoc", "bash", "markdown", "markdown_inline", "templ",
       },
 
       -- Install parsers synchronously (only applied to `ensure_installed`)
@@ -44,22 +51,6 @@ return {
         -- Instead of true it can also be a list of languages
         additional_vim_regex_highlighting = { "markdown" },
       },
-    }
-
-    require("nvim-treesitter.configs").setup(config)
-
-    ---@type table<string, ParserInfo>
-    local parser_config = require("nvim-treesitter.parsers").get_parser_configs()
-    parser_config.templ = {
-      install_info = {
-        url = "https://github.com/vrischmann/tree-sitter-templ.git",
-        files = { "src/parser.c", "src/scanner.c" },
-        branch = "master",
-      },
-      filetype = "templ", -- the filetype to associate with this parser
-      maintainers = { "@vrischmann" }, -- maintainer's GitHub handle
-    }
-
-    vim.treesitter.language.register("templ", "templ")
+    })
   end
 }

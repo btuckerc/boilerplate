@@ -1,6 +1,6 @@
 return {
     "rmagatti/auto-session",
-    enabled = false, -- Disabled, testing
+    enabled = true,
     dependencies = {
         "folke/which-key.nvim",
     },

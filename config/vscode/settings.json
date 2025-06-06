@@ -153,5 +153,7 @@
     "go.toolsManagement.autoUpdate": true,
     "makefile.configureOnOpen": false,
     "cursor.composer.showSuggestedFiles": false,
-    "git.openRepositoryInParentFolders": "always"
+    "git.openRepositoryInParentFolders": "always",
+    "cursor.composer.shouldChimeAfterChatFinishes": true,
+    "cursor.cpp.enablePartialAccepts": true
 }

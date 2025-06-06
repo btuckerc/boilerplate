@@ -49,11 +49,11 @@ return {
     end
 
     -- Toggle previous & next buffers stored within Harpoon list
-    set('n', '<leader>p', function()
+    set('n', '<leader>hp', function()
       harpoon:list():prev()
-    end, { desc = 'Navigate to previous file' })
-    set('n', '<leader>n', function()
+    end, { desc = 'Navigate to previous harpoon file' })
+    set('n', '<leader>hn', function()
       harpoon:list():next()
-    end, { desc = 'Navigate to next file' })
+    end, { desc = 'Navigate to next harpoon file' })
   end,
 }

@@ -1,7 +1,10 @@
+local vault_path = vim.fn.expand('~/Documents/00-Vault')
+
 return {
   'epwalsh/obsidian.nvim',
   version = '*',
   lazy = true,
+  enabled = vim.fn.isdirectory(vault_path) == 1,
   ft = 'markdown',
   dependencies = {
     'nvim-lua/plenary.nvim',
@@ -50,7 +53,7 @@ return {
     })
 
     obsidian.setup({
-      dir = "~/Documents/00-Vault",
+      dir = vault_path,
       notes_subdir = "00 - Inbox",
       new_notes_location = "notes_subdir",
       disable_frontmatter = true,

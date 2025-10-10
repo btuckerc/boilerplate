@@ -1,0 +1,9 @@
+# Stow ignore patterns
+\.git
+\.gitignore
+\.DS_Store
+Makefile
+README\.md
+\.stow-local-ignore
+.*\.backup\..*
+lazy-lock\.json

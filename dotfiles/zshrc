@@ -2,7 +2,7 @@
 
 # Ensure Starship environment variables are set
 export STARSHIP_SHELL="zsh"
-export STARSHIP_CONFIG="$HOME/.config/starship.toml"
+export STARSHIP_CONFIG="$HOME/.config/starship/starship.toml"
 
 # Load Starship prompt if installed (do this early to ensure proper initialization)
 if command -v starship >/dev/null; then
@@ -44,6 +44,7 @@ venv() {
     echo "Activating virtual environment..."
     source venv/bin/activate
 }
+
 
 # File extraction helper
 ee() {
@@ -133,17 +134,38 @@ t () {
     fi
 }
 
+mc() {
+  local dir="$1"
+  if [[ -z "$dir" ]]; then
+    echo "Usage: mc <directory>"
+    return 1
+  fi
+  mkdir -p -- "$dir" && cd -- "$dir"
+}
+
 # load modules
 zmodload zsh/complist
 autoload -U compinit && compinit
 autoload -U colors && colors
 
+# Carapace completions - multi-shell completion library
+# Provides completions for hundreds of CLI tools
+if command -v carapace >/dev/null; then
+    export CARAPACE_BRIDGES='zsh,fish,bash'  # Bridge completions from other shells
+    source <(carapace _carapace)
+fi
+
 # History settings (Zsh-specific)
 setopt SHARE_HISTORY
 setopt HIST_IGNORE_DUPS
 setopt HIST_IGNORE_SPACE
-setopt EXTENDED_HISTORY
-setopt INC_APPEND_HISTORY
+setopt EXTENDED_HISTORY        # Record timestamp of command in history
+setopt INC_APPEND_HISTORY      # Write to history file immediately
+setopt HIST_EXPIRE_DUPS_FIRST  # Expire duplicate entries first when trimming history
+setopt HIST_IGNORE_ALL_DUPS    # Delete old recorded entry if new entry is a duplicate
+setopt HIST_FIND_NO_DUPS       # Do not display a line previously found
+setopt HIST_SAVE_NO_DUPS       # Don't write duplicate entries in the history file
+setopt HIST_REDUCE_BLANKS      # Remove superfluous blanks before recording entry
 HISTSIZE=1000000
 SAVEHIST=1000000
 HISTFILE="$XDG_CACHE_HOME/zsh_history" # move histfile to cache
@@ -155,8 +177,11 @@ eval "$(/opt/homebrew/bin/brew shellenv)"
 # Load FZF
 [ -f "$XDG_CONFIG_HOME/fzf/.fzf.zsh" ] && source "$XDG_CONFIG_HOME/fzf/fzf.zsh"
 
-# fzf setup
-source <(fzf --zsh) # allow for fzf history widget
+# Force emacs mode (normal terminal behavior) - overrides vi mode from EDITOR=nvim
+bindkey -e
+
+# Vanilla zsh Ctrl-R (traditional incremental search)
+bindkey '^r' history-incremental-search-backward
 
 # Zsh-specific settings
 setopt AUTO_CD              # If command is a directory path, cd into it
@@ -185,43 +210,14 @@ if test -n "$KITTY_INSTALLATION_DIR"; then
     unfunction kitty-integration
 fi
 
-# Better completion styles
+# Minimal completion styles for carapace
 zstyle ':completion:*' menu select
-zstyle ':completion:*' matcher-list 'm:{a-zA-Z}={A-Za-z}' 'r:|[._-]=* r:|=*' 'l:|=* r:|=*'   # Smart case matching and partial word completion
-zstyle ':completion:*' list-colors ${(s.:.)LS_COLORS} ma=0\;33 # Colored completion (using ls colors)
-zstyle ':completion:*' verbose yes
-zstyle ':completion:*' group-name ''
-zstyle ':completion:*:descriptions' format '%F{green}-- %d --%f'
-zstyle ':completion:*:messages' format '%F{purple}-- %d --%f'
-zstyle ':completion:*:warnings' format '%F{red}-- no matches found --%f'
-zstyle ':completion:*' file-sort modification reverse   # Sort by most recent first
+zstyle ':completion:*' matcher-list 'm:{a-zA-Z}={A-Za-z}'  # Case insensitive matching
 zstyle ':completion:*' use-cache on
 zstyle ':completion:*' cache-path "$HOME/.zcompcache"
-zstyle ':completion:*' special-dirs true               # Complete . and .. special directories
-zstyle ':completion:*:cd:*' tag-order local-directories directory-stack path-directories
-# zstyle ':completion:*' file-list true # more detailed list
-zstyle ':completion:*' squeeze-slashes false # explicit disable to allow /*/ expansion
 
-# Configure autosuggestions
-ZSH_AUTOSUGGEST_STRATEGY=(history completion)  # Try history first, then completion
-    ZSH_AUTOSUGGEST_BUFFER_MAX_SIZE=20
-    ZSH_AUTOSUGGEST_USE_ASYNC=1
-    ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=244'
-    ZSH_AUTOSUGGEST_MANUAL_REBIND=1  # Ensure suggestions stay visible after tab completion
-
-# Keybindings for accepting suggestions
+# Tab completion for carapace
 bindkey '^I' complete-word                 # Tab for normal zsh completion
-bindkey '^ ' forward-word               # Control+Space accepts one word
-bindkey '^[l' autosuggest-accept          # Control+L accepts the whole suggestion
-bindkey '^[[C' forward-char               # Right arrow accepts one character
-
-# Override tab completion to ensure ghost suggestions stay visible
-function _zsh_autosuggest_completion_bind_tab() {
-    zle complete-word
-    zle autosuggest-fetch
-}
-zle -N _zsh_autosuggest_completion_bind_tab
-bindkey '^I' _zsh_autosuggest_completion_bind_tab # Tab
 
 # Better history searching
 # bindkey '^r' history-incremental-search-backward
@@ -261,8 +257,9 @@ setopt extended_glob # match ~ # ^
 stty stop undef # disable accidental ctrl s
 
 # Load plugins (must be at the end of .zshrc)
-source /opt/homebrew/share/zsh-autosuggestions/zsh-autosuggestions.zsh
 source /opt/homebrew/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
 
 # Auto-attach to "main" session in Tmux
 t
+
+. "$HOME/.local/share/../bin/env"

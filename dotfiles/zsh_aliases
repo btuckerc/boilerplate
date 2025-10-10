@@ -27,7 +27,7 @@ alias vde="deactivate"
 # Editor aliases
 alias vim="nvim"
 alias practice="nvim +VimBeGood"
-alias v.="vim ."
+alias v.="nvim ."
 
 # Git tools
 alias lg="lazygit"

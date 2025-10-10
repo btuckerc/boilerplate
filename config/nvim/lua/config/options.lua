@@ -65,7 +65,7 @@ opt.shortmess:append("c")
 -- Command line
 opt.cmdheight = 1
 opt.showcmd = true
-opt.showtabline = 2
+opt.showtabline = 0  -- Hide tabline (lualine shows buffer info)
 opt.laststatus = 2
 opt.ruler = true
 opt.title = true

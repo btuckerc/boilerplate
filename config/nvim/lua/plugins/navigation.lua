@@ -23,7 +23,37 @@ return {
                         i = {
                             ["<C-k>"] = require("telescope.actions").move_selection_previous,
                             ["<C-j>"] = require("telescope.actions").move_selection_next,
+                            -- Add quick symbol filtering with <C-l>
+                            ["<C-l>"] = require("telescope.actions").complete_tag,
                         },
+                    },
+                    -- Better preview settings
+                    preview = {
+                        treesitter = true,  -- Use treesitter for syntax highlighting in preview
+                    },
+                    layout_strategy = "horizontal",
+                    layout_config = {
+                        horizontal = {
+                            preview_width = 0.55,  -- Slightly larger preview for code context
+                            results_width = 0.45,
+                        },
+                        vertical = {
+                            mirror = false,
+                        },
+                        width = 0.87,
+                        height = 0.80,
+                        preview_cutoff = 120,
+                    },
+                },
+                pickers = {
+                    lsp_document_symbols = {
+                        -- Show symbol kind in results
+                        show_line = true,
+                        symbol_width = 40,
+                        symbol_type_width = 12,
+                    },
+                    lsp_dynamic_workspace_symbols = {
+                        show_line = true,
                     },
                 },
             })
@@ -36,6 +66,27 @@ return {
             vim.keymap.set("n", "<leader>fb", builtin.buffers, { desc = "Find buffers" })
             vim.keymap.set("n", "<leader>fh", builtin.help_tags, { desc = "Help tags" })
             vim.keymap.set("n", "<leader>fr", builtin.oldfiles, { desc = "Recent files" })
+
+            -- LSP Symbol Navigation
+            vim.keymap.set("n", "<leader>fs", builtin.lsp_document_symbols, { desc = "Document symbols" })
+            vim.keymap.set("n", "<leader>fS", builtin.lsp_dynamic_workspace_symbols, { desc = "Workspace symbols" })
+
+            -- Quick function/method navigation
+            -- Use :methods: or :functions: filter in the prompt to filter by type
+            vim.keymap.set("n", "<leader>fm", function()
+                builtin.lsp_document_symbols({
+                    symbols = { "method", "function" },
+                    prompt_title = "Functions & Methods",
+                })
+            end, { desc = "Find methods/functions" })
+
+            -- Class/struct navigation
+            vim.keymap.set("n", "<leader>fc", function()
+                builtin.lsp_document_symbols({
+                    symbols = { "class", "struct", "interface", "enum" },
+                    prompt_title = "Classes & Structs",
+                })
+            end, { desc = "Find classes/structs" })
         end,
     },
 
@@ -49,7 +100,7 @@ return {
         config = function()
             require("oil").setup({
                 default_file_explorer = true,
-                columns = { "icon", "permissions" },
+                columns = { "icon" },
                 keymaps = {
                     ["<C-h>"] = false,
                     ["<M-h>"] = "actions.select_split",

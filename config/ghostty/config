@@ -1,8 +1,9 @@
-background-opacity=0.60
-font-size=24
+background-opacity=0.6
+font-size=20
 theme=current-theme
-font-family='BlexMono Nerd Font Mono'
-background-blur-radius=60
+font-family = ""
+font-family = "SF Mono"
+background-blur-radius=40
 window-padding-y=0,0
 window-padding-balance=true
 window-height=24
@@ -15,3 +16,4 @@ macos-icon-frame=plastic
 macos-option-as-alt=true
 keybind = super+r=reload_config
 keybind = super+i=inspector:toggle
+macos-non-native-fullscreen = true

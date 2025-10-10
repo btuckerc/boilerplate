@@ -40,16 +40,21 @@ vim.api.nvim_create_autocmd("LspAttach", {
         if not client then return end
 
         -- Reduce LSP diagnostics frequency for better typing performance
-        vim.diagnostic.config({
-            update_in_insert = false,  -- Don't update diagnostics while typing
-            signs = {
-                priority = 8,  -- Lower priority to avoid frequent redraws
-            },
-        }, args.buf)
+        -- Use pcall to safely configure diagnostics
+        pcall(function()
+            vim.diagnostic.config({
+                update_in_insert = false,  -- Don't update diagnostics while typing
+                signs = {
+                    priority = 8,  -- Lower priority to avoid frequent redraws
+                },
+            })
+        end)
 
         -- Optimize inlay hints (if supported)
         if client.server_capabilities.inlayHintProvider then
-            vim.lsp.inlay_hint.enable(false, { bufnr = args.buf })  -- Disable by default for performance
+            pcall(function()
+                vim.lsp.inlay_hint.enable(false, { bufnr = args.buf })  -- Disable by default for performance
+            end)
         end
     end,
 })

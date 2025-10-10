@@ -2,7 +2,8 @@
 
 local map = vim.keymap.set
 
--- Note: Escape works by default for exiting insert mode
+-- Escape from insert mode (explicit mapping to ensure it works)
+map("i", "<Esc>", "<ESC>", { desc = "Exit insert mode with Escape" })
 -- Additional escape options
 map("i", "jk", "<ESC>", { desc = "Exit insert mode with jk" })
 map("i", "kj", "<ESC>", { desc = "Exit insert mode with kj" })
@@ -105,3 +106,13 @@ map("v", "<leader>xl", ":lua print(vim.inspect(vim.fn.getreg('\"')))<CR>", { des
 
 -- Plugin management (restore original)
 map("n", "<leader>L", "<cmd>Lazy<CR>", { desc = "Open Lazy plugin manager" })
+
+-- Transparency toggle
+map("n", "<leader>tt", function()
+    if vim.g.transparent_enabled == nil then
+        vim.g.transparent_enabled = true
+    end
+    vim.g.transparent_enabled = not vim.g.transparent_enabled
+    require("themes.current-theme").apply(vim.g.transparent_enabled)
+    vim.notify("Transparency " .. (vim.g.transparent_enabled and "enabled" or "disabled"))
+end, { desc = "Toggle transparency" })

@@ -18,10 +18,30 @@ return {
                 return ""
             end
 
+            -- Custom transparent theme for lualine
+            local custom_theme = require("lualine.themes.auto")
+            for _, section in pairs(custom_theme) do
+                if type(section) == "table" then
+                    for _, part in pairs(section) do
+                        if type(part) == "table" then
+                            part.bg = "NONE"
+                        end
+                    end
+                end
+            end
+
+            -- Custom filename component that hides for Oil buffers
+            local function custom_filename()
+                if vim.bo.filetype == "oil" then
+                    return ""
+                end
+                return vim.fn.expand("%:t") ~= "" and vim.fn.expand("%:t") or "[No Name]"
+            end
+
             require("lualine").setup({
                 options = {
                     icons_enabled = false,
-                    theme = "auto",
+                    theme = custom_theme,
                     component_separators = { left = ' ', right = ' '},
                     section_separators = { left = ' ', right = ' '},
                     disabled_filetypes = {
@@ -34,7 +54,7 @@ return {
                     lualine_a = { "mode" },
                     lualine_b = { "branch", "diff", misery_task_count },
                     lualine_c = {},
-                    lualine_x = { "filename" },
+                    lualine_x = { custom_filename },
                     lualine_y = { "filetype" },
                     lualine_z = { "location" },
                 },

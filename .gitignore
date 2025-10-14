@@ -1,3 +1,20 @@
+# macOS
 .DS_Store
+
+# Backups
 *.bak*
+*.backup.*
+
+# Neovim
 lazy-lock.json
+home/dot_config/nvim.backup.*
+
+# mise (if we ever add local tool installations)
+.mise.*.lock
+
+# Chezmoi (state is managed per-user, not in repo)
+home/.chezmoistate
+
+# Temp files
+*.tmp
+*.log

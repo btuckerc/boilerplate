@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(nvim:*)",
+      "Read(//Users/tucker/.config/**)",
+      "Bash(find:*)",
+      "Read(//Users/tucker/Documents/GitHub/boilerplate/config/**)",
+      "Bash(brew unlink:*)",
+      "Bash(brew install:*)",
+      "Bash(curl:*)",
+      "Bash(tree:*)",
+      "Read(//Users/tucker/Documents/GitHub/boilerplate/**)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

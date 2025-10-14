@@ -1,359 +1,414 @@
-# Workspace Boilerplate
+# Cross-Platform Dotfiles
 
-A comprehensive collection of scripts and configurations for setting up and managing development environments. Features project initialization, environment setup, and configuration management.
+Modern, portable dotfiles managed with [chezmoi](https://chezmoi.io) and [mise](https://mise.jdx.dev), supporting macOS (zsh) and Linux (bash).
+
+## Features
+
+- **Cross-platform**: macOS (zsh) and Linux (bash) support with shared configuration
+- **Declarative package management**: Brewfile for reproducible Homebrew setups
+- **Version management**: mise for language runtime versions (node, python, go)
+- **Automated setup**: One command to apply all configurations
+- **Idempotent**: Safe to run repeatedly
+- **OS-aware templates**: Platform-specific configurations where needed
+- **No duplication**: Shared POSIX shell configuration sourced by all shells
 
 ## Quick Start
 
-One-liner to get started on a fresh Mac (installs Xcode CLI tools, git, and sets up your environment):
+### Prerequisites
+
 ```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/btuckerc/boilerplate/master/utils/scripts/bootstrap.sh)"
+# macOS
+xcode-select --install
+
+# Install chezmoi and mise
+brew install chezmoi mise
 ```
 
-Or if you already have git, you can clone and run directly:
+### Install Dotfiles
+
 ```bash
-git clone https://github.com/btuckerc/boilerplate.git && cd boilerplate && ./utils/init-mac
+# Initialize chezmoi with this repository
+chezmoi init --apply https://github.com/btuckerc/boilerplate.git
 ```
 
-There are other setup tools you can explore as well:
+That's it! This will:
+1. Clone the repository to `~/.local/share/chezmoi`
+2. Install Homebrew packages from Brewfile
+3. Apply all dotfiles to your home directory
+4. Install mise-managed tools (node, python, go)
+5. Set up shell configuration
+
+### Manual Setup (if you already have the repo)
+
 ```bash
-./setup/setup-vscode
-./utils/init-project my-project
-./utils/scripts/readme.sh
+# If you already cloned this repo locally
+cd /path/to/boilerplate
+
+# Initialize chezmoi pointing to this directory
+chezmoi init --source="$(pwd)"
+
+# Preview what would be applied (dry run)
+chezmoi diff
+
+# Apply dotfiles
+chezmoi apply
+
+# Install mise-managed tools
+mise install
 ```
+
+## What Gets Installed
+
+### Shell Configuration
+- **Shared config**: `~/.config/shell/common.sh` - POSIX-compatible configuration
+- **Zsh**: `~/.zshrc`, `~/.zprofile`, `~/.zshenv` with macOS-specific enhancements
+- **Bash**: `~/.bashrc`, `~/.bash_profile` with Linux compatibility
+- **Starship**: Modern, minimal prompt configuration
+
+### Tool Versions (via mise)
+- **Node.js**: LTS version
+- **Python**: 3.13
+- **Go**: 1.25
+
+### Applications (via Brewfile)
+- Terminal: kitty, ghostty, tmux, starship
+- Editors: neovim (with full configuration)
+- CLI tools: yazi, btop, fzf, ripgrep, bat, eza, and more
+- Development: git, gh, docker, mise, chezmoi
+
+### Editor Configurations
+- **Neovim**: Full LSP setup with plugins (Treesitter, Telescope, Copilot, etc.)
+- **VSCode**: Settings and custom snippets
+- **tmux**: With TPM (Tmux Plugin Manager) and sensible defaults
 
 ## Directory Structure
 
 ```
 .
-├── LICENSE                                    # MIT License
-├── README.md                                  # This file
-├── applications-list.md                       # List of recommended applications
-├── bash_aliases                               # Bash aliases
-├── bash_profile                               # Bash profile configuration
-├── bashrc                                     # Bash shell configuration
-├── zsh_aliases                                # Zsh aliases
-├── zprofile                                   # Zsh profile configuration
-├── zshrc                                      # Zsh shell configuration
-├── config                                     # Configuration files
-│   ├── kitty/                                 # Kitty configuration
-│   │   ├── kitty.conf                         # Kitty terminal config
-│   │   └── current-theme.conf                 # Current Kitty theme
-│   ├── vscode/                                # VSCode configuration
-│   │   ├── settings.json                      # Editor settings
-│   │   ├── snippets/                          # Code snippets
-│   │   └── extensions/                        # VSCode extensions
-│   │       └── current-theme/                 # Current theme extension
-│   └── tmux/                                  # Tmux configuration
-│       └── plugins/                           # Tmux plugins
-│           └── tpm/                           # Tmux Plugin Manager (submodule)
-├── nvim                                       # Neovim configuration
-│   └── lua/                                   # Lua configuration files
-│       └── tucker/                            # Personal configuration
-│           └── core/                          # Core configuration
-│           └── plugins/                       # Plugin configuration
-│           └── themes/                        # Theme files
-│               └── current-theme.lua          # Current theme
-├── setup                                      # Environment setup scripts
-│   ├── setup-go.sh                            # Go environment setup
-│   ├── setup-py.sh                            # Python environment setup
-│   ├── setup-git.sh                           # Git configuration setup
-│   ├── setup-kitty.sh                         # Kitty terminal setup
-│   ├── setup-vscode.sh                        # VSCode setup
-│   ├── setup-supabase.sh                      # Supabase environment setup
-│   └── setup-tailwind.sh                      # Tailwind CSS setup
-├── templates                                  # Project templates
-│   ├── go                                     # Go project template
-│   └── python                                 # Python project template
-└── utils                                      # Utility scripts
-    ├── init-mac                               # macOS environment setup
-    ├── init-project                           # Project initialization
-    ├── fonts                                  # Custom font files
-    │   ├── MesloLGLNerdFont-Bold.ttf          # Meslo Nerd Font Bold
-    │   ├── MesloLGLNerdFont-BoldItalic.ttf    # Meslo Nerd Font Bold Italic
-    │   ├── MesloLGLNerdFont-Italic.ttf        # Meslo Nerd Font Italic
-    │   └── MesloLGLNerdFont-Regular.ttf       # Meslo Nerd Font Regular
-    └── scripts                                # Shell script utilities
-        ├── common.sh                          # Common shell functions
-        ├── convert-kitty-theme-nvim.sh        # Theme converter for Neovim
-        ├── convert-kitty-theme-vscode.sh      # Theme converter for VSCode
-        ├── fix-nvim-symlink.sh                # Neovim symlink fixer
-        ├── readme.sh                          # README generator
-        ├── tree.sh                            # Directory tree generator
-        └── bash-to-zsh.sh                     # Shell conversion utility
+├── .chezmoiroot                    # Points chezmoi to home/ directory
+├── Brewfile                        # Homebrew packages (also in home/)
+├── home/                           # chezmoi source directory
+│   ├── .chezmoiignore              # Files to exclude from home directory
+│   ├── dot_zshrc.tmpl              # Zsh configuration (OS-aware)
+│   ├── dot_bashrc.tmpl             # Bash configuration (OS-aware)
+│   ├── dot_bash_profile.tmpl       # Bash profile
+│   ├── dot_zprofile.tmpl           # Zsh profile
+│   ├── dot_zshenv                  # Zsh environment variables
+│   ├── dot_config/                 # XDG config directory
+│   │   ├── shell/
+│   │   │   └── common.sh           # Shared POSIX shell configuration
+│   │   ├── mise/
+│   │   │   └── config.toml         # Tool version management
+│   │   ├── nvim/                   # Neovim configuration
+│   │   ├── tmux/                   # Tmux configuration
+│   │   ├── kitty/                  # Kitty terminal config
+│   │   ├── ghostty/                # Ghostty terminal config
+│   │   ├── starship/               # Starship prompt config
+│   │   ├── yazi/                   # Yazi file manager config
+│   │   ├── btop/                   # btop system monitor config
+│   │   └── vscode/                 # VSCode settings & snippets
+│   ├── dot_local/bin/              # Local executables
+│   ├── run_once_before_01-install-prereqs.sh.tmpl
+│   ├── run_onchange_before_02-install-packages-darwin.sh.tmpl
+│   └── run_onchange_before_03-install-packages-linux.sh.tmpl
+├── templates/                      # Project templates
+│   ├── go/                         # Go project template
+│   └── python/                     # Python project template
+└── utils/                          # Utility scripts
+    ├── init-mac                    # Legacy macOS setup script
+    ├── init-project                # Project initialization
+    ├── fonts/                      # Nerd Fonts
+    └── scripts/                    # Helper scripts
 ```
 
-## TODO
-- [ ] make sure brew install glow
-- [ ] make sure starship can be installed
+## Usage
 
-## Features
+### Managing Dotfiles
 
-### macOS Environment Setup
 ```bash
-# Complete environment setup
-./utils/init-mac
+# Edit a dotfile (opens in $EDITOR)
+chezmoi edit ~/.zshrc
 
-# Setup with specific shell
-./utils/init-mac -s zsh
+# See what would change
+chezmoi diff
 
-# Skip Kitty terminal installation
-./utils/init-mac -k
+# Apply changes
+chezmoi apply
 
-# Skip Homebrew installation
-./utils/init-mac -b
+# Apply specific file
+chezmoi apply ~/.zshrc
+
+# Add new file to chezmoi
+chezmoi add ~/.gitconfig
+
+# Update from remote repository
+chezmoi update
 ```
 
-The `init-mac` script sets up:
-- Shell configuration (Bash or Zsh)
-- Homebrew package manager
-- Kitty terminal with themes
-- Custom Meslo Nerd Fonts
-- Neovim editor with configuration
-- Tmux with configuration
-- Development environment
+### Managing Tool Versions
 
-### Shell Configuration
-Support for both Bash and Zsh:
 ```bash
-# Bash configuration
-ln -s $(pwd)/bashrc ~/.bashrc
-ln -s $(pwd)/bash_profile ~/.bash_profile
-ln -s $(pwd)/bash_aliases ~/.bash_aliases
+# Install all tools defined in mise config
+mise install
 
-# Zsh configuration
-ln -s $(pwd)/zshrc ~/.zshrc
-ln -s $(pwd)/zprofile ~/.zprofile
-ln -s $(pwd)/zsh_aliases ~/.zsh_aliases
+# Install specific tool
+mise install node@20
+
+# See installed tools
+mise list
+
+# Add tool to global config
+mise use --global node@lts python@3.12
+
+# See available versions
+mise ls-remote node
 ```
 
-### Project Initialization
+### Managing Packages
+
 ```bash
-# Create a new Python project
-./init-project my-project
+# Install/update packages from Brewfile
+brew bundle install --file=~/Brewfile
 
-# Create a new Go project
-./init-project -l go my-project
-
-# Initialize in current directory
-./init-project --lang python
-
-# Specify Python version
-./init-project my-project -v 3.11
+# Update Brewfile with currently installed packages
+cd ~/.local/share/chezmoi
+brew bundle dump --force --file=Brewfile
+chezmoi add Brewfile
 ```
 
-### Environment Setup
+## How It Works
+
+### chezmoi Templates
+
+Files ending in `.tmpl` are processed as Go templates, allowing OS-specific configuration:
+
+```go
+{{- if eq .chezmoi.os "darwin" -}}
+# macOS-specific configuration
+eval "$(/opt/homebrew/bin/brew shellenv)"
+{{- else if eq .chezmoi.os "linux" -}}
+# Linux-specific configuration
+alias ls='ls --color=auto'
+{{- end -}}
+```
+
+### Shared Shell Configuration
+
+To avoid duplicating shell configuration between bash and zsh, common functionality lives in `~/.config/shell/common.sh`:
+
+- Environment variables
+- Aliases
+- Functions
+- Tool activation (mise, etc.)
+
+Both `~/.zshrc` and `~/.bashrc` source this file, then add shell-specific features.
+
+### Automated Scripts
+
+- **run_once**: Executes once (tracked by chezmoi state)
+- **run_onchange**: Executes when file content changes
+- **before**: Runs before applying dotfiles
+
+Example: `run_onchange_before_02-install-packages-darwin.sh.tmpl` runs when Brewfile changes, ensuring packages stay up-to-date.
+
+## Cross-Platform Support
+
+### macOS (zsh)
+- Homebrew integration
+- Kitty/Ghostty shell integration
+- macOS-specific aliases and functions
+- zsh-specific features (completion, history)
+
+### Linux (bash)
+- apt/yum package manager support (if needed)
+- GNU coreutils aliases
+- bash-specific features
+- Works on Debian, Ubuntu, Fedora, etc.
+
+## Customization
+
+### Add Your Own Dotfiles
+
 ```bash
-# Set up Python environment
-./setup/setup-py [--version 3.13]
+# Add existing dotfile
+chezmoi add ~/.gitconfig
 
-# Set up Go environment
-./setup/setup-go
+# Edit in chezmoi
+chezmoi edit ~/.gitconfig
 
-# Set up Git configuration
-./setup-git
-
-# Set up Kitty terminal
-./setup-kitty
-
-# Set up Tailwind CSS
-./setup-tailwind
-
-# Set up Supabase
-./setup-supabase
+# Apply changes
+chezmoi apply
 ```
 
-### Utility Scripts
+### Modify Existing Configuration
 
-#### Directory Tree Generation
 ```bash
-./utils/scripts/tree.sh [-p] [-d DEPTH] [-e EXCLUDE]
+# Edit shared shell config
+chezmoi edit ~/.config/shell/common.sh
+
+# Edit OS-specific shell config
+chezmoi edit ~/.zshrc  # or ~/.bashrc
+
+# Preview changes
+chezmoi diff
+
+# Apply
+chezmoi apply
 ```
 
-#### README Generation
+### Add Tools to mise
+
 ```bash
-./utils/scripts/readme.sh [DIRECTORY] [-f]
+# Edit mise config
+chezmoi edit ~/.config/mise/config.toml
+
+# Add tool
+mise use --global rust@latest
+
+# Commit back to chezmoi
+chezmoi add ~/.config/mise/config.toml
 ```
 
-#### Theme Conversion
+## Neovim Configuration
+
+Full-featured Neovim setup with:
+- **LSP**: Language Server Protocol support via Mason
+- **Treesitter**: Advanced syntax highlighting
+- **Telescope**: Fuzzy finder for files, grep, buffers
+- **Git**: fugitive, gitsigns integration
+- **Copilot**: AI pair programming
+- **Completion**: nvim-cmp with multiple sources
+- **File navigation**: oil.nvim, harpoon
+- **Theme**: Custom colorscheme synced with terminal
+
+Configuration location: `~/.config/nvim/`
+
+Plugin organization:
+```
+lua/plugins/
+├── lsp.lua          # LSP and completion
+├── editor.lua       # Core editing features
+├── navigation.lua   # File/code navigation
+├── ui.lua           # Visual elements
+├── git.lua          # Git integration
+├── ai.lua           # Copilot
+└── integrations.lua # External tools
+```
+
+## Tmux Configuration
+
+Modern tmux setup with:
+- **TPM**: Tmux Plugin Manager (installed as git submodule)
+- **Plugins**: sensible, resurrect, continuum, yank
+- **Prefix**: `` ` `` (backtick)
+- **Vim navigation**: C-h/j/k/l for pane switching
+- **Theme**: Minimal, Nord-inspired colors
+- **Mouse support**: Enabled
+
+Configuration: `~/.config/tmux/tmux.conf`
+
+## Project Templates
+
+### Python Project
+
 ```bash
-./utils/scripts/convert-kitty-theme-nvim.sh input.conf output.lua
+./utils/init-project my-python-project
 ```
 
-### Project Templates
-
-#### Python Template
-- Project structure
+Creates:
 - Virtual environment setup
-- Testing configuration
+- `requirements.txt`
+- Testing structure
 - README template
-- Requirements management
+- `.gitignore`
 
-#### Go Template
-- Standard layout
-- Go modules
-- Basic main package
-- Test setup
+### Go Project
+
+```bash
+./utils/init-project -l go my-go-project
+```
+
+Creates:
+- Go modules setup
+- `main.go`
+- Standard project layout
 - Makefile
+- README template
 
-### Editor Configuration
+## Troubleshooting
 
-#### VSCode Configuration
-- Optimized settings
-- Custom snippets
-- Keyboard shortcuts
-- Recommended extensions
-- Automatic theme conversion from Kitty themes
-- Integrated theme extension management
-- Symlinked configuration for version control
-- Automatic backup of existing configurations
-- User-specific theme publisher ID
+### chezmoi Issues
 
 ```bash
-# Set up VSCode configuration
-./setup/setup-vscode.sh
+# Verify chezmoi state
+chezmoi doctor
 
-# Features:
-- Symlinks settings.json to repository
-- Sets up custom theme extension
-- Preserves existing extensions
-- Creates backups of existing configs
-- Manages theme conversion and updates
+# See what chezmoi would apply
+chezmoi diff
+
+# Force apply (overwrites local changes)
+chezmoi apply --force
+
+# Reset to repository state
+chezmoi update --force
 ```
 
-#### Theme Management
+### mise Issues
+
 ```bash
-# Convert Kitty theme to VSCode theme
-./utils/scripts/convert-kitty-theme-vscode.sh
+# Diagnose mise setup
+mise doctor
 
-# Features:
-- Extracts colors from Kitty themes
-- Generates VSCode-compatible theme files
-- Creates proper extension structure
-- Uses current user as publisher ID
-- Sets up bidirectional symlinks
-- Preserves existing themes
-- Creates automatic backups
+# Reinstall tool
+mise uninstall node@22
+mise install node@22
+
+# Clear cache
+rm -rf ~/.cache/mise
 ```
 
-The theme conversion scripts automatically:
-- Extract colors from Kitty themes
-- Generate compatible theme files
-- Set up proper symlinks for version control
-- Install as VSCode extension (for VSCode themes)
-- Update tab bar colors (for Neovim themes)
-- Create backups of existing configurations
-- Use system username as publisher ID
-- Enable bidirectional editing (changes reflect in both locations)
+### Shell Not Loading Configuration
 
-#### Neovim Configuration
-Modern setup with:
-- LSP support (Mason)
-- Treesitter
-- Telescope
-- Git integration
-- Copilot
-- Custom themes with Kitty theme sync
-- Completion (nvim-cmp)
-
-Plugin directory structure:
-```
-lua/tucker/plugins/
-├── lsp/                  # Language Server Protocol and completion
-│   ├── mason-tool-installer.lua  # LSP and tool management
-│   ├── lspconfig.lua            # LSP configuration
-│   ├── completion.lua           # Completion setup
-│   ├── blink.lua               # LSP UI enhancements
-│   └── linting.lua             # Code linting
-├── navigation/            # File and code navigation
-│   ├── telescope.lua     # Fuzzy finder
-│   ├── harpoon.lua      # File navigation
-│   └── oil.lua          # File explorer
-├── editor/               # Core editing features
-│   ├── which-key.lua    # Keybinding help
-│   ├── treesitter.lua   # Syntax highlighting
-│   ├── undotree.lua     # Undo history
-│   └── cloak.lua        # Security features
-├── ui/                   # Visual elements
-│   ├── colorscheme.lua  # Theme configuration
-│   ├── statusline.lua   # Status line
-│   ├── nvim-colorizer.lua # Color highlighting
-│   └── ghostty.lua      # Terminal integration
-└── integrations/         # External tool integration
-    ├── git.lua          # Git commands and status
-    ├── markdown-preview.lua # Markdown preview
-    ├── tmux-navigator.lua # Tmux window navigation
-    ├── db.lua           # Database tools
-    └── obsidian.lua     # Note taking
-```
-
-### Terminal Configuration
-- Kitty terminal setup
-- Multiple themes
-- Alacritty config
-- Starship prompt
-- Tmux configuration with TPM (Tmux Plugin Manager)
-  - Automatic plugin installation
-  - Sensible defaults
-  - Session management (resurrect & continuum)
-  - System clipboard integration (yank)
-
-### yazi Setup
-1. Install yazi
 ```bash
-brew install yazi ffmpegthumbnailer ffmpeg sevenzip jq poppler fd ripgrep fzf zoxide imagemagick font-symbols-only-nerd-font
+# Check if shell sources the right files
+echo $SHELL
+
+# Reload shell configuration
+source ~/.zshrc  # or ~/.bashrc
+
+# Check for errors in shell config
+zsh -x  # or bash -x
 ```
 
-## Development
+## Updating
 
-### Prerequisites
-- macOS (primary support)
-- Git
-- Bash 3.2+ or Zsh
-
-### Installation
-
-1. Clone the repository with submodules:
 ```bash
-git clone --recursive https://github.com/YOUR_USERNAME/boilerplate.git
+# Update dotfiles from repository
+chezmoi update
+
+# Update Homebrew packages
+brew update && brew upgrade
+
+# Update mise tools
+mise upgrade
 ```
 
-2. If you've already cloned the repository, initialize submodules:
-```bash
-git submodule update --init --recursive
-```
+## Migration from Old Setup
 
-3. Run the setup script:
-```bash
-./utils/init-mac
-```
+If you previously used manual symlinks or GNU Stow:
 
-### Submodules
-This repository uses Git submodules for certain components:
-- TPM (Tmux Plugin Manager) - `config/tmux/plugins/tpm`
+1. **Backup existing dotfiles**: `tar czf ~/dotfiles-backup.tar.gz ~/.*rc ~/.*profile`
+2. **Remove old symlinks**: `rm ~/.zshrc ~/.bashrc` (etc.)
+3. **Initialize chezmoi**: `chezmoi init --apply`
+4. **Verify everything works**: Test shell, tmux, nvim
+5. **Clean up**: Remove old dotfile repositories after confirming
 
-Update TPM after installation:
-```bash
-git submodule update --init --recursive
-```
+## Resources
 
-To update submodules to their latest versions:
-```bash
-git submodule update --remote
-```
-
-### Contributing
-1. Fork the repository
-2. Create feature branch
-3. Commit changes
-4. Push to branch
-5. Open Pull Request
-
-### Adding New Scripts
-1. Follow naming convention
-2. Add license header
-3. Include documentation
-4. Update README
-5. Update lexicon.md
+- [chezmoi Documentation](https://chezmoi.io/)
+- [mise Documentation](https://mise.jdx.dev/)
+- [Neovim Configuration](./home/dot_config/nvim/)
+- [Tmux Plugin Manager](https://github.com/tmux-plugins/tpm)
 
 ## License
 

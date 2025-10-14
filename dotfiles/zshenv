@@ -1,9 +1,0 @@
-export XDG_CONFIG_HOME="$HOME/.config"
-export ZDOTDIR="$XDG_CONFIG_HOME/zsh"
-
-CARGODIR="$HOME/.cargo"
-if [ -d "$CARGODIR" ]; then
-    . "$CARGODIR/env"
-fi
-# Starship prompt configuration
-export STARSHIP_CONFIG="$HOME/.config/starship/starship.toml"

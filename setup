@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Bootstrap script for dotfiles setup
+# Installs chezmoi and applies dotfiles configuration
+
+set -euo pipefail
+
+echo "Starting dotfiles setup..."
+
+# Set zsh as default shell if available
+if command -v zsh >/dev/null 2>&1; then
+    if [ "$SHELL" != "$(command -v zsh)" ]; then
+        echo "Setting zsh as default shell..."
+        sudo chsh -s "$(command -v zsh)" "$USER"
+        echo "Default shell set to zsh (restart shell to apply)"
+    else
+        echo "zsh is already the default shell"
+    fi
+else
+    echo "WARNING: zsh not found, skipping shell change"
+fi
+
+# Install and run chezmoi
+DOTFILES_REPO="https://github.com/btuckerc/boilerplate.git"
+
+if command -v chezmoi >/dev/null 2>&1; then
+    echo "chezmoi already installed"
+    echo "Applying dotfiles..."
+    chezmoi init --apply "$DOTFILES_REPO"
+    exit 0
+fi
+
+# Try installing via mise if available
+if command -v mise >/dev/null 2>&1; then
+    echo "Installing chezmoi via mise..."
+    mise use --global chezmoi@latest
+    eval "$(mise activate bash)"
+    chezmoi init --apply "$DOTFILES_REPO"
+    exit 0
+fi
+
+# Fallback: install chezmoi directly
+echo "Installing chezmoi..."
+if command -v brew >/dev/null 2>&1; then
+    brew install chezmoi
+elif command -v apt-get >/dev/null 2>&1; then
+    sudo apt-get install -y chezmoi
+else
+    # Use chezmoi's install script as last resort
+    sh -c "$(curl -fsLS get.chezmoi.io)" -- init --apply "$DOTFILES_REPO"
+    exit 0
+fi
+
+echo "Applying dotfiles..."
+chezmoi init --apply "$DOTFILES_REPO"
+
+echo "Setup complete! Restart your shell or run: exec $SHELL"

@@ -6,17 +6,74 @@
 # mise also supports idiomatic version files like .node-version, .python-version, etc.
 
 [tools]
-# Language runtimes
+# === Core Tools via aqua backend (preferred, most secure) ===
+"aqua:neovim/neovim" = "latest"       # Text editor with full LSP support
+"aqua:cli/cli" = "latest"             # GitHub CLI (gh) - verified attestations
+"aqua:BurntSushi/ripgrep" = "latest"  # Fast grep (rg)
+
+# === Shell & Prompt ===
+"ubi:twpayne/chezmoi" = "latest"      # Dotfile manager
+"ubi:starship/starship" = "latest"    # Cross-shell prompt
+"ubi:ajeetdsouza/zoxide" = "latest"   # Smart cd command
+
+# === CLI Utilities ===
+"ubi:junegunn/fzf" = "latest"         # Fuzzy finder
+"ubi:sharkdp/bat" = "latest"          # Cat with syntax highlighting
+"ubi:sharkdp/fd" = "latest"           # Fast find alternative
+"ubi:sxyazi/yazi" = "latest"          # Terminal file manager
+"ubi:jqlang/jq" = "latest"            # JSON processor
+"ubi:charmbracelet/gum" = "latest"    # Glamorous shell scripts
+
+# === Development Tools ===
+"ubi:jesseduffield/lazygit" = "latest" # Git TUI (aliased as 'lg')
+"ubi:tree-sitter/tree-sitter" = "latest" # Parser generator (for nvim)
+"ubi:carapace-sh/carapace-bin" = { version = "latest", exe = "carapace" } # Shell completions
+
+# === Terminal Multiplexer via asdf (compiles from source) ===
+"asdf:mise-plugins/mise-tmux" = "latest" # tmux - terminal multiplexer
+
+# === Language Servers (LSP) ===
+# Installed via mise instead of Mason.nvim for unified tool management
+"aqua:LuaLS/lua-language-server" = "latest"       # Lua LSP (lua_ls)
+"aqua:rust-lang/rust-analyzer" = "latest"         # Rust LSP
+"aqua:hashicorp/terraform-ls" = "latest"          # Terraform LSP
+"npm:typescript-language-server" = "latest"       # TypeScript/JavaScript LSP (ts_ls)
+"npm:typescript" = "latest"                       # Required for typescript-language-server
+"npm:pyright" = "latest"                          # Python LSP
+"npm:yaml-language-server" = "latest"             # YAML LSP (yamlls)
+"npm:vscode-langservers-extracted" = "latest"     # JSON, HTML, CSS, ESLint LSPs (jsonls)
+"npm:bash-language-server" = "latest"             # Bash LSP (bashls)
+"npm:dockerfile-language-server-nodejs" = "latest" # Docker LSP (dockerls)
+"go:golang.org/x/tools/gopls" = "latest"          # Go LSP
+
+# === Formatters ===
+# Code formatters for various languages
+"npm:prettier" = "latest"                         # JS/TS/JSON/YAML/Markdown formatter
+"pipx:black" = "latest"                           # Python formatter
+"aqua:JohnnyMorganz/StyLua" = "latest"            # Lua formatter
+"aqua:mvdan/gofumpt" = "latest"                   # Go formatter (stricter than gofmt)
+"aqua:mvdan/sh" = "latest"                        # Shell formatter (shfmt)
+"go:golang.org/x/tools/cmd/goimports" = "latest"  # Go imports organizer
+
+# === Tools requiring Homebrew/package manager (not in mise registry) ===
+# git - Install: brew install git (macOS) or apt install git (Linux)
+# eza - Install: brew install eza (macOS) or cargo install eza (Linux)
+# btop - Install: brew install btop (macOS) - no macOS binaries in GitHub releases
+
+# === Language Runtimes ===
 # Use 'lts' for Long Term Support versions, or specify exact versions
 node = "lts"              # Latest LTS version of Node.js
-python = "3.13"           # Python 3.13.x (matches current system)
-go = "1.25"               # Go 1.25.x (matches current system)
+python = "3.13"           # Python 3.13.x
+go = "1.25"               # Go 1.25.x
 
-# Additional tools can be added here
-# Examples:
-# rust = "latest"
+# === Optional Tools ===
+# Uncomment as needed:
+# rust = "latest"         # Rust language (includes rustfmt and cargo-fmt)
+# terraform = "latest"    # Terraform (includes terraform fmt)
 # deno = "latest"
 # bun = "latest"
+# "ubi:dandavison/delta" = "latest"  # Better git diff
+# "ubi:extrawurst/gitui" = "latest"  # Alternative git TUI
 
 [env]
 # Global environment variables (if needed)

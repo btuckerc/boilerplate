@@ -5,90 +5,105 @@ Modern, portable dotfiles managed with [chezmoi](https://chezmoi.io) and [mise](
 ## Features
 
 - **Cross-platform**: macOS (zsh) and Linux (bash) support with shared configuration
-- **Declarative package management**: Brewfile for reproducible Homebrew setups
-- **Version management**: mise for language runtime versions (node, python, go)
-- **Automated setup**: One command to apply all configurations
+- **Tool management**: mise installs and manages all required tools automatically
+- **Automated setup**: One command to bootstrap everything
 - **Idempotent**: Safe to run repeatedly
 - **OS-aware templates**: Platform-specific configurations where needed
 - **No duplication**: Shared POSIX shell configuration sourced by all shells
+- **Optional packages**: Brewfile available for additional tools (not required)
 
 ## Quick Start
 
-### Prerequisites
+### One-Line Setup
 
 ```bash
-# macOS
-xcode-select --install
-
-# Install chezmoi and mise
-brew install chezmoi mise
+curl -fsSL https://raw.githubusercontent.com/btuckerc/boilerplate/main/setup | bash
 ```
 
-### Install Dotfiles
+Or clone and run:
 
 ```bash
-# Initialize chezmoi with this repository
-chezmoi init --apply https://github.com/btuckerc/boilerplate.git
+git clone https://github.com/btuckerc/boilerplate.git
+cd boilerplate
+./setup
 ```
 
-That's it! This will:
-1. Clone the repository to `~/.local/share/chezmoi`
-2. Install Homebrew packages from Brewfile
+That's it! The setup script will:
+1. Set zsh as your default shell (if available)
+2. Install chezmoi (via mise, brew, or direct download)
 3. Apply all dotfiles to your home directory
-4. Install mise-managed tools (node, python, go)
+4. Install mise-managed tools automatically (chezmoi, starship, fzf, ripgrep, bat, eza, fd, yazi, node, python, go)
 5. Set up shell configuration
 
-### Manual Setup (if you already have the repo)
+### Manual Setup
 
 ```bash
-# If you already cloned this repo locally
+# If you already have chezmoi and mise installed
+chezmoi init --apply https://github.com/btuckerc/boilerplate.git
+
+# Or if you cloned this repo locally
 cd /path/to/boilerplate
+chezmoi init --source="$(pwd)" --apply
 
-# Initialize chezmoi pointing to this directory
-chezmoi init --source="$(pwd)"
-
-# Preview what would be applied (dry run)
-chezmoi diff
-
-# Apply dotfiles
-chezmoi apply
-
-# Install mise-managed tools
+# Install all mise-managed tools
 mise install
 ```
 
-## What Gets Installed
+### What Gets Installed Automatically
+
+mise will automatically install these essential tools:
+- **chezmoi** - Dotfile manager
+- **starship** - Cross-shell prompt
+- **fzf** - Fuzzy finder
+- **ripgrep** - Fast search
+- **bat** - Cat with syntax highlighting
+- **eza** - Modern ls replacement
+- **fd** - Fast find alternative
+- **yazi** - Terminal file manager
+- **node** - Node.js (LTS)
+- **python** - Python 3.13
+- **go** - Go 1.25
+
+## Configuration Included
 
 ### Shell Configuration
 - **Shared config**: `~/.config/shell/common.sh` - POSIX-compatible configuration
 - **Zsh**: `~/.zshrc`, `~/.zprofile`, `~/.zshenv` with macOS-specific enhancements
 - **Bash**: `~/.bashrc`, `~/.bash_profile` with Linux compatibility
-- **Starship**: Modern, minimal prompt configuration
-
-### Tool Versions (via mise)
-- **Node.js**: LTS version
-- **Python**: 3.13
-- **Go**: 1.25
-
-### Applications (via Brewfile)
-- Terminal: kitty, ghostty, tmux, starship
-- Editors: neovim (with full configuration)
-- CLI tools: yazi, btop, fzf, ripgrep, bat, eza, and more
-- Development: git, gh, docker, mise, chezmoi
+- **Starship**: Modern, minimal prompt
+- **Git**: `~/.gitconfig` with aliases and sensible defaults
 
 ### Editor Configurations
 - **Neovim**: Full LSP setup with plugins (Treesitter, Telescope, Copilot, etc.)
 - **VSCode**: Settings and custom snippets
 - **tmux**: With TPM (Tmux Plugin Manager) and sensible defaults
 
+### Optional: Additional Packages (Brewfile)
+
+A `Brewfile` is included for additional applications you may want:
+- GUI apps: Docker, Ghostty, Kitty
+- System tools: btop, tmux, gh, jq
+- Development: Additional language tools
+
+To install Brewfile packages (optional):
+```bash
+brew bundle install --file=~/Brewfile
+# Or from the repo
+brew bundle install --file=~/.local/share/chezmoi/Brewfile
+```
+
+**Note**: Brewfile is NOT automatically installed. Essential CLI tools come from mise.
+
 ## Directory Structure
 
 ```
 .
+├── setup                           # Bootstrap script (main entry point)
 ├── .chezmoiroot                    # Points chezmoi to home/ directory
-├── Brewfile                        # Homebrew packages (also in home/)
+├── Brewfile                        # Optional Homebrew packages
 ├── home/                           # chezmoi source directory
 │   ├── .chezmoiignore              # Files to exclude from home directory
+│   ├── dot_gitconfig               # Git configuration
 │   ├── dot_zshrc.tmpl              # Zsh configuration (OS-aware)
 │   ├── dot_bashrc.tmpl             # Bash configuration (OS-aware)
 │   ├── dot_bash_profile.tmpl       # Bash profile
@@ -98,7 +113,7 @@ mise install
 │   │   ├── shell/
 │   │   │   └── common.sh           # Shared POSIX shell configuration
 │   │   ├── mise/
-│   │   │   └── config.toml         # Tool version management
+│   │   │   └── config.toml         # Tool management (primary)
 │   │   ├── nvim/                   # Neovim configuration
 │   │   ├── tmux/                   # Tmux configuration
 │   │   ├── kitty/                  # Kitty terminal config
@@ -108,9 +123,7 @@ mise install
 │   │   ├── btop/                   # btop system monitor config
 │   │   └── vscode/                 # VSCode settings & snippets
 │   ├── dot_local/bin/              # Local executables
-│   ├── run_once_before_01-install-prereqs.sh.tmpl
-│   ├── run_onchange_before_02-install-packages-darwin.sh.tmpl
-│   └── run_onchange_before_03-install-packages-linux.sh.tmpl
+│   └── run_once_before_01-install-prereqs.sh.tmpl
 ├── templates/                      # Project templates
 │   ├── go/                         # Go project template
 │   └── python/                     # Python project template
@@ -166,9 +179,23 @@ mise ls-remote node
 
 ### Managing Packages
 
+**mise** (primary tool manager):
 ```bash
-# Install/update packages from Brewfile
-brew bundle install --file=~/Brewfile
+# Install all tools from mise config
+mise install
+
+# Add a new tool globally
+mise use --global ripgrep@latest
+
+# Update mise config
+chezmoi edit ~/.config/mise/config.toml
+chezmoi apply
+```
+
+**Brewfile** (optional supplementary packages):
+```bash
+# Install packages from Brewfile (optional)
+brew bundle install --file=~/.local/share/chezmoi/Brewfile
 
 # Update Brewfile with currently installed packages
 cd ~/.local/share/chezmoi
@@ -203,13 +230,16 @@ To avoid duplicating shell configuration between bash and zsh, common functional
 
 Both `~/.zshrc` and `~/.bashrc` source this file, then add shell-specific features.
 
-### Automated Scripts
+### Tool Installation
 
-- **run_once**: Executes once (tracked by chezmoi state)
-- **run_onchange**: Executes when file content changes
-- **before**: Runs before applying dotfiles
+All essential tools are managed by **mise** and installed automatically when you run:
+```bash
+mise install
+```
 
-Example: `run_onchange_before_02-install-packages-darwin.sh.tmpl` runs when Brewfile changes, ensuring packages stay up-to-date.
+mise reads `~/.config/mise/config.toml` and installs all defined tools. Tools are installed to `~/.local/share/mise/installs/` and automatically added to your PATH.
+
+No manual installation required!
 
 ## Cross-Platform Support
 

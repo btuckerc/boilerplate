@@ -1,36 +1,45 @@
 {{- if eq .chezmoi.os "darwin" -}}
 #!/usr/bin/env bash
 # Managed by chezmoi - https://github.com/btuckerc/boilerplate
-# Install Homebrew if not present (macOS)
+# Install Homebrew and essential tools (macOS)
 
 set -euo pipefail
 
+# Install Homebrew if not present
 if ! command -v brew >/dev/null 2>&1; then
-    echo "📦 Installing Homebrew..."
+    echo "Installing Homebrew..."
     /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
     # Set up Homebrew in PATH for Apple Silicon
     if [[ $(uname -m) == "arm64" ]]; then
-        echo "🔧 Setting up Homebrew for Apple Silicon..."
+        echo "Setting up Homebrew for Apple Silicon..."
         eval "$(/opt/homebrew/bin/brew shellenv)"
     else
-        echo "🔧 Setting up Homebrew for Intel Mac..."
+        echo "Setting up Homebrew for Intel Mac..."
         eval "$(/usr/local/bin/brew shellenv)"
     fi
 
-    echo "✅ Homebrew installed successfully!"
+    echo "Homebrew installed successfully"
 else
-    echo "✅ Homebrew already installed"
+    echo "Homebrew already installed"
 fi
+
+# Install minimal tools via Homebrew (not available in mise registry)
+echo "Installing essential tools via Homebrew..."
+brew install git eza btop mise
+
+echo "Essential tools installed successfully"
+echo "Run 'mise install' to install all remaining tools automatically"
+echo "NOTE: mise will install neovim, gh, tmux, ripgrep, and 15+ other tools"
 
 {{- else if eq .chezmoi.os "linux" -}}
 #!/usr/bin/env bash
 # Managed by chezmoi - https://github.com/btuckerc/boilerplate
-# Install basic prerequisites (Linux)
+# Install essential prerequisites (Linux)
 
 set -euo pipefail
 
-echo "📦 Installing basic prerequisites..."
+echo "Installing essential tools..."
 
 if command -v apt >/dev/null 2>&1; then
     echo "Detected apt (Debian/Ubuntu)"
@@ -46,9 +55,13 @@ elif command -v pacman >/dev/null 2>&1; then
     sudo pacman -Sy --noconfirm curl git base-devel
 
 else
-    echo "⚠️  Unknown package manager. Please install curl and git manually."
+    echo "WARNING: Unknown package manager. Please install tools manually."
+    echo "Required: git, build tools"
     exit 1
 fi
 
-echo "✅ Basic tools installed successfully!"
+echo "Essential tools installed successfully"
+echo "INFO: Install mise to complete setup: curl https://mise.run | sh"
+echo "INFO: Then run 'mise install' to install all remaining tools automatically"
+echo "NOTE: mise will install neovim, gh, tmux, ripgrep, and 15+ other tools"
 {{- end -}}

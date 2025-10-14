@@ -1,43 +1,15 @@
 -- LSP configuration, formatting, and language servers
--- Uses native vim.lsp.config (Neovim 0.11+) for cleaner setup
+-- Uses native vim.lsp.config (Neovim 0.11+) with mise-managed LSP servers
+-- LSP servers are installed via mise instead of Mason for unified tool management
 
 return {
-    -- Mason for LSP server management
+    -- Native LSP configuration (Neovim 0.11+)
     {
-        "williamboman/mason.nvim",
-        cmd = "Mason",
-        build = ":MasonUpdate",
-        config = function()
-            require("mason").setup({
-                ui = {
-                    border = "rounded",
-                },
-            })
-        end,
-    },
-
-    -- Mason LSP integration
-    {
-        "williamboman/mason-lspconfig.nvim",
+        "neovim/nvim-lspconfig",
         event = { "BufReadPre", "BufNewFile" },
-        dependencies = { "williamboman/mason.nvim" },
         config = function()
-            require("mason-lspconfig").setup({
-                ensure_installed = {
-                    "lua_ls",
-                    "ts_ls",
-                    "pyright",
-                    "gopls",
-                    "rust_analyzer",
-                    "terraformls",
-                    "yamlls",
-                    "jsonls",
-                    "bashls",
-                    "dockerls",
-                },
-            })
-
-            -- Native LSP configuration
+            -- All LSP servers are installed via mise and available in PATH
+            -- See ~/.config/mise/config.toml for LSP installation
             local capabilities = vim.lsp.protocol.make_client_capabilities()
 
             -- Enable native completion
@@ -86,7 +58,9 @@ return {
             })
 
             -- Configure individual LSP servers using native vim.lsp.config
+            -- All commands are installed via mise and available in PATH
             vim.lsp.config("lua_ls", {
+                cmd = { "lua-language-server" },
                 settings = {
                     Lua = {
                         runtime = { version = "LuaJIT" },
@@ -104,6 +78,7 @@ return {
             })
 
             vim.lsp.config("ts_ls", {
+                cmd = { "typescript-language-server", "--stdio" },
                 settings = {
                     typescript = {
                         inlayHints = {
@@ -120,6 +95,7 @@ return {
             })
 
             vim.lsp.config("pyright", {
+                cmd = { "pyright-langserver", "--stdio" },
                 settings = {
                     python = {
                         analysis = {
@@ -132,6 +108,7 @@ return {
             })
 
             vim.lsp.config("gopls", {
+                cmd = { "gopls" },
                 settings = {
                     gopls = {
                         analyses = {
@@ -144,6 +121,7 @@ return {
             })
 
             vim.lsp.config("rust_analyzer", {
+                cmd = { "rust-analyzer" },
                 settings = {
                     ["rust-analyzer"] = {
                         cargo = {
@@ -157,6 +135,7 @@ return {
             })
 
             vim.lsp.config("yamlls", {
+                cmd = { "yaml-language-server", "--stdio" },
                 settings = {
                     yaml = {
                         schemas = {
@@ -169,6 +148,7 @@ return {
             })
 
             vim.lsp.config("jsonls", {
+                cmd = { "vscode-json-language-server", "--stdio" },
                 settings = {
                     json = {
                         schemas = require("schemastore").json.schemas(),
@@ -178,10 +158,32 @@ return {
             })
 
             -- Basic configs for other servers
-            local basic_servers = { "terraformls", "bashls", "dockerls" }
-            for _, server in ipairs(basic_servers) do
-                vim.lsp.config(server, {})
-            end
+            vim.lsp.config("terraformls", {
+                cmd = { "terraform-ls", "serve" },
+            })
+
+            vim.lsp.config("bashls", {
+                cmd = { "bash-language-server", "start" },
+            })
+
+            vim.lsp.config("dockerls", {
+                cmd = { "docker-langserver", "--stdio" },
+            })
+
+            -- Enable all configured LSP servers
+            -- Servers are automatically started when opening matching filetypes
+            vim.lsp.enable({
+                "lua_ls",
+                "ts_ls",
+                "pyright",
+                "gopls",
+                "rust_analyzer",
+                "terraformls",
+                "yamlls",
+                "jsonls",
+                "bashls",
+                "dockerls",
+            })
         end,
     },
 

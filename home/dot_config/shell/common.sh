@@ -153,6 +153,15 @@ nn() {
 
 # === Conditional Tool Loading ===
 
+# Initialize zoxide (smart cd) if available
+if command -v zoxide >/dev/null 2>&1; then
+    if [ -n "$ZSH_VERSION" ]; then
+        eval "$(zoxide init zsh)"
+    elif [ -n "$BASH_VERSION" ]; then
+        eval "$(zoxide init bash)"
+    fi
+fi
+
 # Load FZF if available (shell-specific files)
 if [ -n "$ZSH_VERSION" ]; then
     [ -f "$XDG_CONFIG_HOME/fzf/.fzf.zsh" ] && . "$XDG_CONFIG_HOME/fzf/.fzf.zsh"

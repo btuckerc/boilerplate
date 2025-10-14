@@ -1,0 +1,36 @@
+# Managed by chezmoi - files to ignore when applying to $HOME
+# https://chezmoi.io/reference/special-files/chezmoiignore/
+
+# Documentation and non-dotfile content
+README.md
+LICENSE
+*.md
+
+# Binary and media files
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.gif
+
+# Backup files
+*.bak
+*backup*
+*.backup.*
+
+# macOS system files
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Brewfile - we manage it but don't copy to ~
+# It lives at ~/.local/share/chezmoi/home/Brewfile for reference
+Brewfile
+
+# Backup directories from nvim
+nvim.backup.*
+
+# Temporary files
+*.tmp
+*.temp
+*~

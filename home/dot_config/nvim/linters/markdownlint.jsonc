@@ -1,0 +1,45 @@
+{
+    // Default state for all rules
+    "default": true,
+    // Disable rules that conflict with Dataview syntax
+    "MD040": false, // Fenced code blocks should have a language specified
+    "MD031": false, // Fenced code blocks should be surrounded by blank lines
+    "MD022": false, // Headings should be surrounded by blank lines
+    "MD041": false, // First line in a file should be a top-level heading
+    "MD012": false, // Multiple consecutive blank lines
+    "MD026": false, // Trailing punctuation in heading
+    "MD009": false, // Trailing spaces
+    // Configure rules for Dataview
+    "code-block-style": {
+        "style": "fenced"
+    },
+    // Allow custom syntax
+    "MD033": false, // Allow inline HTML (needed for some Obsidian syntax)
+    "MD003": { // Heading style
+        "style": "atx"
+    },
+    // Customize line length
+    "MD013": false, // Disable line length checking
+    // Configure list style
+    "MD004": { // Unordered list style
+        "style": "dash"
+    },
+    "MD007": { // Unordered list indentation
+        "indent": 2
+    },
+    // Allow multiple headings with the same content
+    "MD024": false,
+    // Configure emphasis style
+    "MD049": { // Emphasis style should be consistent
+        "style": "asterisk"
+    },
+    // Ignore code blocks with specific languages
+    "fenced-code-language": {
+        "allowed_languages": [
+            "dataview",
+            "dataviewjs",
+            "calendar-nav",
+            "task"
+        ]
+    }
+}

@@ -1,0 +1,63 @@
+{{- if eq .chezmoi.os "linux" -}}
+#!/usr/bin/env bash
+# Managed by chezmoi - https://github.com/btuckerc/boilerplate
+# Install packages on Linux
+# This script runs whenever it changes
+
+set -euo pipefail
+
+echo "📦 Installing Linux packages..."
+
+# Detect package manager and install packages
+if command -v apt >/dev/null 2>&1; then
+    echo "📋 Using apt (Debian/Ubuntu)"
+    sudo apt update
+    sudo apt install -y \
+        bat \
+        btop \
+        fd-find \
+        fzf \
+        git \
+        neovim \
+        ripgrep \
+        tmux \
+        zoxide \
+        zsh \
+        zsh-syntax-highlighting
+
+elif command -v dnf >/dev/null 2>&1; then
+    echo "📋 Using dnf (Fedora/RHEL)"
+    sudo dnf install -y \
+        bat \
+        btop \
+        fd-find \
+        fzf \
+        git \
+        neovim \
+        ripgrep \
+        tmux \
+        zoxide \
+        zsh
+
+elif command -v pacman >/dev/null 2>&1; then
+    echo "📋 Using pacman (Arch Linux)"
+    sudo pacman -S --noconfirm \
+        bat \
+        btop \
+        fd \
+        fzf \
+        git \
+        neovim \
+        ripgrep \
+        tmux \
+        zoxide \
+        zsh \
+        zsh-syntax-highlighting
+
+else
+    echo "⚠️  Unknown package manager. Skipping package installation."
+    exit 0
+fi
+
+echo "✅ Linux packages installed successfully!"
+{{- end -}}

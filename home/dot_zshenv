@@ -1,0 +1,22 @@
+#!/bin/zsh
+# Managed by chezmoi - https://github.com/btuckerc/boilerplate
+# Zsh environment configuration
+# This file is sourced on all invocations of the shell (login, interactive, scripts)
+# Keep this minimal - most config should go in .zshrc
+
+# XDG Base Directory Specification
+export XDG_CONFIG_HOME="$HOME/.config"
+export XDG_DATA_HOME="$HOME/.local/share"
+export XDG_CACHE_HOME="$HOME/.cache"
+
+# Set ZDOTDIR for zsh config files
+export ZDOTDIR="$XDG_CONFIG_HOME/zsh"
+
+# Starship prompt configuration
+export STARSHIP_CONFIG="$HOME/.config/starship/starship.toml"
+
+# Load Cargo environment if available
+CARGODIR="$HOME/.cargo"
+if [ -d "$CARGODIR" ]; then
+    . "$CARGODIR/env"
+fi

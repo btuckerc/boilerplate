@@ -1,0 +1,54 @@
+{{- if eq .chezmoi.os "darwin" -}}
+#!/usr/bin/env bash
+# Managed by chezmoi - https://github.com/btuckerc/boilerplate
+# Install Homebrew if not present (macOS)
+
+set -euo pipefail
+
+if ! command -v brew >/dev/null 2>&1; then
+    echo "📦 Installing Homebrew..."
+    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+    # Set up Homebrew in PATH for Apple Silicon
+    if [[ $(uname -m) == "arm64" ]]; then
+        echo "🔧 Setting up Homebrew for Apple Silicon..."
+        eval "$(/opt/homebrew/bin/brew shellenv)"
+    else
+        echo "🔧 Setting up Homebrew for Intel Mac..."
+        eval "$(/usr/local/bin/brew shellenv)"
+    fi
+
+    echo "✅ Homebrew installed successfully!"
+else
+    echo "✅ Homebrew already installed"
+fi
+
+{{- else if eq .chezmoi.os "linux" -}}
+#!/usr/bin/env bash
+# Managed by chezmoi - https://github.com/btuckerc/boilerplate
+# Install basic prerequisites (Linux)
+
+set -euo pipefail
+
+echo "📦 Installing basic prerequisites..."
+
+if command -v apt >/dev/null 2>&1; then
+    echo "Detected apt (Debian/Ubuntu)"
+    sudo apt update
+    sudo apt install -y curl git build-essential
+
+elif command -v dnf >/dev/null 2>&1; then
+    echo "Detected dnf (Fedora/RHEL)"
+    sudo dnf install -y curl git gcc gcc-c++ make
+
+elif command -v pacman >/dev/null 2>&1; then
+    echo "Detected pacman (Arch Linux)"
+    sudo pacman -Sy --noconfirm curl git base-devel
+
+else
+    echo "⚠️  Unknown package manager. Please install curl and git manually."
+    exit 1
+fi
+
+echo "✅ Basic tools installed successfully!"
+{{- end -}}

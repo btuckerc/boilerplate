@@ -1,0 +1,56 @@
+#!/bin/bash
+# Managed by chezmoi - https://github.com/btuckerc/boilerplate
+# Bash configuration file
+
+# Source shared POSIX-compatible configuration
+[ -f "$HOME/.config/shell/common.sh" ] && . "$HOME/.config/shell/common.sh"
+
+# === Bash-Specific Configuration ===
+
+{{- if eq .chezmoi.os "darwin" }}
+# === macOS-specific Configuration ===
+
+# Silence bash deprecation warning (macOS prefers zsh)
+export BASH_SILENCE_DEPRECATION_WARNING=1
+
+# Load Homebrew
+eval "$(/opt/homebrew/bin/brew shellenv)"
+{{- else if eq .chezmoi.os "linux" }}
+# === Linux-specific Configuration ===
+
+# Load Homebrew if installed (Linuxbrew)
+[ -d "/home/linuxbrew/.linuxbrew" ] && eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+
+# Enable color support for ls
+alias ls='ls --color=auto'
+
+# Load bash completion if available
+if [ -r "/usr/share/bash-completion/bash_completion" ]; then
+    . "/usr/share/bash-completion/bash_completion"
+fi
+{{- end }}
+
+# === Mise activation ===
+if command -v mise >/dev/null; then
+    eval "$(mise activate bash)"
+fi
+
+# === Starship prompt ===
+if command -v starship >/dev/null; then
+    export STARSHIP_CONFIG="$HOME/.config/starship/starship.toml"
+    eval "$(starship init bash)"
+fi
+
+# === Bash Options ===
+shopt -s checkwinsize    # Update LINES and COLUMNS after each command
+shopt -s histappend      # Append to history file, don't overwrite
+
+# === History Configuration ===
+export HISTFILESIZE=10000
+export HISTSIZE=5000
+export HISTCONTROL=ignoreboth
+export HISTTIMEFORMAT="%F %T "
+export PROMPT_COMMAND="history -a; history -c; history -r; $PROMPT_COMMAND"
+
+# Logging
+echo "$(date): Bash shell loaded" >> "$LOGFILE"

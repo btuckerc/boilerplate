@@ -1,0 +1,19 @@
+background-opacity=0.6
+font-size=20
+theme=current-theme
+font-family = ""
+font-family = "SF Mono"
+background-blur-radius=40
+window-padding-y=0,0
+window-padding-balance=true
+window-height=24
+window-width=80
+confirm-close-surface=false
+macos-window-shadow=false
+macos-titlebar-style=hidden
+macos-icon=custom-style
+macos-icon-frame=plastic
+macos-option-as-alt=true
+keybind = super+r=reload_config
+keybind = super+i=inspector:toggle
+macos-non-native-fullscreen = true

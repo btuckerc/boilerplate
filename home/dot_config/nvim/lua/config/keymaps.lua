@@ -2,8 +2,6 @@
 
 local map = vim.keymap.set
 
--- Escape from insert mode (explicit mapping to ensure it works)
-map("i", "<Esc>", "<ESC>", { desc = "Exit insert mode with Escape" })
 -- Additional escape options
 map("i", "jk", "<ESC>", { desc = "Exit insert mode with jk" })
 map("i", "kj", "<ESC>", { desc = "Exit insert mode with kj" })

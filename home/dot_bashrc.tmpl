@@ -19,10 +19,28 @@ eval "$(/opt/homebrew/bin/brew shellenv)"
 # === Linux-specific Configuration ===
 
 # Load Homebrew if installed (Linuxbrew)
-[ -d "/home/linuxbrew/.linuxbrew" ] && eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+# Commented out - not available on this system
+# [ -d "/home/linuxbrew/.linuxbrew" ] && eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
 
 # Enable color support for ls
 alias ls='ls --color=auto'
+
+# Add Ruby gems to PATH (for user-installed gems)
+export PATH="$PATH:$HOME/.local/share/gem/ruby/3.4.0/bin"
+
+# Claude Code CLI alias
+alias claude="/home/tux/.claude/local/claude"
+
+# Tmux session helper - attach to or create session named 'T'
+t() {
+    if [[ -z $TMUX ]]; then
+        if tmux has-session -t T 2>/dev/null; then
+            tmux attach-session -t T
+        else
+            tmux new-session -s T
+        fi
+    fi
+}
 
 # Load bash completion if available
 if [ -r "/usr/share/bash-completion/bash_completion" ]; then
@@ -44,13 +62,37 @@ fi
 # === Bash Options ===
 shopt -s checkwinsize    # Update LINES and COLUMNS after each command
 shopt -s histappend      # Append to history file, don't overwrite
+shopt -s cmdhist         # Save multi-line commands as single history entry
+shopt -s lithist         # Save multi-line commands with newlines
+shopt -s autocd          # Type directory name to cd (bash 4+)
+shopt -s globstar        # ** for recursive globbing (bash 4+)
+shopt -s nocaseglob      # Case-insensitive globbing
+shopt -s cdspell         # Auto-correct minor cd typos
+shopt -s dirspell        # Auto-correct directory names during completion
 
 # === History Configuration ===
-export HISTFILESIZE=10000
-export HISTSIZE=5000
-export HISTCONTROL=ignoreboth
+export HISTFILESIZE=1000000   # Increased from 10000 (match zsh)
+export HISTSIZE=100000        # Increased from 5000 (closer to zsh)
+export HISTCONTROL=ignoreboth:erasedups  # Ignore dupes and spaces, erase old dupes
 export HISTTIMEFORMAT="%F %T "
 export PROMPT_COMMAND="history -a; history -c; history -r; $PROMPT_COMMAND"
+
+# === Bash-specific Functions ===
+
+# Yazi wrapper (bash-specific for cd functionality)
+y() {
+    local tmp="$(mktemp -t "yazi-cwd.XXXXXX")"
+    local cwd
+    yazi "$@" --cwd-file="$tmp"
+    cwd="$(command cat -- "$tmp")"
+    if [ -n "$cwd" ] && [ "$cwd" != "$PWD" ]; then
+        builtin cd -- "$cwd"
+        if [ -n "$TMUX" ]; then
+            tmux refresh-client -c "$cwd"
+        fi
+    fi
+    rm -f -- "$tmp"
+}
 
 # Logging
 echo "$(date): Bash shell loaded" >> "$LOGFILE"

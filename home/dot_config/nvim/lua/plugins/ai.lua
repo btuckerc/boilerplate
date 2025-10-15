@@ -13,8 +13,9 @@ return {
                     auto_trigger = true,
                     keymap = {
                         accept = "<C-g>",
-                        next = "<C-]>",
-                        prev = "<C-[>",
+                        next = "<M-]>",     -- Alt+] - cycle to next suggestion
+                        prev = "<M-p>",     -- Alt+p - cycle to previous suggestion
+                        dismiss = "<C-]>",  -- Ctrl+] - dismiss suggestion (explicitly set to avoid ambiguity)
                     },
                 },
                 panel = { enabled = false }, -- Use suggestion mode only

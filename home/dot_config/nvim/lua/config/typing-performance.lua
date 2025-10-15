@@ -5,7 +5,7 @@ vim.opt.updatetime = 250        -- Balanced for responsiveness without excessive
 vim.opt.timeout = true          -- Enable timeout for key sequences
 vim.opt.timeoutlen = 400        -- Key sequence timeout (default 1000ms is too slow)
 vim.opt.ttimeout = true         -- Enable timeout for terminal key codes
-vim.opt.ttimeoutlen = 10        -- Terminal timeout (fast terminal response)
+vim.opt.ttimeoutlen = 50        -- Terminal timeout (increased from 10 to fix Esc delay)
 
 -- Buffer and display optimizations
 vim.opt.lazyredraw = false      -- Don't lazy redraw (can cause issues in modern Neovim)

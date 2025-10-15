@@ -36,10 +36,17 @@ fi
 # === Linux-specific Configuration ===
 
 # Load Homebrew if installed (Linuxbrew)
-[ -d "/home/linuxbrew/.linuxbrew" ] && eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+# Commented out - not available on this system
+# [ -d "/home/linuxbrew/.linuxbrew" ] && eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
 
 # Enable color support for ls
 alias ls='ls --color=auto'
+
+# Add Ruby gems to PATH (for user-installed gems)
+export PATH="$PATH:$HOME/.local/share/gem/ruby/3.4.0/bin"
+
+# Claude Code CLI alias
+alias claude="$HOME/.claude/local/claude"
 
 # Zsh syntax highlighting (if installed via package manager)
 if [ -f "/usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh" ]; then
@@ -157,9 +164,6 @@ t() {
         fi
     fi
 }
-
-# Auto-attach to tmux session on shell start
-t
 
 # Logging
 echo "$(date): Zsh shell loaded" >> "$LOGFILE"

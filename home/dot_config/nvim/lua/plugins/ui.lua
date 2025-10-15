@@ -74,12 +74,12 @@ return {
         end,
     },
 
-    -- Ghostty terminal integration
-    {
-        "ghostty",
-        dir = "/Applications/Ghostty.app/Contents/Resources/vim/vimfiles/",
-        lazy = false,
-    },
+    -- -- Ghostty terminal integration
+    -- {
+    --     "ghostty",
+    --     dir = "/Applications/Ghostty.app/Contents/Resources/vim/vimfiles/",
+    --     lazy = false,
+    -- },
 
     -- Colorizer for CSS colors
     {

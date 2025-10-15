@@ -1,0 +1,15 @@
+{
+  "alwaysThinkingEnabled": true,
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{ .chezmoi.homeDir }}/.claude/hooks/workflow-optimizer.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

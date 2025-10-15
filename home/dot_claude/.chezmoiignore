@@ -1,0 +1,34 @@
+# Claude Code runtime and cache files
+# Managed by chezmoi - https://github.com/btuckerc/boilerplate
+#
+# Only settings.json, settings.local.json.tmpl, and hooks/ should be version controlled
+# All runtime state, cache, and sensitive data should be ignored
+
+# Authentication credentials (regenerated on login)
+.credentials.json
+
+# Runtime state directories
+debug/
+debug/**
+file-history/
+file-history/**
+history.jsonl
+local/
+local/**
+projects/
+projects/**
+shell-snapshots/
+shell-snapshots/**
+statsig/
+statsig/**
+todos/
+todos/**
+
+# Nested .claude directory (appears to be an artifact from running claude in ~/.claude)
+.claude/
+.claude/**
+
+# Backup files
+*.bak
+*backup*
+*.backup.*

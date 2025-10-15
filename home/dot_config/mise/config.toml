@@ -23,6 +23,7 @@
 "ubi:sxyazi/yazi" = "latest"          # Terminal file manager
 "ubi:jqlang/jq" = "latest"            # JSON processor
 "ubi:charmbracelet/gum" = "latest"    # Glamorous shell scripts
+claude = "latest"                     # Anthropic's Claude Code CLI
 
 # === Development Tools ===
 "ubi:jesseduffield/lazygit" = "latest" # Git TUI (aliased as 'lg')

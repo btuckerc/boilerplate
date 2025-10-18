@@ -24,6 +24,7 @@
 "ubi:jqlang/jq" = "latest"            # JSON processor
 "ubi:charmbracelet/gum" = "latest"    # Glamorous shell scripts
 claude = "latest"                     # Anthropic's Claude Code CLI
+"aqua:sst/opencode" = "latest"        # OpenCode AI coding agent for terminal
 
 # === Development Tools ===
 "ubi:jesseduffield/lazygit" = "latest" # Git TUI (aliased as 'lg')
@@ -32,6 +33,12 @@ claude = "latest"                     # Anthropic's Claude Code CLI
 
 # === Terminal Multiplexer via asdf (compiles from source) ===
 "asdf:mise-plugins/mise-tmux" = "latest" # tmux - terminal multiplexer
+
+# === Language Runtimes ===
+# Use 'lts' for Long Term Support versions, or specify exact versions
+node = "lts"              # Latest LTS version of Node.js
+python = "3.13"           # Python 3.13.x
+go = "1.25"               # Go 1.25.x
 
 # === Language Servers (LSP) ===
 # Installed via mise instead of Mason.nvim for unified tool management
@@ -60,12 +67,6 @@ claude = "latest"                     # Anthropic's Claude Code CLI
 # git - Install: brew install git (macOS) or apt install git (Linux)
 # eza - Install: brew install eza (macOS) or cargo install eza (Linux)
 # btop - Install: brew install btop (macOS) - no macOS binaries in GitHub releases
-
-# === Language Runtimes ===
-# Use 'lts' for Long Term Support versions, or specify exact versions
-node = "lts"              # Latest LTS version of Node.js
-python = "3.13"           # Python 3.13.x
-go = "1.25"               # Go 1.25.x
 
 # === Optional Tools ===
 # Uncomment as needed:

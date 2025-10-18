@@ -1,0 +1,53 @@
+# OpenCode runtime and cache files
+# Managed by chezmoi - https://github.com/btuckerc/boilerplate
+#
+# Only opencode.json, AGENTS.md, and custom agents/commands/modes should be version controlled
+# All runtime state, cache, logs, and sensitive data should be ignored
+
+# Session database and history
+sessions.db
+sessions.db-*
+*.db
+*.db-*
+
+# Log files (timestamped and rotating)
+*.log
+*.log.*
+logs/
+logs/**
+
+# Cache directories and files
+cache/
+cache/**
+node_modules/
+node_modules/**
+
+# Authentication and credentials
+.credentials
+.credentials.*
+*.key
+*.pem
+auth/
+auth/**
+
+# Temporary and runtime state
+tmp/
+tmp/**
+.tmp/
+.tmp/**
+temp/
+temp/**
+
+# Backup files
+*.bak
+*backup*
+*.backup.*
+
+# macOS system files
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Nested .opencode directory artifacts
+.opencode/
+.opencode/**

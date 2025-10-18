@@ -3,4 +3,5 @@
 # Zsh login shell configuration
 
 # Source .zshrc for login shells (ensures interactive config is loaded)
-[ -r "$HOME/.zshrc" ] && . "$HOME/.zshrc"
+# Note: .zshrc is now in $ZDOTDIR (set in ~/.zshenv)
+[ -r "${ZDOTDIR:-$HOME}/.zshrc" ] && . "${ZDOTDIR:-$HOME}/.zshrc"

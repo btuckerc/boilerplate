@@ -1,109 +1,79 @@
 # Managed by chezmoi - https://github.com/btuckerc/boilerplate
-# Global tool versions managed by mise
-# https://mise.jdx.dev/configuration.html
-#
-# Project-specific overrides should go in project mise.toml or .mise.toml files
-# mise also supports idiomatic version files like .node-version, .python-version, etc.
+# Global mise configuration - project-specific overrides go in project mise.toml files
 
 [tools]
-# === Core Tools via aqua backend (preferred, most secure) ===
-"aqua:neovim/neovim" = "latest"       # Text editor with full LSP support
-"aqua:cli/cli" = "latest"             # GitHub CLI (gh) - verified attestations
-"aqua:BurntSushi/ripgrep" = "latest"  # Fast grep (rg)
+# Language Runtimes
+node = "lts"
+python = "3.13"
+go = "1.25"
+ruby = "3"
 
-# === Shell & Prompt ===
-"ubi:twpayne/chezmoi" = "latest"      # Dotfile manager
-"ubi:starship/starship" = "latest"    # Cross-shell prompt
-"ubi:ajeetdsouza/zoxide" = "latest"   # Smart cd command
+# Core Tools
+"aqua:neovim/neovim" = "latest"
+"aqua:cli/cli" = "latest"
+"aqua:BurntSushi/ripgrep" = "latest"
+"asdf:mise-plugins/mise-tmux" = "latest"
+claude = "latest"
+"aqua:sst/opencode" = "latest"
 
-# === CLI Utilities ===
-"ubi:junegunn/fzf" = "latest"         # Fuzzy finder
-"ubi:sharkdp/bat" = "latest"          # Cat with syntax highlighting
-"ubi:sharkdp/fd" = "latest"           # Fast find alternative
-"ubi:sxyazi/yazi" = "latest"          # Terminal file manager
-"ubi:jqlang/jq" = "latest"            # JSON processor
-"ubi:charmbracelet/gum" = "latest"    # Glamorous shell scripts
-claude = "latest"                     # Anthropic's Claude Code CLI
-"aqua:sst/opencode" = "latest"        # OpenCode AI coding agent for terminal
+# Shell & Navigation
+"ubi:twpayne/chezmoi" = "latest"
+"ubi:starship/starship" = "latest"
+"ubi:ajeetdsouza/zoxide" = "latest"
+"ubi:junegunn/fzf" = "latest"
 
-# === Development Tools ===
-"ubi:jesseduffield/lazygit" = "latest" # Git TUI (aliased as 'lg')
-"ubi:tree-sitter/tree-sitter" = "latest" # Parser generator (for nvim)
-"ubi:carapace-sh/carapace-bin" = { version = "latest", exe = "carapace" } # Shell completions
+# CLI Utilities
+"ubi:sharkdp/bat" = "latest"
+"ubi:sharkdp/fd" = "latest"
+"ubi:sxyazi/yazi" = "latest"
+"ubi:jqlang/jq" = "latest"
+"ubi:charmbracelet/gum" = "latest"
+"ubi:jesseduffield/lazygit" = "latest"
+"ubi:tree-sitter/tree-sitter" = "latest"
+"ubi:carapace-sh/carapace-bin" = { version = "latest", exe = "carapace" }
 
-# === Terminal Multiplexer via asdf (compiles from source) ===
-"asdf:mise-plugins/mise-tmux" = "latest" # tmux - terminal multiplexer
+# Language Servers
+"aqua:LuaLS/lua-language-server" = "latest"
+"aqua:rust-lang/rust-analyzer" = "latest"
+"aqua:hashicorp/terraform-ls" = "latest"
+"npm:typescript-language-server" = "latest"
+"npm:typescript" = "latest"
+"npm:pyright" = "latest"
+"npm:yaml-language-server" = "latest"
+"npm:vscode-langservers-extracted" = "latest"
+"npm:bash-language-server" = "latest"
+"npm:dockerfile-language-server-nodejs" = "latest"
+"go:golang.org/x/tools/gopls" = "latest"
+"gem:solargraph" = "latest"
 
-# === Language Runtimes ===
-# Use 'lts' for Long Term Support versions, or specify exact versions
-node = "lts"              # Latest LTS version of Node.js
-python = "3.13"           # Python 3.13.x
-go = "1.25"               # Go 1.25.x
+# Formatters
+"npm:prettier" = "latest"
+"pipx:black" = "latest"
+"aqua:JohnnyMorganz/StyLua" = "latest"
+"aqua:mvdan/gofumpt" = "latest"
+"aqua:mvdan/sh" = "latest"
+"go:golang.org/x/tools/cmd/goimports" = "latest"
 
-# === Language Servers (LSP) ===
-# Installed via mise instead of Mason.nvim for unified tool management
-"aqua:LuaLS/lua-language-server" = "latest"       # Lua LSP (lua_ls)
-"aqua:rust-lang/rust-analyzer" = "latest"         # Rust LSP
-"aqua:hashicorp/terraform-ls" = "latest"          # Terraform LSP
-"npm:typescript-language-server" = "latest"       # TypeScript/JavaScript LSP (ts_ls)
-"npm:typescript" = "latest"                       # Required for typescript-language-server
-"npm:pyright" = "latest"                          # Python LSP
-"npm:yaml-language-server" = "latest"             # YAML LSP (yamlls)
-"npm:vscode-langservers-extracted" = "latest"     # JSON, HTML, CSS, ESLint LSPs (jsonls)
-"npm:bash-language-server" = "latest"             # Bash LSP (bashls)
-"npm:dockerfile-language-server-nodejs" = "latest" # Docker LSP (dockerls)
-"go:golang.org/x/tools/gopls" = "latest"          # Go LSP
-
-# === Formatters ===
-# Code formatters for various languages
-"npm:prettier" = "latest"                         # JS/TS/JSON/YAML/Markdown formatter
-"pipx:black" = "latest"                           # Python formatter
-"aqua:JohnnyMorganz/StyLua" = "latest"            # Lua formatter
-"aqua:mvdan/gofumpt" = "latest"                   # Go formatter (stricter than gofmt)
-"aqua:mvdan/sh" = "latest"                        # Shell formatter (shfmt)
-"go:golang.org/x/tools/cmd/goimports" = "latest"  # Go imports organizer
-
-# === Tools ===
+# Additional Tools
 "npm:@playwright/mcp" = "latest"
+"gem:rails" = "latest"
 
-# === Tools requiring Homebrew/package manager (not in mise registry) ===
-# git - Install: brew install git (macOS) or apt install git (Linux)
-# eza - Install: brew install eza (macOS) or cargo install eza (Linux)
-# btop - Install: brew install btop (macOS) - no macOS binaries in GitHub releases
-
-# === Optional Tools ===
-# Uncomment as needed:
-# rust = "latest"         # Rust language (includes rustfmt and cargo-fmt)
-# terraform = "latest"    # Terraform (includes terraform fmt)
-# deno = "latest"
-# bun = "latest"
-# "ubi:dandavison/delta" = "latest"  # Better git diff
-# "ubi:extrawurst/gitui" = "latest"  # Alternative git TUI
-
-[env]
-# Global environment variables (if needed)
-# Example:
-# NODE_ENV = "development"
+# External dependencies (install via homebrew/package manager):
+# - git, eza, btop
 
 [settings]
-# Mise behavior settings
-experimental = true                # Enable experimental features
-legacy_version_file = true         # Support .nvmrc, .python-version, .tool-versions, etc.
-legacy_version_file_disable_tools = []  # Don't disable any legacy file support
-always_keep_download = false       # Don't keep downloads after installation
-plugin_autoupdate_last_check_duration = "7d"  # Check for plugin updates weekly
-jobs = 4                           # Number of parallel jobs for installations
-verbose = false                    # Don't show verbose output by default
-asdf_compat = true                 # Enable asdf compatibility mode
+experimental = true
+legacy_version_file = true
+always_keep_download = false
+plugin_autoupdate_last_check_duration = "7d"
+jobs = 4
+verbose = false
+asdf_compat = true
+color = true
+task_output = "prefix"
 
-# Python-specific settings
-[settings.python]
-venv_auto_create = false           # Don't auto-create venvs (we use pyenv/manual venvs)
+[settings.pipx]
+uvx = true
 
-# Note: Node-specific settings like default_packages_file are not supported in mise
-# Use project-specific mise.toml or global npm config instead
-
-# Tasks can be defined here for global commands
-# [tasks]
-# Example:
-# hello = "echo 'Hello from mise!'"
+[settings.npm]
+bun = true

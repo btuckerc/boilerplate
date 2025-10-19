@@ -1,0 +1,9 @@
+# Automatically fetch spec-kit templates from GitHub
+# This ensures spec-kit stays up to date without manual intervention
+
+[".opencode-speckit"]
+    type = "archive"
+    url = "https://github.com/github/spec-kit/archive/refs/heads/main.tar.gz"
+    exact = true
+    stripComponents = 1
+    refreshPeriod = "168h"  # Weekly check for updates

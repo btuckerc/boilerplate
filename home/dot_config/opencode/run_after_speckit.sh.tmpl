@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Sync spec-kit command files from external archive
+# This runs automatically after chezmoi apply
+
+set -e
+
+SPECKIT_SOURCE="{{ .chezmoi.homeDir }}/.config/opencode/.opencode-speckit/templates/commands"
+COMMAND_DIR="{{ .chezmoi.homeDir }}/.config/opencode/command"
+
+# Create command directory if it doesn't exist
+mkdir -p "$COMMAND_DIR"
+
+# Copy command files if source exists
+if [ -d "$SPECKIT_SOURCE" ]; then
+    # Copy all .md files, prefixing with speckit.
+    for file in "$SPECKIT_SOURCE"/*.md; do
+        if [ -f "$file" ]; then
+            basename=$(basename "$file")
+            cp "$file" "$COMMAND_DIR/speckit.$basename"
+        fi
+    done
+fi

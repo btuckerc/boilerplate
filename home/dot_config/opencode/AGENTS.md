@@ -1,98 +1,67 @@
-# Global OpenCode Agent Instructions
+Operate quietly. Ship diffs and passing tests. Ask only when action is irreversible.
 
-Managed by chezmoi - https://github.com/btuckerc/boilerplate
+## Defaults
 
-These instructions apply to all OpenCode sessions globally. Project-specific instructions should be placed in the project's AGENTS.md file.
+- Use the **Build** agent by default (full tools). Switch to **Plan** only for multi-file or risky refactors. :contentReference[oaicite:4]{index=4}
+- Prefer official docs. For library or framework questions, **use context7** and cite the exact source URL you used. :contentReference[oaicite:5]{index=5}
+- Keep output minimal:
+  - Actions taken (bullets)
+  - Diffs/patches
+  - Test/log summaries
+  - Next steps (if any)
 
-## Core Workflow Principles
+## Workflow
 
-Process every request with these guidelines:
+1. Short plan: goal, files, tests to run.
+2. Implement in small, reversible patches.
+3. Run fast checks locally:
+   - Lint/format
+   - Unit/integration tests
+   - Type checks
+4. If any check fails, fix before proceeding.
+5. Summarize: what changed, why, verification.
 
-- **Be thorough in your analysis and implementation**
-  - Don't rush to solutions
-  - Explore edge cases and potential issues
-  - Consider long-term maintainability
+## Tool use
 
-- **Take your time, I'm in no rush**
-  - Quality over speed
-  - Think through the implications of changes
-  - Test your assumptions
+- File ops and edits: allowed.
+- `bash`: allowed for local dev tasks and test runs.
+- Always show the command list before long-running or network-heavy steps.
+- Never run destructive or billing-impacting ops without a one-line confirmation request:
+  - Dropping or rewriting DB data
+  - Cloud infra changes or charges
+  - `rm -rf`, mass renames, or history rewrites
 
-- **Think step-by-step for complex tasks**
-  - Break down large problems into manageable pieces
-  - Explain your reasoning as you work
-  - Document important decisions
+## Context discipline
 
-- **Use documentation lookups when needed**
-  - Reference official documentation for accuracy
-  - Verify API usage and best practices
-  - Stay current with framework conventions
+- Load only what’s needed. Avoid mass-reading the repo.
+- Use **context7** for APIs, migrations, and framework changes. Include version when relevant. :contentReference[oaicite:6]{index=6}
+- Do not paste full docs; quote only the lines used.
 
-- **Look for edge cases and potential issues**
-  - Consider error handling
-  - Think about boundary conditions
-  - Anticipate failure modes
+## Code quality
 
-- **Challenge assumptions and provide substantive technical analysis**
-  - Question requirements when they seem unclear or problematic
-  - Provide alternative approaches when appropriate
-  - Explain trade-offs between different solutions
+- Match the project’s style and patterns.
+- Name things clearly. Keep functions small.
+- Add/adjust tests for new logic or bug fixes.
+- Watch performance: avoid N+1, needless I/O, and O(n²) loops on hot paths.
 
-## Security Considerations
+## Security
 
-Always consider security implications:
+- Validate inputs at boundaries.
+- Respect authz checks.
+- Don’t log secrets or PII.
+- Watch for XSS, SQLi, CSRF, SSRF, unsafe deserialization.
 
-- **Input Validation**: Validate and sanitize all user inputs
-- **Authentication & Authorization**: Respect access controls
-- **Data Protection**: Handle sensitive data appropriately
-- **Common Vulnerabilities**: Watch for CSRF, SQL injection, XSS, etc.
-- **Dependency Security**: Be aware of known vulnerabilities in dependencies
+## Languages
 
-## Code Quality Standards
+- **TypeScript/JS**: ES2022+, async/await, strict types.
+- **Python**: PEP 8, type hints on public funcs, narrow exceptions.
+- **Rails**: Thin controllers, AR scopes/concerns, strong params, CSRF helpers.
 
-- **Consistency**: Follow existing code style and patterns in the project
-- **Readability**: Write clear, self-documenting code
-- **Testing**: Consider test coverage for new functionality
-- **Performance**: Be mindful of performance implications
-- **Documentation**: Add comments for complex logic
+## Tests & evidence
 
-## Framework-Specific Guidance
+- Run tests before and after changes; include a short diff of failures fixed.
+- For UI flows, generate or update Playwright tests (if available) and keep them deterministic.
 
-### Rails Projects (detected by Gemfile with 'rails')
+## Metrics (tracked outside this file)
 
-- Reference Rails 8 conventions and best practices
-- Use Rails idioms (e.g., ActiveRecord, concerns, helpers)
-- Follow RESTful routing patterns
-- Consider security implications (CSRF, SQL injection, XSS, mass assignment)
-- Use Rails generators when appropriate
-- Leverage Rails testing frameworks (RSpec, Minitest)
-
-### Node.js/JavaScript Projects
-
-- Follow modern ES6+ syntax
-- Use appropriate package managers (npm, pnpm, yarn, bun)
-- Consider async/await patterns
-- Handle promises correctly
-- Use appropriate error handling
-
-### Python Projects
-
-- Follow PEP 8 style guidelines
-- Use virtual environments appropriately
-- Consider type hints where beneficial
-- Handle exceptions properly
-- Use appropriate standard library modules
-
-## File Organization
-
-- Keep related code together
-- Follow the project's existing structure
-- Create new files/modules when appropriate
-- Avoid creating unnecessary files
-
-## Communication
-
-- Explain complex decisions
-- Provide context for changes
-- Ask clarifying questions when requirements are unclear
-- Suggest improvements when you see opportunities
+- Task completion time, PR cycle time, first-CI pass rate, rework rate. RCTs show large speed gains for scoped coding tasks; validate locally with these metrics. :contentReference[oaicite:7]{index=7}

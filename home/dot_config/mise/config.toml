@@ -63,6 +63,9 @@ go = "1.25"               # Go 1.25.x
 "aqua:mvdan/sh" = "latest"                        # Shell formatter (shfmt)
 "go:golang.org/x/tools/cmd/goimports" = "latest"  # Go imports organizer
 
+# === Tools ===
+"npm:@playwright/mcp" = "latest"
+
 # === Tools requiring Homebrew/package manager (not in mise registry) ===
 # git - Install: brew install git (macOS) or apt install git (Linux)
 # eza - Install: brew install eza (macOS) or cargo install eza (Linux)

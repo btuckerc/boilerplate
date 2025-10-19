@@ -1,45 +1,37 @@
 {
-  "$schema": "https://opencode.ai/schema.json",
-
-  // Global OpenCode configuration
-  // Managed by chezmoi - https://github.com/btuckerc/boilerplate
-  // Project-specific settings can override these in project's opencode.json
-
-  // Instructions/Rules - global rules that apply to all sessions
-  "instructions": [
-    "~/.config/opencode/AGENTS.md"
-  ],
-
-  // Provider configuration - you'll configure API keys via `opencode auth login`
-  // OpenCode supports 75+ providers including Anthropic, OpenAI, Google, etc.
-  "provider": {
-    // Providers will be configured via CLI authentication
-    // Example for custom endpoints:
-    // "anthropic": {
-    //   "baseURL": "https://api.anthropic.com"
-    // }
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": ["~/.config/opencode/AGENTS.md"],
+  "permission": {
+    "edit": "ask",
+    "bash": "ask"
   },
-
-  // Model configuration - specify your preferred models
-  // Uncomment and customize after authentication
-  // "model": "anthropic/claude-sonnet-4.5",
-  // "small_model": "anthropic/claude-haiku-4",
-
-  // Tools configuration - manage which tools the LLM can use
-  // "tools": {
-  //   "enabled": true
-  // },
-
-  // Custom commands for repetitive tasks
-  // "command": {
-  //   "custom-command-name": {
-  //     "description": "Description of what this command does",
-  //     "prompt": "The prompt to send to the LLM"
-  //   }
-  // },
-
-  // Keybind customization (optional)
-  // "keybinds": {
-  //   // Custom keybindings
-  // }
+  "tools": {
+    "read": true,
+    "grep": true,
+    "glob": true,
+    "list": true,
+    "patch": true,
+    "todowrite": true,
+    "todoread": true,
+    "webfetch": true
+  },
+  "agent": {
+    "plan": { "from": "~/.config/opencode/agent/plan.md" },
+    "build": { "from": "~/.config/opencode/agent/build.md" },
+    "review": { "from": "~/.config/opencode/agent/review.md" },
+    "docs": { "from": "~/.config/opencode/agent/docs.md" },
+    "e2e": { "from": "~/.config/opencode/agent/e2e.md" }
+  },
+  "mcp": {
+    "context7": {
+      "type": "remote",
+      "url": "https://mcp.context7.com/mcp",
+      "enabled": true
+    },
+    "playwright": {
+      "type": "local",
+      "command": ["npx", "@playwright/mcp@latest"],
+      "enabled": true
+    }
+  }
 }

@@ -51,3 +51,6 @@ temp/**
 # Nested .opencode directory artifacts
 .opencode/
 .opencode/**
+
+.env
+

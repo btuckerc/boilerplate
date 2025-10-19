@@ -18,3 +18,5 @@ home/.chezmoistate
 # Temp files
 *.tmp
 *.log
+
+.env

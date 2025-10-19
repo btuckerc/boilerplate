@@ -1,6 +1,7 @@
 ---
 description: Plan the change safely
 mode: subagent
+temperature: 0.1
 tools:
   write: false
   edit: false
@@ -9,6 +10,8 @@ tools:
   grep: true
   glob: true
   webfetch: true
+permission:
+  webfetch: allow
 ---
 
-Plan the approach. Identify files, risks, tests to run. Prefer official docs. Use `use context7` when APIs are involved.
+Plan the approach. Identify files, risks, and tests. Prefer official docs via context7 and cite exact URLs.

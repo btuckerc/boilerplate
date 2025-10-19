@@ -58,8 +58,13 @@ claude = "latest"
 "npm:@playwright/mcp" = "latest"
 "gem:rails" = "latest"
 
-# External dependencies (install via homebrew/package manager):
-# - git, eza, btop
+# External dependencies (install via package manager):
+# macOS: openssl@3, readline, libyaml, gmp, autoconf, rust (for Ruby builds with YJIT)
+# Linux: build-essential, libssl-dev, libyaml-dev, libreadline-dev, libgmp-dev, rustc, etc.
+# See: run_once_before_01-install-prereqs.sh.tmpl for bootstrap details
+
+# Note: ruby-build (used by mise for Ruby) auto-detects Homebrew dependencies on macOS
+# If you need custom Ruby build options, create mise.local.toml with RUBY_CONFIGURE_OPTS
 
 [settings]
 experimental = true
@@ -77,3 +82,8 @@ uvx = true
 
 [settings.npm]
 bun = true
+
+[settings.ruby]
+# ruby-build will auto-detect Homebrew dependencies on macOS
+# No explicit configuration needed - mise handles this automatically
+# For custom builds, use: mise.local.toml to set RUBY_CONFIGURE_OPTS

@@ -28,9 +28,13 @@ fi
 echo "Installing essential tools via Homebrew..."
 brew install git eza btop mise
 
+# Install Ruby build dependencies
+echo "Installing Ruby build dependencies..."
+brew install openssl@3 readline libyaml gmp autoconf rust
+
 echo "Essential tools installed successfully"
 echo "Run 'mise install' to install all remaining tools automatically"
-echo "NOTE: mise will install neovim, gh, tmux, ripgrep, and 15+ other tools"
+echo "NOTE: mise will install neovim, gh, tmux, ripgrep, ruby, and 15+ other tools"
 
 {{- else if eq .chezmoi.os "linux" -}}
 #!/usr/bin/env bash
@@ -39,29 +43,45 @@ echo "NOTE: mise will install neovim, gh, tmux, ripgrep, and 15+ other tools"
 
 set -euo pipefail
 
-echo "Installing essential tools..."
+echo "Installing essential tools and Ruby build dependencies..."
 
 if command -v apt >/dev/null 2>&1; then
     echo "Detected apt (Debian/Ubuntu)"
     sudo apt update
-    sudo apt install -y curl git build-essential
+    sudo apt install -y \
+        curl git build-essential autoconf \
+        libssl-dev libyaml-dev zlib1g-dev libffi-dev libgmp-dev \
+        libreadline-dev libncurses5-dev libgdbm-dev rustc
 
 elif command -v dnf >/dev/null 2>&1; then
     echo "Detected dnf (Fedora/RHEL)"
-    sudo dnf install -y curl git gcc gcc-c++ make
+    
+    # Check Fedora version for zlib compatibility
+    if grep -q "Fedora release 4[0-9]" /etc/fedora-release 2>/dev/null; then
+        ZLIB_PKG="zlib-ng-compat-devel"
+    else
+        ZLIB_PKG="zlib-devel"
+    fi
+    
+    sudo dnf install -y \
+        curl git gcc gcc-c++ make autoconf rust patch bzip2 \
+        openssl-devel libffi-devel readline-devel gdbm-devel \
+        ncurses-devel libyaml-devel "$ZLIB_PKG"
 
 elif command -v pacman >/dev/null 2>&1; then
     echo "Detected pacman (Arch Linux)"
-    sudo pacman -Sy --noconfirm curl git base-devel
+    sudo pacman -Sy --noconfirm \
+        curl git base-devel rust libffi libyaml openssl zlib \
+        readline gdbm ncurses
 
 else
     echo "WARNING: Unknown package manager. Please install tools manually."
-    echo "Required: git, build tools"
+    echo "Required: git, build-essential, libssl-dev, libyaml-dev, libreadline-dev, libgmp-dev, libffi-dev, zlib1g-dev"
     exit 1
 fi
 
-echo "Essential tools installed successfully"
+echo "Essential tools and Ruby build dependencies installed successfully"
 echo "INFO: Install mise to complete setup: curl https://mise.run | sh"
 echo "INFO: Then run 'mise install' to install all remaining tools automatically"
-echo "NOTE: mise will install neovim, gh, tmux, ripgrep, and 15+ other tools"
+echo "NOTE: mise will install neovim, gh, tmux, ripgrep, ruby, and 15+ other tools"
 {{- end -}}

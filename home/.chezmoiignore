@@ -34,3 +34,6 @@ nvim.backup.*
 *.tmp
 *.temp
 *~
+
+# Local mise configuration (machine-specific)
+.config/mise/mise.local.toml

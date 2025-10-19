@@ -10,17 +10,12 @@
     "grep": true,
     "glob": true,
     "list": true,
-    "patch": true,
+    "edit": true,
+    "write": true,
+    "bash": true,
     "todowrite": true,
     "todoread": true,
     "webfetch": true
-  },
-  "agent": {
-    "plan": { "from": "~/.config/opencode/agent/plan.md" },
-    "build": { "from": "~/.config/opencode/agent/build.md" },
-    "review": { "from": "~/.config/opencode/agent/review.md" },
-    "docs": { "from": "~/.config/opencode/agent/docs.md" },
-    "e2e": { "from": "~/.config/opencode/agent/e2e.md" }
   },
   "mcp": {
     "context7": {

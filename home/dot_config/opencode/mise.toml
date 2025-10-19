@@ -1,0 +1,41 @@
+# OpenCode spec-kit integration via mise
+# This file should be included in your global mise config or chezmoi-managed
+
+[tools]
+# uv is needed to install specify-cli from git
+uv = "latest"
+
+[tasks.install-speckit]
+description = "Install spec-kit CLI tool via uv"
+run = """
+echo "Installing specify-cli via uv..."
+uv tool install --force specify-cli --from git+https://github.com/github/spec-kit.git
+echo "specify-cli installed"
+"""
+
+[tasks.update-speckit]
+description = "Update spec-kit to latest version"
+run = """
+echo "Updating specify-cli to latest..."
+uv tool install --force specify-cli --from git+https://github.com/github/spec-kit.git
+echo ""
+echo "Regenerating opencode configuration..."
+cd ~/.config/opencode
+specify init --here --ai opencode --force
+echo ""
+echo "Spec-kit updated successfully"
+"""
+
+[tasks.setup-opencode-speckit]
+description = "Initial setup of opencode with spec-kit"
+depends = ["install-speckit"]
+run = """
+echo "Setting up opencode with spec-kit..."
+cd ~/.config/opencode
+specify init --here --ai opencode --force
+echo "OpenCode spec-kit setup complete"
+echo ""
+echo "Available commands:"
+echo "  mise run update-speckit    - Update to latest spec-kit"
+echo "  specify check              - Check prerequisites"
+"""

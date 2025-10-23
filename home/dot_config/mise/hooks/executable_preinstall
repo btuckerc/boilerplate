@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+MISE_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/mise"
+MISE_LOCAL_CONFIG="$MISE_CONFIG_DIR/mise.local.toml"
+OPTIONAL_CONFIG="$MISE_CONFIG_DIR/config.optional.toml"
+MARKER_FILE="$MISE_CONFIG_DIR/.optional-tools-prompted"
+
+[ -f "$MARKER_FILE" ] && exit 0
+[ ! -t 0 ] && exit 0
+[ ! -f "$OPTIONAL_CONFIG" ] && exit 0
+
+parse_tools() {
+    grep -E '^[[:space:]]*(#[[:space:]]*)?[^#]+=' "$OPTIONAL_CONFIG" |
+        grep -v '^\[tools\]' |
+        sed 's/^[[:space:]]*#[[:space:]]*//' |
+        while IFS= read -r line; do
+            tool=$(echo "$line" | sed 's/=.*//' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//; s/"//g')
+            if echo "$line" | grep -q '#'; then
+                desc=$(echo "$line" | sed 's/^[^#]*#[[:space:]]*//')
+            else
+                desc=""
+            fi
+            echo "$tool|$desc"
+        done
+}
+
+mapfile -t TOOL_DATA < <(parse_tools)
+[ ${#TOOL_DATA[@]} -eq 0 ] && exit 0
+
+TOOLS=()
+DESCS=()
+ENABLED=()
+
+for data in "${TOOL_DATA[@]}"; do
+    IFS='|' read -r tool desc <<<"$data"
+    TOOLS+=("$tool")
+    DESCS+=("$desc")
+
+    if [ -f "$MISE_LOCAL_CONFIG" ] && grep -qF "$tool" "$MISE_LOCAL_CONFIG" 2>/dev/null; then
+        ENABLED+=("$tool")
+    fi
+done
+
+[ ${#ENABLED[@]} -eq ${#TOOLS[@]} ] && {
+    touch "$MARKER_FILE"
+    exit 0
+}
+
+echo ""
+echo "Optional tools:"
+for i in "${!TOOLS[@]}"; do
+    status=""
+    [[ " ${ENABLED[*]} " =~ " ${TOOLS[$i]} " ]] && status=" ✓"
+    printf "  %d) %-35s %s%s\n" "$((i + 1))" "${TOOLS[$i]}" "${DESCS[$i]}" "$status"
+done
+echo ""
+echo "a) All  s) Select  n) None (Enter=None)"
+read -p "> " -r choice
+echo ""
+
+enable_tool() {
+    local tool="$1"
+    [ -f "$MISE_LOCAL_CONFIG" ] && grep -qF "$tool" "$MISE_LOCAL_CONFIG" 2>/dev/null && return
+
+    [ ! -f "$MISE_LOCAL_CONFIG" ] && echo "[tools]" >"$MISE_LOCAL_CONFIG"
+
+    local tool_line
+    tool_line=$(grep -F "$tool" "$OPTIONAL_CONFIG" | sed 's/^[[:space:]]*#[[:space:]]*//' | sed 's/[[:space:]]*#.*//')
+
+    echo "" >>"$MISE_LOCAL_CONFIG"
+    echo "$tool_line" >>"$MISE_LOCAL_CONFIG"
+}
+
+case "${choice,,}" in
+a | all)
+    SELECTED=()
+    for tool in "${TOOLS[@]}"; do
+        if [[ ! " ${ENABLED[*]} " =~ " $tool " ]]; then
+            enable_tool "$tool"
+            SELECTED+=("$tool")
+        fi
+    done
+    [ ${#SELECTED[@]} -gt 0 ] && echo "✓ Enabled: ${SELECTED[*]}" || echo "✓ All already enabled"
+    ;;
+s | select | some)
+    SELECTED=()
+    for i in "${!TOOLS[@]}"; do
+        if [[ " ${ENABLED[*]} " =~ " ${TOOLS[$i]} " ]]; then
+            echo "  ${TOOLS[$i]}: already enabled"
+            continue
+        fi
+
+        read -p "  ${TOOLS[$i]}? [y/N] " -r resp
+        if [[ "${resp,,}" =~ ^y ]]; then
+            enable_tool "${TOOLS[$i]}"
+            SELECTED+=("${TOOLS[$i]}")
+        fi
+    done
+    [ ${#SELECTED[@]} -gt 0 ] && echo "✓ Enabled: ${SELECTED[*]}" || echo "No tools selected"
+    ;;
+*)
+    echo "Skipped. Edit $OPTIONAL_CONFIG to enable later"
+    ;;
+esac
+
+touch "$MARKER_FILE"

@@ -13,8 +13,6 @@ ruby = "3"
 "aqua:cli/cli" = "latest"
 "aqua:BurntSushi/ripgrep" = "latest"
 "asdf:mise-plugins/mise-tmux" = "latest"
-claude = "latest"
-"aqua:sst/opencode" = "latest"
 
 # Shell & Navigation
 "ubi:twpayne/chezmoi" = "latest"
@@ -49,6 +47,7 @@ claude = "latest"
 # Formatters
 "npm:prettier" = "latest"
 "pipx:black" = "latest"
+"pipx:yubikey-manager" = "latest"
 "aqua:JohnnyMorganz/StyLua" = "latest"
 "aqua:mvdan/gofumpt" = "latest"
 "aqua:mvdan/sh" = "latest"
@@ -76,6 +75,9 @@ verbose = false
 asdf_compat = true
 color = true
 task_output = "prefix"
+
+[hooks]
+preinstall = "bash ${XDG_CONFIG_HOME:-$HOME/.config}/mise/hooks/preinstall"
 
 [settings.pipx]
 uvx = true

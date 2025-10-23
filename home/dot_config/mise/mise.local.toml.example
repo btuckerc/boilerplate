@@ -1,20 +1,6 @@
-# mise.local.toml.example
-# Copy this to mise.local.toml for local machine-specific overrides
-# This file is gitignored and won't be committed
-
-# Example: Override Ruby configuration options
-# [env]
+[env]
 # RUBY_CONFIGURE_OPTS = "--with-openssl-dir=/custom/path --enable-yjit"
 
-# Example: Set custom environment variables
-# [env]
-# MY_LOCAL_VAR = "value"
-
-# Example: Override tool versions locally
-# [tools]
+[tools]
 # ruby = "3.3.6"
 # node = "22"
-
-# Example: Add local-only tools
-# [tools]
-# "cargo:my-local-tool" = "latest"

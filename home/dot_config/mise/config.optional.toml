@@ -1,0 +1,3 @@
+[tools]
+# claude = "latest"  # Anthropic's CLI coding assistant
+# "aqua:sst/opencode" = "latest"  # Open source code assistant

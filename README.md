@@ -177,6 +177,27 @@ mise use --global node@lts python@3.12
 mise ls-remote node
 ```
 
+### Optional Tools
+
+Some tools are not installed by default. On first `mise install`, you'll be prompted:
+
+```bash
+$ mise install
+
+Optional tools:
+  1) claude                            Anthropic CLI
+  2) aqua:sst/opencode                 Open source assistant
+
+a) All  s) Select  n) None [N]
+>
+```
+
+- **a** = Install all optional tools
+- **s** = Select specific tools interactively
+- **n** or Enter = Skip (default)
+
+Your choices are saved locally (gitignored). Edit `~/.config/mise/config.optional.toml` to add more optional tools.
+
 ### Managing Packages
 
 **mise** (primary tool manager):

@@ -6,9 +6,12 @@ MISE_LOCAL_CONFIG="$MISE_CONFIG_DIR/mise.local.toml"
 OPTIONAL_CONFIG="$MISE_CONFIG_DIR/config.optional.toml"
 MARKER_FILE="$MISE_CONFIG_DIR/.optional-tools-prompted"
 
-[ -f "$MARKER_FILE" ] && exit 0
 [ ! -t 0 ] && exit 0
 [ ! -f "$OPTIONAL_CONFIG" ] && exit 0
+
+if [ -f "$MARKER_FILE" ] && [ -f "$MISE_LOCAL_CONFIG" ]; then
+    exit 0
+fi
 
 parse_tools() {
     grep -E '^[[:space:]]*(#[[:space:]]*)?[^#]+=' "$OPTIONAL_CONFIG" |

@@ -1,0 +1,146 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BREWFILE="${1:-$HOME/Brewfile}"
+BREWFILE_OPTIONAL="${BREWFILE}.optional"
+BREWFILE_LOCAL="${BREWFILE}.local"
+MARKER_FILE="${HOME}/.config/.brewfile-optional-prompted"
+
+[ ! -t 0 ] && exec brew bundle --file="$BREWFILE"
+[ ! -f "$BREWFILE_OPTIONAL" ] && exec brew bundle --file="$BREWFILE"
+
+if [ -f "$MARKER_FILE" ] && [ -f "$BREWFILE_LOCAL" ]; then
+    exec brew bundle --file="$BREWFILE"
+fi
+
+parse_brewfile() {
+    grep -E '^[[:space:]]*(#[[:space:]]*)?(tap|brew|cask|vscode|go)[[:space:]]' "$BREWFILE_OPTIONAL" | \
+    while IFS= read -r line; do
+        type=$(echo "$line" | sed 's/^[[:space:]]*#[[:space:]]*//' | awk '{print $1}')
+        pkg=$(echo "$line" | sed 's/^[[:space:]]*#[[:space:]]*//' | awk '{print $2}' | tr -d '"')
+        if echo "$line" | grep -q '#.*#'; then
+            desc=$(echo "$line" | sed 's/.*#[[:space:]]*#[[:space:]]*//')
+        else
+            desc=""
+        fi
+        echo "$type|$pkg|$desc"
+    done
+}
+
+mapfile -t PKG_DATA < <(parse_brewfile)
+[ ${#PKG_DATA[@]} -eq 0 ] && exec brew bundle --file="$BREWFILE"
+
+TYPES=()
+PKGS=()
+DESCS=()
+ENABLED=()
+
+for data in "${PKG_DATA[@]}"; do
+    IFS='|' read -r type pkg desc <<< "$data"
+    TYPES+=("$type")
+    PKGS+=("$pkg")
+    DESCS+=("$desc")
+    
+    if [ -f "$BREWFILE_LOCAL" ] && grep -qF "$pkg" "$BREWFILE_LOCAL" 2>/dev/null; then
+        ENABLED+=("$pkg")
+    fi
+done
+
+[ ${#ENABLED[@]} -eq ${#PKGS[@]} ] && { touch "$MARKER_FILE"; exec brew bundle --file="$BREWFILE"; }
+
+echo ""
+echo "Optional Homebrew packages (${#PKG_DATA[@]} total):"
+echo ""
+
+TAP_COUNT=$(printf '%s\n' "${TYPES[@]}" | grep -c '^tap$' || true)
+BREW_COUNT=$(printf '%s\n' "${TYPES[@]}" | grep -c '^brew$' || true)
+CASK_COUNT=$(printf '%s\n' "${TYPES[@]}" | grep -c '^cask$' || true)
+VSCODE_COUNT=$(printf '%s\n' "${TYPES[@]}" | grep -c '^vscode$' || true)
+GO_COUNT=$(printf '%s\n' "${TYPES[@]}" | grep -c '^go$' || true)
+
+echo "  Taps: $TAP_COUNT | Brews: $BREW_COUNT | Casks: $CASK_COUNT | VSCode: $VSCODE_COUNT | Go: $GO_COUNT"
+echo ""
+echo "Options:"
+echo "  a) Install all optional packages"
+echo "  t) Install by type (tap/brew/cask/vscode/go)"
+echo "  s) Select specific packages"
+echo "  n) None (default)"
+echo ""
+read -p "> " -r choice
+echo ""
+
+enable_pkg() {
+    local type="$1"
+    local pkg="$2"
+    [ -f "$BREWFILE_LOCAL" ] && grep -qF "$pkg" "$BREWFILE_LOCAL" 2>/dev/null && return
+    
+    local line
+    line=$(grep -F "$pkg" "$BREWFILE_OPTIONAL" | sed 's/^[[:space:]]*#[[:space:]]*//' | sed 's/[[:space:]]*#.*//')
+    
+    echo "$line" >> "$BREWFILE_LOCAL"
+}
+
+case "${choice,,}" in
+    a|all)
+        SELECTED=()
+        for i in "${!PKGS[@]}"; do
+            if [[ ! " ${ENABLED[*]} " =~ " ${PKGS[$i]} " ]]; then
+                enable_pkg "${TYPES[$i]}" "${PKGS[$i]}"
+                SELECTED+=("${PKGS[$i]}")
+            fi
+        done
+        [ ${#SELECTED[@]} -gt 0 ] && echo "✓ Enabled ${#SELECTED[@]} packages" || echo "✓ All already enabled"
+        ;;
+    t|type)
+        echo "Select types to install:"
+        echo ""
+        
+        INSTALL_TYPES=()
+        [ "$TAP_COUNT" -gt 0 ] && { read -p "  Taps ($TAP_COUNT)? [y/N] " -r resp; [[ "${resp,,}" =~ ^y ]] && INSTALL_TYPES+=("tap"); }
+        [ "$BREW_COUNT" -gt 0 ] && { read -p "  Brews ($BREW_COUNT)? [y/N] " -r resp; [[ "${resp,,}" =~ ^y ]] && INSTALL_TYPES+=("brew"); }
+        [ "$CASK_COUNT" -gt 0 ] && { read -p "  Casks ($CASK_COUNT)? [y/N] " -r resp; [[ "${resp,,}" =~ ^y ]] && INSTALL_TYPES+=("cask"); }
+        [ "$VSCODE_COUNT" -gt 0 ] && { read -p "  VSCode extensions ($VSCODE_COUNT)? [y/N] " -r resp; [[ "${resp,,}" =~ ^y ]] && INSTALL_TYPES+=("vscode"); }
+        [ "$GO_COUNT" -gt 0 ] && { read -p "  Go packages ($GO_COUNT)? [y/N] " -r resp; [[ "${resp,,}" =~ ^y ]] && INSTALL_TYPES+=("go"); }
+        
+        SELECTED=()
+        for i in "${!PKGS[@]}"; do
+            if [[ " ${INSTALL_TYPES[*]} " =~ " ${TYPES[$i]} " ]] && [[ ! " ${ENABLED[*]} " =~ " ${PKGS[$i]} " ]]; then
+                enable_pkg "${TYPES[$i]}" "${PKGS[$i]}"
+                SELECTED+=("${PKGS[$i]}")
+            fi
+        done
+        [ ${#SELECTED[@]} -gt 0 ] && echo "✓ Enabled ${#SELECTED[@]} packages" || echo "No packages selected"
+        ;;
+    s|select|some)
+        echo "Note: ${#PKG_DATA[@]} packages available. Use 'type' mode for faster bulk selection."
+        read -p "Continue with individual selection? [y/N] " -r cont
+        [[ ! "${cont,,}" =~ ^y ]] && { echo "Cancelled"; touch "$MARKER_FILE"; exec brew bundle --file="$BREWFILE"; }
+        
+        SELECTED=()
+        for i in "${!PKGS[@]}"; do
+            [[ " ${ENABLED[*]} " =~ " ${PKGS[$i]} " ]] && continue
+            
+            read -p "  [${TYPES[$i]}] ${PKGS[$i]}? [y/N] " -r resp
+            if [[ "${resp,,}" =~ ^y ]]; then
+                enable_pkg "${TYPES[$i]}" "${PKGS[$i]}"
+                SELECTED+=("${PKGS[$i]}")
+            fi
+        done
+        [ ${#SELECTED[@]} -gt 0 ] && echo "✓ Enabled ${#SELECTED[@]} packages" || echo "No packages selected"
+        ;;
+    *)
+        echo "Skipped. Edit $BREWFILE_OPTIONAL to enable later"
+        touch "$MARKER_FILE"
+        exec brew bundle --file="$BREWFILE"
+        ;;
+esac
+
+touch "$MARKER_FILE"
+
+if [ -f "$BREWFILE_LOCAL" ]; then
+    echo ""
+    echo "Installing packages (core + optional)..."
+    cat "$BREWFILE" "$BREWFILE_LOCAL" | brew bundle --file=-
+else
+    brew bundle --file="$BREWFILE"
+fi

@@ -15,6 +15,11 @@ mise.local.toml
 home/dot_config/mise/mise.local.toml
 home/dot_config/mise/.optional-tools-prompted
 
+# brew
+Brewfile.local
+home/Brewfile.local
+.config/.brewfile-optional-prompted
+
 # Chezmoi (state is managed per-user, not in repo)
 home/.chezmoistate
 

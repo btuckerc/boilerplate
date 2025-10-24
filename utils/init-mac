@@ -603,6 +603,58 @@ EOF
     setup_mas
     setup_raycast
 
+    echo ""
+    print_step "Tool Installation"
+    
+    # Check for mise (needed for development tools)
+    if ! command -v mise &> /dev/null; then
+        if command -v brew &> /dev/null; then
+            print_warning "mise not found (important for automatic setup)"
+            if confirm "Would you like to install mise?" "y"; then
+                brew install mise
+                eval "$(mise activate bash 2>/dev/null || true)"
+                print_success "mise installed"
+            else
+                print_warning "Skipped mise installation"
+            fi
+        else
+            print_error "Cannot install mise (Homebrew not available)"
+        fi
+    fi
+    
+    # Offer to run mise install
+    if command -v mise &> /dev/null; then
+        if confirm "Install development tools via mise? (will prompt for optional tools)" "y"; then
+            mise install
+            print_success "Development tools installed"
+        else
+            print_warning "Skipped. Run 'mise install' later"
+        fi
+    else
+        print_warning "Skipped development tools (mise not available)"
+    fi
+    
+    echo ""
+    
+    # Offer to run brew bundle
+    if command -v brew &> /dev/null; then
+        BREWFILE="$HOME/Brewfile"
+        if [ -f "$BREWFILE" ]; then
+            if confirm "Install Homebrew packages? (will prompt for optional packages)" "y"; then
+                if command -v brew-bundle-optional &> /dev/null; then
+                    brew-bundle-optional "$BREWFILE"
+                else
+                    brew bundle --file="$BREWFILE"
+                fi
+                print_success "Homebrew packages installed"
+            else
+                print_warning "Skipped. Run 'brew-bundle-optional' later"
+            fi
+        fi
+    else
+        print_warning "Skipped Homebrew packages (brew not available)"
+    fi
+
     print_success "Setup complete! Please restart your terminal for all changes to take effect."
 
     if [ "$SHELL_CHOICE" != "$current_shell" ]; then

@@ -202,26 +202,16 @@ Your choices are saved locally (gitignored). Edit `~/.config/mise/config.optiona
 
 **mise** (primary tool manager):
 ```bash
-# Install all tools from mise config
 mise install
-
-# Add a new tool globally
-mise use --global ripgrep@latest
-
-# Update mise config
-chezmoi edit ~/.config/mise/config.toml
-chezmoi apply
 ```
 
-**Brewfile** (optional supplementary packages):
+**Brewfile** (supplementary packages):
 ```bash
-# Install packages from Brewfile (optional)
-brew bundle install --file=~/.local/share/chezmoi/Brewfile
+# Interactive install with optional packages prompt
+brew-bundle-optional
 
-# Update Brewfile with currently installed packages
-cd ~/.local/share/chezmoi
-brew bundle dump --force --file=Brewfile
-chezmoi add Brewfile
+# Or standard install (no optional packages)
+brew bundle --file=~/Brewfile
 ```
 
 ## How It Works

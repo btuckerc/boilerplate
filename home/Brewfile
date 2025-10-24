@@ -1,6 +1,7 @@
 tap "homebrew/services"
 tap "mongodb/brew"
 tap "neovim/neovim"
+tap "epk/epk"
 
 brew "bat"
 brew "btop"

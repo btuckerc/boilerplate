@@ -23,10 +23,6 @@ LICENSE
 .AppleDouble
 .LSOverride
 
-# Brewfile - we manage it but don't copy to ~
-# It lives at ~/.local/share/chezmoi/home/Brewfile for reference
-Brewfile
-
 # Backup directories from nvim
 nvim.backup.*
 

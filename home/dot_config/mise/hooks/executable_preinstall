@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Ensure python command exists for Ruby and other tools
+if command -v python3 &>/dev/null && ! command -v python &>/dev/null; then
+    SHIM_DIR="${HOME}/.local/share/mise/shims"
+    mkdir -p "$SHIM_DIR"
+    if [ ! -f "$SHIM_DIR/python" ]; then
+        ln -sf "$(command -v python3)" "$SHIM_DIR/python"
+    fi
+    export PATH="$SHIM_DIR:$PATH"
+fi
+
 MISE_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/mise"
 MISE_LOCAL_CONFIG="$MISE_CONFIG_DIR/mise.local.toml"
 OPTIONAL_CONFIG="$MISE_CONFIG_DIR/config.optional.toml"

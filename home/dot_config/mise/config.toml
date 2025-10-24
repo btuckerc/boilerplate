@@ -52,14 +52,27 @@ experimental = true
 legacy_version_file = true
 always_keep_download = false
 plugin_autoupdate_last_check_duration = "7d"
-jobs = 4
+jobs = 2
 verbose = false
 asdf_compat = true
 color = true
 task_output = "prefix"
+http_timeout = 120
+raw = false
 
 [hooks]
 preinstall = "bash ${XDG_CONFIG_HOME:-$HOME/.config}/mise/hooks/preinstall"
+
+[env]
+# Fix Ruby build requiring 'python' command
+_.path = [
+  "{{ config_root }}/shims",
+  "~/.local/share/mise/shims",
+]
+
+[env._.python]
+# Ensure python command exists for tools that need it
+
 
 [settings.pipx]
 uvx = true

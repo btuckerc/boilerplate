@@ -396,17 +396,38 @@ chezmoi update --force
 
 ### mise Issues
 
+**Quick fix**: Run the automated fixer:
+```bash
+./utils/scripts/fix-mise.sh
+```
+
+Common issues and manual fixes:
+
 ```bash
 # Diagnose mise setup
 mise doctor
 
-# Reinstall tool
+# Ruby build failure (python not found)
+mkdir -p ~/.local/share/mise/shims
+ln -sf $(which python3) ~/.local/share/mise/shims/python
+export PATH="$HOME/.local/share/mise/shims:$PATH"
+
+# Network/timeout issues - install sequentially
+MISE_JOBS=1 mise install
+
+# Verbose logging for debugging
+MISE_VERBOSE=1 mise install 2>&1 | tee ~/mise-install.log
+
+# Clear cache and retry
+rm -rf ~/.cache/mise
+mise install
+
+# Reinstall specific tool
 mise uninstall node@22
 mise install node@22
-
-# Clear cache
-rm -rf ~/.cache/mise
 ```
+
+**See detailed troubleshooting**: [TROUBLESHOOTING.md](./TROUBLESHOOTING.md)
 
 ### Shell Not Loading Configuration
 

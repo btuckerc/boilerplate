@@ -57,7 +57,7 @@ verbose = false
 asdf_compat = true
 color = true
 task_output = "prefix"
-http_timeout = 120
+http_timeout = "120"
 raw = false
 
 [hooks]

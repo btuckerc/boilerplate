@@ -5,7 +5,7 @@
 {{-   $gitName = .gitName -}}
 {{- else if env "GIT_NAME" -}}
 {{-   $gitName = env "GIT_NAME" -}}
-{{- else if stdinIsATTY -}}
+{{- else -}}
 {{-   $gitName = promptString "What is your Git name" -}}
 {{- end -}}
 
@@ -13,7 +13,7 @@
 {{-   $gitEmail = .gitEmail -}}
 {{- else if env "GIT_EMAIL" -}}
 {{-   $gitEmail = env "GIT_EMAIL" -}}
-{{- else if stdinIsATTY -}}
+{{- else -}}
 {{-   $gitEmail = promptString "What is your Git email" -}}
 {{- end -}}
 

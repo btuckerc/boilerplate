@@ -12,7 +12,7 @@ if ! command -v brew >/dev/null 2>&1; then
     if [ -t 0 ]; then
         echo "Homebrew not found (required for packages)"
         read -p "Would you like to install Homebrew? [Y/n] " -r resp
-        if [[ ! "${resp,,}" =~ ^n ]]; then
+        if [[ ! "$resp" =~ ^[nN] ]]; then
             echo "Installing Homebrew..."
             /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
             
@@ -46,7 +46,7 @@ echo ""
 
 if [ -t 0 ]; then
     read -p "Install Homebrew packages now? [Y/n] " -r resp
-    if [[ "${resp,,}" =~ ^n ]]; then
+    if [[ "$resp" =~ ^n ]]; then
         echo "Skipped. Run 'brew-bundle-optional' later to install packages."
         exit 0
     fi

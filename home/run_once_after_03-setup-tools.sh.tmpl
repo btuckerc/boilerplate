@@ -11,7 +11,7 @@ if ! command -v mise >/dev/null 2>&1; then
     if [ -t 0 ]; then
         echo "mise not found (required for development tools)"
         read -p "Would you like to install mise? [Y/n] " -r resp
-        if [[ ! "${resp,,}" =~ ^n ]]; then
+        if [[ ! "$resp" =~ ^[nN] ]]; then
             if command -v brew >/dev/null 2>&1; then
                 echo "Installing mise via Homebrew..."
                 brew install mise
@@ -54,7 +54,7 @@ echo ""
 
 if [ -t 0 ]; then
     read -p "Install development tools now? [Y/n] " -r resp
-    if [[ "${resp,,}" =~ ^n ]]; then
+    if [[ "$resp" =~ ^[nN] ]]; then
         echo "Skipped. Run 'mise install' later to install tools."
         exit 0
     fi

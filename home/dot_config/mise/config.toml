@@ -1,26 +1,19 @@
-# Managed by chezmoi - https://github.com/btuckerc/boilerplate
-# Global mise configuration - project-specific overrides go in project mise.toml files
-
 [tools]
-# Language Runtimes
 node = "lts"
 python = "3.13"
 go = "1.25"
 ruby = "3"
 
-# Core Tools
 "aqua:neovim/neovim" = "latest"
 "aqua:cli/cli" = "latest"
 "aqua:BurntSushi/ripgrep" = "latest"
 "asdf:mise-plugins/mise-tmux" = "latest"
 
-# Shell & Navigation
 "ubi:twpayne/chezmoi" = "latest"
 "ubi:starship/starship" = "latest"
 "ubi:ajeetdsouza/zoxide" = "latest"
 "ubi:junegunn/fzf" = "latest"
 
-# CLI Utilities
 "ubi:sharkdp/bat" = "latest"
 "ubi:sharkdp/fd" = "latest"
 "ubi:sxyazi/yazi" = "latest"
@@ -30,7 +23,6 @@ ruby = "3"
 "ubi:tree-sitter/tree-sitter" = "latest"
 "ubi:carapace-sh/carapace-bin" = { version = "latest", exe = "carapace" }
 
-# Language Servers
 "aqua:LuaLS/lua-language-server" = "latest"
 "aqua:rust-lang/rust-analyzer" = "latest"
 "aqua:hashicorp/terraform-ls" = "latest"
@@ -44,7 +36,6 @@ ruby = "3"
 "go:golang.org/x/tools/gopls" = "latest"
 "gem:solargraph" = "latest"
 
-# Formatters
 "npm:prettier" = "latest"
 "pipx:black" = "latest"
 "pipx:yubikey-manager" = "latest"
@@ -53,17 +44,8 @@ ruby = "3"
 "aqua:mvdan/sh" = "latest"
 "go:golang.org/x/tools/cmd/goimports" = "latest"
 
-# Additional Tools
 "npm:@playwright/mcp" = "latest"
 "gem:rails" = "latest"
-
-# External dependencies (install via package manager):
-# macOS: openssl@3, readline, libyaml, gmp, autoconf, rust (for Ruby builds with YJIT)
-# Linux: build-essential, libssl-dev, libyaml-dev, libreadline-dev, libgmp-dev, rustc, etc.
-# See: run_once_before_01-install-prereqs.sh.tmpl for bootstrap details
-
-# Note: ruby-build (used by mise for Ruby) auto-detects Homebrew dependencies on macOS
-# If you need custom Ruby build options, create mise.local.toml with RUBY_CONFIGURE_OPTS
 
 [settings]
 experimental = true
@@ -84,8 +66,3 @@ uvx = true
 
 [settings.npm]
 bun = true
-
-[settings.ruby]
-# ruby-build will auto-detect Homebrew dependencies on macOS
-# No explicit configuration needed - mise handles this automatically
-# For custom builds, use: mise.local.toml to set RUBY_CONFIGURE_OPTS

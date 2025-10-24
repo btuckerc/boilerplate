@@ -1,5 +1,21 @@
-{{- $gitName := promptStringOnce . "git.name" "What is your Git name" -}}
-{{- $gitEmail := promptStringOnce . "git.email" "What is your Git email" -}}
+{{- $gitName := "" -}}
+{{- $gitEmail := "" -}}
+
+{{- if hasKey . "gitName" -}}
+{{-   $gitName = .gitName -}}
+{{- else if env "GIT_NAME" -}}
+{{-   $gitName = env "GIT_NAME" -}}
+{{- else if stdinIsATTY -}}
+{{-   $gitName = promptString "What is your Git name" -}}
+{{- end -}}
+
+{{- if hasKey . "gitEmail" -}}
+{{-   $gitEmail = .gitEmail -}}
+{{- else if env "GIT_EMAIL" -}}
+{{-   $gitEmail = env "GIT_EMAIL" -}}
+{{- else if stdinIsATTY -}}
+{{-   $gitEmail = promptString "What is your Git email" -}}
+{{- end -}}
 
 [data.git]
     name = {{ $gitName | quote }}

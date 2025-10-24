@@ -2,6 +2,7 @@
 # Core dependencies - must install first
 python = "3.13"
 uv = "latest"
+bun = "latest"
 node = "lts"
 go = "1.25"
 

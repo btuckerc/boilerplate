@@ -1,8 +1,6 @@
-{{- $gitName := promptString "What is your Git name" -}}
-{{- $gitEmail := promptString "What is your Git email" -}}
 [user]
-	name = {{ $gitName }}
-	email = {{ $gitEmail }}
+	name = {{ .git.name }}
+	email = {{ .git.email }}
 
 [init]
 	defaultBranch = main

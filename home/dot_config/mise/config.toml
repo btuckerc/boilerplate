@@ -1,19 +1,15 @@
 [tools]
-node = "lts"
+# Core dependencies - must install first
 python = "3.13"
+uv = "latest"
+node = "lts"
 go = "1.25"
-ruby = "3"
 
-"aqua:neovim/neovim" = "latest"
-"aqua:cli/cli" = "latest"
-"aqua:BurntSushi/ripgrep" = "latest"
-"asdf:mise-plugins/mise-tmux" = "latest"
-
+# CLI tools (fast binary downloads)
 "ubi:twpayne/chezmoi" = "latest"
 "ubi:starship/starship" = "latest"
 "ubi:ajeetdsouza/zoxide" = "latest"
 "ubi:junegunn/fzf" = "latest"
-
 "ubi:sharkdp/bat" = "latest"
 "ubi:sharkdp/fd" = "latest"
 "ubi:sxyazi/yazi" = "latest"
@@ -23,9 +19,13 @@ ruby = "3"
 "ubi:tree-sitter/tree-sitter" = "latest"
 "ubi:carapace-sh/carapace-bin" = { version = "latest", exe = "carapace" }
 
-"aqua:LuaLS/lua-language-server" = "latest"
-"aqua:rust-lang/rust-analyzer" = "latest"
-"aqua:hashicorp/terraform-ls" = "latest"
+# Editor and dev tools
+"aqua:neovim/neovim" = "latest"
+"aqua:cli/cli" = "latest"
+"aqua:BurntSushi/ripgrep" = "latest"
+"asdf:mise-plugins/mise-tmux" = "latest"
+
+# Language servers (require node/python/go)
 "npm:typescript-language-server" = "latest"
 "npm:typescript" = "latest"
 "npm:pyright" = "latest"
@@ -33,18 +33,25 @@ ruby = "3"
 "npm:vscode-langservers-extracted" = "latest"
 "npm:bash-language-server" = "latest"
 "npm:dockerfile-language-server-nodejs" = "latest"
-"go:golang.org/x/tools/gopls" = "latest"
-"gem:solargraph" = "latest"
-
 "npm:prettier" = "latest"
+"npm:@playwright/mcp" = "latest"
+
+"go:golang.org/x/tools/gopls" = "latest"
+"go:golang.org/x/tools/cmd/goimports" = "latest"
+
 "pipx:black" = "latest"
 "pipx:yubikey-manager" = "latest"
+
+"aqua:LuaLS/lua-language-server" = "latest"
+"aqua:rust-lang/rust-analyzer" = "latest"
+"aqua:hashicorp/terraform-ls" = "latest"
 "aqua:JohnnyMorganz/StyLua" = "latest"
 "aqua:mvdan/gofumpt" = "latest"
 "aqua:mvdan/sh" = "latest"
-"go:golang.org/x/tools/cmd/goimports" = "latest"
 
-"npm:@playwright/mcp" = "latest"
+# Ruby tools (install last due to build complexity)
+ruby = "3"
+"gem:solargraph" = "latest"
 "gem:rails" = "latest"
 
 [settings]

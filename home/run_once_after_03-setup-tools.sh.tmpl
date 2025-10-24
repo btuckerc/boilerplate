@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo ""
+echo "========================================"
+echo "  Development Tools Setup"
+echo "========================================"
+echo ""
+
+if ! command -v mise >/dev/null 2>&1; then
+    if [ -t 0 ]; then
+        echo "mise not found (required for development tools)"
+        read -p "Would you like to install mise? [Y/n] " -r resp
+        if [[ ! "${resp,,}" =~ ^n ]]; then
+            if command -v brew >/dev/null 2>&1; then
+                echo "Installing mise via Homebrew..."
+                brew install mise
+                eval "$(mise activate bash 2>/dev/null || true)"
+                echo "✓ mise installed"
+            else
+                echo "Homebrew not available. Install mise manually: https://mise.jdx.dev"
+                exit 0
+            fi
+        else
+            echo "Skipped. Install mise later: https://mise.jdx.dev"
+            exit 0
+        fi
+    else
+        echo "mise not found. Skipping tool installation (non-interactive)"
+        exit 0
+    fi
+fi
+
+MISE_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/mise/config.toml"
+
+if [ ! -f "$MISE_CONFIG" ]; then
+    echo "mise config not found. Skipping tool installation."
+    exit 0
+fi
+
+TOOLS_COUNT=$(mise config ls 2>/dev/null | grep -o "config.toml.*" | sed 's/config.toml  //' | tr ',' '\n' | wc -l | tr -d ' ' || echo "0")
+
+if [ "$TOOLS_COUNT" -eq 0 ]; then
+    echo "No tools configured. Skipping installation."
+    exit 0
+fi
+
+TOOL_LIST=$(mise config ls 2>/dev/null | grep -o "config.toml.*" | sed 's/config.toml  //' | tr ',' '\n' | sed 's/aqua://g; s/ubi://g; s/npm://g; s/pipx://g; s/gem://g; s/asdf:mise-plugins\///g; s/go:.*\///' | head -10 | tr '\n' ' ')
+
+echo "mise will install $TOOLS_COUNT development tools:"
+echo "$TOOL_LIST"
+[ "$TOOLS_COUNT" -gt 10 ] && echo "...and $((TOOLS_COUNT - 10)) more"
+echo ""
+
+if [ -t 0 ]; then
+    read -p "Install development tools now? [Y/n] " -r resp
+    if [[ "${resp,,}" =~ ^n ]]; then
+        echo "Skipped. Run 'mise install' later to install tools."
+        exit 0
+    fi
+fi
+
+echo ""
+echo "Installing development tools..."
+mise install
+
+echo ""
+echo "✓ Development tools installed"
+echo ""

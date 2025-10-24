@@ -33,18 +33,6 @@ echo "Installing Ruby build dependencies..."
 brew install openssl@3 readline libyaml gmp autoconf rust
 
 echo "Essential tools installed successfully"
-echo ""
-
-if command -v mise >/dev/null 2>&1; then
-    TOOLS_COUNT=$(mise config ls 2>/dev/null | grep -o "config.toml.*" | sed 's/config.toml  //' | tr ',' '\n' | wc -l | tr -d ' ')
-    TOOL_LIST=$(mise config ls 2>/dev/null | grep -o "config.toml.*" | sed 's/config.toml  //' | tr ',' '\n' | sed 's/aqua://g; s/ubi://g; s/npm://g; s/pipx://g; s/gem://g; s/asdf:mise-plugins\///g; s/go:.*\///' | head -10 | tr '\n' ' ')
-    echo "Running 'mise install' will install $TOOLS_COUNT tools:"
-    echo "$TOOL_LIST"
-    [ "$TOOLS_COUNT" -gt 10 ] && echo "...and $((TOOLS_COUNT - 10)) more"
-    echo ""
-fi
-
-echo "Run 'mise install' to install all tools automatically"
 
 {{- else if eq .chezmoi.os "linux" -}}
 #!/usr/bin/env bash
@@ -91,17 +79,4 @@ else
 fi
 
 echo "Essential tools and Ruby build dependencies installed successfully"
-echo ""
-
-if command -v mise >/dev/null 2>&1; then
-    TOOLS_COUNT=$(mise config ls 2>/dev/null | grep -o "config.toml.*" | sed 's/config.toml  //' | tr ',' '\n' | wc -l | tr -d ' ')
-    TOOL_LIST=$(mise config ls 2>/dev/null | grep -o "config.toml.*" | sed 's/config.toml  //' | tr ',' '\n' | sed 's/aqua://g; s/ubi://g; s/npm://g; s/pipx://g; s/gem://g; s/asdf:mise-plugins\///g; s/go:.*\///' | head -10 | tr '\n' ' ')
-    echo "Running 'mise install' will install $TOOLS_COUNT tools:"
-    echo "$TOOL_LIST"
-    [ "$TOOLS_COUNT" -gt 10 ] && echo "...and $((TOOLS_COUNT - 10)) more"
-    echo ""
-fi
-
-echo "INFO: Install mise to complete setup: curl https://mise.run | sh"
-echo "INFO: Then run 'mise install' to install all tools automatically"
 {{- end -}}

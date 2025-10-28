@@ -6,6 +6,10 @@ local map = vim.keymap.set
 map("i", "jk", "<ESC>", { desc = "Exit insert mode with jk" })
 map("i", "kj", "<ESC>", { desc = "Exit insert mode with kj" })
 
+-- Disable default Ctrl-Y behavior (copy char from line above)
+-- Copilot will override this to accept suggestions
+map("i", "<C-y>", "<Nop>", { desc = "Disabled - used by Copilot" })
+
 -- Prevent space from moving cursor in normal/visual mode
 map({ "n", "v" }, "<Space>", "<Nop>", { desc = "Disable space movement" })
 
@@ -14,12 +18,12 @@ map("n", "<leader>hc", "<cmd>nohlsearch<CR>", { desc = "Clear search highlights"
 
 -- Toggle hlsearch on Enter (preserve original behavior)
 map("n", "<CR>", function()
-    if vim.v.hlsearch == 1 then
-        vim.cmd.nohl()
-        return ""
-    else
-        return vim.keycode("<CR>")
-    end
+  if vim.v.hlsearch == 1 then
+    vim.cmd.nohl()
+    return ""
+  else
+    return vim.keycode("<CR>")
+  end
 end, { expr = true, silent = true, desc = "Clear highlight on Enter" })
 
 -- Better up/down (wrapped lines)
@@ -107,10 +111,10 @@ map("n", "<leader>L", "<cmd>Lazy<CR>", { desc = "Open Lazy plugin manager" })
 
 -- Transparency toggle
 map("n", "<leader>tt", function()
-    if vim.g.transparent_enabled == nil then
-        vim.g.transparent_enabled = true
-    end
-    vim.g.transparent_enabled = not vim.g.transparent_enabled
-    require("themes.current-theme").apply(vim.g.transparent_enabled)
-    vim.notify("Transparency " .. (vim.g.transparent_enabled and "enabled" or "disabled"))
+  if vim.g.transparent_enabled == nil then
+    vim.g.transparent_enabled = true
+  end
+  vim.g.transparent_enabled = not vim.g.transparent_enabled
+  require("themes.current-theme").apply(vim.g.transparent_enabled)
+  vim.notify("Transparency " .. (vim.g.transparent_enabled and "enabled" or "disabled"))
 end, { desc = "Toggle transparency" })

@@ -2,6 +2,7 @@ local set = vim.opt_local
 
 set.expandtab = false
 set.tabstop = 4
+set.softtabstop = 0
 set.shiftwidth = 4
 
 vim.keymap.set("n", "<space>td", function()

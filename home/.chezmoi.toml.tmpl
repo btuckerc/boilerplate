@@ -1,5 +1,7 @@
-{{- $gitName := promptStringOnce . "gitName" "What is your Git name" -}}
-{{- $gitEmail := promptStringOnce . "gitEmail" "What is your Git email" -}}
+{{- $gitName := promptStringOnce . "git_name" "What is your Git name" -}}
+{{- $gitEmail := promptStringOnce . "git_email" "What is your Git email" -}}
+
+sourceDir = {{ .chezmoi.sourceDir | quote }}
 
 [data.git]
     name = {{ $gitName | quote }}

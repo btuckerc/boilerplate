@@ -1,7 +1,7 @@
 local set = vim.opt_local
 
-set.textwidth = 80   -- Wrap text at 80 characters
-set.spell = true     -- Enable spell checking
+set.textwidth = 80 -- Wrap text at 80 characters
+set.spell = true -- Enable spell checking
 set.linebreak = true
 
 -- added extra highlights for markdown files to render highlights properly
@@ -33,4 +33,3 @@ vim.cmd(
 vim.cmd(
   string.format([[highlight @markup.heading.6.markdown cterm=bold gui=bold guifg=%s guibg=%s]], color_fg, color6_bg)
 )
-

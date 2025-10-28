@@ -57,16 +57,16 @@ function M.json_to_markdown(nodes)
     elseif node_type == "check_list" then
       return text_content
     elseif node_type == "check_list_item" then
-        if node.attrs.checked then
-            return "- [x] " .. text_content
-        else
-            return "- [ ] " .. text_content
-        end
+      if node.attrs.checked then
+        return "- [x] " .. text_content
+      else
+        return "- [ ] " .. text_content
+      end
     elseif node_type == "code_block" then
       local lang = node.attrs.language or ""
       return "```" .. lang .. "\n" .. text_content .. "\n```\n\n"
     elseif node_type == "blockquote" then
-        return "> " .. text_content:gsub("\n\n", "\n> ")
+      return "> " .. text_content:gsub("\n\n", "\n> ")
     elseif node_type == "horizontal_rule" then
       return "\n---\n\n"
     elseif node_type == "image" then

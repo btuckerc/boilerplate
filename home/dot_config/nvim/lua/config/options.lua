@@ -65,7 +65,7 @@ opt.shortmess:append("c")
 -- Command line
 opt.cmdheight = 1
 opt.showcmd = true
-opt.showtabline = 0  -- Hide tabline (lualine shows buffer info)
+opt.showtabline = 0 -- Hide tabline (lualine shows buffer info)
 opt.laststatus = 2
 opt.ruler = true
 opt.title = true
@@ -88,5 +88,5 @@ opt.grepformat = "%f:%l:%c:%m"
 
 -- Additional features
 if vim.fn.has("nvim-0.10") == 1 then
-    opt.smoothscroll = true
+  opt.smoothscroll = true
 end

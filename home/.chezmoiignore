@@ -33,3 +33,13 @@ nvim.backup.*
 
 # Local mise configuration (machine-specific)
 .config/mise/mise.local.toml
+
+# OpenCode runtime files
+.config/opencode/.opencode-speckit/
+.config/opencode/.opencode-speckit/**
+.config/opencode/node_modules/
+.config/opencode/node_modules/**
+.config/opencode/bun.lock
+
+# Neovim lazy-lock.json (plugin lockfile)
+.config/nvim/lazy-lock.json

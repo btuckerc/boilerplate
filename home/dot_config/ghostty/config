@@ -1,10 +1,12 @@
-background-opacity=0.6
-font-size=20
+background-opacity=0.8
+font-size=24
+adjust-cell-height=35%
 theme=current-theme
 font-family = ""
 font-family = "SF Mono"
 background-blur-radius=40
-window-padding-y=0,0
+window-padding-y=0
+window-padding-x=5
 window-padding-balance=true
 window-height=24
 window-width=80
@@ -17,3 +19,4 @@ macos-option-as-alt=true
 keybind = super+r=reload_config
 keybind = super+i=inspector:toggle
 macos-non-native-fullscreen = true
+title = " "

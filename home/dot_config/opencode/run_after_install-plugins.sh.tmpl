@@ -1,0 +1,43 @@
+#!/bin/bash
+# Install OpenCode plugin dependencies
+# This script runs after chezmoi applies the dotfiles
+
+set -e
+
+OPENCODE_DIR="${HOME}/.config/opencode"
+PACKAGE_JSON="${OPENCODE_DIR}/package.json"
+
+# Check if package.json exists
+if [[ ! -f "$PACKAGE_JSON" ]]; then
+    echo "No package.json found in ${OPENCODE_DIR}, skipping dependency install"
+    exit 0
+fi
+
+# Check if we're in an interactive terminal
+if [[ ! -t 0 ]]; then
+    echo "Skipping opencode plugin install (non-interactive shell)"
+    exit 0
+fi
+
+cd "$OPENCODE_DIR"
+
+# Check if dependencies are already installed and up to date
+if [[ -d "node_modules" ]] && [[ "package.json" -ot "node_modules/.package-lock.json" || "package.json" -ot "bun.lock" ]]; then
+    echo "OpenCode dependencies already up to date"
+    exit 0
+fi
+
+# Check for bun (preferred) or npm
+if command -v bun &> /dev/null; then
+    echo "Installing OpenCode plugins with bun..."
+    bun install
+elif command -v npm &> /dev/null; then
+    echo "Installing OpenCode plugins with npm..."
+    npm install
+else
+    echo "Warning: Neither bun nor npm found. Cannot install OpenCode plugins."
+    echo "Install mise-managed bun with: mise use bun"
+    exit 0
+fi
+
+echo "OpenCode plugins installed successfully"

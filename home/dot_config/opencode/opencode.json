@@ -1,32 +1,49 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "instructions": ["~/.config/opencode/AGENTS.md"],
   "permission": {
-    "edit": "ask",
-    "bash": "ask"
+    "read": "allow",
+    "edit": "allow",
+    "bash": "ask",
+    "external_directory": "ask",
+    "task": "ask",
+    "glob": "allow",
+    "grep": "allow",
+    "list": "allow",
+    "lsp": "allow"
   },
-  "tools": {
-    "read": true,
-    "grep": true,
-    "glob": true,
-    "list": true,
-    "edit": true,
-    "write": true,
-    "bash": true,
-    "todowrite": true,
-    "todoread": true,
-    "webfetch": true
-  },
-  "mcp": {
-    "context7": {
-      "type": "remote",
-      "url": "https://mcp.context7.com/mcp",
-      "enabled": true
-    },
-    "playwright": {
-      "type": "local",
-      "command": ["npx", "@playwright/mcp@latest"],
-      "enabled": true
+  "provider": {
+    "openrouter": {
+      "models": {
+        "moonshotai/kimi-k2.5": {
+          "name": "Kimi K2.5 (via Fireworks AI)",
+          "limit": {
+            "context": 262144,
+            "output": 16384
+          },
+          "parameters": {
+            "temperature": 0.1,
+            "top_p": 0.95,
+            "reasoning": {
+              "enabled": true,
+              "include_details": true
+            }
+          },
+          "options": {
+            "provider": {
+              "order": ["together", "moonshotai"],
+              "allow_fallbacks": false
+            }
+          }
+        },
+        "anthropic/claude-opus-4.6": {
+          "name": "Claude Opus 4.6 (via OpenRouter)",
+          "limit": {
+            "context": 200000,
+            "output": 65536
+          }
+        }
+      }
     }
-  }
+  },
+  "model": "openrouter/moonshotai/kimi-k2.5"
 }

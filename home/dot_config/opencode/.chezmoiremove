@@ -3,6 +3,5 @@ mise.toml
 update-speckit.sh
 setup.sh
 bun.lock
-package.json
 node_modules
 agent

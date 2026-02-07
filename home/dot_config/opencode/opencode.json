@@ -35,10 +35,10 @@
         },
         "anthropic/claude-opus-4.6": {
           "name": "Claude Opus 4.6 (via OpenRouter)",
-          "limit": {
-            "context": 200000,
-            "output": 65536
-          }
+            "limit": {
+              "context": 1000000,
+              "output": 128000
+            }
         }
       }
     }

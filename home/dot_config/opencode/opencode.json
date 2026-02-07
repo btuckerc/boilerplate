@@ -29,10 +29,8 @@
             }
           },
           "options": {
-            "provider": {
-              "order": ["together", "moonshotai"],
-              "allow_fallbacks": false
-            }
+            "order": ["together", "moonshotai"],
+            "allow_fallbacks": false
           }
         },
         "anthropic/claude-opus-4.6": {

@@ -21,6 +21,9 @@ fi
 eval "$(/opt/homebrew/bin/brew shellenv)"
 export PATH="/opt/homebrew/opt/postgresql@16/bin:$PATH"
 
+# Load docker
+export PATH="/Applications/Docker.app/Contents/Resources/bin:$PATH"
+
 # Kitty shell integration
 if [ -n "$KITTY_INSTALLATION_DIR" ]; then
     export KITTY_SHELL_INTEGRATION="enabled"

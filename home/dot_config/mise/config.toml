@@ -6,6 +6,9 @@ bun = "latest"
 node = "lts"
 go = "1.25"
 
+# AI coding assistant
+"aqua:anomalyco/opencode" = "latest"
+
 # CLI tools (fast binary downloads)
 "ubi:twpayne/chezmoi" = "latest"
 "ubi:starship/starship" = "latest"

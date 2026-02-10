@@ -49,6 +49,29 @@ chezmoi init --source="$(pwd)" --apply
 mise install
 ```
 
+## Documentation
+
+This repository includes comprehensive documentation:
+
+### For AI Agents and Advanced Users
+
+The following skills provide actionable playbooks for working with this repository:
+
+- **[Apply Dotfiles](./home/dot_config/opencode/skills/apply-dotfiles/SKILL.md)** - Deploy and update dotfiles using chezmoi
+- **[Install Tools](./home/dot_config/opencode/skills/install-tools/SKILL.md)** - Install and manage software via mise
+- **[Maintain System](./home/dot_config/opencode/skills/maintain-system/SKILL.md)** - Update and maintain the entire system
+
+### For Users
+
+- **[README.md](./README.md)** (this file) - Getting started and overview
+- **[llms.txt](./llms.txt)** - LLM-friendly repository overview
+
+### Reference (Optional)
+
+- **[LICENSE](./LICENSE)** - MIT License
+
+For most users, this README covers what you need. AI assistants should use the skill files for detailed operational guidance.
+
 ### What Gets Installed Automatically
 
 mise will automatically install these essential tools:
@@ -378,6 +401,10 @@ Creates:
 
 ## Troubleshooting
 
+For detailed troubleshooting steps and solutions to common errors, see **[TROUBLESHOOTING.md](./TROUBLESHOOTING.md)**.
+
+Quick fixes for common issues:
+
 ### chezmoi Issues
 
 ```bash
@@ -443,6 +470,10 @@ zsh -x  # or bash -x
 ```
 
 ## Updating
+
+For detailed update procedures and maintenance schedules, see **[UPDATING.md](./UPDATING.md)**.
+
+Quick update commands:
 
 ```bash
 # Update dotfiles from repository

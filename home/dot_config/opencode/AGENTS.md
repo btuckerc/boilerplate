@@ -1,4 +1,5 @@
 # Global Agent Instructions
 
-<!-- This file is intentionally left blank for user customization -->
-<!-- Add high-level global instructions here as needed -->
+<!-- 
+  This file can be used for additional global context if needed.
+-->

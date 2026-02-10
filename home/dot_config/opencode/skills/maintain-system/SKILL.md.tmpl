@@ -1,0 +1,336 @@
+---
+name: maintain-system
+description: Update and maintain the entire dotfiles system including chezmoi updates, tool upgrades, and repository synchronization. Use this skill for routine maintenance, keeping software current, and system health checks.
+---
+
+# Skill: Maintain System
+
+Update and maintain the entire dotfiles system, tools, and configuration.
+
+## Repository Location
+
+Main repository: `{{ .chezmoi.sourceDir | dir }}/`
+Dotfiles source: `{{ .chezmoi.sourceDir }}/`
+
+## When to Use
+
+- Weekly/monthly maintenance
+- Updating after repository changes
+- Upgrading tool versions
+- System health checks
+- Before major changes (backup verification)
+
+## Core Maintenance Tasks
+
+### Full System Update
+
+```bash
+# 1. Navigate to repo
+cd {{ .chezmoi.sourceDir | dir }}
+
+# 2. Update dotfiles from remote
+chezmoi update
+
+# 3. Review changes
+chezmoi diff
+
+# 4. Apply updates
+chezmoi apply
+
+# 5. Update mise tools
+mise upgrade
+
+# 6. Update Homebrew (macOS)
+brew update && brew upgrade
+
+# 7. Verify everything works
+chezmoi doctor
+mise doctor
+```
+
+### Weekly Maintenance
+
+```bash
+# Quick health check
+chezmoi doctor
+mise doctor
+
+# Check for updates
+chezmoi git fetch
+chezmoi diff  # See if upstream changed
+mise outdated
+
+# Apply if needed
+chezmoi update  # Pull and apply
+mise upgrade    # Update tools
+```
+
+### Monthly Deep Maintenance
+
+```bash
+# 1. Full update
+chezmoi update
+mise upgrade
+brew update && brew upgrade
+
+# 2. Clean up
+brew cleanup
+# Note: mise doesn't have a built-in prune command
+
+# 3. Verify
+chezmoi doctor
+mise doctor
+# Or manually:
+which chezmoi starship zoxide fzf bat fd yazi
+mise list
+
+# 4. Backup
+tar czf ~/dotfiles-backup-$(date +%Y%m%d).tar.gz \
+  ~/.zshrc ~/.bashrc ~/.config ~/.gitconfig
+```
+
+## Update Procedures
+
+### Update Dotfiles from Repository
+
+```bash
+# Standard workflow
+chezmoi update              # Pull and apply
+chezmoi status              # Check state
+
+# If conflicts occur:
+chezmoi diff                # See conflicts
+chezmoi apply --force       # Overwrite local (careful!)
+# OR manually merge in ~/.local/share/chezmoi
+```
+
+### Update Specific Components
+
+```bash
+# Only dotfiles (no tools)
+chezmoi update
+chezmoi apply
+
+# Only mise tools
+mise upgrade
+
+# Only Homebrew
+brew update && brew upgrade
+
+# Only Brewfile packages
+chezmoi apply ~/Brewfile
+brew bundle install --file=~/Brewfile
+```
+
+## Health Checks
+
+### System Verification
+
+```bash
+# chezmoi health
+chezmoi doctor
+
+# mise health  
+mise doctor
+
+# Shell configuration
+echo $SHELL
+env | grep -E "^(PATH|SHELL|HOME)"
+
+# Tools available
+which chezmoi starship fzf bat eza fd yazi
+chezmoi --version
+starship --version
+
+# mise status
+mise status
+mise list
+```
+
+### Configuration Verification
+
+```bash
+# Git config working
+git config user.name
+git config user.email
+
+# Shell config sourced
+alias | grep ll  # Should show ll='ls -alF'
+
+# Starship active
+echo $STARSHIP_SHELL  # Should show zsh or bash
+```
+
+## Backup and Recovery
+
+### Create Backup
+
+```bash
+# Full dotfiles backup
+cd ~
+tar czf ~/dotfiles-backup-$(date +%Y%m%d).tar.gz \
+  .zshrc .bashrc .bash_profile .zprofile .zshenv \
+  .gitconfig .config .local
+
+# Or use chezmoi archive
+chezmoi archive --output=~/dotfiles-backup.tar.gz
+```
+
+### Restore from Backup
+
+```bash
+# Restore files
+tar xzf ~/dotfiles-backup-YYYYMMDD.tar.gz -C ~
+
+# Re-apply from source (recommended)
+chezmoi init --apply {{ .chezmoi.sourceDir | dir }}
+```
+
+### Nuclear Reset (Complete Reinstall)
+
+```bash
+# DANGER: Removes all chezmoi state
+# Only use if system is completely broken
+
+# 1. Backup current
+tar czf ~/dotfiles-emergency-backup.tar.gz ~
+
+# 2. Remove chezmoi (keeps target files)
+chezmoi purge --keep-targets
+
+# 3. Re-initialize
+cd {{ .chezmoi.sourceDir | dir }}
+./setup
+# Or: chezmoi init --apply --source="$(pwd)/home"
+```
+
+## Maintenance Schedule
+
+### Daily
+- Nothing (system should be stable)
+
+### Weekly
+```bash
+# Monday morning routine
+chezmoi update  # Check for dotfile updates
+mise outdated   # Check for tool updates
+```
+
+### Monthly
+```bash
+# First of month
+mise upgrade                    # Update all tools
+brew update && brew upgrade     # Update Homebrew
+brew cleanup                    # Clean old versions
+chezmoi doctor && mise doctor # Verify system
+```
+
+### Quarterly
+```bash
+# Review and audit
+# - Check for unused tools: mise list
+# - Review Brewfile for unused packages
+# - Update documentation
+# - Major version upgrades (node, python, go)
+```
+
+## Troubleshooting Maintenance Issues
+
+### Update fails
+
+```bash
+# Check git status
+cd ~/.local/share/chezmoi
+git status
+git log --oneline -5
+
+# Reset to clean state
+git checkout HEAD -- .
+chezmoi apply --force
+```
+
+### Tools broken after update
+
+```bash
+# Check which tool
+mise list
+
+# Reinstall specific tool
+mise uninstall node
+mise install node
+
+# Or reset all
+mise uninstall --all
+mise install
+```
+
+### Shell broken after apply
+
+```bash
+# Emergency: get basic shell
+export PATH="/usr/local/bin:/usr/bin:/bin:$PATH"
+bash --norc --noprofile
+
+# Or clean zsh
+zsh -f
+
+# Then fix
+chezmoi apply --force
+```
+
+## Automation Opportunities
+
+### Suggested Git Hooks
+
+Add to `{{ .chezmoi.sourceDir | dir }}/.git/hooks/`:
+
+**pre-commit:**
+```bash
+#!/bin/bash
+chezmoi doctor --no-network || true
+mise doctor --no-network || true
+```
+
+**post-merge:**
+```bash
+#!/bin/bash
+echo "Dotfiles updated. Run 'chezmoi diff' to review changes."
+```
+
+### Manual Health Check
+
+Instead of a script, run these commands:
+
+```bash
+# Check system health
+chezmoi doctor
+mise doctor
+
+# Full update
+cd {{ .chezmoi.sourceDir | dir }}
+chezmoi update
+mise upgrade
+brew update && brew upgrade
+```
+
+## Verification
+
+After maintenance:
+
+```bash
+# All systems green
+chezmoi doctor | grep -c "ok"
+# Should match total checks
+
+# Tools current
+mise outdated  # Should show nothing or minimal
+
+# Shell works
+source ~/.zshrc  # No errors
+which starship fzf bat eza  # All found
+```
+
+## Related
+
+- For applying changes: use `apply-dotfiles` skill
+- For installing tools: use `install-tools` skill

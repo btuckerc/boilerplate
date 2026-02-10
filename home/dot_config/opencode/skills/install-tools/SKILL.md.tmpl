@@ -1,0 +1,324 @@
+---
+name: install-tools
+description: Install and manage software, binaries, and development tools using mise. Use this skill when adding new CLI tools, updating existing tools, or managing language runtimes (node, python, go). Handles all package installation through mise's multi-backend system.
+---
+
+# Skill: Install Tools
+
+Install and manage software, binaries, and development tools using mise.
+
+## Repository Location
+
+Configuration: `{{ .chezmoi.sourceDir }}/dot_config/mise/config.toml`
+Optional tools: `{{ .chezmoi.sourceDir }}/dot_config/mise/config.optional.toml`
+
+## When to Use
+
+- Installing tools on a new system
+- Adding a new CLI tool to your workflow
+- Updating tool versions
+- Installing language runtimes (node, python, go)
+- Setting up development environment
+
+## Core Commands
+
+### Install All Tools
+
+```bash
+# Install everything defined in config.toml
+mise install
+
+# Install with verbose output (for debugging)
+mise install --verbose
+```
+
+### Install Specific Tool
+
+```bash
+# Install specific version
+mise install node@20
+mise install python@3.13
+
+# Use latest version
+mise install starship@latest
+```
+
+### Check Status
+
+```bash
+# List installed tools
+mise list
+
+# Check for outdated tools
+mise outdated
+
+# Check tool availability
+which starship fzf bat eza chezmoi
+```
+
+## Adding New Tools
+
+### Step-by-Step Process
+
+```bash
+# 1. Choose the right backend
+cd {{ .chezmoi.sourceDir | dir }}
+
+# 2. Edit the mise config
+chezmoi edit ~/.config/mise/config.toml
+
+# 3. Add to [tools] section:
+# "ubi:owner/repo" = "latest"    # GitHub releases
+# "aqua:tool/name" = "latest"    # Registry tools  
+# "npm:package" = "latest"       # Node packages
+# "go:import/path" = "latest"    # Go tools
+# "pipx:package" = "latest"      # Python apps
+# "gem:gemname" = "latest"       # Ruby gems
+
+# 4. Save and test
+mise install
+which <new-tool>
+
+# 5. Commit the change
+cd {{ .chezmoi.sourceDir | dir }}
+git add home/dot_config/mise/config.toml
+git commit -m "Add <tool> for <purpose>"
+```
+
+### Installation Method Decision Tree
+
+```
+What type of software?
+│
+├─ CLI tool, language runtime, or dev tool?
+│  └─ Use: mise (via config.toml)
+│     - Version managed and pinned
+│     - Examples: node, python, fzf, bat, starship
+│
+├─ GUI application (IDE, browser, editor)?
+│  └─ Use: Homebrew Cask
+│     - Installs to /Applications
+│     - Examples: zed, cursor, docker, ghostty
+│     - Command: brew install --cask <name>
+│
+├─ System library or service?
+│  └─ Use: Homebrew Formula (not cask)
+│     - Examples: openssl, mysql, redis
+│     - Command: brew install <name>
+│
+└─ macOS system extension or driver?
+   └─ Use: Homebrew Cask with caution
+      - May require manual approval in System Settings
+```
+
+### Backend Decision Tree (for mise)
+
+```
+What type of tool?
+│
+├─ GitHub binary release?
+│  └─ Use: "ubi:owner/repo" = "latest"
+│     Example: "ubi:starship/starship" = "latest"
+│
+├─ Popular CLI tool in registry?
+│  └─ Use: "aqua:owner/repo" = "latest"
+│     Example: "aqua:neovim/neovim" = "latest"
+│
+├─ Node.js package?
+│  └─ Use: "npm:package-name" = "latest"
+│     Example: "npm:typescript-language-server" = "latest"
+│
+├─ Go tool?
+│  └─ Use: "go:import/path" = "latest"
+│     Example: "go:mvdan.cc/sh/v3/cmd/shfmt" = "latest"
+│
+├─ Python CLI app?
+│  └─ Use: "pipx:package" = "latest"
+│     Example: "pipx:black" = "latest"
+│
+└─ Ruby gem?
+   └─ Use: "gem:gemname" = "latest"
+      Example: "gem:solargraph" = "latest"
+```
+
+## Installing GUI Applications
+
+GUI applications (IDEs, browsers, editors) should be installed via Homebrew Casks, not mise.
+
+### Install a GUI App
+
+```bash
+# Search for the cask
+brew search --casks <app-name>
+
+# Install the GUI application
+brew install --cask <cask-name>
+
+# Example: Install Zed IDE
+brew install --cask zed
+
+# Example: Install Docker
+brew install --cask docker
+```
+
+### Where to Add GUI Apps
+
+GUI apps installed via casks are managed in the **Brewfile**, not mise config:
+
+```bash
+# Edit the Brewfile
+chezmoi edit ~/Brewfile
+
+# Add cask entries:
+cask "zed"
+cask "docker"
+cask "ghostty"
+
+# Apply changes
+brew bundle install --file=~/Brewfile
+```
+
+### Important Distinction
+
+| Use mise for... | Use Homebrew Casks for... |
+|----------------|---------------------------|
+| CLI tools (fzf, bat, starship) | GUI apps (Zed, VSCode, Chrome) |
+| Language runtimes (node, python, go) | Development environments (Docker) |
+| Dev tools (neovim, lazygit) | System applications (1Password) |
+| Version-controlled binaries | App Store replacements |
+
+## Optional Tools
+
+Tools can be marked as optional (user prompted on install):
+
+```bash
+# Edit optional config
+chezmoi edit ~/.config/mise/config.optional.toml
+
+# Add commented entry:
+[tools]
+# mytool = "latest"  # Comment indicates optional
+
+# On next mise install, user will be prompted:
+# "Install mytool? y/n"
+```
+
+## Version Management
+
+### Pin Versions
+
+```bash
+# Edit config to pin version
+chezmoi edit ~/.config/mise/config.toml
+
+# Change from:
+node = "latest"
+# To:
+node = "20.11.0"  # Specific version
+
+# Or use version constraints:
+node = ">=20"     # 20 or higher
+```
+
+### Upgrade Tools
+
+```bash
+# Check what's outdated
+mise outdated
+
+# Upgrade specific tool
+mise upgrade starship
+
+# Upgrade all tools
+mise upgrade
+
+# Reinstall after config change
+mise install
+```
+
+## Troubleshooting
+
+### Tool not found after install
+
+```bash
+# 1. Verify mise activated
+which mise
+
+# 2. Reload shell (activates mise)
+source ~/.zshrc  # or open new terminal
+
+# 3. Check if tool installed
+mise list | grep <tool>
+
+# 4. Reset command hash
+hash -r
+
+# 5. Manual activation if needed
+mise activate
+```
+
+### Installation fails
+
+```bash
+# Check backend availability
+mise ls-remote ubi:owner/repo
+
+# Install sequentially (avoid timeouts)
+MISE_JOBS=1 mise install
+
+# Verbose logging
+mise install --verbose 2>&1 | tee /tmp/mise-install.log
+
+# Clear cache and retry
+rm -rf ~/.cache/mise
+mise install
+```
+
+### Ruby build fails
+
+```bash
+# Ruby needs python symlink
+mkdir -p ~/.local/share/mise/shims
+ln -sf $(which python3) ~/.local/share/mise/shims/python
+export PATH="$HOME/.local/share/mise/shims:$PATH"
+mise install
+```
+
+## Current Tool Inventory
+
+Core languages:
+- python = "3.13"
+- node = "lts"
+- go = "1.25"
+- bun = "latest"
+- uv = "latest"
+
+CLI tools:
+- chezmoi, starship, zoxide, fzf, bat, fd, yazi, jq, gum, lazygit, tree-sitter, carapace, gh, tmux, ripgrep
+
+Language servers and dev tools:
+- typescript-language-server, pyright, yaml-language-server, vscode-langservers, bash-language-server, dockerfile-language-server, prettier, gopls, goimports, black, lua-language-server, rust-analyzer, terraform-ls, stylua, gofumpt, shfmt
+
+Ruby tools:
+- ruby, solargraph, rails
+
+## Verification
+
+After installing:
+
+```bash
+# All core tools available
+which python node go bun
+
+# CLI tools in PATH
+which starship fzf bat eza fd yazi
+
+# Versions correct
+python --version  # 3.13.x
+node --version    # v20.x.x
+```
+
+## Related
+
+- For applying dotfiles: use `apply-dotfiles` skill
+- For system maintenance: use `maintain-system` skill

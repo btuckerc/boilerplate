@@ -1,0 +1,199 @@
+---
+name: apply-dotfiles
+description: Deploy and update dotfiles using chezmoi. Use this skill when setting up a new system, applying configuration changes, or syncing dotfiles from the repository. Handles the complete workflow from repository to working configuration.
+---
+
+# Skill: Apply Dotfiles
+
+Deploy and update dotfiles from the boilerplate repository to your home directory using chezmoi.
+
+## Repository Location
+
+Dotfiles source: `{{ .chezmoi.sourceDir | dir }}`
+Target location: `$HOME` (your home directory)
+
+## When to Use
+
+- Setting up a new machine
+- Applying configuration changes from the repo
+- Syncing after pulling updates
+- Recovering from broken configuration
+- Testing changes before committing
+
+## Core Commands
+
+### Initial Setup
+
+```bash
+# If chezmoi is not installed, it will be auto-installed
+# Then apply the dotfiles
+cd {{ .chezmoi.sourceDir | dir }}
+chezmoi init --source="$(pwd)/home" --apply
+```
+
+### Apply Changes
+
+```bash
+# Apply all dotfiles (safe to run repeatedly)
+chezmoi apply
+
+# Apply specific file only
+chezmoi apply ~/.zshrc
+chezmoi apply ~/.config/mise/config.toml
+
+# Force apply (overwrites local changes - use with caution)
+chezmoi apply --force
+```
+
+### Preview Changes
+
+```bash
+# See what would change without applying
+chezmoi diff
+
+# Diff specific file
+chezmoi diff ~/.zshrc
+
+# Verbose output with template rendering
+chezmoi diff --verbose
+```
+
+## Workflow
+
+### Standard Update Workflow
+
+```bash
+# 1. Check current status
+chezmoi status
+
+# 2. Review what will change
+chezmoi diff
+
+# 3. Apply if changes look correct
+chezmoi apply
+
+# 4. Verify the change took effect
+source ~/.zshrc  # or open new terminal
+which starship    # Verify tools are available
+```
+
+### First-Time Setup on New Machine
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/btuckerc/boilerplate.git {{ .chezmoi.sourceDir | dir }}
+
+# 2. Run the setup script (installs chezmoi, applies dotfiles)
+cd {{ .chezmoi.sourceDir | dir }}
+./setup
+
+# 3. Or manually if you prefer
+chezmoi init --source="$(pwd)/home" --apply
+mise install
+```
+
+## Safety Checks
+
+Before applying, always:
+
+```bash
+# Check that you're targeting the right source
+chezmoi source-path
+# Should output: /Users/you/Documents/GitHub/boilerplate/home
+
+# Preview changes
+chezmoi diff | head -50
+
+# Check for template errors
+chezmoi doctor
+```
+
+## Troubleshooting
+
+### Changes not appearing after apply
+
+```bash
+# Check if file is managed by chezmoi
+chezmoi managed | grep <filename>
+
+# Check if file is in .chezmoiignore
+cat {{ .chezmoi.sourceDir }}/.chezmoiignore
+
+# Force reload shell config
+exec zsh  # or exec bash
+```
+
+### Template errors
+
+```bash
+# Test template syntax
+chezmoi execute-template < {{ .chezmoi.sourceDir }}/dot_zshrc.tmpl
+
+# Apply with verbose debugging
+chezmoi apply --verbose 2>&1 | head -100
+```
+
+### Permission denied
+
+```bash
+# Check file permissions
+ls -la ~/.zshrc
+
+# Fix with force (overwrites local changes)
+chezmoi apply --force ~/.zshrc
+```
+
+### TTY/hook errors
+
+```bash
+# Error: "could not open a new TTY: open /dev/tty: device not configured"
+# This happens when hook scripts try to run interactively in non-TTY mode
+
+# Solution: Use --force to skip interactive hooks
+chezmoi apply --force
+
+# Or skip all scripts with environment variable
+CHEZMOI_SKIP_SCRIPTS=1 chezmoi apply
+```
+
+## Verification
+
+After applying, verify:
+
+```bash
+# Shell configuration loaded
+source ~/.zshrc
+echo $SHELL  # Should be /bin/zsh (macOS) or /bin/bash (Linux)
+
+# Tools available
+which chezmoi starship fzf bat eza
+
+# chezmoi healthy
+chezmoi doctor
+
+# mise tools installed
+mise list
+```
+
+## Decision Tree
+
+```
+Need to apply dotfiles?
+│
+├─ First time on this machine?
+│  └─ Run: ./setup or chezmoi init --source="$(pwd)/home" --apply
+│
+├─ Updating after git pull?
+│  └─ Run: chezmoi diff, review, then chezmoi apply
+│
+├─ Specific file not updating?
+│  └─ Run: chezmoi apply --force <filepath>
+│
+└─ Template errors?
+   └─ Run: chezmoi execute-template to debug
+```
+
+## Related
+
+- For installing tools: use `install-tools` skill
+- For system maintenance: use `maintain-system` skill

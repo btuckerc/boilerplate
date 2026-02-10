@@ -27,4 +27,7 @@ home/.chezmoistate
 *.tmp
 *.log
 
+# Planning documents (untracked)
+PLAN.md
+
 .env

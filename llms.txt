@@ -1,0 +1,75 @@
+# Boilerplate Dotfiles
+
+> Cross-platform dotfiles managed with chezmoi and mise, supporting macOS (zsh) and Linux (bash). Provides automated setup, OS-aware templates, and comprehensive tool management for development environments.
+
+This repository contains dotfiles and configuration managed via chezmoi. It uses mise for tool installation, supports both macOS and Linux, and includes configurations for zsh/bash, nvim, tmux, and various development tools.
+
+## Documentation
+
+### Core Skills (for AI Agents)
+
+These skills provide actionable playbooks for working with this repository:
+
+- [Apply Dotfiles](./home/dot_config/opencode/skills/apply-dotfiles/SKILL.md): Deploy and update dotfiles using chezmoi. Use for initial setup, applying changes, or syncing configuration.
+- [Install Tools](./home/dot_config/opencode/skills/install-tools/SKILL.md): Install and manage software via mise. Use for adding CLI tools, updating versions, or managing language runtimes.
+- [Maintain System](./home/dot_config/opencode/skills/maintain-system/SKILL.md): Update and maintain the entire system. Use for routine maintenance, upgrades, and health checks.
+
+### User Documentation
+
+- [README.md](./README.md): Getting started guide, quick start, and user-friendly overview
+- [LICENSE](./LICENSE): MIT License
+
+### For Humans
+
+- [README.md](./README.md): Complete user guide with setup instructions
+- [LICENSE](./LICENSE): MIT License
+
+## Repository Structure
+
+```
+boilerplate/
+├── home/                          # chezmoi source directory
+│   ├── dot_config/
+│   │   ├── mise/config.toml       # Tool definitions
+│   │   ├── nvim/                  # Neovim configuration
+│   │   ├── tmux/                  # Tmux configuration
+│   │   ├── shell/common.sh        # Shared shell config
+│   │   └── opencode/skills/       # AI agent skills
+│   ├── dot_zshrc.tmpl             # Zsh configuration
+│   ├── dot_bashrc.tmpl            # Bash configuration
+│   └── run_once_*.sh.tmpl         # Setup hooks
+├── setup                          # Bootstrap script
+├── Brewfile                       # Homebrew packages
+└── README.md                      # User documentation
+```
+
+## Key Technologies
+
+- **chezmoi**: Dotfile manager with templating (https://chezmoi.io)
+- **mise**: Universal tool manager (https://mise.jdx.dev)
+- **Git**: Version control
+- **Homebrew**: macOS package manager
+- **zsh/bash**: Shell environments
+
+## Quick Commands
+
+```bash
+# Initial setup
+./setup
+
+# Apply dotfiles
+chezmoi apply
+
+# Install tools
+mise install
+
+# Update system
+chezmoi update && mise upgrade
+```
+
+## Repository Location
+
+When working with this repository on a local system, the source is typically at:
+`~/Documents/GitHub/boilerplate/`
+
+The dotfiles source is in the `home/` subdirectory, configured via `.chezmoiroot`.

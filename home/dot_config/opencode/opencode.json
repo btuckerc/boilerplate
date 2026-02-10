@@ -1,27 +1,64 @@
 {
   "$schema": "https://opencode.ai/config.json",
+  "model": "openrouter/moonshotai/kimi-k2.5",
+  "small_model": "openrouter/deepseek/deepseek-chat",
+  
+  "compaction": {
+    "auto": true,
+    "prune": true
+  },
+  
+  "watcher": {
+    "ignore": [
+      "node_modules/**",
+      ".git/**",
+      "dist/**",
+      "build/**",
+      ".next/**",
+      ".turbo/**",
+      "coverage/**",
+      "*.log",
+      ".DS_Store",
+      "*.lockb",
+      "target/**",
+      ".cargo/**",
+      "__pycache__/**",
+      ".pytest_cache/**",
+      ".mypy_cache/**",
+      ".venv/**",
+      "venv/**"
+    ]
+  },
+  
   "permission": {
     "read": "allow",
     "edit": "allow",
     "bash": "ask",
     "external_directory": "ask",
-    "task": "ask",
+    "task": "allow",
     "glob": "allow",
     "grep": "allow",
     "list": "allow",
-    "lsp": "allow"
+    "lsp": "allow",
+    "webfetch": "allow",
+    "websearch": "allow"
   },
+  
   "provider": {
     "openrouter": {
+      "options": {
+        "timeout": false,
+        "setCacheKey": true
+      },
       "models": {
         "moonshotai/kimi-k2.5": {
-          "name": "Kimi K2.5 (via Fireworks AI)",
+          "name": "Kimi K2.5 Architect (via Together AI)",
           "limit": {
             "context": 262144,
             "output": 16384
           },
           "parameters": {
-            "temperature": 0.1,
+            "temperature": 0.3,
             "top_p": 0.95,
             "reasoning": {
               "enabled": true,
@@ -29,19 +66,178 @@
             }
           },
           "options": {
-            "order": ["together", "moonshotai"],
+            "order": ["together"],
             "allow_fallbacks": false
+          },
+          "variants": {
+            "high": {
+              "temperature": 0.2,
+              "top_p": 0.95,
+              "reasoning": {
+                "enabled": true,
+                "include_details": true
+              }
+            },
+            "fast": {
+              "temperature": 0.4,
+              "top_p": 0.9,
+              "reasoning": {
+                "enabled": false
+              }
+            }
+          }
+        },
+        "deepseek/deepseek-chat": {
+          "name": "DeepSeek Chat Worker",
+          "limit": {
+            "context": 64000,
+            "output": 8192
+          },
+          "parameters": {
+            "temperature": 0.1,
+            "top_p": 0.9
+          },
+          "variants": {
+            "coding": {
+              "temperature": 0.05,
+              "top_p": 0.85
+            },
+            "explore": {
+              "temperature": 0.2,
+              "top_p": 0.95
+            }
           }
         },
         "anthropic/claude-opus-4.6": {
           "name": "Claude Opus 4.6 (via OpenRouter)",
-            "limit": {
-              "context": 1000000,
-              "output": 128000
+          "limit": {
+            "context": 1000000,
+            "output": 128000
+          },
+          "variants": {
+            "high": {
+              "thinking": {
+                "type": "enabled",
+                "budgetTokens": 16000
+              }
             }
+          }
         }
       }
     }
   },
-  "model": "openrouter/moonshotai/kimi-k2.5"
+  
+  "agent": {
+    "build": {
+      "mode": "primary",
+      "model": "openrouter/moonshotai/kimi-k2.5",
+      "temperature": 0.3,
+      "prompt": "{file:~/.config/opencode/prompts/architect.md}",
+      "tools": {
+        "write": true,
+        "edit": true,
+        "bash": true,
+        "read": true,
+        "grep": true,
+        "glob": true,
+        "list": true,
+        "lsp": true,
+        "skill": true,
+        "task": true,
+        "webfetch": true,
+        "websearch": true
+      },
+      "permission": {
+        "task": {
+          "*": "allow"
+        }
+      }
+    },
+    "frontend_builder": {
+      "description": "Specialized frontend developer for UI components, styling, and client-side code",
+      "mode": "subagent",
+      "model": "openrouter/deepseek/deepseek-chat",
+      "temperature": 0.1,
+      "top_p": 0.85,
+      "prompt": "{file:~/.config/opencode/prompts/frontend_builder.md}",
+      "tools": {
+        "write": true,
+        "edit": true,
+        "bash": true,
+        "read": true,
+        "grep": true,
+        "glob": true,
+        "list": true,
+        "skill": true,
+        "webfetch": true
+      }
+    },
+    "backend_builder": {
+      "description": "Specialized backend developer for APIs, database models, and server-side logic",
+      "mode": "subagent",
+      "model": "openrouter/deepseek/deepseek-chat",
+      "temperature": 0.1,
+      "top_p": 0.85,
+      "prompt": "{file:~/.config/opencode/prompts/backend_builder.md}",
+      "tools": {
+        "write": true,
+        "edit": true,
+        "bash": true,
+        "read": true,
+        "grep": true,
+        "glob": true,
+        "list": true,
+        "skill": true,
+        "webfetch": true
+      }
+    },
+    "explore": {
+      "description": "Fast, read-only agent for exploring codebases without making changes",
+      "mode": "subagent",
+      "model": "openrouter/deepseek/deepseek-chat",
+      "temperature": 0.1,
+      "tools": {
+        "write": false,
+        "edit": false,
+        "bash": false,
+        "read": true,
+        "grep": true,
+        "glob": true,
+        "list": true,
+        "lsp": true
+      },
+      "hidden": false
+    },
+    "general": {
+      "description": "General-purpose agent for researching complex questions and executing multi-step tasks",
+      "mode": "subagent",
+      "model": "openrouter/deepseek/deepseek-chat",
+      "temperature": 0.2,
+      "tools": {
+        "write": true,
+        "edit": true,
+        "bash": true,
+        "read": true,
+        "grep": true,
+        "glob": true,
+        "list": true,
+        "webfetch": true,
+        "websearch": true
+      }
+    }
+  },
+  
+  "default_agent": "build",
+  
+  "autoupdate": "notify",
+  
+  "share": "manual",
+  
+  "tui": {
+    "scroll_speed": 3,
+    "scroll_acceleration": {
+      "enabled": true
+    },
+    "diff_style": "auto"
+  }
 }

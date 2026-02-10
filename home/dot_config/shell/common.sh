@@ -54,6 +54,9 @@ alias vim='nvim'
 alias v.='nvim .'
 alias practice='nvim +VimBeGood'
 
+# opencode alias
+alias oc='opencode'
+
 # Python virtual environment
 alias venv_activate='source venv/bin/activate'
 alias vde='deactivate'
@@ -70,103 +73,103 @@ alias dunnet="emacs -batch -l dunnet"
 
 # Navigate to GitHub directory
 dev() {
-    TARGET_DIR=~/Documents/GitHub
-    if [ ! -d "$TARGET_DIR" ]; then
-        echo "$(date): GitHub directory not found. Creating..." >> ~/.shellrc_log
-        mkdir -p "$TARGET_DIR"
-    fi
-    cd "$TARGET_DIR" || echo "$(date): Failed to navigate to $TARGET_DIR" >> ~/.shellrc_log
+	TARGET_DIR=~/Documents/GitHub
+	if [ ! -d "$TARGET_DIR" ]; then
+		echo "$(date): GitHub directory not found. Creating..." >>~/.shellrc_log
+		mkdir -p "$TARGET_DIR"
+	fi
+	cd "$TARGET_DIR" || echo "$(date): Failed to navigate to $TARGET_DIR" >>~/.shellrc_log
 }
 
 # Create and activate Python virtual environment
 venv() {
-    if [ ! -d "venv" ]; then
-        echo "Creating virtual environment..."
-        python3 -m venv venv
-    fi
-    echo "Activating virtual environment..."
-    . venv/bin/activate
+	if [ ! -d "venv" ]; then
+		echo "Creating virtual environment..."
+		python3 -m venv venv
+	fi
+	echo "Activating virtual environment..."
+	. venv/bin/activate
 }
 
 # File extraction helper
 ee() {
-    if [ -f "$1" ]; then
-        case $1 in
-            *.tar.bz2)   tar xvjf "$1"     ;;
-            *.tar.gz)    tar xvzf "$1"     ;;
-            *.bz2)       bunzip2 "$1"      ;;
-            *.rar)       unrar x "$1"      ;;
-            *.gz)        gunzip "$1"       ;;
-            *.tar)       tar xvf "$1"      ;;
-            *.tbz2)      tar xvjf "$1"     ;;
-            *.tgz)       tar xvzf "$1"     ;;
-            *.zip)       unzip "$1"        ;;
-            *.Z)         uncompress "$1"   ;;
-            *.7z)        7z x "$1"         ;;
-            *)           echo "'$1' cannot be extracted via ee" ;;
-        esac
-    else
-        echo "'$1' is not a valid file!"
-    fi
+	if [ -f "$1" ]; then
+		case $1 in
+		*.tar.bz2) tar xvjf "$1" ;;
+		*.tar.gz) tar xvzf "$1" ;;
+		*.bz2) bunzip2 "$1" ;;
+		*.rar) unrar x "$1" ;;
+		*.gz) gunzip "$1" ;;
+		*.tar) tar xvf "$1" ;;
+		*.tbz2) tar xvjf "$1" ;;
+		*.tgz) tar xvzf "$1" ;;
+		*.zip) unzip "$1" ;;
+		*.Z) uncompress "$1" ;;
+		*.7z) 7z x "$1" ;;
+		*) echo "'$1' cannot be extracted via ee" ;;
+		esac
+	else
+		echo "'$1' is not a valid file!"
+	fi
 }
 
 # Archive creation helpers
 mtar() {
-    tar cvzf "${1%%/}.tar.gz"  "${1%%/}/";
+	tar cvzf "${1%%/}.tar.gz" "${1%%/}/"
 }
 
 mzip() {
-    zip -r "${1%%/}.zip" "$1";
+	zip -r "${1%%/}.zip" "$1"
 }
 
 # File swap function
 swap() {
-    local TMPFILE=tmp.$$
-    [ $# -ne 2 ] && echo "swap: 2 arguments needed" && return 1
-    [ ! -e "$1" ] && echo "swap: $1 does not exist" && return 1
-    [ ! -e "$2" ] && echo "swap: $2 does not exist" && return 1
-    mv "$1" "$TMPFILE"
-    mv "$2" "$1"
-    mv "$TMPFILE" "$2"
+	local TMPFILE=tmp.$$
+	[ $# -ne 2 ] && echo "swap: 2 arguments needed" && return 1
+	[ ! -e "$1" ] && echo "swap: $1 does not exist" && return 1
+	[ ! -e "$2" ] && echo "swap: $2 does not exist" && return 1
+	mv "$1" "$TMPFILE"
+	mv "$2" "$1"
+	mv "$TMPFILE" "$2"
 }
 
 # Make directory and cd into it
 mc() {
-    local dir="$1"
-    if [ -z "$dir" ]; then
-        echo "Usage: mc <directory>"
-        return 1
-    fi
-    mkdir -p -- "$dir" && cd -- "$dir"
+	local dir="$1"
+	if [ -z "$dir" ]; then
+		echo "Usage: mc <directory>"
+		return 1
+	fi
+	mkdir -p -- "$dir" && cd -- "$dir"
 }
 
 # New note helper function
 nn() {
-    if [ -z "$1" ]; then
-        echo "Error: No filename provided."
-        echo "Usage: nn <filename>"
-        return 1
-    fi
-    local filename="$1.md"
-    vim "$filename"
+	if [ -z "$1" ]; then
+		echo "Error: No filename provided."
+		echo "Usage: nn <filename>"
+		return 1
+	fi
+	local filename="$1.md"
+	vim "$filename"
 }
 
 # === Conditional Tool Loading ===
 
 # Initialize zoxide (smart cd) if available
 if command -v zoxide >/dev/null 2>&1; then
-    if [ -n "$ZSH_VERSION" ]; then
-        eval "$(zoxide init zsh)"
-    elif [ -n "$BASH_VERSION" ]; then
-        eval "$(zoxide init bash)"
-    fi
+	if [ -n "$ZSH_VERSION" ]; then
+		eval "$(zoxide init zsh)"
+	elif [ -n "$BASH_VERSION" ]; then
+		eval "$(zoxide init bash)"
+	fi
 fi
 
 # Load FZF if available (shell-specific files)
 if [ -n "$ZSH_VERSION" ]; then
-    [ -f "$XDG_CONFIG_HOME/fzf/.fzf.zsh" ] && . "$XDG_CONFIG_HOME/fzf/.fzf.zsh"
+	[ -f "$XDG_CONFIG_HOME/fzf/.fzf.zsh" ] && . "$XDG_CONFIG_HOME/fzf/.fzf.zsh"
 elif [ -n "$BASH_VERSION" ]; then
-    [ -f "$XDG_CONFIG_HOME/fzf/.fzf.bash" ] && . "$XDG_CONFIG_HOME/fzf/.fzf.bash"
+	[ -f "$XDG_CONFIG_HOME/fzf/.fzf.bash" ] && . "$XDG_CONFIG_HOME/fzf/.fzf.bash"
 fi
 
 # Load Cargo if available

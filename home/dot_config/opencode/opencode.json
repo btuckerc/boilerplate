@@ -1,6 +1,6 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "model": "openrouter/moonshotai/kimi-k2.5",
+  "model": "openrouter/minimax/minimax-m2.5",
   "small_model": "openrouter/deepseek/deepseek-chat",
   
   "compaction": {
@@ -122,6 +122,38 @@
               }
             }
           }
+        },
+        "minimax/minimax-m2.5": {
+          "name": "MiniMax M2.5 Architect",
+          "limit": {
+            "context": 204800,
+            "output": 32768
+          },
+          "parameters": {
+            "temperature": 0.3,
+            "top_p": 0.95,
+            "reasoning": {
+              "enabled": true,
+              "include_details": true
+            }
+          },
+          "variants": {
+            "high": {
+              "temperature": 0.2,
+              "top_p": 0.95,
+              "reasoning": {
+                "enabled": true,
+                "include_details": true
+              }
+            },
+            "fast": {
+              "temperature": 0.4,
+              "top_p": 0.9,
+              "reasoning": {
+                "enabled": false
+              }
+            }
+          }
         }
       }
     }
@@ -130,7 +162,7 @@
   "agent": {
     "build": {
       "mode": "primary",
-      "model": "openrouter/moonshotai/kimi-k2.5",
+      "model": "openrouter/minimax/minimax-m2.5",
       "temperature": 0.3,
       "prompt": "{file:~/.config/opencode/prompts/architect.md}",
       "tools": {

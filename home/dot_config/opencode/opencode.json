@@ -154,6 +154,42 @@
               }
             }
           }
+        },
+        "z-ai/glm-5": {
+          "name": "GLM-5 Architect (via Together AI)",
+          "limit": {
+            "context": 204800,
+            "output": 32768
+          },
+          "parameters": {
+            "temperature": 0.3,
+            "top_p": 0.95,
+            "reasoning": {
+              "enabled": true,
+              "include_details": true
+            }
+          },
+          "options": {
+            "order": ["together"],
+            "allow_fallbacks": false
+          },
+          "variants": {
+            "high": {
+              "temperature": 0.2,
+              "top_p": 0.95,
+              "reasoning": {
+                "enabled": true,
+                "include_details": true
+              }
+            },
+            "fast": {
+              "temperature": 0.4,
+              "top_p": 0.9,
+              "reasoning": {
+                "enabled": false
+              }
+            }
+          }
         }
       }
     }

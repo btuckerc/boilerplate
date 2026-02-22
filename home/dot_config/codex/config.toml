@@ -1,0 +1,133 @@
+# Codex CLI Configuration
+# Managed by chezmoi - edit source at:
+# /Users/tucker/Documents/GitHub/boilerplate/home/dot_config/codex/config.toml
+
+# =============================================================================
+# Model Configuration
+# =============================================================================
+
+# Default model - GPT-5 Codex for Pro subscribers
+model = "gpt-5-codex"
+
+# Reasoning effort for supported models
+model_reasoning_effort = "high"
+
+# Communication style (none, friendly, pragmatic)
+personality = "pragmatic"
+
+# =============================================================================
+# Approval & Security
+# =============================================================================
+
+# Approval policy: "untrusted", "on-request", "never"
+# on-request: prompts for approval on potentially destructive operations
+approval_policy = "on-request"
+
+# Sandbox mode: "read-only", "workspace-write", "danger-full-access"
+# workspace-write: allows writes to project directory only
+sandbox_mode = "workspace-write"
+
+# =============================================================================
+# Web Search
+# =============================================================================
+
+# Web search mode: "cached", "live", "disabled"
+# cached: uses OpenAI-maintained index (safer, faster)
+# live: fetches real-time results
+web_search = "cached"
+
+# =============================================================================
+# Features
+# =============================================================================
+
+[features]
+# Enable shell tool for running commands
+shell_tool = true
+
+# Enable collaboration modes (plan mode, etc.)
+collaboration_modes = true
+
+# Enable personality selection
+personality = true
+
+# Enable undo via git ghost snapshots
+undo = true
+
+# Enable smart approvals with prefix_rule suggestions
+request_rule = true
+
+# Snapshot shell environment to speed up repeated commands
+shell_snapshot = true
+
+# Use unified PTY-backed exec tool
+unified_exec = true
+
+# Multi-agent collaboration (experimental)
+multi_agent = false
+
+# =============================================================================
+# Shell Environment Policy
+# =============================================================================
+
+[shell_environment_policy]
+# Inherit core environment variables
+inherit = "core"
+
+# Explicit environment overrides
+[shell_environment_policy.set]
+# Ensure consistent locale
+LANG = "en_US.UTF-8"
+LC_ALL = "en_US.UTF-8"
+
+# =============================================================================
+# TUI Settings
+# =============================================================================
+
+[tui]
+# Enable terminal animations
+animations = true
+
+# Show onboarding tooltips
+show_tooltips = true
+
+# Notification method for unfocused terminal
+notification_method = "auto"
+
+# =============================================================================
+# History
+# =============================================================================
+
+[history]
+# Save session transcripts
+persistence = "save-all"
+
+# Cap history file size (bytes) - 10MB
+max_bytes = 10485760
+
+# =============================================================================
+# Project Discovery
+# =============================================================================
+
+# Additional filenames to check when AGENTS.md is missing
+project_doc_fallback_filenames = ["TEAM_GUIDE.md", ".agents.md", "CLAUDE.md"]
+
+# Maximum bytes read from AGENTS.md (64KB)
+project_doc_max_bytes = 65536
+
+# Project root markers
+project_root_markers = [".git", "package.json", "Cargo.toml", "go.mod", "pyproject.toml"]
+
+# =============================================================================
+# File Opener
+# =============================================================================
+
+# URI scheme for opening citations: vscode, vscode-insiders, windsurf, cursor, none
+file_opener = "vscode"
+
+# =============================================================================
+# Feedback
+# =============================================================================
+
+[feedback]
+# Enable feedback submission via /feedback
+enabled = true

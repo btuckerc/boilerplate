@@ -2,6 +2,7 @@
 # Managed by chezmoi - https://github.com/btuckerc/boilerplate
 # Zsh login shell configuration
 
-# Source .zshrc for login shells (ensures interactive config is loaded)
-# Note: .zshrc is now in $ZDOTDIR (set in ~/.zshenv)
-[ -r "${ZDOTDIR:-$HOME}/.zshrc" ] && . "${ZDOTDIR:-$HOME}/.zshrc"
+# Source .zshrc only for interactive login shells.
+if [[ -o interactive ]] && [ -r "${ZDOTDIR:-$HOME}/.zshrc" ]; then
+    . "${ZDOTDIR:-$HOME}/.zshrc"
+fi

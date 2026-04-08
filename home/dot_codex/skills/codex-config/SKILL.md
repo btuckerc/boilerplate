@@ -11,9 +11,9 @@ A complete reference for modifying Codex settings on this machine, covering the 
 
 | What you want to change | Where to edit | Applied via |
 |------------------------|---------------|-------------|
-| Main model, approval policy, features | `/Users/tucker/Documents/GitHub/boilerplate/home/dot_config/codex/config.toml` | chezmoi apply |
-| Global system instructions | `/Users/tucker/Documents/GitHub/boilerplate/home/dot_config/codex/AGENTS.md` | chezmoi apply |
-| Skills | `/Users/tucker/Documents/GitHub/boilerplate/home/dot_config/codex/skills/` | chezmoi apply |
+| Main model, approval policy, features | `$(chezmoi source-path)/dot_codex/config.toml` | chezmoi apply |
+| Global system instructions | `$(chezmoi source-path)/dot_codex/AGENTS.md` | chezmoi apply |
+| Skills | `$(chezmoi source-path)/dot_codex/skills/` | chezmoi apply |
 | Project-specific settings | `.codex/config.toml` in project root | Direct file (not chezmoi) |
 | Authentication | Run `codex` and sign in | Stored in `~/.codex/auth.json` |
 
@@ -23,20 +23,20 @@ A complete reference for modifying Codex settings on this machine, covering the 
 
 ### This Machine's Setup
 
-This machine uses **chezmoi** to manage dotfiles from the repository at `/Users/tucker/Documents/GitHub/boilerplate/`.
+This machine uses **chezmoi** to manage dotfiles from the source tree returned by `chezmoi source-path`.
 
 **Key locations:**
-- **Source (chezmoi):** `/Users/tucker/Documents/GitHub/boilerplate/home/dot_config/codex/`
+- **Source (chezmoi):** `$(chezmoi source-path)/dot_codex/`
 - **Live config:** `~/.codex/`
 - **Credentials:** `~/.codex/auth.json` (managed by Codex, not chezmoi)
 
-**Important:** Always edit files in the **source directory** (`/Users/tucker/Documents/GitHub/boilerplate/...`) and run `chezmoi apply` to apply changes. Never edit files directly in `~/.codex/` as they will be overwritten.
+**Important:** Always edit files in the **source directory** (`$(chezmoi source-path)/...`) and run `chezmoi apply` to apply changes. Never edit files directly in `~/.codex/` as they will be overwritten.
 
 ### Workflow for Changes
 
 ```bash
 # 1. Edit the source file
-cd /Users/tucker/Documents/GitHub/boilerplate/home/dot_config/codex/
+cd "$(chezmoi source-path)/dot_codex/"
 # Edit config.toml, AGENTS.md, or create skills
 
 # 2. Apply changes
@@ -102,7 +102,7 @@ For OpenAI Pro subscribers:
 **Step 1:** Edit the source config:
 
 ```bash
-vim /Users/tucker/Documents/GitHub/boilerplate/home/dot_config/codex/config.toml
+vim "$(chezmoi source-path)/dot_codex/config.toml"
 ```
 
 **Step 2:** Update the model field:
@@ -187,7 +187,7 @@ The `AGENTS.md` file provides persistent instructions that Codex reads before an
 **Step 1:** Edit the source file:
 
 ```bash
-vim /Users/tucker/Documents/GitHub/boilerplate/home/dot_config/codex/AGENTS.md
+vim "$(chezmoi source-path)/dot_codex/AGENTS.md"
 ```
 
 **Step 2:** Add your instructions:
@@ -239,7 +239,7 @@ skills/
 **Step 1:** Create skill directory:
 
 ```bash
-mkdir -p /Users/tucker/Documents/GitHub/boilerplate/home/dot_config/codex/skills/my-skill
+mkdir -p "$(chezmoi source-path)/dot_codex/skills/my-skill"
 ```
 
 **Step 2:** Create `SKILL.md`:
@@ -357,7 +357,7 @@ ls -la ~/.codex/
 
 ### DO
 
-- Always edit files in `/Users/tucker/Documents/GitHub/boilerplate/` then apply with chezmoi
+- Always edit files in `$(chezmoi source-path)/` then apply with chezmoi
 - Use version control (commit changes to the boilerplate repo)
 - Test configuration changes with simple tasks first
 - Use `approval_policy = "on-request"` for interactive work
@@ -378,7 +378,7 @@ ls -la ~/.codex/
 
 ```bash
 # 1. Edit source config
-vim /Users/tucker/Documents/GitHub/boilerplate/home/dot_config/codex/config.toml
+vim "$(chezmoi source-path)/dot_codex/config.toml"
 
 # 2. Update model field
 # model = "gpt-5.2"
@@ -411,7 +411,7 @@ codex
 
 ```bash
 # 1. Edit AGENTS.md
-vim /Users/tucker/Documents/GitHub/boilerplate/home/dot_config/codex/AGENTS.md
+vim "$(chezmoi source-path)/dot_codex/AGENTS.md"
 
 # 2. Apply
 chezmoi apply --force ~/.codex/AGENTS.md
@@ -431,4 +431,4 @@ codex
 - [AGENTS.md Specification](https://agents.md)
 - [Chezmoi Documentation](https://www.chezmoi.io/)
 
-Base directory for this skill: file:///Users/tucker/.codex/skills/codex-config/
+Base directory for this skill: `~/.codex/skills/codex-config/`

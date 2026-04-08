@@ -5,7 +5,7 @@
 
 # === Environment Variables ===
 export EDITOR="nvim"
-export DEV_DIR=~/Documents/GitHub
+export DEV_DIR="$HOME/src"
 
 # XDG Base Directory Specification
 # https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html
@@ -54,9 +54,6 @@ alias vim='nvim'
 alias v.='nvim .'
 alias practice='nvim +VimBeGood'
 
-# opencode alias
-alias oc='opencode'
-
 # Python virtual environment
 alias venv_activate='source venv/bin/activate'
 alias vde='deactivate'
@@ -71,11 +68,11 @@ alias dunnet="emacs -batch -l dunnet"
 
 # === Functions ===
 
-# Navigate to GitHub directory
+# Navigate to source directory
 dev() {
-	TARGET_DIR=~/Documents/GitHub
+	TARGET_DIR="$HOME/src"
 	if [ ! -d "$TARGET_DIR" ]; then
-		echo "$(date): GitHub directory not found. Creating..." >>~/.shellrc_log
+		echo "$(date): source directory not found. Creating..." >>~/.shellrc_log
 		mkdir -p "$TARGET_DIR"
 	fi
 	cd "$TARGET_DIR" || echo "$(date): Failed to navigate to $TARGET_DIR" >>~/.shellrc_log

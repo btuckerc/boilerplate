@@ -34,7 +34,15 @@ nvim.backup.*
 # Local mise configuration (machine-specific)
 .config/mise/mise.local.toml
 
+# Legacy assistant configs are preserved in source but not deployed by default.
+.claude
+.claude/**
+.config/nvim/.claude
+.config/nvim/.claude/**
+
 # OpenCode runtime files
+.config/opencode
+.config/opencode/**
 .config/opencode/.opencode-speckit/
 .config/opencode/.opencode-speckit/**
 .config/opencode/node_modules/

@@ -18,7 +18,9 @@ fi
 # === macOS-specific Configuration ===
 
 # Load Homebrew
-eval "$(/opt/homebrew/bin/brew shellenv)"
+if [ -x /opt/homebrew/bin/brew ]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+fi
 export PATH="/opt/homebrew/opt/postgresql@16/bin:$PATH"
 
 # Load docker
@@ -48,9 +50,6 @@ alias ls='ls --color=auto'
 
 # Add Ruby gems to PATH (for user-installed gems)
 export PATH="$PATH:$HOME/.local/share/gem/ruby/3.4.0/bin"
-
-# Claude Code CLI alias
-alias claude="$HOME/.claude/local/claude"
 
 # Zsh syntax highlighting (if installed via package manager)
 if [ -f "/usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh" ]; then
@@ -121,7 +120,9 @@ setopt NO_MENU_COMPLETE    # Do not autoselect the first completion entry
 setopt GLOBDOTS            # Include dotfiles in glob patterns
 
 # Disable accidental ctrl-s (terminal freeze)
-stty stop undef
+if [[ -t 0 ]]; then
+    stty stop undef
+fi
 
 # === Completion Styles ===
 zstyle ':completion:*' menu select

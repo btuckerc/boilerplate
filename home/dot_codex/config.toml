@@ -1,6 +1,5 @@
 # Codex CLI Configuration
-# Managed by chezmoi - edit source at:
-# /Users/tucker/Documents/GitHub/boilerplate/home/dot_config/codex/config.toml
+# Managed by chezmoi - edit this file in your chezmoi source tree.
 
 # =============================================================================
 # Model Configuration
@@ -109,7 +108,7 @@ max_bytes = 10485760
 # =============================================================================
 
 # Additional filenames to check when AGENTS.md is missing
-project_doc_fallback_filenames = ["TEAM_GUIDE.md", ".agents.md", "CLAUDE.md"]
+project_doc_fallback_filenames = ["TEAM_GUIDE.md", ".agents.md", "CLAUDE.md", "program.md"]
 
 # Maximum bytes read from AGENTS.md (64KB)
 project_doc_max_bytes = 65536

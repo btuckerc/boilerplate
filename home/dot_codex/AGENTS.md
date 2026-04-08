@@ -3,7 +3,7 @@
 <!--
   This file provides global instructions for Codex CLI.
   Managed by chezmoi - edit source at:
-  /Users/tucker/Documents/GitHub/boilerplate/home/dot_config/codex/AGENTS.md
+  $(chezmoi source-path)/dot_codex/AGENTS.md
 -->
 
 ## Working Agreements

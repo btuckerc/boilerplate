@@ -14,7 +14,9 @@
 export BASH_SILENCE_DEPRECATION_WARNING=1
 
 # Load Homebrew
-eval "$(/opt/homebrew/bin/brew shellenv)"
+if [ -x /opt/homebrew/bin/brew ]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+fi
 {{- else if eq .chezmoi.os "linux" }}
 # === Linux-specific Configuration ===
 
@@ -27,9 +29,6 @@ alias ls='ls --color=auto'
 
 # Add Ruby gems to PATH (for user-installed gems)
 export PATH="$PATH:$HOME/.local/share/gem/ruby/3.4.0/bin"
-
-# Claude Code CLI alias
-alias claude="/home/tux/.claude/local/claude"
 
 # Tmux session helper - attach to or create session named 'T'
 t() {

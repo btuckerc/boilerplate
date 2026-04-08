@@ -91,7 +91,7 @@ First run will prompt for authentication. Sign in with your ChatGPT account (Pro
 
 ```bash
 # Edit source
-vim /Users/tucker/Documents/GitHub/boilerplate/home/dot_config/codex/config.toml
+vim "$(chezmoi source-path)/dot_codex/config.toml"
 
 # Apply changes
 chezmoi apply --force ~/.codex/
@@ -109,6 +109,6 @@ cat ~/.codex/config.toml
 
 ## Related
 
-- **opencode**: Alternative AI coding assistant (also configured in this dotfiles repo)
 - **chezmoi**: Dotfile manager used to sync this configuration
 - **mise**: Tool manager used to install Codex CLI
+- Legacy Claude/OpenCode files can remain on a machine, but they are not part of the default baseline.

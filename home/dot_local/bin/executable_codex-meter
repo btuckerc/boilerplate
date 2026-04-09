@@ -1,0 +1,589 @@
+#!/bin/sh
+set -eu
+
+CONFIG_FILE="${CODEX_METER_CONFIG_FILE:-$HOME/.config/decent-angl/codex-meter.env}"
+if [ -f "$CONFIG_FILE" ]; then
+    set -a
+    # shellcheck disable=SC1090
+    . "$CONFIG_FILE"
+    set +a
+fi
+
+export CODEX_METER_CONFIG_FILE="$CONFIG_FILE"
+
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "python3 is required for codex-meter." >&2
+    exit 1
+fi
+
+exec python3 - "$@" <<'PY'
+import json
+import os
+import re
+import socket
+import subprocess
+import sys
+import tempfile
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+USAGE = """Usage: codex-meter <export|publish> [options]
+
+Commands:
+  export [--print]   Write the newest token_count snapshot to latest.json.
+  publish            Export a fresh snapshot and publish it to macmini.
+"""
+
+EXPORT_USAGE = """Usage: codex-meter export [--print]
+
+Parse the newest token_count event from ~/.codex/sessions/**/*.jsonl,
+write ~/.local/state/codex-meter/latest.json, and optionally print JSON.
+"""
+
+PUBLISH_USAGE = """Usage: codex-meter publish
+
+Export a fresh snapshot and publish it to macmini's inbox.
+"""
+
+KNOWN_MACHINE_ALIASES = {
+    "omarchy": "omarchy",
+    "btct14": "omarchy",
+    "macbook": "macbook",
+    "btc-mbp14": "macbook",
+    "macmini": "macmini",
+    "webweaver": "macmini",
+}
+
+SAFE_MACHINE_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+SAFE_REMOTE_PATH_RE = re.compile(r"^[A-Za-z0-9._~/:-]+$")
+
+
+def command_output(argv: list[str]) -> str:
+    try:
+        completed = subprocess.run(
+            argv,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except (FileNotFoundError, OSError):
+        return ""
+    if completed.returncode != 0:
+        return ""
+    return completed.stdout.strip()
+
+
+def parse_timestamp(value):
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        timestamp = float(value)
+        if timestamp > 100_000_000_000:
+            timestamp = timestamp / 1000.0
+        try:
+            return datetime.fromtimestamp(timestamp, tz=timezone.utc)
+        except (OverflowError, OSError, ValueError):
+            return None
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def isoformat_utc(value: datetime, with_millis: bool) -> str:
+    value = value.astimezone(timezone.utc)
+    if with_millis and value.microsecond:
+        return value.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    return value.isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def optional_int(value):
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def normalize_machine_id(raw_value):
+    if not raw_value:
+        return None
+    text = raw_value.strip()
+    if not text:
+        return None
+    short = text.split(".", 1)[0]
+    lower = short.lower()
+    if lower in KNOWN_MACHINE_ALIASES:
+        return KNOWN_MACHINE_ALIASES[lower]
+    if short.startswith("BTC-MBP14"):
+        return "macbook"
+    if short.startswith("btct14"):
+        return "omarchy"
+    if short.startswith("webweaver"):
+        return "macmini"
+    if SAFE_MACHINE_ID_RE.match(short):
+        return short
+    return None
+
+
+def detect_machine_id() -> str:
+    env_value = normalize_machine_id(os.environ.get("CODEX_METER_MACHINE_ID"))
+    if env_value:
+        return env_value
+
+    chezmoi_data = command_output(["chezmoi", "data"])
+    if chezmoi_data:
+        try:
+            parsed = json.loads(chezmoi_data)
+            machine_id = normalize_machine_id(
+                parsed.get("decentangl", {}).get("machine_id")
+            )
+            if machine_id:
+                return machine_id
+        except json.JSONDecodeError:
+            match = re.search(r'"machine_id"\s*:\s*"([^"]+)"', chezmoi_data)
+            if match:
+                machine_id = normalize_machine_id(match.group(1))
+                if machine_id:
+                    return machine_id
+
+    tailscale_status = command_output(["tailscale", "status", "--json"])
+    if tailscale_status:
+        try:
+            parsed = json.loads(tailscale_status)
+            machine_id = normalize_machine_id(
+                (
+                    parsed.get("Self", {}) or {}
+                ).get("HostName")
+            )
+            if machine_id:
+                return machine_id
+        except json.JSONDecodeError:
+            match = re.search(r'"HostName"\s*:\s*"([^"]+)"', tailscale_status)
+            if match:
+                machine_id = normalize_machine_id(match.group(1))
+                if machine_id:
+                    return machine_id
+
+    for candidate in (
+        socket.gethostname(),
+        command_output(["hostname"]),
+    ):
+        machine_id = normalize_machine_id(candidate)
+        if machine_id:
+            return machine_id
+
+    raise SystemExit(
+        "Unable to determine CODEX_METER_MACHINE_ID from config, chezmoi, tailscale, or hostname."
+    )
+
+
+def session_root() -> Path:
+    configured = os.environ.get("CODEX_METER_SESSION_ROOT")
+    if configured:
+        return Path(configured).expanduser()
+    return Path.home() / ".codex" / "sessions"
+
+
+def snapshot_path() -> Path:
+    configured = os.environ.get("CODEX_METER_SNAPSHOT_PATH")
+    if configured:
+        return Path(configured).expanduser()
+    return Path.home() / ".local" / "state" / "codex-meter" / "latest.json"
+
+
+def candidate_sort_key(candidate: dict) -> tuple[int, int, str, int]:
+    timestamp = parse_timestamp(candidate["entry"].get("timestamp"))
+    timestamp_us = -1
+    if timestamp is not None:
+        timestamp_us = int(timestamp.timestamp() * 1_000_000)
+    return (
+        timestamp_us,
+        int(candidate["file_mtime_ns"]),
+        str(candidate["path"]),
+        int(candidate["line_no"]),
+    )
+
+
+def extract_model(entry_type: str, payload: dict):
+    for key in ("model", "default_model"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def latest_token_event(root: Path) -> dict:
+    latest = None
+
+    if not root.exists():
+        raise SystemExit(f"Codex session root not found: {root}")
+
+    for path in sorted(root.rglob("*.jsonl")):
+        try:
+            stat_result = path.stat()
+        except OSError:
+            continue
+
+        current_model = None
+        try:
+            handle = path.open("r", encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+
+        with handle:
+            for line_no, raw_line in enumerate(handle, start=1):
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+                entry_type = entry.get("type")
+                payload = entry.get("payload")
+                if not isinstance(payload, dict):
+                    payload = {}
+
+                model = extract_model(entry_type, payload)
+                if model:
+                    current_model = model
+
+                if payload.get("type") != "token_count":
+                    continue
+
+                candidate = {
+                    "path": path,
+                    "file_mtime_ns": stat_result.st_mtime_ns,
+                    "line_no": line_no,
+                    "entry": entry,
+                    "model": current_model,
+                }
+                if latest is None or candidate_sort_key(candidate) > candidate_sort_key(latest):
+                    latest = candidate
+
+    if latest is None:
+        raise SystemExit(f"No token_count events found under {root}")
+
+    return latest
+
+
+def extract_usage_entry(info, *keys: str) -> dict:
+    if not isinstance(info, dict):
+        return {}
+    for key in keys:
+        value = info.get(key)
+        if isinstance(value, dict):
+            return value
+    if any(key in info for key in ("input_tokens", "output_tokens", "total_tokens")):
+        return info
+    return {}
+
+
+def rate_limit_windows(rate_limits) -> list[tuple[str, dict]]:
+    if not isinstance(rate_limits, dict):
+        return []
+
+    windows = []
+    for key, value in rate_limits.items():
+        if key in {"limit_id", "limit_name", "credits", "plan_type"}:
+            continue
+        if not isinstance(value, dict):
+            continue
+        if any(field in value for field in ("resets_at", "window_minutes", "used_percent", "limit_tokens")):
+            windows.append((key, value))
+    return windows
+
+
+def window_key(limit_id, key: str) -> str:
+    clean_key = key.strip() if isinstance(key, str) else ""
+    if clean_key:
+        return clean_key
+    clean_limit_id = limit_id.strip() if isinstance(limit_id, str) else ""
+    if clean_limit_id:
+        return clean_limit_id
+    return "window"
+
+
+def format_reset_at(value):
+    parsed = parse_timestamp(value)
+    if parsed is None:
+        return None
+    return isoformat_utc(parsed, with_millis=False)
+
+
+def build_snapshot() -> dict:
+    machine_id = detect_machine_id()
+    latest = latest_token_event(session_root())
+    entry = latest["entry"]
+    payload = entry.get("payload")
+    if not isinstance(payload, dict):
+        payload = {}
+
+    info = payload.get("info")
+    total_usage = extract_usage_entry(
+        info,
+        "total_token_usage",
+        "cumulative_token_usage",
+        "token_usage",
+    )
+    last_usage = extract_usage_entry(info, "last_token_usage")
+    usage = total_usage or last_usage
+
+    used_input_tokens = optional_int(usage.get("input_tokens")) or 0
+    used_output_tokens = optional_int(usage.get("output_tokens")) or 0
+    used_total_tokens = optional_int(usage.get("total_tokens"))
+    if used_total_tokens is None:
+        used_total_tokens = used_input_tokens + used_output_tokens
+    last_total_tokens = optional_int(last_usage.get("total_tokens"))
+
+    captured_at_dt = parse_timestamp(entry.get("timestamp")) or datetime.now(timezone.utc)
+    captured_at = isoformat_utc(captured_at_dt, with_millis=True)
+
+    rate_limits = payload.get("rate_limits")
+    limit_id = None
+    if isinstance(rate_limits, dict):
+        raw_limit_id = rate_limits.get("limit_id")
+        if isinstance(raw_limit_id, str) and raw_limit_id.strip():
+            limit_id = raw_limit_id.strip()
+
+    windows = []
+    for key, window in rate_limit_windows(rate_limits):
+        windows.append(
+            {
+                "window_key": window_key(limit_id, key),
+                "model": latest.get("model"),
+                "reset_at": format_reset_at(window.get("resets_at")),
+                "used_percent": window.get("used_percent"),
+                "window_minutes": optional_int(window.get("window_minutes")),
+                "used_input_tokens": used_input_tokens,
+                "used_output_tokens": used_output_tokens,
+                "used_total_tokens": used_total_tokens,
+                "last_total_tokens": last_total_tokens,
+                "limit_tokens": optional_int(window.get("limit_tokens")),
+            }
+        )
+
+    if not windows:
+        windows.append(
+            {
+                "window_key": window_key(limit_id, "default"),
+                "model": latest.get("model"),
+                "reset_at": None,
+                "used_percent": None,
+                "window_minutes": None,
+                "used_input_tokens": used_input_tokens,
+                "used_output_tokens": used_output_tokens,
+                "used_total_tokens": used_total_tokens,
+                "last_total_tokens": last_total_tokens,
+                "limit_tokens": None,
+            }
+        )
+
+    return {
+        "schema_version": 1,
+        "machine_id": machine_id,
+        "captured_at": captured_at,
+        "source_session_file": latest["path"].name,
+        "windows": windows,
+    }
+
+
+def snapshot_json(snapshot: dict) -> str:
+    return json.dumps(snapshot, indent=2) + "\n"
+
+
+def write_atomic(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        path.parent.chmod(0o700)
+    except OSError:
+        pass
+
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        dir=path.parent,
+        prefix=".latest.",
+        delete=False,
+    ) as handle:
+        handle.write(content)
+        temp_name = handle.name
+
+    try:
+        os.chmod(temp_name, 0o600)
+    except OSError:
+        pass
+
+    os.replace(temp_name, path)
+
+
+def safe_remote_path(value: str, label: str) -> str:
+    if not value:
+        raise SystemExit(f"Missing {label}.")
+    if not SAFE_REMOTE_PATH_RE.match(value):
+        raise SystemExit(
+            f"{label} contains unsupported characters; use only letters, numbers, ., _, -, :, /, and ~."
+        )
+    return value
+
+
+def remote_join(directory: str, filename: str) -> str:
+    if directory in {"", "."}:
+        return filename
+    if directory == "~":
+        return f"~/{filename}"
+    return f"{directory.rstrip('/')}/{filename}"
+
+
+def ssh_command(destination: str) -> list[str]:
+    command = ["ssh", "-o", "BatchMode=yes"]
+    identity_file = os.environ.get("CODEX_METER_PUBLISH_SSH_IDENTITY_FILE", "").strip()
+    if identity_file:
+        identity_path = str(Path(identity_file).expanduser())
+        command.extend(["-o", "IdentitiesOnly=yes", "-i", identity_path])
+    command.append(destination)
+    return command
+
+
+def publish_snapshot(snapshot: dict, serialized: str) -> dict:
+    machine_id = snapshot["machine_id"]
+    if not SAFE_MACHINE_ID_RE.match(machine_id):
+        raise SystemExit(f"Unsupported machine_id for publish: {machine_id}")
+
+    server_machine_id = os.environ.get("CODEX_METER_PUBLISH_SERVER_MACHINE_ID", "macmini").strip() or "macmini"
+    remote_dir = os.environ.get("CODEX_METER_PUBLISH_REMOTE_DIR", "~/srv/codex-meter/inbox").strip() or "~/srv/codex-meter/inbox"
+
+    if machine_id == server_machine_id and os.environ.get("CODEX_METER_PUBLISH_FORCE_SSH") != "1":
+        local_dir = Path(remote_dir).expanduser()
+        local_path = local_dir / f"{machine_id}.json"
+        write_atomic(local_path, serialized)
+        return {
+            "publish_mode": "local",
+            "publish_target": str(local_path),
+        }
+
+    ssh_dest = os.environ.get("CODEX_METER_PUBLISH_SSH_DEST", "admin@macmini").strip()
+    if not ssh_dest:
+        raise SystemExit("Missing CODEX_METER_PUBLISH_SSH_DEST.")
+
+    remote_dir = safe_remote_path(remote_dir, "CODEX_METER_PUBLISH_REMOTE_DIR")
+    remote_path = safe_remote_path(remote_join(remote_dir, f"{machine_id}.json"), "remote publish path")
+    remote_tmp = safe_remote_path(f"{remote_path}.tmp-{os.getpid()}", "remote temp path")
+
+    remote_cmd = (
+        f"umask 077 && "
+        f"mkdir -p {remote_dir} && "
+        f"cat > {remote_tmp} && "
+        f"mv {remote_tmp} {remote_path}"
+    )
+
+    try:
+        subprocess.run(
+            ssh_command(ssh_dest) + [remote_cmd],
+            input=serialized.encode("utf-8"),
+            check=True,
+        )
+    except FileNotFoundError as exc:
+        raise SystemExit("ssh is required for codex-meter publish.") from exc
+    except subprocess.CalledProcessError as exc:
+        raise SystemExit(f"Publish failed via ssh to {ssh_dest}.") from exc
+
+    return {
+        "publish_mode": "ssh",
+        "publish_target": f"{ssh_dest}:{remote_path}",
+    }
+
+
+def print_export_status(snapshot: dict, path: Path) -> None:
+    print("status=exported")
+    print(f"machine_id={snapshot['machine_id']}")
+    print(f"captured_at={snapshot['captured_at']}")
+    print(f"source_session_file={snapshot['source_session_file']}")
+    print(f"snapshot_path={path}")
+    print(f"window_count={len(snapshot['windows'])}")
+
+
+def print_publish_status(snapshot: dict, path: Path, publish_info: dict) -> None:
+    print("status=published")
+    print(f"machine_id={snapshot['machine_id']}")
+    print(f"captured_at={snapshot['captured_at']}")
+    print(f"source_session_file={snapshot['source_session_file']}")
+    print(f"snapshot_path={path}")
+    print(f"window_count={len(snapshot['windows'])}")
+    print(f"publish_mode={publish_info['publish_mode']}")
+    print(f"publish_target={publish_info['publish_target']}")
+
+
+def do_export(print_json: bool) -> int:
+    snapshot = build_snapshot()
+    serialized = snapshot_json(snapshot)
+    path = snapshot_path()
+    write_atomic(path, serialized)
+    if print_json:
+        sys.stdout.write(serialized)
+    else:
+        print_export_status(snapshot, path)
+    return 0
+
+
+def do_publish() -> int:
+    snapshot = build_snapshot()
+    serialized = snapshot_json(snapshot)
+    path = snapshot_path()
+    write_atomic(path, serialized)
+    publish_info = publish_snapshot(snapshot, serialized)
+    print_publish_status(snapshot, path, publish_info)
+    return 0
+
+
+def main(argv: list[str]) -> int:
+    if not argv or argv[0] in {"-h", "--help"}:
+        sys.stdout.write(USAGE)
+        return 0
+
+    command = argv[0]
+    args = argv[1:]
+
+    if command == "export":
+        print_json = False
+        for arg in args:
+            if arg == "--print":
+                print_json = True
+                continue
+            if arg in {"-h", "--help"}:
+                sys.stdout.write(EXPORT_USAGE)
+                return 0
+            raise SystemExit(f"Unknown export argument: {arg}")
+        return do_export(print_json)
+
+    if command == "publish":
+        for arg in args:
+            if arg in {"-h", "--help"}:
+                sys.stdout.write(PUBLISH_USAGE)
+                return 0
+            raise SystemExit(f"Unknown publish argument: {arg}")
+        return do_publish()
+
+    raise SystemExit(f"Unknown command: {command}")
+
+
+try:
+    raise SystemExit(main(sys.argv[1:]))
+except BrokenPipeError:
+    sys.stderr.close()
+    raise SystemExit(1)
+PY

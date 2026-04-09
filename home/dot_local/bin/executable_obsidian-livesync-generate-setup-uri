@@ -1,0 +1,337 @@
+#!/bin/sh
+set -eu
+
+CONFIG_FILE="${OBSIDIAN_LIVESYNC_CONFIG_FILE:-$HOME/.config/decent-angl/obsidian-livesync.env}"
+if [ -f "$CONFIG_FILE" ]; then
+    # shellcheck disable=SC1090
+    . "$CONFIG_FILE"
+fi
+
+has_arg() {
+    needle="$1"
+    shift
+    for arg in "$@"; do
+        if [ "$arg" = "$needle" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+find_bin() {
+    for candidate in "$@"; do
+        if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+NODE_BIN="${NODE_BIN:-}"
+if [ -z "$NODE_BIN" ]; then
+    NODE_BIN="$(find_bin \
+        "$HOME/.local/share/mise/shims/node" \
+        "$HOME/.local/bin/node" \
+        "/opt/homebrew/bin/node" \
+        "/usr/local/bin/node" \
+        "$(command -v node 2>/dev/null || true)")"
+fi
+
+if [ ! -x "$NODE_BIN" ]; then
+    echo "node is required." >&2
+    exit 1
+fi
+
+set -- "$@"
+
+if ! has_arg --url "$@"; then
+    set -- --url "${OBSIDIAN_LIVESYNC_SERVER_URL:-https://notes.weavedweb.com}" "$@"
+fi
+if ! has_arg --env-file "$@"; then
+    set -- --env-file "${OBSIDIAN_LIVESYNC_SERVER_ENV_FILE:-/Users/admin/homelab/obsidian-sync/.env}" "$@"
+fi
+if ! has_arg --e2ee-passphrase "$@" && ! has_arg --e2ee-passphrase-file "$@"; then
+    set -- --e2ee-passphrase-file "${OBSIDIAN_LIVESYNC_E2EE_PASSPHRASE_FILE:-$HOME/.local/state/decent-angl/obsidian-livesync/weavedweb/weavedweb.e2ee.passphrase.txt}" "$@"
+fi
+if ! has_arg --save-uri "$@"; then
+    set -- --save-uri "${OBSIDIAN_LIVESYNC_SETUP_URI_FILE:-$HOME/.local/state/decent-angl/obsidian-livesync/weavedweb/weavedweb.setup-uri.txt}" "$@"
+fi
+if ! has_arg --save-uri-passphrase "$@"; then
+    set -- --save-uri-passphrase "${OBSIDIAN_LIVESYNC_SETUP_URI_PASSPHRASE_FILE:-$HOME/.local/state/decent-angl/obsidian-livesync/weavedweb/weavedweb.setup-uri-passphrase.txt}" "$@"
+fi
+
+exec "$NODE_BIN" - "$@" <<'NODE'
+const fs = require("fs");
+const path = require("path");
+const crypto = require("crypto").webcrypto;
+
+const adjectives = [
+  "autumn", "hidden", "bitter", "misty", "silent", "empty", "dry", "dark",
+  "summer", "icy", "delicate", "quiet", "white", "cool", "spring", "winter",
+  "patient", "twilight", "dawn", "crimson", "wispy", "weathered", "blue",
+  "billowing", "broken", "cold", "damp", "falling", "frosty", "green", "long",
+  "late", "lingering", "bold", "little", "morning", "muddy", "old", "red",
+  "rough", "still", "small", "sparkling", "thrumming", "shy", "wandering",
+  "withered", "wild", "black", "young", "holy", "solitary", "fragrant", "aged",
+  "snowy", "proud", "floral", "restless", "divine", "polished", "ancient",
+  "purple", "lively", "nameless",
+];
+
+const nouns = [
+  "waterfall", "river", "breeze", "moon", "rain", "wind", "sea", "morning",
+  "snow", "lake", "sunset", "pine", "shadow", "leaf", "dawn", "glitter",
+  "forest", "hill", "cloud", "meadow", "sun", "glade", "bird", "brook",
+  "butterfly", "bush", "dew", "dust", "field", "fire", "flower", "firefly",
+  "feather", "grass", "haze", "mountain", "night", "pond", "darkness",
+  "snowflake", "silence", "sound", "sky", "shape", "surf", "thunder", "violet",
+  "water", "wildflower", "wave", "resonance", "log", "dream", "cherry", "tree",
+  "fog", "frost", "voice", "paper", "frog", "smoke", "star",
+];
+
+function usage() {
+  const message = [
+    "Usage: obsidian-livesync-generate-setup-uri --url URL",
+    "       [--env-file PATH | --database NAME --username USER --password PASS]",
+    "       (--e2ee-passphrase VALUE | --e2ee-passphrase-file PATH)",
+    "       [--uri-passphrase VALUE | --uri-passphrase-file PATH]",
+    "       [--save-uri PATH] [--save-uri-passphrase PATH] [--print-secrets]",
+    "",
+    "Reads the LiveSync server credential, combines it with the E2EE passphrase,",
+    "and emits a Setup URI compatible with Self-hosted LiveSync.",
+  ].join("\n");
+  process.stderr.write(`${message}\n`);
+}
+
+function friendlyString() {
+  return `${adjectives[Math.floor(Math.random() * adjectives.length)]}-${nouns[Math.floor(Math.random() * nouns.length)]}`;
+}
+
+function readFileTrimmed(filePath) {
+  return fs.readFileSync(filePath, "utf8").trim();
+}
+
+function parseEnvFile(filePath) {
+  const result = {};
+  const content = fs.readFileSync(filePath, "utf8");
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#") || !line.includes("=")) {
+      continue;
+    }
+    const idx = rawLine.indexOf("=");
+    const key = rawLine.slice(0, idx).trim();
+    const value = rawLine.slice(idx + 1).trim();
+    result[key] = value;
+  }
+  return result;
+}
+
+function parseArgs(argv) {
+  const args = {
+    envFile: "",
+    url: "",
+    database: "",
+    username: "",
+    password: "",
+    e2eePassphrase: "",
+    e2eePassphraseFile: "",
+    uriPassphrase: "",
+    uriPassphraseFile: "",
+    saveUri: "",
+    saveUriPassphrase: "",
+    printSecrets: false,
+  };
+
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    const next = argv[i + 1];
+    switch (arg) {
+      case "--env-file":
+        args.envFile = next || "";
+        i += 1;
+        break;
+      case "--url":
+        args.url = next || "";
+        i += 1;
+        break;
+      case "--database":
+        args.database = next || "";
+        i += 1;
+        break;
+      case "--username":
+        args.username = next || "";
+        i += 1;
+        break;
+      case "--password":
+        args.password = next || "";
+        i += 1;
+        break;
+      case "--e2ee-passphrase":
+        args.e2eePassphrase = next || "";
+        i += 1;
+        break;
+      case "--e2ee-passphrase-file":
+        args.e2eePassphraseFile = next || "";
+        i += 1;
+        break;
+      case "--uri-passphrase":
+        args.uriPassphrase = next || "";
+        i += 1;
+        break;
+      case "--uri-passphrase-file":
+        args.uriPassphraseFile = next || "";
+        i += 1;
+        break;
+      case "--save-uri":
+        args.saveUri = next || "";
+        i += 1;
+        break;
+      case "--save-uri-passphrase":
+        args.saveUriPassphrase = next || "";
+        i += 1;
+        break;
+      case "--print-secrets":
+        args.printSecrets = true;
+        break;
+      case "-h":
+      case "--help":
+        usage();
+        process.exit(0);
+      default:
+        usage();
+        throw new Error(`Unknown argument: ${arg}`);
+    }
+  }
+
+  return args;
+}
+
+function resolveSecret(args, valueKey, fileKey) {
+  if (args[fileKey]) {
+    return readFileTrimmed(args[fileKey]);
+  }
+  return args[valueKey];
+}
+
+function toHex(uint8Array) {
+  return [...uint8Array].map((value) => value.toString(16).padStart(2, "0")).join("");
+}
+
+async function encrypt(input, passphrase) {
+  const textEncoder = new TextEncoder();
+  const digest = await crypto.subtle.digest("SHA-256", textEncoder.encode(passphrase));
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw",
+    digest,
+    { name: "PBKDF2" },
+    false,
+    ["deriveKey"],
+  );
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const key = await crypto.subtle.deriveKey(
+    {
+      name: "PBKDF2",
+      salt,
+      iterations: 100000,
+      hash: "SHA-256",
+    },
+    keyMaterial,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt"],
+  );
+  const fixedPart = crypto.getRandomValues(new Uint8Array(12));
+  const invocationPart = new Uint8Array(new Uint32Array([1]).buffer);
+  const iv = new Uint8Array([...fixedPart, ...invocationPart]);
+  const encryptedBuffer = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    key,
+    textEncoder.encode(input),
+  );
+  const encryptedData = Buffer.from(new Uint8Array(encryptedBuffer)).toString("base64");
+  return `%${toHex(iv)}${toHex(salt)}${encryptedData}`;
+}
+
+function ensureParent(filePath) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true, mode: 0o700 });
+}
+
+async function main() {
+  const args = parseArgs(process.argv.slice(2));
+
+  if (args.envFile) {
+    const envValues = parseEnvFile(args.envFile);
+    args.database = args.database || envValues.WEAVEDWEB_DB || envValues.LIVESYNC_DB || envValues.DB || "";
+    args.username = args.username || envValues.WEAVEDWEB_SYNC_USER || envValues.LIVESYNC_USER || envValues.USERNAME || "";
+    args.password = args.password || envValues.WEAVEDWEB_SYNC_PASSWORD || envValues.LIVESYNC_PASSWORD || envValues.PASSWORD || "";
+  }
+
+  const e2eePassphrase = resolveSecret(args, "e2eePassphrase", "e2eePassphraseFile");
+  const uriPassphrase = resolveSecret(args, "uriPassphrase", "uriPassphraseFile") || friendlyString();
+
+  if (!args.url || !args.database || !args.username || !args.password || !e2eePassphrase) {
+    usage();
+    throw new Error("Missing required values.");
+  }
+
+  const conf = {
+    couchDB_URI: args.url,
+    couchDB_USER: args.username,
+    couchDB_PASSWORD: args.password,
+    couchDB_DBNAME: args.database,
+    syncOnStart: true,
+    gcDelay: 0,
+    periodicReplication: true,
+    syncOnFileOpen: true,
+    encrypt: true,
+    passphrase: e2eePassphrase,
+    usePathObfuscation: true,
+    batchSave: true,
+    batch_size: 50,
+    batches_limit: 50,
+    useHistory: true,
+    disableRequestURI: true,
+    customChunkSize: 50,
+    syncAfterMerge: false,
+    concurrencyOfReadChunksOnline: 100,
+    minimumIntervalOfReadChunksOnline: 100,
+    handleFilenameCaseSensitive: false,
+    doNotUseFixedRevisionForChunks: false,
+    settingVersion: 10,
+    notifyThresholdOfRemoteStorageSize: 800,
+  };
+
+  const encryptedConf = encodeURIComponent(await encrypt(JSON.stringify(conf), uriPassphrase));
+  const setupUri = `obsidian://setuplivesync?settings=${encryptedConf}`;
+
+  if (args.saveUri) {
+    ensureParent(args.saveUri);
+    fs.writeFileSync(args.saveUri, `${setupUri}\n`, { mode: 0o600 });
+  }
+  if (args.saveUriPassphrase) {
+    ensureParent(args.saveUriPassphrase);
+    fs.writeFileSync(args.saveUriPassphrase, `${uriPassphrase}\n`, { mode: 0o600 });
+  }
+
+  process.stdout.write("status=generated\n");
+  if (args.saveUri) {
+    process.stdout.write(`setup_uri_file=${args.saveUri}\n`);
+  }
+  if (args.saveUriPassphrase) {
+    process.stdout.write(`setup_uri_passphrase_file=${args.saveUriPassphrase}\n`);
+  }
+  if (args.printSecrets || (!args.saveUri && !args.saveUriPassphrase)) {
+    process.stdout.write(`setup_uri_passphrase=${uriPassphrase}\n`);
+    process.stdout.write(`setup_uri=${setupUri}\n`);
+  } else {
+    process.stdout.write("setup_uri_passphrase=hidden\n");
+    process.stdout.write("setup_uri=hidden\n");
+  }
+}
+
+main().catch((error) => {
+  process.stderr.write(`${error.message}\n`);
+  process.exit(1);
+});
+NODE

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Platform Ops"
+  short_description: "Handle Omarchy/Linux and macOS system settings and local ops"
+  default_prompt: "Inspect or change machine settings, decide whether the change belongs in shared chezmoi config or local OS state, and verify the final value."

@@ -1,0 +1,128 @@
+#!/bin/sh
+set -eu
+
+CONFIG_FILE="${OBSIDIAN_LIVESYNC_CONFIG_FILE:-$HOME/.config/decent-angl/obsidian-livesync.env}"
+if [ -f "$CONFIG_FILE" ]; then
+    # shellcheck disable=SC1090
+    . "$CONFIG_FILE"
+fi
+
+LOCAL_ONLY=0
+ROTATE_PASSWORD=0
+PRINT_SECRETS=0
+SHOW_PASSWORD=0
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --local-only)
+            LOCAL_ONLY=1
+            shift
+            ;;
+        --rotate-password)
+            ROTATE_PASSWORD=1
+            shift
+            ;;
+        --print-secrets)
+            PRINT_SECRETS=1
+            shift
+            ;;
+        --show-password)
+            SHOW_PASSWORD=1
+            shift
+            ;;
+        -h|--help)
+            cat <<'EOF'
+Usage: obsidian-livesync-refresh-bundle [--rotate-password] [--print-secrets] [--show-password]
+
+Refresh the local LiveSync import bundle using the canonical server on macmini.
+When run from a non-server machine, this command transparently executes on the
+server over SSH and then copies the current bundle back to the local state dir.
+
+Options:
+  --rotate-password  Rotate the dedicated CouchDB sync-user password first.
+  --print-secrets    Print the setup URI and its passphrase to stdout.
+  --show-password    When rotating, print the new sync password on the server.
+EOF
+            exit 0
+            ;;
+        *)
+            echo "Unknown argument: $1" >&2
+            exit 1
+            ;;
+    esac
+done
+
+MACHINE_ID="${OBSIDIAN_LIVESYNC_MACHINE_ID:-unknown}"
+SERVER_MACHINE_ID="${OBSIDIAN_LIVESYNC_SERVER_MACHINE_ID:-macmini}"
+SERVER_SSH_DEST="${OBSIDIAN_LIVESYNC_SERVER_SSH_DEST:-admin@macmini.tail4d5aec.ts.net}"
+SERVER_HOME="${OBSIDIAN_LIVESYNC_SERVER_HOME:-/Users/admin}"
+SERVER_STATE_DIR="${OBSIDIAN_LIVESYNC_SERVER_STATE_DIR:-/Users/admin/.local/state/decent-angl/obsidian-livesync/weavedweb}"
+LOCAL_STATE_DIR="${OBSIDIAN_LIVESYNC_STATE_DIR:-$HOME/.local/state/decent-angl/obsidian-livesync/weavedweb}"
+
+mkdir -p "$LOCAL_STATE_DIR"
+chmod 700 "$LOCAL_STATE_DIR" 2>/dev/null || true
+
+append_flag() {
+    if [ -n "${2:-}" ] && [ "$2" -eq 1 ]; then
+        printf ' %s' "$1"
+    fi
+}
+
+if [ "$LOCAL_ONLY" -ne 1 ] && [ "$MACHINE_ID" != "$SERVER_MACHINE_ID" ]; then
+    remote_cmd="${SERVER_HOME}/.local/bin/obsidian-livesync-refresh-bundle --local-only"
+    remote_cmd="${remote_cmd}$(append_flag --rotate-password "$ROTATE_PASSWORD")"
+    remote_cmd="${remote_cmd}$(append_flag --print-secrets "$PRINT_SECRETS")"
+    remote_cmd="${remote_cmd}$(append_flag --show-password "$SHOW_PASSWORD")"
+
+    remote_output="$(ssh "$SERVER_SSH_DEST" "$remote_cmd")"
+    if [ "$PRINT_SECRETS" -eq 1 ] || [ "$SHOW_PASSWORD" -eq 1 ]; then
+        printf '%s\n' "$remote_output"
+    fi
+
+    for file_name in \
+        weavedweb.e2ee.passphrase.txt \
+        weavedweb.setup-uri.txt \
+        weavedweb.setup-uri-passphrase.txt
+    do
+        scp "${SERVER_SSH_DEST}:${SERVER_STATE_DIR}/${file_name}" "${LOCAL_STATE_DIR}/${file_name}"
+        chmod 600 "${LOCAL_STATE_DIR}/${file_name}"
+    done
+
+    printf 'status=refreshed\n'
+    printf 'executed_on=%s\n' "$SERVER_MACHINE_ID"
+    printf 'machine_id=%s\n' "$MACHINE_ID"
+    printf 'local_state_dir=%s\n' "$LOCAL_STATE_DIR"
+    printf 'setup_uri_file=%s\n' "${LOCAL_STATE_DIR}/weavedweb.setup-uri.txt"
+    printf 'setup_uri_passphrase_file=%s\n' "${LOCAL_STATE_DIR}/weavedweb.setup-uri-passphrase.txt"
+    printf 'e2ee_passphrase_file=%s\n' "${LOCAL_STATE_DIR}/weavedweb.e2ee.passphrase.txt"
+    exit 0
+fi
+
+if [ "$ROTATE_PASSWORD" -eq 1 ]; then
+    rotate_args=""
+    if [ "$SHOW_PASSWORD" -eq 1 ]; then
+        rotate_args=" --show-password"
+    fi
+    # shellcheck disable=SC2086
+    rotate_output="$("$HOME/.local/bin/obsidian-livesync-rotate-password" $rotate_args)"
+    if [ "$SHOW_PASSWORD" -eq 1 ]; then
+        printf '%s\n' "$rotate_output"
+    fi
+fi
+
+generate_args=""
+if [ "$PRINT_SECRETS" -eq 1 ]; then
+    generate_args=" --print-secrets"
+fi
+# shellcheck disable=SC2086
+generate_output="$("$HOME/.local/bin/obsidian-livesync-generate-setup-uri" $generate_args)"
+if [ "$PRINT_SECRETS" -eq 1 ]; then
+    printf '%s\n' "$generate_output"
+fi
+
+printf 'status=refreshed\n'
+printf 'executed_on=%s\n' "$MACHINE_ID"
+printf 'local_state_dir=%s\n' "$LOCAL_STATE_DIR"
+printf 'setup_uri_file=%s\n' "${LOCAL_STATE_DIR}/weavedweb.setup-uri.txt"
+printf 'setup_uri_passphrase_file=%s\n' "${LOCAL_STATE_DIR}/weavedweb.setup-uri-passphrase.txt"
+printf 'e2ee_passphrase_file=%s\n' "${LOCAL_STATE_DIR}/weavedweb.e2ee.passphrase.txt"

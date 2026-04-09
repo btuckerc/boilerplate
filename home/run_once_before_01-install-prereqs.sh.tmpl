@@ -49,7 +49,8 @@ if command -v apt >/dev/null 2>&1; then
     sudo apt install -y \
         curl git build-essential autoconf \
         libssl-dev libyaml-dev zlib1g-dev libffi-dev libgmp-dev \
-        libreadline-dev libncurses5-dev libgdbm-dev rustc
+        libreadline-dev libncurses5-dev libgdbm-dev rustc \
+        libpcsclite-dev pcscd
 
 elif command -v dnf >/dev/null 2>&1; then
     echo "Detected dnf (Fedora/RHEL)"
@@ -64,13 +65,14 @@ elif command -v dnf >/dev/null 2>&1; then
     sudo dnf install -y \
         curl git gcc gcc-c++ make autoconf rust patch bzip2 \
         openssl-devel libffi-devel readline-devel gdbm-devel \
-        ncurses-devel libyaml-devel "$ZLIB_PKG"
+        ncurses-devel libyaml-devel "$ZLIB_PKG" \
+        pcsc-lite pcsc-lite-devel ccid
 
 elif command -v pacman >/dev/null 2>&1; then
     echo "Detected pacman (Arch Linux)"
     sudo pacman -Sy --noconfirm \
         curl git base-devel rust libffi libyaml openssl zlib \
-        readline gdbm ncurses
+        readline gdbm ncurses pcsclite ccid
 
 else
     echo "WARNING: Unknown package manager. Please install tools manually."

@@ -3,7 +3,12 @@
 # Zsh configuration file
 
 # Source shared POSIX-compatible configuration
-[ -f "$HOME/.config/shell/common.sh" ] && . "$HOME/.config/shell/common.sh"
+COMMON_SH="${XDG_CONFIG_HOME:-$HOME/.config}/shell/common.sh"
+[ -f "$COMMON_SH" ] && . "$COMMON_SH"
+unset COMMON_SH
+
+# Safe fallback if common.sh is temporarily missing
+export LOGFILE="${LOGFILE:-$HOME/.shellrc_log}"
 
 # === Zsh-Specific Configuration ===
 
@@ -171,4 +176,4 @@ t() {
 }
 
 # Logging
-echo "$(date): Zsh shell loaded" >> "$LOGFILE"
+printf '%s: Zsh shell loaded\n' "$(date)" >>"$LOGFILE" 2>/dev/null || true

@@ -1,0 +1,487 @@
+#!/usr/bin/env python3
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shlex
+import socket
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+
+DEFAULT_SERVER_MACHINE_ID = "macmini"
+DEFAULT_SERVER_SSH_DEST = "admin@macmini"
+DEFAULT_CONFIG_FILE = Path.home() / ".config/decent-angl/codex-meter.env"
+
+
+def load_env_file(path: Path) -> None:
+    try:
+        content = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        raise SystemExit(f"Unable to read codex meter config: {path}: {exc}") from exc
+
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if not key or key in os.environ:
+            continue
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+            value = value[1:-1]
+        os.environ[key] = os.path.expandvars(value)
+
+
+def parse_datetime(value: Any) -> datetime | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+    if isinstance(value, (int, float)):
+        return datetime.fromtimestamp(float(value), tz=timezone.utc)
+    if not isinstance(value, str):
+        return None
+    raw = value.strip()
+    if not raw:
+        return None
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def as_int(value: Any) -> int | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(float(value))
+        except ValueError:
+            return None
+    return None
+
+
+def human_age(seconds: int | None) -> str:
+    if seconds is None:
+        return "unknown"
+    if seconds < 60:
+        return f"{seconds}s"
+    minutes, rem = divmod(seconds, 60)
+    if minutes < 60:
+        return f"{minutes}m"
+    hours, rem_minutes = divmod(minutes, 60)
+    if hours < 24:
+        return f"{hours}h{rem_minutes:02d}m"
+    days, rem_hours = divmod(hours, 24)
+    return f"{days}d{rem_hours:02d}h"
+
+
+def human_token_count(value: int | None) -> str:
+    if value is None:
+        return "unknown"
+    return f"{value:,}"
+
+
+def format_reset(now: datetime, value: str | None) -> str:
+    parsed = parse_datetime(value)
+    if parsed is None:
+        return "unknown"
+    local_value = parsed.astimezone()
+    delta = parsed - now
+    if delta.total_seconds() >= 0:
+        suffix = f"in {human_age(int(delta.total_seconds()))}"
+    else:
+        suffix = f"{human_age(abs(int(delta.total_seconds())))} ago"
+    return f"{local_value.strftime('%Y-%m-%d %H:%M %Z')} ({suffix})"
+
+
+def machine_candidates_from_hostname(hostname: str) -> str | None:
+    lowered = hostname.lower()
+    if lowered in {"omarchy", "btct14"}:
+        return "omarchy"
+    if lowered.startswith("btc-mbp14") or lowered == "macbook":
+        return "macbook"
+    if lowered.startswith("webweaver") or lowered == "macmini":
+        return "macmini"
+    return None
+
+
+def detect_machine_id() -> str:
+    for env_key in ("CODEX_BUDGET_MACHINE_ID", "CODEX_METER_MACHINE_ID"):
+        value = os.environ.get(env_key)
+        if value:
+            return value
+    if shutil_which("chezmoi"):
+        try:
+            result = subprocess.run(
+                ["chezmoi", "data"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            data = json.loads(result.stdout)
+            machine_id = (
+                data.get("machine_id")
+                or data.get("decentangl", {}).get("machine_id")
+                or data.get("machine", {}).get("id")
+            )
+            if machine_id:
+                return str(machine_id)
+        except Exception:
+            pass
+    if shutil_which("tailscale"):
+        try:
+            result = subprocess.run(
+                ["tailscale", "status", "--json"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            payload = json.loads(result.stdout)
+            host_name = payload.get("Self", {}).get("HostName")
+            if host_name:
+                return str(host_name)
+        except Exception:
+            pass
+    hostname = socket.gethostname()
+    return machine_candidates_from_hostname(hostname) or hostname
+
+
+def shutil_which(binary: str) -> str | None:
+    paths = os.environ.get("PATH", "").split(os.pathsep)
+    for entry in paths:
+        if not entry:
+            continue
+        candidate = Path(entry) / binary
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return None
+
+
+def parse_args(argv: list[str]) -> tuple[str, argparse.Namespace]:
+    command = "status"
+    remaining = list(argv)
+    if remaining and not remaining[0].startswith("-"):
+        command = remaining.pop(0)
+
+    parser = argparse.ArgumentParser(
+        prog="codex-budget",
+        description="Fleet view for Codex rate-limit usage.",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Print aggregate JSON instead of human-readable text.",
+    )
+    parser.add_argument(
+        "--local",
+        action="store_true",
+        help="Read the aggregate state directly instead of SSHing to macmini.",
+    )
+    parser.add_argument(
+        "--no-refresh",
+        action="store_true",
+        help="Do not run the local aggregator before reading state.",
+    )
+    parser.add_argument(
+        "--state-file",
+        default=os.environ.get("CODEX_METER_STATE_FILE", str(Path.home() / "srv/codex-meter/state/latest.json")),
+        help="Aggregate state file to read locally.",
+    )
+    parser.add_argument(
+        "--inbox",
+        default=os.environ.get("CODEX_METER_INBOX_DIR", str(Path.home() / "srv/codex-meter/inbox")),
+        help="Inbox directory to pass to the local aggregator.",
+    )
+    parser.add_argument(
+        "--expected-machines",
+        default=os.environ.get("CODEX_METER_EXPECTED_MACHINES", "omarchy,macbook,macmini"),
+        help="Comma-separated machine ids for local refreshes.",
+    )
+    parser.add_argument(
+        "--stale-after-seconds",
+        default=os.environ.get("CODEX_METER_STALE_AFTER_SECONDS", "1800"),
+        help="Stale threshold to pass to the local aggregator.",
+    )
+    parser.add_argument(
+        "--warn-percent",
+        default=os.environ.get("CODEX_BUDGET_WARN_PERCENT", "80"),
+        help="Usage warning threshold to pass to the local aggregator.",
+    )
+    parser.add_argument(
+        "--critical-percent",
+        default=os.environ.get("CODEX_BUDGET_CRITICAL_PERCENT", "90"),
+        help="Usage critical threshold to pass to the local aggregator.",
+    )
+    parser.add_argument(
+        "--reset-soon-minutes",
+        default=os.environ.get("CODEX_BUDGET_RESET_SOON_MINUTES", "20"),
+        help="Reset-soon threshold to pass to the local aggregator.",
+    )
+    parser.add_argument(
+        "--server-machine-id",
+        default=os.environ.get("CODEX_BUDGET_SERVER_MACHINE_ID", DEFAULT_SERVER_MACHINE_ID),
+        help="Machine id that hosts the aggregate state.",
+    )
+    parser.add_argument(
+        "--server-ssh-dest",
+        default=os.environ.get("CODEX_BUDGET_SERVER_SSH_DEST", DEFAULT_SERVER_SSH_DEST),
+        help="SSH destination for the aggregate host.",
+    )
+    parser.add_argument(
+        "--remote-command",
+        default=os.environ.get("CODEX_BUDGET_REMOTE_COMMAND", "codex-budget"),
+        help="Remote command path to invoke on macmini.",
+    )
+    parser.add_argument(
+        "--ssh-identity-file",
+        default=os.environ.get("CODEX_BUDGET_SSH_IDENTITY_FILE", ""),
+        help="Optional SSH identity file to use for remote status reads.",
+    )
+    args = parser.parse_args(remaining)
+    return command, args
+
+
+def aggregate_command() -> list[str]:
+    env_override = os.environ.get("CODEX_METER_AGGREGATE_BIN")
+    if env_override:
+        candidate = Path(env_override).expanduser()
+        if candidate.is_file():
+            return executable_command(candidate)
+    current_file = Path(__file__).resolve()
+    for name in ("executable_codex-meter-aggregate", "codex-meter-aggregate"):
+        candidate = current_file.with_name(name)
+        if candidate.is_file():
+            return executable_command(candidate)
+    installed = Path.home() / ".local/bin/codex-meter-aggregate"
+    if installed.is_file():
+        return executable_command(installed)
+    return []
+
+
+def executable_command(path: Path) -> list[str]:
+    if os.access(path, os.X_OK):
+        return [str(path)]
+    return [sys.executable, str(path)]
+
+
+def run_local_aggregate(args: argparse.Namespace) -> None:
+    command = aggregate_command()
+    if not command:
+        state_file = Path(args.state_file).expanduser()
+        if not state_file.is_file():
+            raise SystemExit("Unable to locate codex-meter-aggregate for a local refresh.")
+        return
+    command.extend(
+        [
+            "--inbox",
+            args.inbox,
+            "--state-file",
+            args.state_file,
+            "--expected-machines",
+            args.expected_machines,
+            "--stale-after-seconds",
+            str(args.stale_after_seconds),
+            "--warn-percent",
+            str(args.warn_percent),
+            "--critical-percent",
+            str(args.critical_percent),
+            "--reset-soon-minutes",
+            str(args.reset_soon_minutes),
+        ]
+    )
+    subprocess.run(command, check=True)
+
+
+def read_state(path: Path) -> dict[str, Any]:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise SystemExit(f"Aggregate state file not found: {path}") from exc
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"Aggregate state file is invalid JSON: {path}") from exc
+
+
+def remote_status(args: argparse.Namespace) -> int:
+    remote_args = [args.remote_command, "status", "--local"]
+    if args.json:
+        remote_args.append("--json")
+    if args.no_refresh:
+        remote_args.append("--no-refresh")
+    remote_command = " ".join(shlex.quote(part) for part in remote_args)
+    remote_script = f'PATH="$HOME/.local/bin:$PATH"; {remote_command}'
+    ssh_command = ["ssh", "-o", "BatchMode=yes"]
+    if args.ssh_identity_file:
+        ssh_command.extend(
+            [
+                "-o",
+                "IdentitiesOnly=yes",
+                "-i",
+                str(Path(args.ssh_identity_file).expanduser()),
+            ]
+        )
+    ssh_command.extend([args.server_ssh_dest, "sh", "-lc", remote_script])
+    result = subprocess.run(
+        ssh_command,
+        capture_output=True,
+        text=True,
+    )
+    if result.stdout:
+        sys.stdout.write(result.stdout)
+    if result.stderr:
+        sys.stderr.write(result.stderr)
+    return result.returncode
+
+
+def render_window_line(now: datetime, window_key: str, payload: dict[str, Any]) -> str:
+    details: list[str] = []
+    used_percent = payload.get("used_percent")
+    if used_percent is not None:
+        details.append(f"{float(used_percent):.1f}%")
+    if payload.get("used_total_tokens") is not None:
+        total = human_token_count(as_int(payload.get("used_total_tokens")))
+        limit = human_token_count(as_int(payload.get("limit_tokens")))
+        if as_int(payload.get("limit_tokens")) is not None:
+            details.append(f"{total}/{limit} tokens")
+        else:
+            details.append(f"{total} tokens")
+    details.append(f"reset {format_reset(now, payload.get('reset_at'))}")
+    source_machine = payload.get("source_machine_id")
+    if source_machine:
+        details.append(f"source {source_machine}")
+    captured_at = parse_datetime(payload.get("captured_at"))
+    if captured_at is not None:
+        age_seconds = max(0, int((now - captured_at).total_seconds()))
+        details.append(f"captured {human_age(age_seconds)} ago")
+    if payload.get("stale"):
+        details.append("stale")
+    return f"  {window_key}: " + " | ".join(details)
+
+
+def render_machine_line(now: datetime, machine_id: str, payload: dict[str, Any]) -> str:
+    status = "missing" if payload.get("snapshot_missing") else ("stale" if payload.get("stale") else "fresh")
+    age = human_age(as_int(payload.get("age_seconds")))
+    total = human_token_count(as_int(payload.get("token_totals", {}).get("used_total_tokens")))
+    delta = as_int(payload.get("token_totals", {}).get("delta_token_usage"))
+    delta_text = f"+{human_token_count(delta)}" if delta is not None and delta >= 0 else human_token_count(delta)
+    reset_at = format_reset(now, payload.get("token_totals", {}).get("reset_at"))
+    return (
+        f"  {machine_id}: {status}, age {age}, total {total}, "
+        f"delta {delta_text}, reset {reset_at}"
+    )
+
+
+def render_status(state: dict[str, Any]) -> str:
+    now = parse_datetime(state.get("generated_at")) or datetime.now(timezone.utc)
+    lines = [
+        f"Codex budget status as of {now.astimezone().strftime('%Y-%m-%d %H:%M:%S %Z')}",
+    ]
+
+    fleet = state.get("fleet", {})
+    lines.append(
+        "Fleet: "
+        f"{fleet.get('fresh_machine_count', 0)} fresh, "
+        f"{fleet.get('stale_machine_count', 0)} stale, "
+        f"{fleet.get('missing_machine_count', 0)} missing"
+    )
+    fleet_totals = fleet.get("token_totals", {})
+    if fleet_totals.get("used_total_tokens") is not None:
+        delta_value = as_int(fleet_totals.get("delta_token_usage"))
+        if delta_value is None:
+            delta_text = "unknown"
+        elif delta_value >= 0:
+            delta_text = f"+{human_token_count(delta_value)}"
+        else:
+            delta_text = human_token_count(delta_value)
+        lines.append(
+            "Attribution totals: "
+            f"{human_token_count(as_int(fleet_totals.get('used_total_tokens')))} total, "
+            f"{delta_text} delta"
+        )
+
+    lines.append("")
+    lines.append("Global windows:")
+    current_windows = state.get("current_global_windows", {})
+    if current_windows:
+        for window_key in sorted(current_windows):
+            lines.append(render_window_line(now, window_key, current_windows[window_key]))
+    else:
+        lines.append("  no global window data available")
+
+    lines.append("")
+    lines.append("Machines:")
+    machines = state.get("machines", {})
+    if machines:
+        for machine_id in sorted(machines):
+            lines.append(render_machine_line(now, machine_id, machines[machine_id]))
+    else:
+        lines.append("  no machine snapshots available")
+
+    errors = state.get("errors", [])
+    if errors:
+        lines.append("")
+        lines.append("Errors:")
+        for entry in errors:
+            lines.append(f"  {entry}")
+
+    warnings = state.get("warnings", [])
+    if warnings:
+        lines.append("")
+        lines.append("Warnings:")
+        for warning in warnings:
+            severity = warning.get("severity", "warning").upper()
+            lines.append(f"  [{severity}] {warning.get('message')}")
+
+    return "\n".join(lines) + "\n"
+
+
+def local_status(args: argparse.Namespace) -> int:
+    if not args.no_refresh:
+        run_local_aggregate(args)
+    state = read_state(Path(args.state_file).expanduser())
+    if args.json:
+        sys.stdout.write(json.dumps(state, indent=2, sort_keys=True))
+        sys.stdout.write("\n")
+    else:
+        sys.stdout.write(render_status(state))
+    return 0
+
+
+def main(argv: list[str]) -> int:
+    config_file = Path(os.environ.get("CODEX_METER_CONFIG_FILE", str(DEFAULT_CONFIG_FILE))).expanduser()
+    load_env_file(config_file)
+    command, args = parse_args(argv)
+    if command != "status":
+        print(f"Unsupported codex-budget command: {command}", file=sys.stderr)
+        return 2
+
+    current_machine = detect_machine_id()
+    if not args.local and current_machine != args.server_machine_id:
+        return remote_status(args)
+    return local_status(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

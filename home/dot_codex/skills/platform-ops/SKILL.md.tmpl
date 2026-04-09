@@ -1,0 +1,80 @@
+---
+name: platform-ops
+description: Inspect or change machine-local operating system, desktop, hardware, network, power, service, or native app settings on Omarchy/Linux or macOS. Use for requests like trackpad, keyboard, mouse, display, audio, battery, Tailscale, launch agents, or to decide whether a change belongs in shared chezmoi config or should stay local.
+---
+
+# Platform Ops
+
+Use this when the user asks to inspect or change machine settings, desktop behavior, hardware preferences, native app settings, or OS services.
+
+## Current Target
+{{ template "codex/current-target.md.tmpl" . }}
+
+## Scope Decision
+
+- Shared and durable: edit `~/src/boilerplate/home/...`, sync the same files into `~/.local/share/chezmoi/home/...`, then apply with `chezmoi`.
+- Machine-local and OS-owned: change the live OS or app setting directly on the target host.
+- If the request targets another known host, prefer `ssh omarchy`, `ssh macbook`, or `ssh macmini`.
+
+## Shared vs Local
+
+- Shared:
+  - shell, tmux, Codex, Ghostty, Kitty
+  - Hyprland, Waybar, Mako, Walker, user services shipped in the boilerplate
+- Machine-local:
+  - trackpad speed
+  - keyboard repeat rate
+  - display scaling
+  - battery policy
+  - Bluetooth pairings
+  - app login state
+- If unclear, inspect where the current value lives before editing.
+
+## Omarchy And Linux
+
+- Package installs: `omarchy-pkg-add`.
+- Inspect first:
+  - `hyprctl devices`
+  - `hyprctl getoption <section:option>`
+  - `systemctl --user status <unit>`
+  - `systemctl status <unit>` for machine services
+- Common durable config roots:
+  - source: `~/src/boilerplate/home/dot_config/hypr/`
+  - live: `~/.config/hypr/`
+  - related desktops/apps: `~/.config/omarchy/`, `~/.config/waybar/`, `~/.config/mako/`, `~/.config/walker/`, `~/.config/systemd/user/`
+- Trackpad and input workflow:
+  1. Inspect `hyprctl devices` and the live `~/.config/hypr/input.conf`.
+  2. If the behavior should be part of the standard workstation setup, edit the source `home/dot_config/hypr/input.conf`.
+  3. Apply with `chezmoi apply ~/.config/hypr/input.conf`.
+  4. Reload with `hyprctl reload`.
+- Treat Omarchy desktop changes as shared only when they are part of your normal workstation baseline.
+
+## macOS
+
+- Shared CLI and dotfile behavior still goes through `brew`, `mise`, and `chezmoi`.
+- Native macOS preferences usually stay machine-local unless you explicitly want them standardized.
+- Inspect or change with:
+  - `defaults read` and `defaults write`
+  - `defaults -currentHost read` and `defaults -currentHost write`
+  - `pmset`, `scutil`, `networksetup`, `systemsetup`
+  - `launchctl` for agents and daemons
+  - `osascript` or `open "/System/Applications/System Settings.app"` when the setting is UI-only
+- Common trackpad domains:
+  - `com.apple.AppleMultitouchTrackpad`
+  - `com.apple.driver.AppleBluetoothMultitouch.trackpad`
+  - `NSGlobalDomain`
+- Trackpad and input workflow:
+  1. Read the relevant defaults domains before writing.
+  2. For trackpad settings, expect to mirror writes to both the built-in and Bluetooth trackpad domains when applicable.
+  3. Re-read the domains after writing.
+  4. Tell the user if a logout, reconnect, or System Settings restart may be needed.
+- Prefer CLI changes when they are clear and reversible. If Apple moved a setting to UI-only, say that directly instead of guessing.
+- Avoid user-facing UI tweaks on `macmini` unless the user explicitly asks; treat it as a server-first machine.
+
+## Reliability Rules
+
+- Inspect before writing.
+- Decide shared vs local before editing the boilerplate.
+- Keep machine-local state out of shared Codex guidance unless it is durable and portable.
+- After changes, re-read the setting or file and report the final value or path.
+- For shared config changes, verify the rendered live file after `chezmoi apply`.

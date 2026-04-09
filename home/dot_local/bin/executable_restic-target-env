@@ -1,0 +1,104 @@
+#!/bin/sh
+set -eu
+
+quote_sh() {
+    printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
+find_bin() {
+    for candidate in "$@"; do
+        if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+CONFIG_FILE="${RESTIC_CONFIG_FILE:-$HOME/.config/decent-angl/restic.env}"
+if [ -f "$CONFIG_FILE" ]; then
+    # shellcheck disable=SC1090
+    . "$CONFIG_FILE"
+fi
+
+PLAN_ONLY=0
+TARGET_NAME="${RESTIC_REPO_TARGET:-local}"
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --plan)
+            PLAN_ONLY=1
+            shift
+            ;;
+        local|machine|primary)
+            TARGET_NAME="local"
+            shift
+            ;;
+        offsite)
+            TARGET_NAME="offsite"
+            shift
+            ;;
+        *)
+            echo "usage: restic-target-env [--plan] <local|offsite>" >&2
+            exit 1
+            ;;
+    esac
+done
+
+RESTIC_MACHINE_REPO_BIN="$(find_bin \
+    "$HOME/.local/bin/restic-machine-repo" \
+    "$(command -v restic-machine-repo 2>/dev/null || true)")"
+RESTIC_OFFSITE_REPO_BIN="$(find_bin \
+    "$HOME/.local/bin/restic-offsite-repo" \
+    "$(command -v restic-offsite-repo 2>/dev/null || true)")"
+BW_RESTIC_OFFSITE_ENV_BIN="$(find_bin \
+    "$HOME/.local/bin/bw-restic-offsite-env" \
+    "$(command -v bw-restic-offsite-env 2>/dev/null || true)")"
+
+case "$TARGET_NAME" in
+    local)
+        repo="${RESTIC_LOCAL_REPO:-${RESTIC_REPO:-}}"
+        if [ -z "$repo" ]; then
+            if [ -z "${RESTIC_MACHINE_REPO_BIN:-}" ]; then
+                echo "restic-machine-repo helper not found." >&2
+                exit 1
+            fi
+            repo="$("$RESTIC_MACHINE_REPO_BIN")"
+        fi
+        if [ -z "$repo" ]; then
+            echo "Unable to determine the local restic repository." >&2
+            exit 1
+        fi
+        printf 'export RESTIC_TARGET_NAME=%s\n' "$(quote_sh "local")"
+        printf 'export RESTIC_TARGET_PROVIDER=%s\n' "$(quote_sh "local")"
+        printf 'export RESTIC_TARGET_REPO=%s\n' "$(quote_sh "$repo")"
+        ;;
+    offsite)
+        if [ -z "${RESTIC_OFFSITE_REPO_BIN:-}" ]; then
+            echo "restic-offsite-repo helper not found." >&2
+            exit 1
+        fi
+        repo="${RESTIC_OFFSITE_REPO:-}"
+        if [ -z "$repo" ]; then
+            repo="$("$RESTIC_OFFSITE_REPO_BIN" "${RESTIC_MACHINE_ID:-}")"
+        fi
+        if [ -z "$repo" ]; then
+            echo "Unable to determine the offsite restic repository." >&2
+            exit 1
+        fi
+        printf 'export RESTIC_TARGET_NAME=%s\n' "$(quote_sh "offsite")"
+        printf 'export RESTIC_TARGET_PROVIDER=%s\n' "$(quote_sh "${RESTIC_OFFSITE_PROVIDER:-unknown}")"
+        printf 'export RESTIC_TARGET_REPO=%s\n' "$(quote_sh "$repo")"
+        if [ "$PLAN_ONLY" -eq 0 ]; then
+            if [ -z "${BW_RESTIC_OFFSITE_ENV_BIN:-}" ]; then
+                echo "bw-restic-offsite-env helper not found." >&2
+                exit 1
+            fi
+            "$BW_RESTIC_OFFSITE_ENV_BIN"
+        fi
+        ;;
+    *)
+        echo "Unknown repo target: $TARGET_NAME" >&2
+        exit 1
+        ;;
+esac

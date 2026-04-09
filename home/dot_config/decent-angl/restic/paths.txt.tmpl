@@ -1,0 +1,20 @@
+{{- $home := .chezmoi.homeDir -}}
+{{- $machineID := .decentangl.machine_id -}}
+{{ $home }}/src
+{{ $home }}/notes
+{{ $home }}/.config
+{{ $home }}/.local/bin
+{{ $home }}/.local/share/chezmoi
+{{ $home }}/.local/state/decent-angl
+{{ $home }}/.ssh
+{{ $home }}/.codex
+{{ $home }}/.gnupg
+{{ $home }}/.age
+{{ $home }}/.password-store
+{{- if eq $machineID "omarchy" }}
+{{ $home }}/Documents/decent-angl
+{{- end }}
+{{- if eq $machineID "macmini" }}
+{{ $home }}/srv/git
+{{ $home }}/homelab
+{{- end }}

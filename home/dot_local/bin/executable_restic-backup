@@ -1,0 +1,145 @@
+#!/bin/sh
+set -eu
+
+find_bin() {
+    for candidate in "$@"; do
+        if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+CONFIG_FILE="${RESTIC_CONFIG_FILE:-$HOME/.config/decent-angl/restic.env}"
+if [ -f "$CONFIG_FILE" ]; then
+    # shellcheck disable=SC1090
+    . "$CONFIG_FILE"
+fi
+
+RESTIC_BIN="$(find_bin \
+    "$HOME/.local/share/mise/shims/restic" \
+    "$HOME/.local/bin/restic" \
+    "/opt/homebrew/bin/restic" \
+    "/usr/local/bin/restic" \
+    "$(command -v restic 2>/dev/null || true)")"
+RESTIC_TARGET_ENV_BIN="$(find_bin \
+    "$HOME/.local/bin/restic-target-env" \
+    "$(command -v restic-target-env 2>/dev/null || true)")"
+
+if [ -z "${RESTIC_BIN:-}" ]; then
+    echo "restic CLI not found." >&2
+    exit 1
+fi
+
+if [ -z "${RESTIC_TARGET_ENV_BIN:-}" ]; then
+    echo "restic-target-env helper not found." >&2
+    exit 1
+fi
+
+PATHS_FILE="${RESTIC_PATHS_FILE:-$HOME/.config/decent-angl/restic/paths.txt}"
+EXCLUDES_FILE="${RESTIC_EXCLUDES_FILE:-$HOME/.config/decent-angl/restic/excludes.txt}"
+MACHINE_ID="${RESTIC_MACHINE_ID:-unknown}"
+ROLE="${RESTIC_MACHINE_ROLE:-unknown}"
+REPO_TARGET="${RESTIC_REPO_TARGET:-local}"
+PRINT_PLAN=0
+pass_args_file="$(mktemp)"
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --repo-target)
+            if [ "$#" -lt 2 ]; then
+                echo "Missing value for --repo-target." >&2
+                exit 1
+            fi
+            REPO_TARGET="$2"
+            shift 2
+            ;;
+        --print-plan)
+            PRINT_PLAN=1
+            shift
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+for arg in "$@"; do
+    printf '%s\n' "$arg" >>"$pass_args_file"
+done
+
+if [ ! -f "$PATHS_FILE" ]; then
+    echo "Restic paths file not found: $PATHS_FILE" >&2
+    exit 1
+fi
+
+resolve_paths_file="$(mktemp)"
+cleanup() {
+    rm -f "$resolve_paths_file" "$pass_args_file"
+}
+trap cleanup EXIT INT TERM
+
+while IFS= read -r path || [ -n "$path" ]; do
+    case "$path" in
+        ''|'#'*)
+            continue
+            ;;
+    esac
+    if [ -e "$path" ]; then
+        printf '%s\n' "$path" >>"$resolve_paths_file"
+    fi
+done <"$PATHS_FILE"
+
+if [ ! -s "$resolve_paths_file" ]; then
+    echo "No existing backup paths were resolved from $PATHS_FILE" >&2
+    exit 1
+fi
+
+if [ -n "${RESTIC_PASSWORD_FILE:-}" ] && [ -f "${RESTIC_PASSWORD_FILE:-}" ]; then
+    export RESTIC_PASSWORD_FILE
+elif [ -n "${RESTIC_PASSWORD_COMMAND:-}" ]; then
+    export RESTIC_PASSWORD_COMMAND
+else
+    echo "Set RESTIC_PASSWORD_FILE or RESTIC_PASSWORD_COMMAND." >&2
+    exit 1
+fi
+
+if [ "$PRINT_PLAN" -eq 1 ]; then
+    target_env="$("$RESTIC_TARGET_ENV_BIN" --plan "$REPO_TARGET")" || exit 1
+else
+    target_env="$("$RESTIC_TARGET_ENV_BIN" "$REPO_TARGET")" || exit 1
+fi
+eval "$target_env"
+
+if [ "$PRINT_PLAN" -eq 1 ]; then
+    printf 'machine_id=%s\n' "$MACHINE_ID"
+    printf 'role=%s\n' "$ROLE"
+    printf 'repo_target=%s\n' "$RESTIC_TARGET_NAME"
+    printf 'repo=%s\n' "$RESTIC_TARGET_REPO"
+    printf 'paths_file=%s\n' "$PATHS_FILE"
+    printf 'excludes_file=%s\n' "$EXCLUDES_FILE"
+    printf 'exclude_caches=%s\n' "true"
+    printf 'resolved_paths=\n'
+    sed 's/^/  /' "$resolve_paths_file"
+    exit 0
+fi
+
+set -- \
+    -r "$RESTIC_TARGET_REPO" \
+    backup \
+    --exclude-caches \
+    --host "$MACHINE_ID" \
+    --tag "machine:$MACHINE_ID" \
+    --tag "role:$ROLE" \
+    --files-from "$resolve_paths_file"
+
+if [ -f "$EXCLUDES_FILE" ]; then
+    set -- "$@" --exclude-file "$EXCLUDES_FILE"
+fi
+
+while IFS= read -r arg || [ -n "$arg" ]; do
+    set -- "$@" "$arg"
+done <"$pass_args_file"
+
+exec "$RESTIC_BIN" "$@"

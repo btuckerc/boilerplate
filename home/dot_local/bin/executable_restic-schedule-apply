@@ -1,0 +1,145 @@
+#!/bin/sh
+set -eu
+
+find_bin() {
+    for candidate in "$@"; do
+        if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+CONFIG_FILE="${RESTIC_CONFIG_FILE:-$HOME/.config/decent-angl/restic.env}"
+if [ -f "$CONFIG_FILE" ]; then
+    # shellcheck disable=SC1090
+    . "$CONFIG_FILE"
+fi
+
+PRINT_PLAN=0
+FORCE=0
+OS_NAME="$(uname -s)"
+PASSWORD_FILE="${RESTIC_LOCAL_PASSWORD_FILE:-${RESTIC_PASSWORD_FILE:-$HOME/.local/share/decent-angl/secrets/restic.password}}"
+SYSTEMD_TIMER_UNITS="
+decent-angl-restic-backup.timer
+decent-angl-restic-restore-smoke.timer
+decent-angl-restic-forget-prune.timer
+decent-angl-restic-check.timer
+"
+LAUNCHD_SOURCE_DIR="${RESTIC_LAUNCHD_SOURCE_DIR:-$HOME/.local/share/decent-angl/launchd}"
+LAUNCHD_TARGET_DIR="${RESTIC_LAUNCHD_TARGET_DIR:-$HOME/Library/LaunchAgents}"
+LOG_DIR="${RESTIC_SCHEDULE_LOG_DIR:-$HOME/.local/state/decent-angl/restic-scheduler/logs}"
+
+usage() {
+    cat <<EOF
+Usage: restic-schedule-apply [--print-plan] [--force]
+
+Loads the native scheduled restic cadence for this machine.
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --print-plan)
+            PRINT_PLAN=1
+            shift
+            ;;
+        --force)
+            FORCE=1
+            shift
+            ;;
+        -h|--help|help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "Unknown argument: $1" >&2
+            usage >&2
+            exit 1
+            ;;
+    esac
+done
+
+if [ "$PRINT_PLAN" -eq 1 ]; then
+    printf 'os=%s\n' "$OS_NAME"
+    printf 'password_file=%s\n' "$PASSWORD_FILE"
+    if [ -f "$PASSWORD_FILE" ]; then
+        printf 'password_file_exists=true\n'
+    else
+        printf 'password_file_exists=false\n'
+    fi
+    case "$OS_NAME" in
+        Linux)
+            printf 'systemd_timer_units=\n'
+            for unit in $SYSTEMD_TIMER_UNITS; do
+                printf '  %s\n' "$unit"
+            done
+            ;;
+        Darwin)
+            printf 'launchd_source_dir=%s\n' "$LAUNCHD_SOURCE_DIR"
+            printf 'launchd_target_dir=%s\n' "$LAUNCHD_TARGET_DIR"
+            printf 'log_dir=%s\n' "$LOG_DIR"
+            ;;
+        *)
+            printf 'unsupported_os=%s\n' "$OS_NAME"
+            ;;
+    esac
+    exit 0
+fi
+
+if [ "$FORCE" -ne 1 ] && [ ! -f "$PASSWORD_FILE" ]; then
+    echo "Missing machine-local restic password file: $PASSWORD_FILE" >&2
+    echo "Run 'restic-local-password sync' before enabling the schedule." >&2
+    exit 1
+fi
+
+mkdir -p "$LOG_DIR"
+
+case "$OS_NAME" in
+    Linux)
+        SYSTEMCTL_BIN="$(find_bin "$(command -v systemctl 2>/dev/null || true)" "/usr/bin/systemctl")"
+        if [ -z "${SYSTEMCTL_BIN:-}" ]; then
+            echo "systemctl not found." >&2
+            exit 1
+        fi
+        "$SYSTEMCTL_BIN" --user daemon-reload
+        for unit in $SYSTEMD_TIMER_UNITS; do
+            "$SYSTEMCTL_BIN" --user enable --now "$unit"
+        done
+        ;;
+    Darwin)
+        if [ ! -d "$LAUNCHD_SOURCE_DIR" ]; then
+            echo "Launchd source directory not found: $LAUNCHD_SOURCE_DIR" >&2
+            exit 1
+        fi
+        uid="$(id -u)"
+        launchd_domain="user/$uid"
+        if launchctl print "gui/$uid" >/dev/null 2>&1; then
+            launchd_domain="gui/$uid"
+        fi
+        mkdir -p "$LAUNCHD_TARGET_DIR"
+        found_plist=0
+        for source_plist in "$LAUNCHD_SOURCE_DIR"/com.decentangl.restic.*.plist; do
+            if [ ! -f "$source_plist" ]; then
+                continue
+            fi
+            found_plist=1
+            plist_name="$(basename "$source_plist")"
+            plist_label="${plist_name%.plist}"
+            target_plist="$LAUNCHD_TARGET_DIR/$plist_name"
+            launchctl bootout "$launchd_domain" "$target_plist" >/dev/null 2>&1 || true
+            install -m 644 "$source_plist" "$target_plist"
+            launchctl bootstrap "$launchd_domain" "$target_plist"
+            launchctl enable "$launchd_domain/$plist_label" >/dev/null 2>&1 || true
+        done
+        if [ "$found_plist" -ne 1 ]; then
+            echo "No rendered launchd plists found in $LAUNCHD_SOURCE_DIR" >&2
+            exit 1
+        fi
+        ;;
+    *)
+        echo "Unsupported OS: $OS_NAME" >&2
+        exit 1
+        ;;
+esac

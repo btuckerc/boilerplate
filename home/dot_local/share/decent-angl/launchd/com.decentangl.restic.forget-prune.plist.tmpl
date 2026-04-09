@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.decentangl.restic.forget-prune</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{{ .chezmoi.homeDir }}/.local/bin/restic-scheduled-job</string>
+        <string>forget-prune</string>
+    </array>
+    <key>UserName</key>
+    <string>{{ base .chezmoi.homeDir }}</string>
+    <key>WorkingDirectory</key>
+    <string>{{ .chezmoi.homeDir }}</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>{{ .chezmoi.homeDir }}</string>
+        <key>PATH</key>
+        <string>{{ .chezmoi.homeDir }}/.local/bin:{{ .chezmoi.homeDir }}/.local/share/mise/shims:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>RunAtLoad</key>
+    <false/>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Day</key>
+        <integer>{{ .decentangl.backup.schedule.forget_prune.day }}</integer>
+        <key>Hour</key>
+        <integer>{{ .decentangl.backup.schedule.forget_prune.hour }}</integer>
+        <key>Minute</key>
+        <integer>{{ .decentangl.backup.schedule.forget_prune.minute }}</integer>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>{{ .chezmoi.homeDir }}/.local/state/decent-angl/restic-scheduler/logs/forget-prune.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>{{ .chezmoi.homeDir }}/.local/state/decent-angl/restic-scheduler/logs/forget-prune.err.log</string>
+</dict>
+</plist>

@@ -3,7 +3,12 @@
 # Bash configuration file
 
 # Source shared POSIX-compatible configuration
-[ -f "$HOME/.config/shell/common.sh" ] && . "$HOME/.config/shell/common.sh"
+COMMON_SH="${XDG_CONFIG_HOME:-$HOME/.config}/shell/common.sh"
+[ -f "$COMMON_SH" ] && . "$COMMON_SH"
+unset COMMON_SH
+
+# Safe fallback if common.sh is temporarily missing
+export LOGFILE="${LOGFILE:-$HOME/.shellrc_log}"
 
 # === Bash-Specific Configuration ===
 
@@ -59,22 +64,39 @@ if command -v starship >/dev/null; then
 fi
 
 # === Bash Options ===
-shopt -s checkwinsize    # Update LINES and COLUMNS after each command
-shopt -s histappend      # Append to history file, don't overwrite
-shopt -s cmdhist         # Save multi-line commands as single history entry
-shopt -s lithist         # Save multi-line commands with newlines
-shopt -s autocd          # Type directory name to cd (bash 4+)
-shopt -s globstar        # ** for recursive globbing (bash 4+)
-shopt -s nocaseglob      # Case-insensitive globbing
-shopt -s cdspell         # Auto-correct minor cd typos
-shopt -s dirspell        # Auto-correct directory names during completion
+for bash_opt in \
+    checkwinsize \
+    histappend \
+    cmdhist \
+    lithist \
+    autocd \
+    globstar \
+    nocaseglob \
+    cdspell \
+    dirspell
+do
+    shopt -s "$bash_opt" 2>/dev/null || true
+done
+unset bash_opt
 
 # === History Configuration ===
 export HISTFILESIZE=1000000   # Increased from 10000 (match zsh)
 export HISTSIZE=100000        # Increased from 5000 (closer to zsh)
 export HISTCONTROL=ignoreboth:erasedups  # Ignore dupes and spaces, erase old dupes
 export HISTTIMEFORMAT="%F %T "
-export PROMPT_COMMAND="history -a; history -c; history -r; $PROMPT_COMMAND"
+history_sync_prompt='history -a; history -c; history -r'
+if [ -n "${PROMPT_COMMAND:-}" ]; then
+    case "$PROMPT_COMMAND" in
+        "$history_sync_prompt"|"$history_sync_prompt; "*|*"; $history_sync_prompt"|*"; $history_sync_prompt; "*) ;;
+        *)
+            PROMPT_COMMAND="$history_sync_prompt; $PROMPT_COMMAND"
+            ;;
+    esac
+else
+    PROMPT_COMMAND="$history_sync_prompt"
+fi
+export PROMPT_COMMAND
+unset history_sync_prompt
 
 # === Bash-specific Functions ===
 
@@ -94,4 +116,4 @@ y() {
 }
 
 # Logging
-echo "$(date): Bash shell loaded" >> "$LOGFILE"
+printf '%s: Bash shell loaded\n' "$(date)" >>"$LOGFILE" 2>/dev/null || true

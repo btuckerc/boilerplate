@@ -1,0 +1,44 @@
+{{- $machineID := .decentangl.machine_id | default "" -}}
+{{- $hostKey := lower .chezmoi.hostname -}}
+{{- if eq .chezmoi.os "darwin" -}}
+{{-   $hostKey = (output "scutil" "--get" "ComputerName" | trim | lower) -}}
+{{- end -}}
+{{- if and (eq $machineID "") (or (eq $hostKey "btct14") (eq $hostKey "omarchy")) -}}
+{{-   $machineID = "omarchy" -}}
+{{- else if and (eq $machineID "") (or (eq $hostKey "btc-mbp14") (eq $hostKey "macbook")) -}}
+{{-   $machineID = "macbook" -}}
+{{- else if and (eq $machineID "") (or (eq $hostKey "webweaver") (eq $hostKey "macmini")) -}}
+{{-   $machineID = "macmini" -}}
+{{- end -}}
+{{- if eq $machineID "omarchy" }}
+- Machine: `omarchy`
+- Role: `{{ .decentangl.machines.omarchy.role }}`
+- OS packages: `{{ .decentangl.machines.omarchy.package_manager }}`
+- Repo root: `{{ .decentangl.defaults.repo_root }}`
+- Notes: `{{ .decentangl.defaults.notes_path }}`
+{{- else if eq $machineID "macbook" }}
+- Machine: `macbook`
+- Role: `{{ .decentangl.machines.macbook.role }}`
+- OS packages: `{{ .decentangl.machines.macbook.package_manager }}`
+- Tailscale: `{{ .decentangl.machines.macbook.tailscale_variant }}`
+- Repo root: `{{ .decentangl.defaults.repo_root }}`
+{{- else if eq $machineID "macmini" }}
+- Machine: `macmini`
+- Role: `{{ .decentangl.machines.macmini.role }}`
+- OS packages: `{{ .decentangl.machines.macmini.package_manager }}`
+- Tailscale: `{{ .decentangl.machines.macmini.tailscale_variant }}`
+- Mirror root: `{{ .decentangl.machines.macmini.mirror_root }}`
+- Backup root: `{{ .decentangl.machines.macmini.backup_root }}`
+{{- else if eq .chezmoi.os "darwin" }}
+- Platform: `macos`
+- OS packages: `brew`
+- Repo root: `{{ .decentangl.defaults.repo_root }}`
+{{- else if eq .chezmoi.os "linux" }}
+- Platform: `linux`
+- OS packages: `native package manager`
+- Repo root: `{{ .decentangl.defaults.repo_root }}`
+{{- else }}
+- Platform: `{{ .chezmoi.os }}`
+- OS packages: `native package manager`
+- Repo root: `{{ .decentangl.defaults.repo_root }}`
+{{- end }}

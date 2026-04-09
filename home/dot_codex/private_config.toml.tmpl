@@ -1,0 +1,17 @@
+# Managed by chezmoi. Edit the source tree, not ~/.codex directly.
+#
+# Keep this file portable. Host-local state such as auth and project trust
+# stays on the machine and is not part of the shared baseline.
+{{- $localTrust := (output "bash" "-lc" "config=\"$HOME/.codex/config.toml\"; if [ -f \"$config\" ]; then awk 'BEGIN { printing = 0 } /^\\[projects\\./ { printing = 1 } printing && /^\\[/ && $0 !~ /^\\[projects\\./ { printing = 0 } printing { print }' \"$config\"; fi") | trim }}
+
+model = "gpt-5.4"
+model_reasoning_effort = "xhigh"
+service_tier = "fast"
+commit_attribution = ""
+{{ if ne $localTrust "" }}
+
+{{ $localTrust }}
+{{ end }}
+
+[plugins."github@openai-curated"]
+enabled = true

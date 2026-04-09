@@ -1,8 +1,38 @@
-{{- $gitName := promptStringOnce . "git_name" "What is your Git name" -}}
-{{- $gitEmail := promptStringOnce . "git_email" "What is your Git email" -}}
+{{- $gitName := "" -}}
+{{- if hasKey . "git" -}}
+{{-   $gitName = (get .git "name") -}}
+{{- end -}}
+{{- if eq $gitName "" -}}
+{{-   $gitName = promptStringOnce . "git_name" "What is your Git name" -}}
+{{- end -}}
+{{- $gitEmail := "" -}}
+{{- if hasKey . "git" -}}
+{{-   $gitEmail = (get .git "email") -}}
+{{- end -}}
+{{- if eq $gitEmail "" -}}
+{{-   $gitEmail = promptStringOnce . "git_email" "What is your Git email" -}}
+{{- end -}}
+{{- $machineID := "" -}}
+{{- if hasKey . "decentangl" -}}
+{{-   $machineID = (get .decentangl "machine_id") -}}
+{{- end -}}
+{{- $hostKey := lower .chezmoi.hostname -}}
+{{- if eq .chezmoi.os "darwin" -}}
+{{-   $hostKey = (output "scutil" "--get" "ComputerName" | trim | lower) -}}
+{{- end -}}
+{{- if and (eq $machineID "") (or (eq $hostKey "btct14") (eq $hostKey "omarchy")) -}}
+{{-   $machineID = "omarchy" -}}
+{{- else if and (eq $machineID "") (or (eq $hostKey "btc-mbp14") (eq $hostKey "macbook")) -}}
+{{-   $machineID = "macbook" -}}
+{{- else if and (eq $machineID "") (or (eq $hostKey "webweaver") (eq $hostKey "macmini")) -}}
+{{-   $machineID = "macmini" -}}
+{{- end -}}
 
 sourceDir = {{ .chezmoi.sourceDir | quote }}
 
 [data.git]
     name = {{ $gitName | quote }}
     email = {{ $gitEmail | quote }}
+
+[data.decentangl]
+    machine_id = {{ $machineID | quote }}

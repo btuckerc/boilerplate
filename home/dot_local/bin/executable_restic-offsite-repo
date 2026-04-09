@@ -1,0 +1,30 @@
+#!/bin/sh
+set -eu
+
+CONFIG_FILE="${RESTIC_CONFIG_FILE:-$HOME/.config/decent-angl/restic.env}"
+if [ -f "$CONFIG_FILE" ]; then
+    # shellcheck disable=SC1090
+    . "$CONFIG_FILE"
+fi
+
+machine_id="${1:-${RESTIC_MACHINE_ID:-}}"
+
+if [ -z "$machine_id" ]; then
+    echo "usage: restic-offsite-repo <omarchy|macbook|macmini>" >&2
+    exit 1
+fi
+
+if [ "${RESTIC_OFFSITE_ENABLED:-0}" != "1" ]; then
+    echo "Offsite restic target is not enabled in $CONFIG_FILE." >&2
+    exit 1
+fi
+
+url_base="${RESTIC_OFFSITE_URL_BASE:-}"
+
+if [ -z "$url_base" ]; then
+    echo "Set RESTIC_OFFSITE_URL_BASE in $CONFIG_FILE." >&2
+    exit 1
+fi
+
+url_base="${url_base%/}"
+printf 'rest:%s/%s\n' "$url_base" "$machine_id"

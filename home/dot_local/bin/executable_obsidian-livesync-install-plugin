@@ -1,0 +1,119 @@
+#!/bin/sh
+set -eu
+
+usage() {
+    cat <<'EOF' >&2
+Usage: obsidian-livesync-install-plugin --config-dir PATH [--version TAG]
+
+Downloads the pinned Self-hosted LiveSync community plugin into the given
+vault config directory, enables the community plugin entry, and disables the
+conflicting built-in Obsidian Sync core plugin for that config.
+EOF
+}
+
+CONFIG_DIR=""
+VERSION="${OBSIDIAN_LIVESYNC_VERSION:-0.25.56}"
+CONFIG_FILE="${OBSIDIAN_LIVESYNC_CONFIG_FILE:-$HOME/.config/decent-angl/obsidian-livesync.env}"
+
+if [ -f "$CONFIG_FILE" ]; then
+    # shellcheck disable=SC1090
+    . "$CONFIG_FILE"
+fi
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --config-dir)
+            [ "$#" -ge 2 ] || {
+                usage
+                exit 1
+            }
+            CONFIG_DIR="$2"
+            shift 2
+            ;;
+        --version)
+            [ "$#" -ge 2 ] || {
+                usage
+                exit 1
+            }
+            VERSION="$2"
+            shift 2
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            if [ -z "$CONFIG_DIR" ]; then
+                CONFIG_DIR="$1"
+                shift
+                continue
+            fi
+            usage
+            exit 1
+            ;;
+    esac
+done
+
+if [ -z "$CONFIG_DIR" ]; then
+    CONFIG_DIR="${OBSIDIAN_LIVESYNC_CONFIG_DIR:-}"
+fi
+
+[ -n "$CONFIG_DIR" ] || {
+    echo "Config dir is not set. Pass --config-dir or configure OBSIDIAN_LIVESYNC_CONFIG_DIR." >&2
+    usage
+    exit 1
+}
+
+PYTHON_BIN="$(command -v python3 2>/dev/null || true)"
+[ -n "$PYTHON_BIN" ] || {
+    echo "python3 is required." >&2
+    exit 1
+}
+
+PLUGIN_ID="obsidian-livesync"
+PLUGIN_DIR="${CONFIG_DIR}/plugins/${PLUGIN_ID}"
+BASE_URL="https://github.com/vrtmrz/obsidian-livesync/releases/download/${VERSION}"
+
+mkdir -p "$PLUGIN_DIR"
+
+for asset in main.js manifest.json styles.css; do
+    tmp_file="${PLUGIN_DIR}/${asset}.tmp"
+    curl -fsSL --retry 3 "${BASE_URL}/${asset}" -o "$tmp_file"
+    mv "$tmp_file" "${PLUGIN_DIR}/${asset}"
+done
+
+"$PYTHON_BIN" - "$CONFIG_DIR" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+config_dir = Path(sys.argv[1])
+
+def load_json(path: Path, default):
+    if not path.exists():
+        return default
+    try:
+        return json.loads(path.read_text())
+    except Exception:
+        return default
+
+community_plugins_path = config_dir / "community-plugins.json"
+community_plugins = load_json(community_plugins_path, [])
+if not isinstance(community_plugins, list):
+    community_plugins = []
+if "obsidian-livesync" not in community_plugins:
+    community_plugins.append("obsidian-livesync")
+community_plugins_path.write_text(json.dumps(community_plugins, indent=2) + "\n")
+
+core_plugins_path = config_dir / "core-plugins.json"
+core_plugins = load_json(core_plugins_path, {})
+if not isinstance(core_plugins, dict):
+    core_plugins = {}
+core_plugins["sync"] = False
+core_plugins_path.write_text(json.dumps(core_plugins, indent=2) + "\n")
+PY
+
+printf 'status=installed\n'
+printf 'plugin=%s\n' "$PLUGIN_ID"
+printf 'version=%s\n' "$VERSION"
+printf 'config_dir=%s\n' "$CONFIG_DIR"

@@ -6,6 +6,7 @@
 # === Environment Variables ===
 export EDITOR="nvim"
 export DEV_DIR="$HOME/src"
+export LOGFILE="${LOGFILE:-$HOME/.shellrc_log}"
 
 # XDG Base Directory Specification
 # https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html
@@ -18,8 +19,16 @@ export LESSHISTFILE="$XDG_CACHE_HOME/less_history"
 export PYTHON_HISTORY="$XDG_DATA_HOME/python/history"
 
 # === PATH Setup ===
-# Add ~/.local/bin to PATH if it exists
-[ -d "$HOME/.local/bin" ] && export PATH="$HOME/.local/bin:$PATH"
+# Add key user-level bin directories to PATH if they exist.
+for dir in "$HOME/.local/bin" "$HOME/shims" "$HOME/.local/share/mise/shims"; do
+	if [ -d "$dir" ]; then
+		case ":$PATH:" in
+		*":$dir:"*) ;;
+		*) PATH="$dir:$PATH" ;;
+		esac
+	fi
+done
+export PATH
 
 # === Pager Configuration ===
 export MANPAGER="less -R --use-color -Dd+r -Du+b"
@@ -72,10 +81,10 @@ alias dunnet="emacs -batch -l dunnet"
 dev() {
 	TARGET_DIR="$HOME/src"
 	if [ ! -d "$TARGET_DIR" ]; then
-		echo "$(date): source directory not found. Creating..." >>~/.shellrc_log
+		echo "$(date): source directory not found. Creating..." >>"$LOGFILE"
 		mkdir -p "$TARGET_DIR"
 	fi
-	cd "$TARGET_DIR" || echo "$(date): Failed to navigate to $TARGET_DIR" >>~/.shellrc_log
+	cd "$TARGET_DIR" || echo "$(date): Failed to navigate to $TARGET_DIR" >>"$LOGFILE"
 }
 
 # Create and activate Python virtual environment
@@ -177,6 +186,3 @@ fi
 
 # Load secrets if they exist
 [ -f "$HOME/.secrets" ] && . "$HOME/.secrets"
-
-# === Logging ===
-LOGFILE=~/.shellrc_log

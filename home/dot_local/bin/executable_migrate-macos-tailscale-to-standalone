@@ -1,0 +1,160 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+	cat <<'EOF'
+Usage: sudo migrate-macos-tailscale-to-standalone [--hostname NAME]
+
+Migrates a macOS workstation from the open-source/Homebrew tailscaled path to
+the standalone Tailscale app installed via Homebrew cask `tailscale-app`.
+
+This script:
+- backs up the current root-managed tailscaled files
+- stops and removes the legacy LaunchDaemon path
+- uninstalls the Homebrew `tailscale` formula as the logged-in user
+- installs or reinstalls the standalone app variant as the logged-in user
+
+Manual follow-up is still required for Apple-managed approval flows and login.
+EOF
+}
+
+desired_hostname=""
+while [[ $# -gt 0 ]]; do
+	case "$1" in
+	--hostname)
+		shift
+		[[ $# -gt 0 ]] || { echo "--hostname requires a value." >&2; exit 1; }
+		desired_hostname="$1"
+		;;
+	-h|--help)
+		usage
+		exit 0
+		;;
+	*)
+		echo "Unknown argument: $1" >&2
+		usage >&2
+		exit 1
+		;;
+	esac
+	shift
+done
+
+if [[ "$(uname -s)" != "Darwin" ]]; then
+	echo "migrate-macos-tailscale-to-standalone is for macOS only." >&2
+	exit 1
+fi
+
+if [[ "${EUID}" -ne 0 ]]; then
+	echo "Run with sudo." >&2
+	exit 1
+fi
+
+if [[ -z "${SUDO_USER:-}" || "${SUDO_USER}" == "root" ]]; then
+	echo "Run this via sudo from the login user session." >&2
+	exit 1
+fi
+
+brew_bin=""
+for candidate in /opt/homebrew/bin/brew /usr/local/bin/brew; do
+	if [[ -x "${candidate}" ]]; then
+		brew_bin="${candidate}"
+		break
+	fi
+done
+
+if [[ -z "${brew_bin}" ]]; then
+	echo "Homebrew was not found." >&2
+	exit 1
+fi
+
+user_home="$(dscl . -read "/Users/${SUDO_USER}" NFSHomeDirectory | awk '{print $2}')"
+if [[ -z "${user_home}" || ! -d "${user_home}" ]]; then
+	echo "Could not determine the home directory for ${SUDO_USER}." >&2
+	exit 1
+fi
+
+app_path="/Applications/Tailscale.app"
+legacy_plist="/Library/LaunchDaemons/com.tailscale.tailscaled.plist"
+legacy_bins=(/usr/local/bin/tailscale /usr/local/bin/tailscaled)
+timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+backup_dir="/Users/Shared/decent-angl-backups/${timestamp}/tailscale-standalone-migration"
+
+mkdir -p "${backup_dir}"
+
+if [[ -d "${user_home}/Applications/Tailscale.app" ]]; then
+	echo "Found ${user_home}/Applications/Tailscale.app." >&2
+	echo "Remove that app manually first, empty the Trash, and reboot before rerunning." >&2
+	exit 1
+fi
+
+if [[ -d "${app_path}" ]]; then
+	echo "Found ${app_path} already installed." >&2
+	echo "If you are switching variants, delete the app, empty the Trash, reboot, and rerun." >&2
+	exit 1
+fi
+
+{
+	echo "# $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+	echo "SUDO_USER=${SUDO_USER}"
+	echo "HOSTNAME=$(scutil --get LocalHostName 2>/dev/null || hostname -s)"
+	echo
+	echo "## tailscale version"
+	/opt/homebrew/bin/tailscale version 2>/dev/null || true
+	echo
+	echo "## tailscale status"
+	/opt/homebrew/bin/tailscale status --json 2>/dev/null || true
+	echo
+	echo "## files"
+	ls -l "${legacy_plist}" "${legacy_bins[@]}" 2>/dev/null || true
+} >"${backup_dir}/preflight.txt"
+
+if [[ -f "${legacy_plist}" ]]; then
+	cp -p "${legacy_plist}" "${backup_dir}/"
+fi
+for path in "${legacy_bins[@]}"; do
+	if [[ -e "${path}" ]]; then
+		cp -p "${path}" "${backup_dir}/$(basename "${path}")"
+	fi
+done
+
+launchctl bootout system "${legacy_plist}" >/dev/null 2>&1 || true
+pkill -x tailscaled >/dev/null 2>&1 || true
+sleep 2
+
+rm -f "${legacy_plist}" "${legacy_bins[@]}"
+
+sudo -u "${SUDO_USER}" -H "${brew_bin}" uninstall --formula tailscale >/dev/null 2>&1 || true
+if sudo -u "${SUDO_USER}" -H "${brew_bin}" list --cask tailscale-app >/dev/null 2>&1; then
+	sudo -u "${SUDO_USER}" -H "${brew_bin}" reinstall --cask tailscale-app
+else
+	sudo -u "${SUDO_USER}" -H "${brew_bin}" install --cask tailscale-app
+fi
+
+app_cli="${app_path}/Contents/MacOS/Tailscale"
+if [[ ! -x "${app_cli}" ]]; then
+	echo "Standalone Tailscale app CLI not found at ${app_cli}." >&2
+	exit 1
+fi
+
+{
+	echo
+	echo "Installed standalone app at ${app_path}."
+	echo "Backup saved to ${backup_dir}."
+	echo
+	echo "Manual steps:"
+	echo "1. Open Tailscale from Applications."
+	echo "2. Approve the system extension in macOS Settings if prompted."
+	echo "3. Allow the VPN configuration if prompted."
+	echo "4. Log in to the tailnet from the menu bar app."
+	if [[ -n "${desired_hostname}" ]]; then
+		echo "5. After login, run: tailscale set --hostname=${desired_hostname}"
+		echo "6. Verify: tailscale status --json | jq -r '.Self.HostName,.Self.DNSName'"
+	else
+		echo "5. Verify: tailscale status --json | jq -r '.Self.HostName,.Self.DNSName'"
+	fi
+	echo
+	echo "Useful commands:"
+	echo "  tailscale configure sysext status"
+	echo "  tailscale configure sysext activate"
+	echo "  tailscale configure mac-vpn install"
+} | tee "${backup_dir}/next-steps.txt"

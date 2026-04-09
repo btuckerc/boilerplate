@@ -26,6 +26,14 @@ if [ "$(uname -s)" = "Darwin" ]; then
     export PATH
 fi
 
+# Keep user-managed shims ahead of OS package-manager bins.
+for dir in "$HOME/.local/bin" "$HOME/shims" "$HOME/.local/share/mise/shims"; do
+    case ":$PATH:" in
+        *":$dir:"*) ;;
+        *) [ -d "$dir" ] && PATH="$dir:$PATH" ;;
+    esac
+done
+
 # Load Cargo environment if available
 CARGODIR="$HOME/.cargo"
 if [ -d "$CARGODIR" ]; then

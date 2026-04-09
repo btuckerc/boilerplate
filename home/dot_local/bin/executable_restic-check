@@ -1,0 +1,116 @@
+#!/bin/sh
+set -eu
+
+find_bin() {
+    for candidate in "$@"; do
+        if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+CONFIG_FILE="${RESTIC_CONFIG_FILE:-$HOME/.config/decent-angl/restic.env}"
+if [ -f "$CONFIG_FILE" ]; then
+    # shellcheck disable=SC1090
+    . "$CONFIG_FILE"
+fi
+
+RESTIC_BIN="$(find_bin \
+    "$HOME/.local/share/mise/shims/restic" \
+    "$HOME/.local/bin/restic" \
+    "/opt/homebrew/bin/restic" \
+    "/usr/local/bin/restic" \
+    "$(command -v restic 2>/dev/null || true)")"
+RESTIC_TARGET_ENV_BIN="$(find_bin \
+    "$HOME/.local/bin/restic-target-env" \
+    "$(command -v restic-target-env 2>/dev/null || true)")"
+
+if [ -z "${RESTIC_BIN:-}" ]; then
+    echo "restic CLI not found." >&2
+    exit 1
+fi
+
+if [ -z "${RESTIC_TARGET_ENV_BIN:-}" ]; then
+    echo "restic-target-env helper not found." >&2
+    exit 1
+fi
+
+REPO_TARGET="${RESTIC_REPO_TARGET:-local}"
+READ_DATA_SUBSET="${RESTIC_CHECK_READ_DATA_SUBSET:-10%}"
+PRINT_PLAN=0
+FULL_CHECK=0
+pass_args_file="$(mktemp)"
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --repo-target)
+            if [ "$#" -lt 2 ]; then
+                echo "Missing value for --repo-target." >&2
+                exit 1
+            fi
+            REPO_TARGET="$2"
+            shift 2
+            ;;
+        --print-plan)
+            PRINT_PLAN=1
+            shift
+            ;;
+        --full)
+            FULL_CHECK=1
+            shift
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+for arg in "$@"; do
+    printf '%s\n' "$arg" >>"$pass_args_file"
+done
+
+cleanup() {
+    rm -f "$pass_args_file"
+}
+trap cleanup EXIT INT TERM
+
+if [ -n "${RESTIC_PASSWORD_FILE:-}" ] && [ -f "${RESTIC_PASSWORD_FILE:-}" ]; then
+    export RESTIC_PASSWORD_FILE
+elif [ -n "${RESTIC_PASSWORD_COMMAND:-}" ]; then
+    export RESTIC_PASSWORD_COMMAND
+else
+    echo "Set RESTIC_PASSWORD_FILE or RESTIC_PASSWORD_COMMAND." >&2
+    exit 1
+fi
+
+if [ "$PRINT_PLAN" -eq 1 ]; then
+    target_env="$("$RESTIC_TARGET_ENV_BIN" --plan "$REPO_TARGET")" || exit 1
+else
+    target_env="$("$RESTIC_TARGET_ENV_BIN" "$REPO_TARGET")" || exit 1
+fi
+eval "$target_env"
+
+if [ "$PRINT_PLAN" -eq 1 ]; then
+    printf 'repo_target=%s\n' "$RESTIC_TARGET_NAME"
+    printf 'repo=%s\n' "$RESTIC_TARGET_REPO"
+    if [ "$FULL_CHECK" -eq 1 ]; then
+        printf 'mode=full\n'
+    else
+        printf 'mode=read-data-subset\n'
+        printf 'read_data_subset=%s\n' "$READ_DATA_SUBSET"
+    fi
+    exit 0
+fi
+
+set -- -r "$RESTIC_TARGET_REPO" check
+if [ "$FULL_CHECK" -ne 1 ]; then
+    set -- "$@" --read-data-subset "$READ_DATA_SUBSET"
+fi
+
+while IFS= read -r arg || [ -n "$arg" ]; do
+    set -- "$@" "$arg"
+done <"$pass_args_file"
+
+exec "$RESTIC_BIN" "$@"

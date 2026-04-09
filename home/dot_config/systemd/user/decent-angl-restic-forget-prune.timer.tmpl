@@ -1,0 +1,9 @@
+[Unit]
+Description=Monthly Decent Angl restic forget and prune
+
+[Timer]
+OnCalendar=*-*-{{ printf "%02d" (int .decentangl.backup.schedule.forget_prune.day) }} {{ printf "%02d" (int .decentangl.backup.schedule.forget_prune.hour) }}:{{ printf "%02d" (int .decentangl.backup.schedule.forget_prune.minute) }}:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

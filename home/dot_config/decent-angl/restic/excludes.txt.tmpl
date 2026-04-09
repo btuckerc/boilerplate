@@ -1,0 +1,54 @@
+{{- $home := .chezmoi.homeDir -}}
+# Common transient build and cache directories
+**/.cache
+**/.mypy_cache
+**/.pytest_cache
+**/.ruff_cache
+**/.tox
+**/.venv
+**/node_modules
+**/dist
+**/build
+**/target
+**/.next
+**/.turbo
+**/.parcel-cache
+**/.sass-cache
+**/.tmp
+**/tmp
+
+# App runtime caches and crash data inside user config trees
+{{ $home }}/.config/**/Cache
+{{ $home }}/.config/**/Cache_Data
+{{ $home }}/.config/**/Code Cache
+{{ $home }}/.config/**/GPUCache
+{{ $home }}/.config/**/DawnGraphiteCache
+{{ $home }}/.config/**/DawnWebGPUCache
+{{ $home }}/.config/**/GrShaderCache
+{{ $home }}/.config/**/ShaderCache
+{{ $home }}/.config/**/Crashpad
+{{ $home }}/.config/**/Crash Reports
+{{ $home }}/.config/**/blob_storage
+{{ $home }}/.config/**/Service Worker/CacheStorage
+{{ $home }}/.config/**/Service Worker/ScriptCache
+{{ $home }}/.config/**/Shared Dictionary
+{{ $home }}/.config/**/No_Vary_Search
+{{ $home }}/.config/**/component_crx_cache
+{{ $home }}/.config/**/extensions_crx_cache
+
+# Editor and desktop churn
+**/.DS_Store
+**/workspace.json
+**/workspace-mobile.json
+**/.obsidian/workspace*.json
+**/.obsidian-*/workspace*.json
+
+# OS-specific caches and logs
+{{- if eq .chezmoi.os "darwin" }}
+{{ .chezmoi.homeDir }}/Library/Caches
+{{ .chezmoi.homeDir }}/Library/Logs
+{{ .chezmoi.homeDir }}/Library/Developer/Xcode/DerivedData
+{{- end }}
+
+# Restic scheduler runtime state
+{{ $home }}/.local/state/decent-angl/restic-scheduler

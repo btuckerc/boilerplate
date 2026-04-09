@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+self_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+self_path="${self_dir}/$(basename -- "${BASH_SOURCE[0]}")"
+
+for candidate in \
+	/usr/bin/tailscale \
+	/usr/sbin/tailscale \
+	/opt/homebrew/bin/tailscale \
+	/usr/local/bin/tailscale \
+	/Applications/Tailscale.app/Contents/MacOS/Tailscale
+do
+	if [[ -x "${candidate}" && "${candidate}" != "${self_path}" ]]; then
+		exec "${candidate}" "$@"
+	fi
+done
+
+echo "tailscale CLI not found in standard locations." >&2
+echo "Checked: /usr/bin, /usr/sbin, /opt/homebrew/bin, /usr/local/bin, and /Applications/Tailscale.app." >&2
+exit 1

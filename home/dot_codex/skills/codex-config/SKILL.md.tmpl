@@ -1,0 +1,34 @@
+---
+name: codex-config
+description: Update the shared Codex baseline managed by chezmoi, including config.toml, AGENTS.md, skills, and the portable bootstrap rules for this multi-machine setup.
+---
+
+# Codex Config
+
+Use this when changing the shared Codex baseline managed with chezmoi.
+
+## Canonical Layout
+
+- Working repo: `~/src/boilerplate/home/dot_codex/`
+- Applied source: `{{ .decentangl.defaults.codex_source }}`
+- Live files: `{{ .decentangl.defaults.codex_home }}/`
+
+## Current Target
+
+{{ template "codex/current-target.md.tmpl" . }}
+
+## Rules
+
+- Edit the source tree, not `{{ .decentangl.defaults.codex_home }}/` directly.
+- Keep auth, history, caches, sqlite files, logs, and project trust local.
+- Keep `config.toml` portable and minimal.
+- Put durable workflow rules in `AGENTS.md`.
+- Render platform or machine specifics with chezmoi templates instead of adding cross-platform prose.
+- Prefer Tailscale hostnames: `omarchy`, `macbook`, `macmini`.
+
+## Workflow
+
+1. Edit `~/src/boilerplate/home/dot_codex/...`.
+2. Sync the same files into `{{ .decentangl.defaults.chezmoi_source }}/dot_codex/...` if the live source checkout is separate.
+3. Apply targeted files with `chezmoi apply`.
+4. Verify the rendered live files and `codex --version`.

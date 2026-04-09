@@ -1,0 +1,14 @@
+# Global Agent Instructions
+
+Shared Codex state is managed with chezmoi.
+
+- Edit shared Codex files in `~/src/boilerplate/home/dot_codex/` or `{{ .decentangl.defaults.codex_source }}`, then apply with `chezmoi`.
+- Keep `{{ .decentangl.defaults.codex_home }}/auth.json`, history, caches, sqlite files, and project trust local.
+- Use `mise` for `codex`, `bw`, `restic`, and `chezmoi`. Use the native package manager for OS packages.
+- Prefer Tailscale hostnames for remote access: `omarchy`, `macbook`, `macmini`.
+- This setup is Codex-first. Claude Code and OpenCode are optional leftovers, not baseline requirements.
+- For machine settings, native app preferences, or platform-specific operations, use the shared `platform-ops` skill.
+- Keep shared guidance short and durable. Let chezmoi render platform or machine specifics into the live files.
+
+Current target:
+{{ template "codex/current-target.md.tmpl" . }}

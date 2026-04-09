@@ -1,0 +1,56 @@
+#!/bin/sh
+set -eu
+
+find_bin() {
+    for candidate in "$@"; do
+        if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+CONFIG_FILE="${OBSIDIAN_LIVESYNC_CONFIG_FILE:-$HOME/.config/decent-angl/obsidian-livesync.env}"
+if [ -f "$CONFIG_FILE" ]; then
+    # shellcheck disable=SC1090
+    . "$CONFIG_FILE"
+fi
+
+CURRENT_MACHINE_ID="${OBSIDIAN_LIVESYNC_MACHINE_ID:-unknown}"
+
+BW_ENSURE_AUTH_BIN="$(find_bin \
+    "$HOME/.local/bin/bw-ensure-auth" \
+    "$(command -v bw-ensure-auth 2>/dev/null || true)")"
+
+if [ -z "${BW_ENSURE_AUTH_BIN:-}" ]; then
+    echo "bw-ensure-auth helper not found." >&2
+    exit 1
+fi
+
+check_machine() {
+    machine_id="$1"
+    if [ "$machine_id" = "$CURRENT_MACHINE_ID" ]; then
+        output="$("$BW_ENSURE_AUTH_BIN" 2>/dev/null || true)"
+    else
+        output="$(ssh "$machine_id" "~/.local/bin/bw-ensure-auth" 2>/dev/null || true)"
+    fi
+
+    server="$(printf '%s\n' "$output" | sed -n 's/^server=//p' | head -n1)"
+    status="$(printf '%s\n' "$output" | sed -n 's/^status=//p' | head -n1)"
+    next="$(printf '%s\n' "$output" | sed -n 's/^next=//p' | head -n1)"
+
+    printf 'machine=%s\n' "$machine_id"
+    printf 'server=%s\n' "${server:-unknown}"
+    printf 'status=%s\n' "${status:-unknown}"
+    printf 'next=%s\n' "${next:-inspect manually}"
+    printf '\n'
+}
+
+if [ "$#" -eq 0 ]; then
+    set -- omarchy macbook macmini
+fi
+
+for machine_id in "$@"; do
+    check_machine "$machine_id"
+done

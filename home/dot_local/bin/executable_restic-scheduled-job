@@ -1,0 +1,187 @@
+#!/bin/sh
+set -eu
+
+find_bin() {
+    for candidate in "$@"; do
+        if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+timestamp_utc() {
+    date -u '+%Y-%m-%dT%H:%M:%SZ'
+}
+
+CONFIG_FILE="${RESTIC_CONFIG_FILE:-$HOME/.config/decent-angl/restic.env}"
+if [ -f "$CONFIG_FILE" ]; then
+    # shellcheck disable=SC1090
+    . "$CONFIG_FILE"
+fi
+
+PRINT_PLAN=0
+REPO_TARGET="${RESTIC_REPO_TARGET:-local}"
+JOB_NAME=""
+LOCK_WAIT_SECONDS="${RESTIC_SCHEDULE_LOCK_WAIT_SECONDS:-7200}"
+LOCK_PATH="${RESTIC_SCHEDULE_LOCK_PATH:-$HOME/.local/state/decent-angl/restic-scheduler/lock}"
+PASSWORD_FILE="${RESTIC_LOCAL_PASSWORD_FILE:-${RESTIC_PASSWORD_FILE:-$HOME/.local/share/decent-angl/secrets/restic.password}}"
+MACHINE_ID="${RESTIC_MACHINE_ID:-unknown}"
+
+usage() {
+    cat <<EOF
+Usage: restic-scheduled-job [--print-plan] [--repo-target local|offsite] <backup|restore-smoke|forget-prune|check> [args...]
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --print-plan)
+            PRINT_PLAN=1
+            shift
+            ;;
+        --repo-target)
+            if [ "$#" -lt 2 ]; then
+                echo "Missing value for --repo-target." >&2
+                exit 1
+            fi
+            REPO_TARGET="$2"
+            shift 2
+            ;;
+        backup|restore-smoke|forget-prune|check)
+            JOB_NAME="$1"
+            shift
+            break
+            ;;
+        -h|--help|help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "Unknown argument: $1" >&2
+            usage >&2
+            exit 1
+            ;;
+    esac
+done
+
+if [ -z "$JOB_NAME" ]; then
+    usage >&2
+    exit 1
+fi
+
+case "$JOB_NAME" in
+    backup)
+        JOB_BIN="$(find_bin "$HOME/.local/bin/restic-backup" "$(command -v restic-backup 2>/dev/null || true)")"
+        ;;
+    restore-smoke)
+        JOB_BIN="$(find_bin "$HOME/.local/bin/restic-restore-smoke" "$(command -v restic-restore-smoke 2>/dev/null || true)")"
+        ;;
+    forget-prune)
+        JOB_BIN="$(find_bin "$HOME/.local/bin/restic-forget-prune" "$(command -v restic-forget-prune 2>/dev/null || true)")"
+        ;;
+    check)
+        JOB_BIN="$(find_bin "$HOME/.local/bin/restic-check" "$(command -v restic-check 2>/dev/null || true)")"
+        ;;
+    *)
+        echo "Unknown job: $JOB_NAME" >&2
+        exit 1
+        ;;
+esac
+
+if [ -z "${JOB_BIN:-}" ]; then
+    echo "Scheduled restic job helper not found for '$JOB_NAME'." >&2
+    exit 1
+fi
+
+lock_parent="$(dirname "$LOCK_PATH")"
+mkdir -p "$lock_parent"
+
+clear_stale_lock() {
+    if [ ! -d "$LOCK_PATH" ]; then
+        return 0
+    fi
+    if [ ! -f "$LOCK_PATH/machine_id" ] || [ ! -f "$LOCK_PATH/pid" ]; then
+        return 0
+    fi
+    lock_machine_id="$(cat "$LOCK_PATH/machine_id" 2>/dev/null || true)"
+    lock_pid="$(cat "$LOCK_PATH/pid" 2>/dev/null || true)"
+    if [ -z "$lock_machine_id" ] || [ -z "$lock_pid" ]; then
+        return 0
+    fi
+    if [ "$lock_machine_id" = "$MACHINE_ID" ] && ! kill -0 "$lock_pid" 2>/dev/null; then
+        rm -rf "$LOCK_PATH"
+    fi
+}
+
+acquire_lock() {
+    deadline="$(( $(date +%s) + LOCK_WAIT_SECONDS ))"
+    while :; do
+        if mkdir "$LOCK_PATH" 2>/dev/null; then
+            printf '%s\n' "$MACHINE_ID" >"$LOCK_PATH/machine_id"
+            printf '%s\n' "$$" >"$LOCK_PATH/pid"
+            printf '%s\n' "$JOB_NAME" >"$LOCK_PATH/job"
+            printf '%s\n' "$(timestamp_utc)" >"$LOCK_PATH/started_at"
+            return 0
+        fi
+        clear_stale_lock
+        if [ ! -d "$LOCK_PATH" ]; then
+            continue
+        fi
+        if [ "$(date +%s)" -ge "$deadline" ]; then
+            echo "Timed out waiting for restic schedule lock: $LOCK_PATH" >&2
+            exit 1
+        fi
+        sleep 15
+    done
+}
+
+if [ "$PRINT_PLAN" -eq 1 ]; then
+    printf 'machine_id=%s\n' "$MACHINE_ID"
+    printf 'job=%s\n' "$JOB_NAME"
+    printf 'repo_target=%s\n' "$REPO_TARGET"
+    printf 'command=%s\n' "$JOB_BIN"
+    printf 'password_file=%s\n' "$PASSWORD_FILE"
+    if [ -f "$PASSWORD_FILE" ]; then
+        printf 'password_file_exists=true\n'
+    else
+        printf 'password_file_exists=false\n'
+    fi
+    printf 'lock_path=%s\n' "$LOCK_PATH"
+    printf 'lock_wait_seconds=%s\n' "$LOCK_WAIT_SECONDS"
+    if [ "$#" -gt 0 ]; then
+        printf 'args=\n'
+        for arg in "$@"; do
+            printf '  %s\n' "$arg"
+        done
+    fi
+    exit 0
+fi
+
+if [ ! -f "$PASSWORD_FILE" ]; then
+    echo "Missing machine-local restic password file: $PASSWORD_FILE" >&2
+    echo "Run 'restic-local-password sync' after unlocking Bitwarden, then try again." >&2
+    exit 1
+fi
+
+acquire_lock
+cleanup() {
+    rm -rf "$LOCK_PATH"
+}
+trap cleanup EXIT INT TERM
+
+export RESTIC_PASSWORD_FILE="$PASSWORD_FILE"
+unset RESTIC_PASSWORD_COMMAND 2>/dev/null || true
+
+printf 'restic_scheduled_job=%s\n' "$JOB_NAME"
+printf 'machine_id=%s\n' "$MACHINE_ID"
+printf 'repo_target=%s\n' "$REPO_TARGET"
+printf 'started_at=%s\n' "$(timestamp_utc)"
+
+status=0
+"$JOB_BIN" --repo-target "$REPO_TARGET" "$@" || status=$?
+
+printf 'finished_at=%s\n' "$(timestamp_utc)"
+printf 'exit_code=%s\n' "$status"
+exit "$status"

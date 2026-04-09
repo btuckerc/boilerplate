@@ -1,0 +1,399 @@
+#!/bin/sh
+set -eu
+
+usage() {
+    cat <<'EOF' >&2
+Usage:
+  obsidian-livesync-apply-setup-uri status [--config-dir PATH]
+  obsidian-livesync-apply-setup-uri apply [--config-dir PATH] [--dry-run]
+      [--setup-uri-file PATH] [--setup-uri-passphrase-file PATH]
+      [--setup-uri VALUE] [--setup-uri-passphrase VALUE]
+
+Decode the local Setup-URI bundle and write the active LiveSync settings into
+the local Obsidian plugin config. This makes the generated bundle reusable from
+CLI on Omarchy and macOS instead of depending on manual in-app import.
+
+Commands:
+  status   Show the current local plugin-state readiness.
+  apply    Back up and update plugins/obsidian-livesync/data.json.
+
+Options:
+  --config-dir PATH                  Override OBSIDIAN_LIVESYNC_CONFIG_DIR
+  --setup-uri-file PATH              Override OBSIDIAN_LIVESYNC_SETUP_URI_FILE
+  --setup-uri-passphrase-file PATH   Override OBSIDIAN_LIVESYNC_SETUP_URI_PASSPHRASE_FILE
+  --setup-uri VALUE                  Use an inline Setup URI instead of a file
+  --setup-uri-passphrase VALUE       Use an inline Setup-URI passphrase instead of a file
+  --dry-run                          Decode and print the planned state without writing
+EOF
+}
+
+CONFIG_FILE="${OBSIDIAN_LIVESYNC_CONFIG_FILE:-$HOME/.config/decent-angl/obsidian-livesync.env}"
+if [ -f "$CONFIG_FILE" ]; then
+    # shellcheck disable=SC1090
+    . "$CONFIG_FILE"
+fi
+
+find_bin() {
+    for candidate in "$@"; do
+        if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+NODE_BIN="${NODE_BIN:-}"
+if [ -z "$NODE_BIN" ]; then
+    NODE_BIN="$(find_bin \
+        "$HOME/.local/share/mise/shims/node" \
+        "$HOME/.local/bin/node" \
+        "/opt/homebrew/bin/node" \
+        "/usr/local/bin/node" \
+        "$(command -v node 2>/dev/null || true)")"
+fi
+
+if [ ! -x "$NODE_BIN" ]; then
+    echo "node is required." >&2
+    exit 1
+fi
+
+COMMAND="${1:-status}"
+case "$COMMAND" in
+    status|apply)
+        shift
+        ;;
+    -h|--help)
+        usage
+        exit 0
+        ;;
+    *)
+        usage
+        exit 1
+        ;;
+esac
+
+CONFIG_DIR="${OBSIDIAN_LIVESYNC_CONFIG_DIR:-}"
+SETUP_URI_FILE="${OBSIDIAN_LIVESYNC_SETUP_URI_FILE:-$HOME/.local/state/decent-angl/obsidian-livesync/weavedweb/weavedweb.setup-uri.txt}"
+SETUP_URI_PASSPHRASE_FILE="${OBSIDIAN_LIVESYNC_SETUP_URI_PASSPHRASE_FILE:-$HOME/.local/state/decent-angl/obsidian-livesync/weavedweb/weavedweb.setup-uri-passphrase.txt}"
+SETUP_URI_VALUE=""
+SETUP_URI_PASSPHRASE_VALUE=""
+MACHINE_ID="${OBSIDIAN_LIVESYNC_MACHINE_ID:-unknown}"
+VAULT_DIR="${OBSIDIAN_LIVESYNC_VAULT_DIR:-$HOME/notes/obsidian/weavedweb}"
+DRY_RUN=0
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --config-dir)
+            [ "$#" -ge 2 ] || {
+                usage
+                exit 1
+            }
+            CONFIG_DIR="$2"
+            shift 2
+            ;;
+        --setup-uri-file)
+            [ "$#" -ge 2 ] || {
+                usage
+                exit 1
+            }
+            SETUP_URI_FILE="$2"
+            shift 2
+            ;;
+        --setup-uri-passphrase-file)
+            [ "$#" -ge 2 ] || {
+                usage
+                exit 1
+            }
+            SETUP_URI_PASSPHRASE_FILE="$2"
+            shift 2
+            ;;
+        --setup-uri)
+            [ "$#" -ge 2 ] || {
+                usage
+                exit 1
+            }
+            SETUP_URI_VALUE="$2"
+            shift 2
+            ;;
+        --setup-uri-passphrase)
+            [ "$#" -ge 2 ] || {
+                usage
+                exit 1
+            }
+            SETUP_URI_PASSPHRASE_VALUE="$2"
+            shift 2
+            ;;
+        --dry-run)
+            DRY_RUN=1
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "Unknown argument: $1" >&2
+            usage
+            exit 1
+            ;;
+    esac
+done
+
+[ -n "$CONFIG_DIR" ] || {
+    echo "Config dir is not set. Pass --config-dir or configure OBSIDIAN_LIVESYNC_CONFIG_DIR." >&2
+    exit 1
+}
+
+exec "$NODE_BIN" - "$COMMAND" "$CONFIG_DIR" "$SETUP_URI_FILE" "$SETUP_URI_PASSPHRASE_FILE" "$SETUP_URI_VALUE" "$SETUP_URI_PASSPHRASE_VALUE" "$MACHINE_ID" "$VAULT_DIR" "$DRY_RUN" <<'NODE'
+const fs = require("fs");
+const path = require("path");
+const crypto = require("crypto").webcrypto;
+
+const [
+  command,
+  configDir,
+  setupUriFile,
+  setupUriPassphraseFile,
+  setupUriValue,
+  setupUriPassphraseValue,
+  machineId,
+  vaultDir,
+  dryRunValue,
+] = process.argv.slice(2);
+
+const SETUP_URI_PREFIX = "obsidian://setuplivesync?settings=";
+const PLUGIN_ID = "obsidian-livesync";
+
+function readTrimmed(filePath) {
+  return fs.readFileSync(filePath, "utf8").trim();
+}
+
+function fileExists(filePath) {
+  try {
+    fs.accessSync(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function readJson(filePath, fallback) {
+  if (!fileExists(filePath)) {
+    return fallback;
+  }
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch {
+    return fallback;
+  }
+}
+
+function writeJson(filePath, value) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+}
+
+function timestamp() {
+  const now = new Date();
+  const pad = (value) => String(value).padStart(2, "0");
+  return [
+    now.getFullYear(),
+    pad(now.getMonth() + 1),
+    pad(now.getDate()),
+    "T",
+    pad(now.getHours()),
+    pad(now.getMinutes()),
+    pad(now.getSeconds()),
+  ].join("");
+}
+
+function hexToBytes(input) {
+  if (input.length % 2 !== 0) {
+    throw new Error("Invalid hex payload length.");
+  }
+  const output = new Uint8Array(input.length / 2);
+  for (let i = 0; i < input.length; i += 2) {
+    output[i / 2] = Number.parseInt(input.slice(i, i + 2), 16);
+  }
+  return output;
+}
+
+async function deriveKey(passphrase, salt) {
+  const encoder = new TextEncoder();
+  const digest = await crypto.subtle.digest("SHA-256", encoder.encode(passphrase));
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw",
+    digest,
+    { name: "PBKDF2" },
+    false,
+    ["deriveKey"],
+  );
+  return crypto.subtle.deriveKey(
+    {
+      name: "PBKDF2",
+      salt,
+      iterations: 100000,
+      hash: "SHA-256",
+    },
+    keyMaterial,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["decrypt"],
+  );
+}
+
+async function decryptSetupPayload(payload, passphrase) {
+  const raw = payload.startsWith("%") ? payload.slice(1) : payload;
+  if (raw.length < 64) {
+    throw new Error("Setup payload is too short.");
+  }
+  const iv = hexToBytes(raw.slice(0, 32));
+  const salt = hexToBytes(raw.slice(32, 64));
+  const ciphertext = Uint8Array.from(Buffer.from(raw.slice(64), "base64"));
+  const key = await deriveKey(passphrase, salt);
+  const decrypted = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ciphertext);
+  return new TextDecoder().decode(decrypted);
+}
+
+function decodeSetupUriValue(setupUri) {
+  const trimmed = setupUri.trim();
+  if (trimmed.startsWith(SETUP_URI_PREFIX)) {
+    return decodeURIComponent(trimmed.slice(SETUP_URI_PREFIX.length));
+  }
+  if (trimmed.includes("settings=")) {
+    return decodeURIComponent(trimmed.slice(trimmed.indexOf("settings=") + "settings=".length));
+  }
+  return decodeURIComponent(trimmed);
+}
+
+async function decodeBundle(setupUri, passphrase) {
+  const payload = decodeSetupUriValue(setupUri);
+  return JSON.parse(await decryptSetupPayload(payload, passphrase));
+}
+
+function ensureCommunityPluginEnabled(communityPluginsPath) {
+  const communityPlugins = readJson(communityPluginsPath, []);
+  const next = Array.isArray(communityPlugins) ? communityPlugins.slice() : [];
+  if (!next.includes(PLUGIN_ID)) {
+    next.push(PLUGIN_ID);
+  }
+  return next;
+}
+
+function ensureCorePlugins(corePluginsPath) {
+  const corePlugins = readJson(corePluginsPath, {});
+  const next = typeof corePlugins === "object" && corePlugins !== null ? { ...corePlugins } : {};
+  next.sync = false;
+  return next;
+}
+
+function summariseStatus(paths, data) {
+  const communityPlugins = readJson(paths.communityPluginsPath, []);
+  const corePlugins = readJson(paths.corePluginsPath, {});
+  const remoteType = data.remoteType === "" ? "COUCHDB" : `${data.remoteType || "unset"}`;
+  const passphraseSet = typeof data.passphrase === "string" && data.passphrase.length > 0;
+  const liveSyncEnabled = data.liveSync === true;
+  const connectionReady =
+    typeof data.couchDB_URI === "string" && data.couchDB_URI.length > 0 &&
+    typeof data.couchDB_USER === "string" && data.couchDB_USER.length > 0 &&
+    typeof data.couchDB_DBNAME === "string" && data.couchDB_DBNAME.length > 0 &&
+    passphraseSet;
+
+  return {
+    config_dir: paths.configDir,
+    data_file: paths.dataFile,
+    plugin_manifest: paths.pluginManifest,
+    plugin_installed: fileExists(paths.pluginManifest),
+    community_plugin_enabled: Array.isArray(communityPlugins) && communityPlugins.includes(PLUGIN_ID),
+    core_obsidian_sync_disabled: Boolean(corePlugins && corePlugins.sync === false),
+    data_file_exists: fileExists(paths.dataFile),
+    is_configured: data.isConfigured === true,
+    remote_type: remoteType,
+    live_sync_enabled: liveSyncEnabled,
+    sync_on_start: data.syncOnStart === true,
+    periodic_replication: data.periodicReplication === true,
+    sync_on_file_open: data.syncOnFileOpen === true,
+    couchdb_uri_set: typeof data.couchDB_URI === "string" && data.couchDB_URI.length > 0,
+    couchdb_user_set: typeof data.couchDB_USER === "string" && data.couchDB_USER.length > 0,
+    couchdb_dbname_set: typeof data.couchDB_DBNAME === "string" && data.couchDB_DBNAME.length > 0,
+    passphrase_set: passphraseSet,
+    connection_ready: connectionReady,
+  };
+}
+
+function printObject(obj) {
+  for (const [key, value] of Object.entries(obj)) {
+    process.stdout.write(`${key}=${value}\n`);
+  }
+}
+
+async function main() {
+  const dryRun = dryRunValue === "1";
+  const paths = {
+    configDir,
+    pluginManifest: path.join(configDir, "plugins", PLUGIN_ID, "manifest.json"),
+    dataFile: path.join(configDir, "plugins", PLUGIN_ID, "data.json"),
+    communityPluginsPath: path.join(configDir, "community-plugins.json"),
+    corePluginsPath: path.join(configDir, "core-plugins.json"),
+  };
+
+  if (command === "status") {
+    const status = summariseStatus(paths, readJson(paths.dataFile, {}));
+    printObject(status);
+    process.stdout.write(`machine_id=${machineId}\n`);
+    process.stdout.write(`vault_dir=${vaultDir}\n`);
+    process.stdout.write(`setup_uri_file=${setupUriFile}\n`);
+    process.stdout.write(`setup_uri_file_exists=${fileExists(setupUriFile)}\n`);
+    process.stdout.write(`setup_uri_passphrase_file=${setupUriPassphraseFile}\n`);
+    process.stdout.write(`setup_uri_passphrase_file_exists=${fileExists(setupUriPassphraseFile)}\n`);
+    return;
+  }
+
+  if (!fileExists(paths.pluginManifest)) {
+    throw new Error(`LiveSync plugin is not installed in ${configDir}`);
+  }
+
+  const setupUri = setupUriValue || readTrimmed(setupUriFile);
+  const setupUriPassphrase = setupUriPassphraseValue || readTrimmed(setupUriPassphraseFile);
+  const decoded = await decodeBundle(setupUri, setupUriPassphrase);
+  const currentData = readJson(paths.dataFile, {});
+  const nextData = {
+    ...currentData,
+    ...decoded,
+    liveSync: true,
+    isConfigured: true,
+    configPassphraseStore: "",
+    encryptedPassphrase: "",
+    encryptedCouchDBConnection: "",
+  };
+
+  const communityPlugins = ensureCommunityPluginEnabled(paths.communityPluginsPath);
+  const corePlugins = ensureCorePlugins(paths.corePluginsPath);
+  const backupFile = fileExists(paths.dataFile) ? `${paths.dataFile}.bak.${timestamp()}` : "";
+
+  if (!dryRun) {
+    if (backupFile) {
+      fs.copyFileSync(paths.dataFile, backupFile);
+    }
+    writeJson(paths.dataFile, nextData);
+    writeJson(paths.communityPluginsPath, communityPlugins);
+    writeJson(paths.corePluginsPath, corePlugins);
+  }
+
+  process.stdout.write(`status=${dryRun ? "planned" : "applied"}\n`);
+  process.stdout.write(`machine_id=${machineId}\n`);
+  process.stdout.write(`vault_dir=${vaultDir}\n`);
+  process.stdout.write(`config_dir=${paths.configDir}\n`);
+  process.stdout.write(`data_file=${paths.dataFile}\n`);
+  process.stdout.write(`backup_file=${backupFile || "none"}\n`);
+  process.stdout.write(`setup_uri_source=${setupUriValue ? "inline" : setupUriFile}\n`);
+  process.stdout.write(`setup_uri_passphrase_source=${setupUriPassphraseValue ? "inline" : setupUriPassphraseFile}\n`);
+  printObject(summariseStatus(paths, nextData));
+}
+
+main().catch((error) => {
+  process.stderr.write(`${error.message}\n`);
+  process.exit(1);
+});
+NODE

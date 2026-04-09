@@ -1,0 +1,61 @@
+#!/bin/sh
+set -eu
+
+desired_server="${BW_SERVER_URL:-https://vault.weavedweb.com}"
+
+BW_BIN=""
+for candidate in \
+    "${BW_BIN:-}" \
+    "$HOME/.local/share/mise/shims/bw" \
+    "$HOME/.local/bin/bw" \
+    "/opt/homebrew/bin/bw" \
+    "/usr/local/bin/bw"
+do
+    if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+        BW_BIN="$candidate"
+        break
+    fi
+done
+
+if [ -z "$BW_BIN" ] && command -v bw >/dev/null 2>&1; then
+    BW_BIN="$(command -v bw)"
+fi
+
+if [ -z "$BW_BIN" ]; then
+    echo "bw CLI not found." >&2
+    exit 1
+fi
+
+status_json="$("$BW_BIN" status 2>/dev/null || true)"
+status="$(printf '%s' "$status_json" | sed -n 's/.*"status":"\([^"]*\)".*/\1/p' | head -n1)"
+server="$(printf '%s' "$status_json" | sed -n 's/.*"serverUrl":"\([^"]*\)".*/\1/p' | head -n1)"
+status="${status:-unknown}"
+server="${server:-}"
+
+if [ "$status" = "unauthenticated" ] && [ "$server" != "$desired_server" ]; then
+    "$BW_BIN" config server "$desired_server" >/dev/null
+    status_json="$("$BW_BIN" status 2>/dev/null || true)"
+    status="$(printf '%s' "$status_json" | sed -n 's/.*"status":"\([^"]*\)".*/\1/p' | head -n1)"
+    server="$(printf '%s' "$status_json" | sed -n 's/.*"serverUrl":"\([^"]*\)".*/\1/p' | head -n1)"
+    status="${status:-unknown}"
+    server="${server:-}"
+fi
+
+printf 'server=%s\n' "${server:-unset}"
+printf 'status=%s\n' "$status"
+
+case "$status" in
+    unlocked)
+        echo "next=ready"
+        ;;
+    locked)
+        echo "next=export BW_SESSION=\"\$(bw unlock --raw)\""
+        ;;
+    unauthenticated)
+        echo "next=bw login"
+        ;;
+    *)
+        echo "next=inspect manually"
+        exit 1
+        ;;
+esac

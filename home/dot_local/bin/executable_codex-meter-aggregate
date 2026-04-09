@@ -1,0 +1,659 @@
+#!/usr/bin/env python3
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import sys
+import tempfile
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+DEFAULT_EXPECTED_MACHINES = ("omarchy", "macbook", "macmini")
+DEFAULT_STALE_AFTER_SECONDS = 1800
+DEFAULT_WARN_PERCENT = 80.0
+DEFAULT_CRITICAL_PERCENT = 90.0
+DEFAULT_RESET_SOON_MINUTES = 20
+DEFAULT_CONFIG_FILE = Path.home() / ".config/decent-angl/codex-meter.env"
+
+
+def load_env_file(path: Path) -> None:
+    try:
+        content = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        raise SystemExit(f"Unable to read codex meter config: {path}: {exc}") from exc
+
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if not key or key in os.environ:
+            continue
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+            value = value[1:-1]
+        os.environ[key] = os.path.expandvars(value)
+
+
+def env_number(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw in (None, ""):
+        return default
+    try:
+        return float(raw)
+    except ValueError as exc:
+        raise SystemExit(f"Invalid numeric value for {name}: {raw}") from exc
+
+
+def env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw in (None, ""):
+        return default
+    try:
+        return int(raw)
+    except ValueError as exc:
+        raise SystemExit(f"Invalid integer value for {name}: {raw}") from exc
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    home = Path.home()
+    parser = argparse.ArgumentParser(
+        prog="codex-meter-aggregate",
+        description="Aggregate per-machine Codex rate-limit snapshots on macmini.",
+    )
+    parser.add_argument(
+        "--inbox",
+        default=os.environ.get("CODEX_METER_INBOX_DIR", str(home / "srv/codex-meter/inbox")),
+        help="Directory containing per-machine snapshot JSON files.",
+    )
+    parser.add_argument(
+        "--state-file",
+        default=os.environ.get("CODEX_METER_STATE_FILE", str(home / "srv/codex-meter/state/latest.json")),
+        help="Aggregate state file to write.",
+    )
+    parser.add_argument(
+        "--expected-machines",
+        default=os.environ.get(
+            "CODEX_METER_EXPECTED_MACHINES",
+            ",".join(DEFAULT_EXPECTED_MACHINES),
+        ),
+        help="Comma-separated machine ids that should usually report.",
+    )
+    parser.add_argument(
+        "--stale-after-seconds",
+        type=int,
+        default=env_int("CODEX_METER_STALE_AFTER_SECONDS", DEFAULT_STALE_AFTER_SECONDS),
+        help="Mark a machine stale when its snapshot is older than this age.",
+    )
+    parser.add_argument(
+        "--warn-percent",
+        type=float,
+        default=env_number("CODEX_BUDGET_WARN_PERCENT", DEFAULT_WARN_PERCENT),
+        help="Warn once a global window reaches this usage percentage.",
+    )
+    parser.add_argument(
+        "--critical-percent",
+        type=float,
+        default=env_number("CODEX_BUDGET_CRITICAL_PERCENT", DEFAULT_CRITICAL_PERCENT),
+        help="Raise a stronger warning once a global window reaches this usage percentage.",
+    )
+    parser.add_argument(
+        "--reset-soon-minutes",
+        type=int,
+        default=env_int("CODEX_BUDGET_RESET_SOON_MINUTES", DEFAULT_RESET_SOON_MINUTES),
+        help="Warn when a heavily-used window resets within this many minutes.",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Print the rendered aggregate JSON after writing it.",
+    )
+    parser.add_argument(
+        "--now",
+        help=argparse.SUPPRESS,
+    )
+    return parser.parse_args(argv)
+
+
+def parse_datetime(value: Any) -> datetime | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+    if isinstance(value, (int, float)):
+        return datetime.fromtimestamp(float(value), tz=timezone.utc)
+    if not isinstance(value, str):
+        return None
+    raw = value.strip()
+    if not raw:
+        return None
+    if re.fullmatch(r"\d+", raw):
+        return datetime.fromtimestamp(int(raw), tz=timezone.utc)
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def isoformat_utc(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def as_int(value: Any) -> int | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(float(value))
+        except ValueError:
+            return None
+    return None
+
+
+def as_float(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return None
+    return None
+
+
+def compact_list(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        cleaned = value.strip()
+        if cleaned and cleaned not in seen:
+            seen.add(cleaned)
+            result.append(cleaned)
+    return result
+
+
+def parse_expected_machines(raw: str) -> list[str]:
+    parsed = compact_list(raw.replace(" ", "").split(","))
+    return parsed or list(DEFAULT_EXPECTED_MACHINES)
+
+
+def canonical_window_key(value: str | None, fallback_index: int) -> str:
+    raw = (value or "").strip().lower()
+    if ":" in raw:
+        raw = raw.rsplit(":", 1)[-1]
+    if raw in {"primary", "pri", "p"}:
+        return "primary"
+    if raw in {"secondary", "sec", "s"}:
+        return "secondary"
+    cleaned = re.sub(r"[^a-z0-9]+", "_", raw).strip("_")
+    if cleaned:
+        return cleaned
+    return f"window_{fallback_index + 1}"
+
+
+def nested_get(mapping: dict[str, Any], *path: str) -> Any:
+    current: Any = mapping
+    for key in path:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return current
+
+
+def first_present(mapping: dict[str, Any], *candidates: tuple[str, ...] | str) -> Any:
+    for candidate in candidates:
+        if isinstance(candidate, tuple):
+            value = nested_get(mapping, *candidate)
+        else:
+            value = mapping.get(candidate)
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def extract_total_tokens(mapping: dict[str, Any], *keys: tuple[str, ...] | str) -> int | None:
+    for key in keys:
+        if isinstance(key, tuple):
+            value = nested_get(mapping, *key)
+        else:
+            value = mapping.get(key)
+        if isinstance(value, dict):
+            for nested_key in ("total_tokens", "used_total_tokens", "total"):
+                nested_value = value.get(nested_key)
+                coerced = as_int(nested_value)
+                if coerced is not None:
+                    return coerced
+        else:
+            coerced = as_int(value)
+            if coerced is not None:
+                return coerced
+    return None
+
+
+def normalize_window(raw: dict[str, Any], index: int) -> dict[str, Any]:
+    raw_window_key = first_present(raw, "window_key", "key", "name", "kind", "scope", "id")
+    window_key = canonical_window_key(str(raw_window_key) if raw_window_key is not None else None, index)
+    reset_at = parse_datetime(first_present(raw, "reset_at", "resets_at", ("window", "reset_at")))
+    used_total_tokens = extract_total_tokens(
+        raw,
+        "used_total_tokens",
+        "total_token_usage",
+        ("usage", "used_total_tokens"),
+        ("token_usage", "total"),
+        ("token_usage", "total_tokens"),
+    )
+    last_total_tokens = extract_total_tokens(
+        raw,
+        "last_total_tokens",
+        "last_token_usage",
+        ("usage", "last_total_tokens"),
+        ("token_usage", "last"),
+        ("last_token_usage", "total_tokens"),
+    )
+    used_input_tokens = as_int(first_present(raw, "used_input_tokens", ("usage", "used_input_tokens")))
+    used_output_tokens = as_int(first_present(raw, "used_output_tokens", ("usage", "used_output_tokens")))
+    limit_tokens = as_int(first_present(raw, "limit_tokens", ("usage", "limit_tokens")))
+    used_percent = as_float(first_present(raw, "used_percent", ("usage", "used_percent")))
+    if used_percent is not None and 0.0 <= used_percent <= 1.0:
+        used_percent *= 100.0
+    if used_percent is None and used_total_tokens is not None and limit_tokens and limit_tokens > 0:
+        used_percent = (used_total_tokens / limit_tokens) * 100.0
+    window_minutes = as_int(first_present(raw, "window_minutes", ("window", "minutes")))
+    model = first_present(raw, "model", "model_name")
+
+    return {
+        "window_key": window_key,
+        "window_key_raw": raw_window_key,
+        "reset_at": isoformat_utc(reset_at),
+        "used_percent": round(used_percent, 2) if used_percent is not None else None,
+        "window_minutes": window_minutes,
+        "model": model,
+        "used_input_tokens": used_input_tokens,
+        "used_output_tokens": used_output_tokens,
+        "used_total_tokens": used_total_tokens,
+        "last_total_tokens": last_total_tokens,
+        "limit_tokens": limit_tokens,
+        "reset_window_key": f"{window_key}@{isoformat_utc(reset_at) or 'unknown'}",
+    }
+
+
+def machine_total_window(windows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if not windows:
+        return None
+    preferred = {window["window_key"]: window for window in windows}
+    for key in ("primary", "secondary"):
+        if key in preferred and preferred[key].get("used_total_tokens") is not None:
+            return preferred[key]
+    with_totals = [window for window in windows if window.get("used_total_tokens") is not None]
+    if with_totals:
+        return max(with_totals, key=lambda window: window["used_total_tokens"])
+    return windows[0]
+
+
+def format_warning(kind: str, severity: str, message: str, **details: Any) -> dict[str, Any]:
+    payload = {"kind": kind, "severity": severity, "message": message}
+    payload.update(details)
+    return payload
+
+
+def load_previous_state(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def safe_age_seconds(now: datetime, captured_at: datetime | None) -> int | None:
+    if captured_at is None:
+        return None
+    delta = now - captured_at
+    return max(0, int(delta.total_seconds()))
+
+
+def summarize_snapshot(
+    snapshot: dict[str, Any],
+    path: Path,
+    now: datetime,
+    stale_after_seconds: int,
+    previous_state: dict[str, Any],
+) -> dict[str, Any]:
+    machine_id = str(snapshot.get("machine_id") or path.stem)
+    captured_dt = parse_datetime(snapshot.get("captured_at"))
+    windows_raw = snapshot.get("windows")
+    if not isinstance(windows_raw, list):
+        raise ValueError("windows must be an array")
+    windows = [
+        normalize_window(window, index)
+        for index, window in enumerate(windows_raw)
+        if isinstance(window, dict)
+    ]
+    total_window = machine_total_window(windows)
+    total_tokens = total_window.get("used_total_tokens") if total_window else None
+    last_total_tokens = total_window.get("last_total_tokens") if total_window else None
+    total_reset_at = total_window.get("reset_at") if total_window else None
+    previous_machine = previous_state.get("machines", {}).get(machine_id, {})
+    previous_total = as_int(nested_get(previous_machine, "token_totals", "used_total_tokens"))
+    previous_delta = as_int(nested_get(previous_machine, "token_totals", "delta_token_usage"))
+    previous_reset_at = nested_get(previous_machine, "token_totals", "reset_at")
+    fingerprint = "|".join(
+        [
+            machine_id,
+            isoformat_utc(captured_dt) or "unknown",
+            str(snapshot.get("source_session_file") or ""),
+        ]
+    )
+    previous_fingerprint = previous_machine.get("snapshot_fingerprint")
+    if total_tokens is None:
+        delta_tokens = None
+    elif fingerprint == previous_fingerprint:
+        delta_tokens = previous_delta
+    elif previous_total is not None and total_reset_at == previous_reset_at:
+        delta_tokens = total_tokens - previous_total
+        if delta_tokens < 0:
+            delta_tokens = last_total_tokens if last_total_tokens is not None else total_tokens
+    else:
+        delta_tokens = last_total_tokens if last_total_tokens is not None else total_tokens
+
+    age_seconds = safe_age_seconds(now, captured_dt)
+    stale = age_seconds is None or age_seconds > stale_after_seconds
+    return {
+        "machine_id": machine_id,
+        "captured_at": isoformat_utc(captured_dt),
+        "age_seconds": age_seconds,
+        "stale": stale,
+        "snapshot_missing": False,
+        "snapshot_path": str(path),
+        "snapshot_fingerprint": fingerprint,
+        "source_session_file": snapshot.get("source_session_file"),
+        "windows": windows,
+        "token_totals": {
+            "window_key": total_window.get("window_key") if total_window else None,
+            "reset_at": total_reset_at,
+            "used_total_tokens": total_tokens,
+            "delta_token_usage": delta_tokens,
+            "last_total_tokens": last_total_tokens,
+        },
+    }
+
+
+def build_placeholder_machine(
+    machine_id: str,
+    previous_state: dict[str, Any],
+    now: datetime,
+) -> dict[str, Any]:
+    previous_machine = previous_state.get("machines", {}).get(machine_id, {})
+    previous_totals = previous_machine.get("token_totals", {})
+    captured_at = previous_machine.get("captured_at")
+    return {
+        "machine_id": machine_id,
+        "captured_at": captured_at,
+        "age_seconds": safe_age_seconds(now, parse_datetime(captured_at)),
+        "stale": True,
+        "snapshot_missing": True,
+        "snapshot_path": None,
+        "snapshot_fingerprint": previous_machine.get("snapshot_fingerprint"),
+        "source_session_file": previous_machine.get("source_session_file"),
+        "windows": previous_machine.get("windows", []),
+        "token_totals": {
+            "window_key": previous_totals.get("window_key"),
+            "reset_at": previous_totals.get("reset_at"),
+            "used_total_tokens": previous_totals.get("used_total_tokens"),
+            "delta_token_usage": previous_totals.get("delta_token_usage"),
+            "last_total_tokens": previous_totals.get("last_total_tokens"),
+        },
+    }
+
+
+def choose_better_window(candidate: dict[str, Any], current: dict[str, Any] | None) -> bool:
+    if current is None:
+        return True
+    candidate_time = parse_datetime(candidate.get("captured_at"))
+    current_time = parse_datetime(current.get("captured_at"))
+    if current_time is None:
+        return True
+    if candidate_time is None:
+        return False
+    if candidate_time != current_time:
+        return candidate_time > current_time
+    if current.get("stale") and not candidate.get("stale"):
+        return True
+    return False
+
+
+def build_state(args: argparse.Namespace) -> dict[str, Any]:
+    now = parse_datetime(args.now) if args.now else datetime.now(timezone.utc)
+    if now is None:
+        raise SystemExit(f"Unable to parse --now value: {args.now}")
+    inbox_dir = Path(args.inbox).expanduser()
+    state_file = Path(args.state_file).expanduser()
+    previous_state = load_previous_state(state_file)
+    expected_machines = parse_expected_machines(args.expected_machines)
+    warnings: list[dict[str, Any]] = []
+    errors: list[str] = []
+    machines: dict[str, Any] = {}
+
+    for snapshot_path in sorted(inbox_dir.glob("*.json")):
+        try:
+            snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+            if not isinstance(snapshot, dict):
+                raise ValueError("snapshot root must be an object")
+            summary = summarize_snapshot(
+                snapshot=snapshot,
+                path=snapshot_path,
+                now=now,
+                stale_after_seconds=args.stale_after_seconds,
+                previous_state=previous_state,
+            )
+            machines[summary["machine_id"]] = summary
+        except Exception as exc:
+            errors.append(f"{snapshot_path}: {exc}")
+
+    for machine_id in expected_machines:
+        if machine_id not in machines:
+            machines[machine_id] = build_placeholder_machine(machine_id, previous_state, now)
+
+    global_windows: dict[str, dict[str, Any]] = {}
+    current_global_windows: dict[str, dict[str, Any]] = {}
+
+    for machine in machines.values():
+        for window in machine.get("windows", []):
+            candidate = {
+                "window_key": window.get("window_key"),
+                "window_key_raw": window.get("window_key_raw"),
+                "reset_at": window.get("reset_at"),
+                "used_percent": window.get("used_percent"),
+                "window_minutes": window.get("window_minutes"),
+                "model": window.get("model"),
+                "used_input_tokens": window.get("used_input_tokens"),
+                "used_output_tokens": window.get("used_output_tokens"),
+                "used_total_tokens": window.get("used_total_tokens"),
+                "limit_tokens": window.get("limit_tokens"),
+                "captured_at": machine.get("captured_at"),
+                "stale": machine.get("stale"),
+                "source_machine_id": machine.get("machine_id"),
+                "source_session_file": machine.get("source_session_file"),
+                "reset_window_key": window.get("reset_window_key"),
+            }
+            reset_key = window.get("reset_window_key")
+            if choose_better_window(candidate, global_windows.get(reset_key)):
+                global_windows[reset_key] = candidate
+            current_key = window.get("window_key")
+            if choose_better_window(candidate, current_global_windows.get(current_key)):
+                current_global_windows[current_key] = candidate
+
+    stale_count = 0
+    fresh_count = 0
+    missing_count = 0
+    for machine_id, machine in machines.items():
+        if machine.get("snapshot_missing"):
+            missing_count += 1
+            warnings.append(
+                format_warning(
+                    "machine_missing",
+                    "warning",
+                    f"{machine_id} has not published a snapshot to the inbox yet.",
+                    machine_id=machine_id,
+                )
+            )
+        elif machine.get("stale"):
+            stale_count += 1
+            warnings.append(
+                format_warning(
+                    "machine_stale",
+                    "warning",
+                    f"{machine_id} snapshot is stale.",
+                    machine_id=machine_id,
+                    captured_at=machine.get("captured_at"),
+                    age_seconds=machine.get("age_seconds"),
+                )
+            )
+        else:
+            fresh_count += 1
+
+    for window_key, window in sorted(current_global_windows.items()):
+        used_percent = as_float(window.get("used_percent"))
+        if used_percent is None:
+            continue
+        if used_percent >= args.critical_percent:
+            warnings.append(
+                format_warning(
+                    "window_threshold",
+                    "critical",
+                    f"{window_key} window is at {used_percent:.1f}% usage.",
+                    window_key=window_key,
+                    used_percent=used_percent,
+                    reset_at=window.get("reset_at"),
+                    source_machine_id=window.get("source_machine_id"),
+                )
+            )
+        elif used_percent >= args.warn_percent:
+            warnings.append(
+                format_warning(
+                    "window_threshold",
+                    "warning",
+                    f"{window_key} window is at {used_percent:.1f}% usage.",
+                    window_key=window_key,
+                    used_percent=used_percent,
+                    reset_at=window.get("reset_at"),
+                    source_machine_id=window.get("source_machine_id"),
+                )
+            )
+        reset_at = parse_datetime(window.get("reset_at"))
+        if reset_at is None:
+            continue
+        minutes_until_reset = (reset_at - now).total_seconds() / 60.0
+        if 0 <= minutes_until_reset <= args.reset_soon_minutes and used_percent >= args.warn_percent:
+            warnings.append(
+                format_warning(
+                    "reset_soon",
+                    "warning",
+                    f"{window_key} window resets soon and is already heavily used.",
+                    window_key=window_key,
+                    used_percent=used_percent,
+                    reset_at=window.get("reset_at"),
+                    minutes_until_reset=round(minutes_until_reset, 1),
+                )
+            )
+
+    machine_totals = [
+        as_int(nested_get(machine, "token_totals", "used_total_tokens"))
+        for machine in machines.values()
+        if as_int(nested_get(machine, "token_totals", "used_total_tokens")) is not None
+    ]
+    machine_deltas = [
+        as_int(nested_get(machine, "token_totals", "delta_token_usage"))
+        for machine in machines.values()
+        if as_int(nested_get(machine, "token_totals", "delta_token_usage")) is not None
+    ]
+
+    state = {
+        "schema_version": 1,
+        "generated_at": isoformat_utc(now),
+        "stale_after_seconds": args.stale_after_seconds,
+        "expected_machines": expected_machines,
+        "thresholds": {
+            "warn_percent": args.warn_percent,
+            "critical_percent": args.critical_percent,
+            "reset_soon_minutes": args.reset_soon_minutes,
+        },
+        "fleet": {
+            "machine_count": len(machines),
+            "fresh_machine_count": fresh_count,
+            "stale_machine_count": stale_count,
+            "missing_machine_count": missing_count,
+            "token_totals": {
+                "used_total_tokens": sum(machine_totals) if machine_totals else None,
+                "delta_token_usage": sum(machine_deltas) if machine_deltas else None,
+            },
+        },
+        "machines": {machine_id: machines[machine_id] for machine_id in sorted(machines)},
+        "global_windows": {
+            key: global_windows[key]
+            for key in sorted(global_windows)
+        },
+        "current_global_windows": {
+            key: current_global_windows[key]
+            for key in sorted(current_global_windows)
+        },
+        "warnings": warnings,
+        "errors": errors,
+    }
+    return state
+
+
+def write_state(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rendered = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        dir=path.parent,
+        prefix=f".{path.name}.",
+        delete=False,
+    ) as handle:
+        handle.write(rendered)
+        temp_path = Path(handle.name)
+    temp_path.replace(path)
+
+
+def main(argv: list[str]) -> int:
+    config_file = Path(os.environ.get("CODEX_METER_CONFIG_FILE", str(DEFAULT_CONFIG_FILE))).expanduser()
+    load_env_file(config_file)
+    args = parse_args(argv)
+    state = build_state(args)
+    state_file = Path(args.state_file).expanduser()
+    write_state(state_file, state)
+    if args.json:
+        sys.stdout.write(json.dumps(state, indent=2, sort_keys=True))
+        sys.stdout.write("\n")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily Decent Angl restic backup
+
+[Timer]
+OnCalendar=*-*-* {{ printf "%02d" (int .decentangl.backup.schedule.backup.hour) }}:{{ printf "%02d" (int .decentangl.backup.schedule.backup.minute) }}:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

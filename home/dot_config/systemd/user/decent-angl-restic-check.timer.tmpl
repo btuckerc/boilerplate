@@ -1,0 +1,9 @@
+[Unit]
+Description=Monthly Decent Angl restic integrity check
+
+[Timer]
+OnCalendar=*-*-{{ printf "%02d" (int .decentangl.backup.schedule.check.day) }} {{ printf "%02d" (int .decentangl.backup.schedule.check.hour) }}:{{ printf "%02d" (int .decentangl.backup.schedule.check.minute) }}:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

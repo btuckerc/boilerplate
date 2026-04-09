@@ -1,0 +1,89 @@
+#!/bin/sh
+set -eu
+
+quote_sh() {
+    printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
+CONFIG_FILE="${RESTIC_CONFIG_FILE:-$HOME/.config/decent-angl/restic.env}"
+if [ -f "$CONFIG_FILE" ]; then
+    # shellcheck disable=SC1090
+    . "$CONFIG_FILE"
+fi
+
+if [ "${RESTIC_OFFSITE_ENABLED:-0}" != "1" ]; then
+    echo "Offsite restic target is not enabled in $CONFIG_FILE." >&2
+    exit 1
+fi
+
+provider="${RESTIC_OFFSITE_PROVIDER:-}"
+if [ "$provider" != "rest-server" ]; then
+    echo "Unsupported offsite provider: ${provider:-unset}" >&2
+    exit 1
+fi
+
+rest_username="${RESTIC_REST_USERNAME:-}"
+rest_password="${RESTIC_REST_PASSWORD:-}"
+
+if [ -n "$rest_username" ] && [ -n "$rest_password" ]; then
+    :
+else
+    BW_BIN=""
+    for candidate in \
+        "${BW_BIN:-}" \
+        "$HOME/.local/share/mise/shims/bw" \
+        "$HOME/.local/bin/bw" \
+        "/opt/homebrew/bin/bw" \
+        "/usr/local/bin/bw"
+    do
+        if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+            BW_BIN="$candidate"
+            break
+        fi
+    done
+
+    if [ -z "$BW_BIN" ] && command -v bw >/dev/null 2>&1; then
+        BW_BIN="$(command -v bw)"
+    fi
+
+    if [ -z "$BW_BIN" ] || ! command -v jq >/dev/null 2>&1; then
+        echo "bw and jq are required to load offsite restic credentials." >&2
+        exit 1
+    fi
+
+    status="$("$BW_BIN" status 2>/dev/null | sed -n 's/.*"status":"\([^"]*\)".*/\1/p' | head -n1)"
+    status="${status:-unknown}"
+    case "$status" in
+        unlocked)
+            ;;
+        unauthenticated)
+            echo "bw is unauthenticated; run 'bw login' first." >&2
+            exit 1
+            ;;
+        locked)
+            echo "bw is locked; run 'export BW_SESSION=\$(bw unlock --raw)' first." >&2
+            exit 1
+            ;;
+        *)
+            echo "Unable to determine bw status." >&2
+            exit 1
+            ;;
+    esac
+
+    item="${RESTIC_OFFSITE_BW_ITEM:-restic-offsite-rest-server}"
+    payload="$("$BW_BIN" get item "$item" 2>/dev/null || true)"
+    if [ -z "$payload" ]; then
+        echo "Vaultwarden item '$item' was not found." >&2
+        exit 1
+    fi
+
+    rest_username="$(printf '%s' "$payload" | jq -r '.login.username // ""')"
+    rest_password="$(printf '%s' "$payload" | jq -r '.login.password // ""')"
+    if [ -z "$rest_username" ] || [ -z "$rest_password" ]; then
+        echo "Vaultwarden item '$item' must store the rest-server username in login.username and password in login.password." >&2
+        exit 1
+    fi
+fi
+
+printf 'export RESTIC_REST_USERNAME=%s\n' "$(quote_sh "$rest_username")"
+printf 'export RESTIC_REST_PASSWORD=%s\n' "$(quote_sh "$rest_password")"

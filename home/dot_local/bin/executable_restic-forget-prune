@@ -1,0 +1,120 @@
+#!/bin/sh
+set -eu
+
+find_bin() {
+    for candidate in "$@"; do
+        if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+CONFIG_FILE="${RESTIC_CONFIG_FILE:-$HOME/.config/decent-angl/restic.env}"
+if [ -f "$CONFIG_FILE" ]; then
+    # shellcheck disable=SC1090
+    . "$CONFIG_FILE"
+fi
+
+RESTIC_BIN="$(find_bin \
+    "$HOME/.local/share/mise/shims/restic" \
+    "$HOME/.local/bin/restic" \
+    "/opt/homebrew/bin/restic" \
+    "/usr/local/bin/restic" \
+    "$(command -v restic 2>/dev/null || true)")"
+RESTIC_TARGET_ENV_BIN="$(find_bin \
+    "$HOME/.local/bin/restic-target-env" \
+    "$(command -v restic-target-env 2>/dev/null || true)")"
+
+if [ -z "${RESTIC_BIN:-}" ]; then
+    echo "restic CLI not found." >&2
+    exit 1
+fi
+
+if [ -z "${RESTIC_TARGET_ENV_BIN:-}" ]; then
+    echo "restic-target-env helper not found." >&2
+    exit 1
+fi
+
+MACHINE_ID="${RESTIC_MACHINE_ID:-unknown}"
+REPO_TARGET="${RESTIC_REPO_TARGET:-local}"
+KEEP_DAILY="${RESTIC_KEEP_DAILY:-7}"
+KEEP_WEEKLY="${RESTIC_KEEP_WEEKLY:-5}"
+KEEP_MONTHLY="${RESTIC_KEEP_MONTHLY:-12}"
+KEEP_YEARLY="${RESTIC_KEEP_YEARLY:-3}"
+PRINT_PLAN=0
+pass_args_file="$(mktemp)"
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --repo-target)
+            if [ "$#" -lt 2 ]; then
+                echo "Missing value for --repo-target." >&2
+                exit 1
+            fi
+            REPO_TARGET="$2"
+            shift 2
+            ;;
+        --print-plan)
+            PRINT_PLAN=1
+            shift
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+for arg in "$@"; do
+    printf '%s\n' "$arg" >>"$pass_args_file"
+done
+
+cleanup() {
+    rm -f "$pass_args_file"
+}
+trap cleanup EXIT INT TERM
+
+if [ -n "${RESTIC_PASSWORD_FILE:-}" ] && [ -f "${RESTIC_PASSWORD_FILE:-}" ]; then
+    export RESTIC_PASSWORD_FILE
+elif [ -n "${RESTIC_PASSWORD_COMMAND:-}" ]; then
+    export RESTIC_PASSWORD_COMMAND
+else
+    echo "Set RESTIC_PASSWORD_FILE or RESTIC_PASSWORD_COMMAND." >&2
+    exit 1
+fi
+
+if [ "$PRINT_PLAN" -eq 1 ]; then
+    target_env="$("$RESTIC_TARGET_ENV_BIN" --plan "$REPO_TARGET")" || exit 1
+else
+    target_env="$("$RESTIC_TARGET_ENV_BIN" "$REPO_TARGET")" || exit 1
+fi
+eval "$target_env"
+
+if [ "$PRINT_PLAN" -eq 1 ]; then
+    printf 'machine_id=%s\n' "$MACHINE_ID"
+    printf 'repo_target=%s\n' "$RESTIC_TARGET_NAME"
+    printf 'repo=%s\n' "$RESTIC_TARGET_REPO"
+    printf 'keep_daily=%s\n' "$KEEP_DAILY"
+    printf 'keep_weekly=%s\n' "$KEEP_WEEKLY"
+    printf 'keep_monthly=%s\n' "$KEEP_MONTHLY"
+    printf 'keep_yearly=%s\n' "$KEEP_YEARLY"
+    exit 0
+fi
+
+set -- \
+    -r "$RESTIC_TARGET_REPO" \
+    forget \
+    --prune \
+    --host "$MACHINE_ID" \
+    --group-by host,tags \
+    --keep-daily "$KEEP_DAILY" \
+    --keep-weekly "$KEEP_WEEKLY" \
+    --keep-monthly "$KEEP_MONTHLY" \
+    --keep-yearly "$KEEP_YEARLY"
+
+while IFS= read -r arg || [ -n "$arg" ]; do
+    set -- "$@" "$arg"
+done <"$pass_args_file"
+
+exec "$RESTIC_BIN" "$@"

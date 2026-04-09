@@ -1,0 +1,82 @@
+#!/bin/sh
+set -eu
+
+CONFIG_FILE="${RESTIC_CONFIG_FILE:-$HOME/.config/decent-angl/restic.env}"
+if [ -f "$CONFIG_FILE" ]; then
+    # shellcheck disable=SC1090
+    . "$CONFIG_FILE"
+fi
+
+OS_NAME="$(uname -s)"
+PASSWORD_FILE="${RESTIC_LOCAL_PASSWORD_FILE:-${RESTIC_PASSWORD_FILE:-$HOME/.local/share/decent-angl/secrets/restic.password}}"
+SYSTEMD_TIMER_UNITS="
+decent-angl-restic-backup.timer
+decent-angl-restic-restore-smoke.timer
+decent-angl-restic-forget-prune.timer
+decent-angl-restic-check.timer
+"
+LAUNCHD_LABELS="
+com.decentangl.restic.backup
+com.decentangl.restic.restore-smoke
+com.decentangl.restic.forget-prune
+com.decentangl.restic.check
+"
+LAUNCHD_SOURCE_DIR="${RESTIC_LAUNCHD_SOURCE_DIR:-$HOME/.local/share/decent-angl/launchd}"
+LAUNCHD_TARGET_DIR="${RESTIC_LAUNCHD_TARGET_DIR:-$HOME/Library/LaunchAgents}"
+
+printf 'os=%s\n' "$OS_NAME"
+printf 'password_file=%s\n' "$PASSWORD_FILE"
+if [ -f "$PASSWORD_FILE" ]; then
+    printf 'password_file_exists=true\n'
+else
+    printf 'password_file_exists=false\n'
+fi
+
+case "$OS_NAME" in
+    Linux)
+        if ! command -v systemctl >/dev/null 2>&1; then
+            echo "systemctl not found." >&2
+            exit 1
+        fi
+        for unit in $SYSTEMD_TIMER_UNITS; do
+            unit_file_state="$(systemctl --user show "$unit" -p UnitFileState --value 2>/dev/null || true)"
+            active_state="$(systemctl --user show "$unit" -p ActiveState --value 2>/dev/null || true)"
+            next_elapse="$(systemctl --user show "$unit" -p NextElapseUSecRealtime --value 2>/dev/null || true)"
+            printf 'timer=%s unit_file_state=%s active_state=%s next=%s\n' \
+                "$unit" "${unit_file_state:-unknown}" "${active_state:-unknown}" "${next_elapse:-unknown}"
+        done
+        ;;
+    Darwin)
+        uid="$(id -u)"
+        launchd_domain="user/$uid"
+        if launchctl print "gui/$uid" >/dev/null 2>&1; then
+            launchd_domain="gui/$uid"
+        fi
+        printf 'launchd_source_dir=%s\n' "$LAUNCHD_SOURCE_DIR"
+        printf 'launchd_target_dir=%s\n' "$LAUNCHD_TARGET_DIR"
+        printf 'launchd_domain=%s\n' "$launchd_domain"
+        for label in $LAUNCHD_LABELS; do
+            source_plist="$LAUNCHD_SOURCE_DIR/$label.plist"
+            target_plist="$LAUNCHD_TARGET_DIR/$label.plist"
+            source_present=false
+            installed=false
+            loaded=unknown
+            if [ -f "$source_plist" ]; then
+                source_present=true
+            fi
+            if [ -f "$target_plist" ]; then
+                installed=true
+                loaded=false
+            fi
+            if launchctl print "$launchd_domain/$label" >/dev/null 2>&1; then
+                loaded=true
+            fi
+            printf 'label=%s source_present=%s installed=%s loaded=%s\n' \
+                "$label" "$source_present" "$installed" "$loaded"
+        done
+        ;;
+    *)
+        echo "Unsupported OS: $OS_NAME" >&2
+        exit 1
+        ;;
+esac

@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "$(uname -s)" != "Darwin" ]]; then
+  echo "repair-homebrew-tailscale-daemon is for macOS only." >&2
+  exit 1
+fi
+
+if [[ "${EUID}" -ne 0 ]]; then
+  echo "Run with sudo." >&2
+  exit 1
+fi
+
+brew_bin=""
+for candidate in /opt/homebrew/bin/brew /usr/local/bin/brew; do
+  if [[ -x "${candidate}" ]]; then
+    brew_bin="${candidate}"
+    break
+  fi
+done
+
+if [[ -z "${brew_bin}" ]]; then
+  echo "Homebrew was not found." >&2
+  exit 1
+fi
+
+brew_prefix="$("${brew_bin}" --prefix)"
+tailscale_bin="${brew_prefix}/opt/tailscale/bin/tailscale"
+tailscaled_bin="${brew_prefix}/opt/tailscale/bin/tailscaled"
+plist="/Library/LaunchDaemons/com.tailscale.tailscaled.plist"
+timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+backup_dir="/Users/Shared/decent-angl-backups/${timestamp}/tailscale-homebrew-daemon"
+
+if [[ ! -x "${tailscale_bin}" || ! -x "${tailscaled_bin}" ]]; then
+  echo "Homebrew tailscale binaries were not found under ${brew_prefix}." >&2
+  exit 1
+fi
+
+if [[ ! -f "${plist}" ]]; then
+  echo "LaunchDaemon plist ${plist} does not exist." >&2
+  exit 1
+fi
+
+mkdir -p "${backup_dir}"
+cp -p "${plist}" "${backup_dir}/com.tailscale.tailscaled.plist"
+
+plutil -replace ProgramArguments -json "[\"${tailscaled_bin}\"]" "${plist}"
+plutil -lint "${plist}" >/dev/null
+
+launchctl bootout system "${plist}" >/dev/null 2>&1 || true
+launchctl bootstrap system "${plist}"
+launchctl kickstart -k system/com.tailscale.tailscaled
+
+sleep 2
+
+"${tailscale_bin}" version
+"${tailscale_bin}" status --json >/dev/null
+
+echo "Repaired Homebrew tailscale LaunchDaemon."
+echo "Backup saved to ${backup_dir}."

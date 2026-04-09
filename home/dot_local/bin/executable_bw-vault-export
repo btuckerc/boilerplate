@@ -1,0 +1,88 @@
+#!/bin/sh
+set -eu
+
+find_bin() {
+    for candidate in "$@"; do
+        if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+BW_BIN="$(find_bin \
+    "$HOME/.local/share/mise/shims/bw" \
+    "$HOME/.local/bin/bw" \
+    "/opt/homebrew/bin/bw" \
+    "/usr/local/bin/bw" \
+    "$(command -v bw 2>/dev/null || true)")"
+
+if [ -z "${BW_BIN:-}" ]; then
+    echo "bw CLI not found." >&2
+    exit 1
+fi
+
+OUTPUT_DIR="${BW_EXPORT_OUTPUT_DIR:-$HOME/.local/state/decent-angl/vaultwarden-exports}"
+EXPORT_PASSWORD="${BW_EXPORT_PASSWORD:-}"
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --output-dir)
+            OUTPUT_DIR="${2:-}"
+            shift 2
+            ;;
+        --password)
+            EXPORT_PASSWORD="${2:-}"
+            shift 2
+            ;;
+        -h|--help)
+            cat <<'EOF'
+Usage: bw-vault-export [--output-dir DIR] [--password PASSWORD]
+
+Create a timestamped encrypted JSON export of the current Vaultwarden vault.
+The output directory defaults to ~/.local/state/decent-angl/vaultwarden-exports.
+EOF
+            exit 0
+            ;;
+        *)
+            echo "Unknown argument: $1" >&2
+            exit 1
+            ;;
+    esac
+done
+
+status="$("$BW_BIN" status 2>/dev/null | sed -n 's/.*"status":"\([^"]*\)".*/\1/p' | head -n1)"
+if [ "${status:-unknown}" != "unlocked" ]; then
+    echo "bw must be unlocked first." >&2
+    exit 1
+fi
+
+if [ -z "$EXPORT_PASSWORD" ]; then
+    if [ ! -t 0 ]; then
+        echo "Pass --password or set BW_EXPORT_PASSWORD." >&2
+        exit 1
+    fi
+    printf 'Vault export password: ' >&2
+    stty -echo
+    IFS= read -r EXPORT_PASSWORD
+    stty echo
+    printf '\n' >&2
+fi
+
+if [ -z "$EXPORT_PASSWORD" ]; then
+    echo "Vault export password cannot be empty." >&2
+    exit 1
+fi
+
+mkdir -p "$OUTPUT_DIR"
+chmod 700 "$OUTPUT_DIR" 2>/dev/null || true
+
+timestamp="$(date +%Y%m%dT%H%M%S)"
+output_file="${OUTPUT_DIR}/vaultwarden-${timestamp}.encrypted.json"
+
+"$BW_BIN" export --format encrypted_json --password "$EXPORT_PASSWORD" --output "$output_file" >/dev/null
+chmod 600 "$output_file" 2>/dev/null || true
+
+printf 'status=exported\n'
+printf 'output=%s\n' "$output_file"

@@ -1,0 +1,101 @@
+#!/bin/sh
+set -eu
+
+find_bin() {
+    for candidate in "$@"; do
+        if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+RESTIC_BIN="${RESTIC_BIN:-}"
+if [ -z "$RESTIC_BIN" ]; then
+    RESTIC_BIN="$(find_bin \
+        "$HOME/.local/share/mise/shims/restic" \
+        "$HOME/.local/bin/restic" \
+        "/opt/homebrew/bin/restic" \
+        "/usr/local/bin/restic" \
+        "$(command -v restic 2>/dev/null || true)")"
+fi
+
+RESTIC_HOME_REPO_BIN="${RESTIC_HOME_REPO_BIN:-}"
+if [ -z "$RESTIC_HOME_REPO_BIN" ]; then
+    RESTIC_HOME_REPO_BIN="$(find_bin \
+        "$HOME/.local/bin/restic-home-repo" \
+        "$(command -v restic-home-repo 2>/dev/null || true)")"
+fi
+
+RESTIC_BOOTSTRAP_SECRET_BIN="${RESTIC_BOOTSTRAP_SECRET_BIN:-}"
+if [ -z "$RESTIC_BOOTSTRAP_SECRET_BIN" ]; then
+    RESTIC_BOOTSTRAP_SECRET_BIN="$(find_bin \
+        "$HOME/.local/bin/restic-bootstrap-secret" \
+        "$(command -v restic-bootstrap-secret 2>/dev/null || true)")"
+fi
+
+BW_ENSURE_AUTH_BIN="${BW_ENSURE_AUTH_BIN:-}"
+if [ -z "$BW_ENSURE_AUTH_BIN" ]; then
+    BW_ENSURE_AUTH_BIN="$(find_bin \
+        "$HOME/.local/bin/bw-ensure-auth" \
+        "$(command -v bw-ensure-auth 2>/dev/null || true)")"
+fi
+
+PASSWORD_COMMAND="${RESTIC_PASSWORD_COMMAND:-$HOME/.local/bin/bw-restic-password}"
+
+if [ ! -x "$RESTIC_BIN" ]; then
+    echo "restic CLI not found." >&2
+    exit 1
+fi
+
+if [ ! -x "$RESTIC_HOME_REPO_BIN" ]; then
+    echo "restic-home-repo helper not found." >&2
+    exit 1
+fi
+
+if [ ! -x "$RESTIC_BOOTSTRAP_SECRET_BIN" ]; then
+    echo "restic-bootstrap-secret helper not found." >&2
+    exit 1
+fi
+
+if [ ! -x "$BW_ENSURE_AUTH_BIN" ]; then
+    echo "bw-ensure-auth helper not found." >&2
+    exit 1
+fi
+
+status="$("$BW_ENSURE_AUTH_BIN" | sed -n 's/^status=//p' | head -n1)"
+case "${status:-unknown}" in
+    unlocked)
+        ;;
+    locked)
+        echo "bw is locked; run 'export BW_SESSION=\$(bw unlock --raw)' in this shell first." >&2
+        exit 1
+        ;;
+    unauthenticated)
+        echo "bw is unauthenticated; run 'bw login' first." >&2
+        exit 1
+        ;;
+    *)
+        echo "Unable to determine bw status." >&2
+        exit 1
+        ;;
+esac
+
+export RESTIC_PASSWORD_COMMAND="$PASSWORD_COMMAND"
+"$RESTIC_BOOTSTRAP_SECRET_BIN"
+
+if [ "$#" -eq 0 ]; then
+    set -- omarchy macbook macmini
+fi
+
+for machine_id in "$@"; do
+    repo="$("$RESTIC_HOME_REPO_BIN" "$machine_id")"
+    if "$RESTIC_BIN" -r "$repo" cat config >/dev/null 2>&1; then
+        printf 'exists:%s:%s\n' "$machine_id" "$repo"
+        continue
+    fi
+
+    "$RESTIC_BIN" -r "$repo" init
+    printf 'initialized:%s:%s\n' "$machine_id" "$repo"
+done

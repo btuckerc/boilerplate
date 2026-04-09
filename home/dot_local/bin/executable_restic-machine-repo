@@ -1,0 +1,36 @@
+#!/bin/sh
+set -eu
+
+machine_id=""
+
+if command -v chezmoi >/dev/null 2>&1; then
+    machine_id="$(chezmoi data 2>/dev/null | sed -n 's/.*"machine_id":"\([^"]*\)".*/\1/p' | head -n1)"
+fi
+
+if [ -z "$machine_id" ] && command -v tailscale >/dev/null 2>&1; then
+    machine_id="$(tailscale status --json 2>/dev/null | sed -n 's/.*"HostName": "\([^"]*\)".*/\1/p' | head -n1)"
+fi
+
+if [ -z "$machine_id" ]; then
+    case "$(hostname 2>/dev/null || true)" in
+        btct14|omarchy) machine_id="omarchy" ;;
+        BTC-MBP14*|macbook) machine_id="macbook" ;;
+        webweaver*|macmini) machine_id="macmini" ;;
+    esac
+fi
+
+case "$machine_id" in
+    omarchy)
+        printf '%s\n' 'sftp:admin@macmini.tail4d5aec.ts.net:/Users/admin/srv/restic/omarchy'
+        ;;
+    macbook)
+        printf '%s\n' 'sftp:admin@macmini.tail4d5aec.ts.net:/Users/admin/srv/restic/macbook'
+        ;;
+    macmini)
+        printf '%s\n' '/Users/admin/srv/restic/macmini'
+        ;;
+    *)
+        echo "Unable to determine restic repo for this machine." >&2
+        exit 1
+        ;;
+esac

@@ -1,0 +1,25 @@
+#!/bin/sh
+set -eu
+
+machine_id="${1:-}"
+
+if [ -z "$machine_id" ]; then
+    echo "usage: restic-home-repo <omarchy|macbook|macmini>" >&2
+    exit 1
+fi
+
+case "$machine_id" in
+    omarchy)
+        printf '%s\n' 'sftp:admin@macmini.tail4d5aec.ts.net:/Users/admin/srv/restic/omarchy'
+        ;;
+    macbook)
+        printf '%s\n' 'sftp:admin@macmini.tail4d5aec.ts.net:/Users/admin/srv/restic/macbook'
+        ;;
+    macmini)
+        printf '%s\n' 'sftp:admin@macmini.tail4d5aec.ts.net:/Users/admin/srv/restic/macmini'
+        ;;
+    *)
+        echo "unknown machine: $machine_id" >&2
+        exit 1
+        ;;
+esac

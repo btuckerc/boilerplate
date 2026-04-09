@@ -1,0 +1,56 @@
+decentangl:
+  defaults:
+    repo_root: "~/src/boilerplate"
+    chezmoi_source: "~/.local/share/chezmoi/home"
+    codex_source: "~/.local/share/chezmoi/home/dot_codex"
+    codex_home: "~/.codex"
+    notes_path: "~/Documents/decent-angl"
+  secrets:
+    restic_item: "restic-decent-angl"
+    obsidian_livesync_item: "obsidian-livesync-weavedweb"
+  backup:
+    retention:
+      daily: 7
+      weekly: 5
+      monthly: 12
+      yearly: 3
+    check_read_data_subset: "10%"
+    unattended:
+      local_password_file: "~/.local/share/decent-angl/secrets/restic.password"
+    schedule:
+      lock_wait_seconds: 7200
+      backup:
+        hour: 3
+        minute: 15
+      restore_smoke:
+        day: 1
+        hour: 4
+        minute: 15
+      forget_prune:
+        day: 1
+        hour: 4
+        minute: 45
+      check:
+        day: 1
+        hour: 5
+        minute: 15
+    offsite:
+      enabled: false
+      provider: "rest-server"
+      bw_item: "restic-offsite-rest-server"
+      url_base: ""
+  machines:
+    omarchy:
+      role: "portable-linux-workstation"
+      package_manager: "omarchy-pkg-add"
+      tailscale_variant: "linux-service"
+    macbook:
+      role: "portable-macos-workstation"
+      package_manager: "brew"
+      tailscale_variant: "standalone-app"
+    macmini:
+      role: "home-server"
+      package_manager: "brew"
+      tailscale_variant: "homebrew-open-source"
+      mirror_root: "~/srv/git"
+      backup_root: "~/srv/backups"

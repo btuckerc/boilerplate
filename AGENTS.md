@@ -471,7 +471,7 @@ chezmoi edit ~/.config/mise/config.toml
 
 # Example additions:
 "ubi:cli/cli" = "latest"                    # GitHub CLI
-"npm:@anthropic-ai/claude-code" = "latest"  # Claude Code
+"ubi:mikefarah/yq" = "latest"               # YAML processor
 ```
 
 **Test and document**:
@@ -502,15 +502,15 @@ chezmoi edit ~/.config/mise/config.optional.toml
 
 # 2. Add tool with description comment
 [tools]
-# Anthropic CLI tool
-# "npm:@anthropic-ai/claude-code" = "latest"
+# Optional YAML processor
+# "ubi:mikefarah/yq" = "latest"
 
 # 3. Save and apply
 chezmoi apply
 
 # 4. Test the prompt
 mise install
-# Should show: "Optional tools: 1) @anthropic-ai/claude-code  Anthropic CLI"
+# Should show the new optional tool in the prompt
 ```
 
 **How it works**:

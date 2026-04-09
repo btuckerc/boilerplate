@@ -169,8 +169,8 @@ Purpose: Stores tools that users may or may not want to install. Entries are com
 Structure:
 ```toml
 [tools]
-# claude = "latest"  # Anthropic's CLI coding assistant
-# "aqua:anomalyco/opencode" = "latest"  # Moved to main config.toml
+# "ubi:mikefarah/yq" = "4.47.2"
+# "aqua:hashicorp/packer" = "1.14.2"
 ```
 
 **How it works**:
@@ -189,9 +189,8 @@ Purpose: Stores user-specific tool selections and overrides.
 Example content (auto-generated):
 ```toml
 [tools]
-
-claude = "latest"
-"aqua:anomalyco/opencode" = "latest"
+"ubi:mikefarah/yq" = "4.47.2"
+"aqua:hashicorp/packer" = "1.14.2"
 ```
 
 **Common uses**:
@@ -298,7 +297,6 @@ mise supports multiple installation backends. Each backend has specific syntax a
 "aqua:JohnnyMorganz/StyLua" = "latest"
 "aqua:mvdan/gofumpt" = "latest"
 "aqua:mvdan/sh" = "latest"
-"aqua:anomalyco/opencode" = "latest"
 ```
 
 **Advantages over ubi**:
@@ -527,14 +525,6 @@ Complete list of all tools configured in `config.toml`, organized by category.
 - **What**: Ultra-fast Python package installer and resolver
 - **Used for**: pipx backend (configured in settings.pipx)
 - **Notes**: Replaces pipx for faster Python tool installation
-
-### AI Coding Assistants
-
-**"aqua:anomalyco/opencode" = "latest"**
-- **Backend**: aqua
-- **What**: AI-powered code assistant CLI
-- **Used for**: AI-assisted development tasks
-- **Notes**: Can be disabled in optional config if not needed
 
 ### CLI Productivity Tools
 
@@ -777,8 +767,8 @@ This repository supports optional tools that users can choose to install or skip
 **1. Definition in config.optional.toml**:
 ```toml
 [tools]
-# claude = "latest"  # Anthropic's CLI coding assistant
-# "aqua:anomalyco/opencode" = "latest"  # Moved to main config.toml
+# "ubi:mikefarah/yq" = "4.47.2"         # YAML processor
+# "aqua:hashicorp/packer" = "1.14.2"    # Image builder
 ```
 
 **2. Prompt mechanism**: During the first `mise install` run, the preinstall hook:
@@ -866,14 +856,10 @@ Then remove from `mise.local.toml` if present.
 
 ### Examples of Optional Tools
 
-**claude**: Anthropic's CLI coding assistant
-- Provides AI assistance for coding tasks
-- Requires API key configuration
-- Large download (~100MB)
+Optional tools should be selected for a concrete workflow need, not because they were part of an old baseline. Examples:
 
-**opencode**: AI-powered code assistant
-- Alternative AI assistant
-- May be redundant if claude is installed
+- **yq**: YAML processor for automation and data reshaping
+- **packer**: Image-building tool for repeatable machine images
 
 ### Moving from Optional to Required
 

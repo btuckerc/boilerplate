@@ -10,9 +10,8 @@ This repository contains dotfiles and configuration managed via chezmoi. It uses
 
 These skills provide actionable playbooks for working with this repository:
 
-- [Apply Dotfiles](./home/dot_config/opencode/skills/apply-dotfiles/SKILL.md): Deploy and update dotfiles using chezmoi. Use for initial setup, applying changes, or syncing configuration.
-- [Install Tools](./home/dot_config/opencode/skills/install-tools/SKILL.md): Install and manage software via mise. Use for adding CLI tools, updating versions, or managing language runtimes.
-- [Maintain System](./home/dot_config/opencode/skills/maintain-system/SKILL.md): Update and maintain the entire system. Use for routine maintenance, upgrades, and health checks.
+- [Codex Config](./home/dot_codex/skills/codex-config/SKILL.md.tmpl): Update the shared Codex baseline managed by chezmoi.
+- [Platform Ops](./home/dot_codex/skills/platform-ops/SKILL.md.tmpl): Inspect or change machine-local OS, desktop, and app settings on Omarchy/Linux or macOS.
 
 ### User Documentation
 
@@ -34,7 +33,7 @@ boilerplate/
 │   │   ├── nvim/                  # Neovim configuration
 │   │   ├── tmux/                  # Tmux configuration
 │   │   ├── shell/common.sh        # Shared shell config
-│   │   └── opencode/skills/       # AI agent skills
+│   ├── dot_codex/skills/          # Shared Codex skills
 │   ├── dot_zshrc.tmpl             # Zsh configuration
 │   ├── dot_bashrc.tmpl            # Bash configuration
 │   └── run_once_*.sh.tmpl         # Setup hooks
@@ -72,4 +71,4 @@ chezmoi update && mise upgrade
 When working with this repository on a local system, the source is typically at:
 `~/Documents/GitHub/boilerplate/`
 
-The dotfiles source is in the `home/` subdirectory, configured via `.chezmoiroot`.
+The dotfiles source is in the `home/` subdirectory, configured via `.chezmoiroot`. Legacy Claude/OpenCode material lives on the `legacy/claude-opencode` branch, not the active baseline.

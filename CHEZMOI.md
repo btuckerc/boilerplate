@@ -52,8 +52,7 @@ boilerplate/
 │   │   ├── yazi/
 │   │   ├── kitty/
 │   │   ├── ghostty/
-│   │   ├── btop/
-│   │   └── opencode/
+│   │   └── btop/
 │   ├── run_once_before_01-install-prereqs.sh.tmpl
 │   ├── run_once_after_02-setup-packages.sh.tmpl
 │   └── run_once_after_03-setup-tools.sh.tmpl
@@ -798,11 +797,6 @@ nvim.backup.*
 # Local mise configuration (machine-specific)
 .config/mise/mise.local.toml
 
-# OpenCode runtime files
-.config/opencode/.opencode-speckit/
-.config/opencode/node_modules/
-.config/opencode/bun.lock
-
 # Neovim lazy-lock.json (plugin lockfile)
 .config/nvim/lazy-lock.json
 ```
@@ -868,7 +862,6 @@ External resources are managed manually rather than through `.chezmoiexternal.to
 | `home/dot_config/kitty/` | `~/.config/kitty/` | No | Kitty terminal |
 | `home/dot_config/ghostty/config` | `~/.config/ghostty/config` | No | Ghostty terminal |
 | `home/dot_config/btop/btop.conf` | `~/.config/btop/btop.conf` | No | Btop system monitor |
-| `home/dot_config/opencode/` | `~/.config/opencode/` | Yes (some) | OpenCode configuration |
 
 ### Adding New Mappings
 

@@ -55,11 +55,10 @@ This repository includes comprehensive documentation:
 
 ### For AI Agents and Advanced Users
 
-The following skills provide actionable playbooks for working with this repository:
+The active baseline is Codex-first. The current shared skills live under `home/dot_codex/skills/`.
 
-- **[Apply Dotfiles](./home/dot_config/opencode/skills/apply-dotfiles/SKILL.md)** - Deploy and update dotfiles using chezmoi
-- **[Install Tools](./home/dot_config/opencode/skills/install-tools/SKILL.md)** - Install and manage software via mise
-- **[Maintain System](./home/dot_config/opencode/skills/maintain-system/SKILL.md)** - Update and maintain the entire system
+- **[Codex Config](./home/dot_codex/skills/codex-config/SKILL.md.tmpl)** - Update the shared Codex baseline managed by chezmoi
+- **[Platform Ops](./home/dot_codex/skills/platform-ops/SKILL.md.tmpl)** - Inspect or change platform-local settings on Omarchy/Linux or macOS
 
 ### For Users
 
@@ -70,7 +69,7 @@ The following skills provide actionable playbooks for working with this reposito
 
 - **[LICENSE](./LICENSE)** - MIT License
 
-For most users, this README covers what you need. AI assistants should use the skill files for detailed operational guidance.
+For most users, this README covers what you need. Legacy Claude/OpenCode files were archived to the `legacy/claude-opencode` branch and are not part of the active baseline.
 
 ### What Gets Installed Automatically
 
@@ -208,8 +207,8 @@ Some tools are not installed by default. On first `mise install`, you'll be prom
 $ mise install
 
 Optional tools:
-  1) claude                            Anthropic CLI
-  2) aqua:sst/opencode                 Open source assistant
+  1) ubi:mikefarah/yq                  YAML processor
+  2) aqua:hashicorp/packer             Image builder
 
 a) All  s) Select  n) None [N]
 >

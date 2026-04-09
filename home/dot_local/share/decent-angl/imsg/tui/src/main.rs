@@ -49,6 +49,30 @@ where
     }
 }
 
+fn deserialize_stringish<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Stringish {
+        Text(String),
+        Int(i64),
+        Float(f64),
+        Bool(bool),
+    }
+
+    let value = Option::<Stringish>::deserialize(deserializer)?;
+    let rendered = match value {
+        None => String::new(),
+        Some(Stringish::Text(value)) => value,
+        Some(Stringish::Int(value)) => value.to_string(),
+        Some(Stringish::Float(value)) => value.to_string(),
+        Some(Stringish::Bool(value)) => value.to_string(),
+    };
+    Ok(rendered)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Pane {
     Chats,
@@ -75,8 +99,9 @@ enum LowerView {
 #[derive(Debug, Clone, Deserialize, Default)]
 struct ChatSummary {
     chat_rowid: i64,
+    #[serde(default, deserialize_with = "deserialize_stringish")]
     title: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_stringish")]
     participants: String,
     #[serde(default)]
     message_count: i64,
@@ -84,7 +109,7 @@ struct ChatSummary {
     unread_count: i64,
     #[serde(default)]
     last_message_at: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_stringish")]
     last_message_preview: String,
 }
 
@@ -95,13 +120,13 @@ struct AttachmentRow {
     attachment_rowid: i64,
     #[serde(default)]
     timestamp: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_stringish")]
     sender: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_stringish")]
     transfer_name: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_stringish")]
     filename: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_stringish")]
     mime_type: String,
     #[serde(default)]
     total_bytes: i64,
@@ -114,15 +139,17 @@ struct AttachmentRow {
 struct MessageRow {
     #[serde(default)]
     message_rowid: i64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_stringish")]
     guid: String,
     #[serde(default)]
     handle_id: Option<String>,
     #[serde(default)]
+    handle_display: Option<String>,
+    #[serde(default)]
     is_from_me: i64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_stringish")]
     preview: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_stringish")]
     kind: String,
     #[serde(default)]
     timestamp: Option<String>,
@@ -145,17 +172,19 @@ struct ShowResponse {
 struct SearchResultRow {
     #[serde(default)]
     chat_rowid: i64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_stringish")]
     chat_title: String,
     #[serde(default)]
     message_rowid: i64,
     #[serde(default)]
     handle_id: Option<String>,
     #[serde(default)]
+    handle_display: Option<String>,
+    #[serde(default)]
     is_from_me: i64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_stringish")]
     preview: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_stringish")]
     kind: String,
     #[serde(default)]
     timestamp: Option<String>,
@@ -166,23 +195,23 @@ struct SearchResultRow {
 struct SendJobRow {
     #[serde(default)]
     job_rowid: i64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_stringish")]
     status: String,
     #[serde(default)]
     created_at: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_stringish")]
     requested_by_machine_id: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_stringish")]
     resolved_recipient: String,
     #[serde(default)]
     recipient_input: Option<String>,
     #[serde(default)]
     attempt_count: i64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_stringish")]
     blocked_reason: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_stringish")]
     provider_detail: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_stringish")]
     message_text: String,
 }
 
@@ -220,8 +249,12 @@ struct App {
     status: String,
     unreads_only: bool,
     quit: bool,
+    loaded_chat_rowid: Option<i64>,
+    pending_chat_rowid: Option<i64>,
+    last_chat_selection_change: Instant,
     last_tick: Instant,
     tick_rate: Duration,
+    chat_selection_delay: Duration,
 }
 
 impl App {
@@ -242,8 +275,12 @@ impl App {
             status: "Loading imsg…".to_string(),
             unreads_only: false,
             quit: false,
+            loaded_chat_rowid: None,
+            pending_chat_rowid: None,
+            last_chat_selection_change: Instant::now(),
             last_tick: Instant::now(),
-            tick_rate: Duration::from_secs(8),
+            tick_rate: Duration::from_secs(30),
+            chat_selection_delay: Duration::from_millis(160),
         }
     }
 
@@ -255,6 +292,14 @@ impl App {
         self.messages_state
             .selected()
             .and_then(|idx| self.messages.get(idx))
+    }
+
+    fn selected_chat_rowid(&self) -> Option<i64> {
+        self.selected_chat().map(|chat| chat.chat_rowid)
+    }
+
+    fn selected_message_rowid(&self) -> Option<i64> {
+        self.selected_message().map(|message| message.message_rowid)
     }
 
     fn selected_search_result(&self) -> Option<&SearchResultRow> {
@@ -276,33 +321,44 @@ impl App {
     }
 
     fn refresh_chats(&mut self) -> AppResult<()> {
+        let selected_chat_rowid = self.selected_chat_rowid();
         let args = if self.unreads_only {
-            vec!["unreads".to_string(), "--limit".to_string(), "200".to_string(), "--json".to_string()]
+            vec!["unreads".to_string(), "--limit".to_string(), "80".to_string(), "--json".to_string()]
         } else {
-            vec!["chats".to_string(), "--limit".to_string(), "200".to_string(), "--json".to_string()]
+            vec!["chats".to_string(), "--limit".to_string(), "80".to_string(), "--json".to_string()]
         };
         self.chats = run_imsg_json::<Vec<ChatSummary>>(&args)?;
         if self.chats.is_empty() {
             self.chats_state.select(None);
         } else {
-            let idx = self.chats_state.selected().unwrap_or(0).min(self.chats.len() - 1);
+            let idx = selected_chat_rowid
+                .and_then(|chat_rowid| self.chats.iter().position(|chat| chat.chat_rowid == chat_rowid))
+                .unwrap_or(0)
+                .min(self.chats.len() - 1);
             self.chats_state.select(Some(idx));
         }
         Ok(())
     }
 
     fn refresh_current_chat(&mut self) -> AppResult<()> {
-        let Some(chat) = self.selected_chat() else {
+        let Some(chat_rowid) = self.selected_chat_rowid() else {
             self.messages.clear();
             self.messages_state.select(None);
             self.attachments.clear();
+            self.loaded_chat_rowid = None;
+            self.pending_chat_rowid = None;
             return Ok(());
+        };
+        let previous_message_rowid = if self.loaded_chat_rowid == Some(chat_rowid) {
+            self.selected_message_rowid()
+        } else {
+            None
         };
         let args = vec![
             "show".to_string(),
-            chat.chat_rowid.to_string(),
+            chat_rowid.to_string(),
             "--limit".to_string(),
-            "80".to_string(),
+            "60".to_string(),
             "--json".to_string(),
         ];
         let response = run_imsg_json::<ShowResponse>(&args)?;
@@ -310,14 +366,38 @@ impl App {
         if self.messages.is_empty() {
             self.messages_state.select(None);
         } else {
-            let idx = self
-                .messages_state
-                .selected()
+            let idx = previous_message_rowid
+                .and_then(|message_rowid| {
+                    self.messages
+                        .iter()
+                        .position(|message| message.message_rowid == message_rowid)
+                })
                 .unwrap_or(self.messages.len().saturating_sub(1))
                 .min(self.messages.len() - 1);
             self.messages_state.select(Some(idx));
         }
+        self.loaded_chat_rowid = Some(chat_rowid);
+        self.pending_chat_rowid = None;
         Ok(())
+    }
+
+    fn queue_current_chat_refresh(&mut self) {
+        self.pending_chat_rowid = self.selected_chat_rowid();
+        self.last_chat_selection_change = Instant::now();
+    }
+
+    fn maybe_refresh_pending_chat(&mut self) -> AppResult<()> {
+        let Some(chat_rowid) = self.pending_chat_rowid else {
+            return Ok(());
+        };
+        if self.last_chat_selection_change.elapsed() < self.chat_selection_delay {
+            return Ok(());
+        }
+        if self.loaded_chat_rowid == Some(chat_rowid) {
+            self.pending_chat_rowid = None;
+            return Ok(());
+        }
+        self.refresh_current_chat()
     }
 
     fn refresh_outbox(&mut self) -> AppResult<()> {
@@ -346,7 +426,7 @@ impl App {
             "attachments".to_string(),
             chat.chat_rowid.to_string(),
             "--limit".to_string(),
-            "50".to_string(),
+            "24".to_string(),
             "--json".to_string(),
         ];
         #[derive(Debug, Deserialize)]
@@ -372,7 +452,7 @@ impl App {
             "search".to_string(),
             query.to_string(),
             "--limit".to_string(),
-            "80".to_string(),
+            "40".to_string(),
             "--json".to_string(),
         ];
         self.search_results = run_imsg_json::<Vec<SearchResultRow>>(&args)?;
@@ -528,8 +608,17 @@ impl App {
 
     fn on_tick(&mut self) -> AppResult<()> {
         if self.last_tick.elapsed() >= self.tick_rate && self.input_mode == InputMode::Normal {
+            let current_chat_rowid = self.selected_chat_rowid();
             self.refresh_chats()?;
-            self.refresh_current_chat()?;
+            if self.selected_chat_rowid().is_some() {
+                if self.selected_chat_rowid() != current_chat_rowid
+                    || self.loaded_chat_rowid != self.selected_chat_rowid()
+                {
+                    self.refresh_current_chat()?;
+                } else {
+                    self.refresh_current_chat()?;
+                }
+            }
             if self.lower_view == Some(LowerView::Outbox) {
                 self.refresh_outbox()?;
             }
@@ -555,6 +644,89 @@ fn compact_string(value: &str, limit: usize) -> String {
         return collapsed;
     }
     format!("{}...", &collapsed[..limit.saturating_sub(3)])
+}
+
+fn looks_like_opaque_chat_id(value: &str) -> bool {
+    let trimmed = value.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    if !lower.starts_with("chat") {
+        return false;
+    }
+    let suffix = &lower[4..];
+    !suffix.is_empty() && suffix.chars().all(|character| character.is_ascii_digit())
+}
+
+fn summarize_participants(value: &str, limit_entries: usize) -> String {
+    let entries: Vec<String> = value
+        .split(',')
+        .map(|entry| entry.trim())
+        .filter(|entry| !entry.is_empty())
+        .map(|entry| entry.to_string())
+        .collect();
+    if entries.is_empty() {
+        return String::new();
+    }
+    if entries.len() <= limit_entries {
+        return entries.join(", ");
+    }
+    format!(
+        "{} +{}",
+        entries[..limit_entries].join(", "),
+        entries.len().saturating_sub(limit_entries)
+    )
+}
+
+fn friendly_timestamp(value: Option<&str>) -> String {
+    let Some(raw_value) = value else {
+        return "unknown".to_string();
+    };
+    let normalized = raw_value.trim().replace('T', " ");
+    if normalized.len() >= 16 {
+        normalized[..16].to_string()
+    } else if normalized.is_empty() {
+        "unknown".to_string()
+    } else {
+        normalized
+    }
+}
+
+fn message_actor_label(is_from_me: i64, handle_display: Option<&str>, handle_id: Option<&str>) -> String {
+    if is_from_me != 0 {
+        return "You".to_string();
+    }
+    handle_display
+        .filter(|value| !value.trim().is_empty())
+        .or(handle_id)
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "Unknown".to_string())
+}
+
+fn chat_label(chat: &ChatSummary) -> String {
+    let title = chat.title.trim();
+    if !title.is_empty() && !looks_like_opaque_chat_id(title) {
+        return title.to_string();
+    }
+    let participants = summarize_participants(&chat.participants, 3);
+    if !participants.is_empty() {
+        return participants;
+    }
+    if !title.is_empty() {
+        return title.to_string();
+    }
+    format!("chat {}", chat.chat_rowid)
+}
+
+fn chat_subtitle(chat: &ChatSummary) -> String {
+    let preview = compact_string(&chat.last_message_preview, 80);
+    if !preview.is_empty() && preview != "[empty]" {
+        return preview;
+    }
+    let participants = summarize_participants(&chat.participants, 4);
+    if !participants.is_empty() && participants != chat_label(chat) {
+        return participants;
+    }
+    "No recent preview".to_string()
 }
 
 fn run_imsg_json<T: DeserializeOwned>(args: &[String]) -> AppResult<T> {
@@ -628,6 +800,7 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> AppResult<()> {
                 }
             }
         }
+        app.maybe_refresh_pending_chat()?;
         app.on_tick()?;
     }
 
@@ -652,13 +825,13 @@ fn handle_normal_key(app: &mut App, key: KeyEvent) -> AppResult<()> {
         KeyCode::Down | KeyCode::Char('j') => {
             app.move_selection_down();
             if app.pane == Pane::Chats {
-                app.refresh_current_chat()?;
+                app.queue_current_chat_refresh();
             }
         }
         KeyCode::Up | KeyCode::Char('k') => {
             app.move_selection_up();
             if app.pane == Pane::Chats {
-                app.refresh_current_chat()?;
+                app.queue_current_chat_refresh();
             }
         }
         KeyCode::Enter => match app.pane {
@@ -787,24 +960,41 @@ fn draw(frame: &mut Frame, app: &App) {
 fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
     let selected = app
         .selected_chat()
-        .map(|chat| chat.title.clone())
+        .map(chat_label)
         .unwrap_or_else(|| "no chat selected".to_string());
+    let selected_meta = app
+        .selected_chat()
+        .map(|chat| {
+            let participants = summarize_participants(&chat.participants, 4);
+            if participants.is_empty() || participants == selected {
+                friendly_timestamp(chat.last_message_at.as_deref())
+            } else {
+                format!("{} | {}", participants, friendly_timestamp(chat.last_message_at.as_deref()))
+            }
+        })
+        .unwrap_or_else(|| "no conversation loaded".to_string());
     let mode = match app.input_mode {
         InputMode::Normal => "normal",
         InputMode::Search => "search",
         InputMode::Compose => "compose",
         InputMode::Reply => "reply",
     };
-    let header = Paragraph::new(Line::from(vec![
-        Span::styled(" imsg tui ", Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD)),
-        Span::raw(" "),
-        Span::styled(format!("chat: {}", selected), Style::default().fg(Color::White)),
-        Span::raw(" "),
-        Span::styled(
-            format!("mode: {}", mode),
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-        ),
-    ]));
+    let header = Paragraph::new(vec![
+        Line::from(vec![
+            Span::styled(" imsg tui ", Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            Span::raw(" "),
+            Span::styled(format!("conversation: {}", selected), Style::default().fg(Color::White)),
+            Span::raw(" "),
+            Span::styled(
+                format!("mode: {}", mode),
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::from(Span::styled(
+            selected_meta,
+            Style::default().fg(Color::DarkGray),
+        )),
+    ]);
     frame.render_widget(header, area);
 }
 
@@ -833,16 +1023,27 @@ fn draw_chats(frame: &mut Frame, area: Rect, app: &App) {
         .chats
         .iter()
         .map(|chat| {
-            let prefix = if chat.unread_count > 0 {
-                format!("({}) ", chat.unread_count)
+            let title = if chat.unread_count > 0 {
+                format!("{}  [{} unread]", chat_label(chat), chat.unread_count)
             } else {
-                String::new()
+                chat_label(chat)
             };
-            let title = compact_string(&(prefix + &chat.title), 42);
-            let subtitle = compact_string(&chat.last_message_preview, 50);
+            let subtitle = chat_subtitle(chat);
+            let meta = format!(
+                "{} | {} messages",
+                friendly_timestamp(chat.last_message_at.as_deref()),
+                chat.message_count
+            );
             ListItem::new(vec![
-                Line::from(Span::raw(title)),
-                Line::from(Span::styled(subtitle, Style::default().fg(Color::DarkGray))),
+                Line::from(Span::styled(
+                    compact_string(&title, 44),
+                    Style::default().add_modifier(Modifier::BOLD),
+                )),
+                Line::from(Span::styled(
+                    compact_string(&subtitle, 56),
+                    Style::default().fg(Color::White),
+                )),
+                Line::from(Span::styled(meta, Style::default().fg(Color::DarkGray))),
             ])
         })
         .collect();
@@ -859,22 +1060,23 @@ fn draw_chats(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 fn draw_messages(frame: &mut Frame, area: Rect, app: &App) {
+    let title = app
+        .selected_chat()
+        .map(|chat| format!("Messages: {}", compact_string(&chat_label(chat), 36)))
+        .unwrap_or_else(|| "Messages".to_string());
     let items: Vec<ListItem> = app
         .messages
         .iter()
         .map(|message| {
-            let actor = if message.is_from_me != 0 {
-                "me".to_string()
-            } else {
-                message
-                    .handle_id
-                    .clone()
-                    .unwrap_or_else(|| "unknown".to_string())
-            };
-            let stamp = message.timestamp.clone().unwrap_or_else(|| "unknown".to_string());
+            let actor = message_actor_label(
+                message.is_from_me,
+                message.handle_display.as_deref(),
+                message.handle_id.as_deref(),
+            );
+            let stamp = friendly_timestamp(message.timestamp.as_deref());
             let mut lines = vec![Line::from(vec![
                 Span::styled(
-                    compact_string(&stamp, 19),
+                    stamp,
                     Style::default().fg(Color::DarkGray),
                 ),
                 Span::raw(" "),
@@ -884,12 +1086,11 @@ fn draw_messages(frame: &mut Frame, area: Rect, app: &App) {
                         .fg(if message.is_from_me != 0 { Color::Green } else { Color::Yellow })
                         .add_modifier(Modifier::BOLD),
                 ),
-                Span::raw(" "),
-                Span::styled(
-                    compact_string(&message.preview, 120),
-                    Style::default().fg(Color::White),
-                ),
             ])];
+            lines.push(Line::from(Span::styled(
+                compact_string(&message.preview, 140),
+                Style::default().fg(Color::White),
+            )));
             if let Some(parent) = &message.reply_target_preview {
                 lines.push(Line::from(Span::styled(
                     format!("↳ {}", compact_string(parent, 100)),
@@ -906,7 +1107,7 @@ fn draw_messages(frame: &mut Frame, area: Rect, app: &App) {
         })
         .collect();
     let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title("Messages"))
+        .block(Block::default().borders(Borders::ALL).title(title))
         .highlight_style(
             Style::default()
                 .fg(Color::Black)
@@ -930,11 +1131,11 @@ fn draw_search_results(frame: &mut Frame, area: Rect, app: &App) {
         .search_results
         .iter()
         .map(|row| {
-            let actor = if row.is_from_me != 0 {
-                "me".to_string()
-            } else {
-                row.handle_id.clone().unwrap_or_else(|| "unknown".to_string())
-            };
+            let actor = message_actor_label(
+                row.is_from_me,
+                row.handle_display.as_deref(),
+                row.handle_id.as_deref(),
+            );
             ListItem::new(vec![
                 Line::from(Span::styled(
                     compact_string(&row.chat_title, 50),
@@ -942,7 +1143,7 @@ fn draw_search_results(frame: &mut Frame, area: Rect, app: &App) {
                 )),
                 Line::from(vec![
                     Span::styled(
-                        compact_string(row.timestamp.as_deref().unwrap_or("unknown"), 19),
+                        friendly_timestamp(row.timestamp.as_deref()),
                         Style::default().fg(Color::DarkGray),
                     ),
                     Span::raw(" "),

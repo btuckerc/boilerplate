@@ -392,6 +392,7 @@ def initialize_index_schema(con: sqlite3.Connection) -> None:
             service text,
             uncanonicalized_id text,
             person_centric_id text,
+            contact_name text not null default '',
             message_count integer not null default 0,
             last_message_date integer not null default 0
         );
@@ -526,7 +527,25 @@ def initialize_index_schema(con: sqlite3.Connection) -> None:
         create index if not exists idx_send_jobs_status on send_jobs(status, created_at desc);
         """
     )
+    ensure_index_schema_migrations(con)
     con.commit()
+
+
+def ensure_column_exists(
+    con: sqlite3.Connection,
+    table_name: str,
+    column_name: str,
+    column_sql: str,
+) -> None:
+    rows = con.execute(f"pragma table_info({table_name})").fetchall()
+    existing_columns = {str(row["name"]).lower() for row in rows}
+    if column_name.lower() not in existing_columns:
+        con.execute(f"alter table {table_name} add column {column_name} {column_sql}")
+
+
+def ensure_index_schema_migrations(con: sqlite3.Connection) -> None:
+    ensure_column_exists(con, "handles", "contact_name", "text not null default ''")
+    con.execute("create index if not exists idx_handles_contact_name on handles(contact_name)")
 
 
 def source_latest_message_rowid(source: sqlite3.Connection) -> int:
@@ -567,6 +586,124 @@ def normalize_phone_like(value: str) -> str:
     if len(digits) == 11 and digits.startswith("1"):
         return digits[1:]
     return digits
+
+
+def default_addressbook_db() -> Path | None:
+    path = Path.home() / "Library/Application Support/AddressBook/AddressBook-v22.abcddb"
+    if path.exists():
+        return path
+    return None
+
+
+def contact_display_name(row: sqlite3.Row | dict[str, Any]) -> str:
+    first_name = str(row_value(row, "first_name", "") or "").strip()
+    last_name = str(row_value(row, "last_name", "") or "").strip()
+    combined = " ".join(part for part in (first_name, last_name) if part).strip()
+    if combined:
+        return combined
+    for key in ("full_name", "organization", "nickname"):
+        value = str(row_value(row, key, "") or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def load_addressbook_contact_maps() -> tuple[dict[str, str], dict[str, str]]:
+    path = default_addressbook_db()
+    if path is None:
+        return {}, {}
+
+    try:
+        with sqlite_connect_ro(path) as con:
+            phone_rows = con.execute(
+                """
+                select
+                    p.ZFULLNUMBER as value,
+                    p.ZISPRIMARY as is_primary,
+                    p.ZORDERINGINDEX as ordering_index,
+                    r.ZFIRSTNAME as first_name,
+                    r.ZLASTNAME as last_name,
+                    r.ZNAME as full_name,
+                    r.ZORGANIZATION as organization,
+                    r.ZNICKNAME as nickname
+                from ZABCDPHONENUMBER p
+                left join ZABCDRECORD r on r.Z_PK = coalesce(p.ZOWNER, p.Z22_OWNER)
+                where p.ZFULLNUMBER is not null and p.ZFULLNUMBER != ''
+                order by p.ZISPRIMARY desc, p.ZORDERINGINDEX asc, p.Z_PK asc
+                """
+            ).fetchall()
+            email_rows = con.execute(
+                """
+                select
+                    lower(trim(e.ZADDRESS)) as value,
+                    e.ZISPRIMARY as is_primary,
+                    e.ZORDERINGINDEX as ordering_index,
+                    r.ZFIRSTNAME as first_name,
+                    r.ZLASTNAME as last_name,
+                    r.ZNAME as full_name,
+                    r.ZORGANIZATION as organization,
+                    r.ZNICKNAME as nickname
+                from ZABCDEMAILADDRESS e
+                left join ZABCDRECORD r on r.Z_PK = coalesce(e.ZOWNER, e.Z22_OWNER)
+                where e.ZADDRESS is not null and e.ZADDRESS != ''
+                order by e.ZISPRIMARY desc, e.ZORDERINGINDEX asc, e.Z_PK asc
+                """
+            ).fetchall()
+    except Exception:
+        return {}, {}
+
+    phone_map: dict[str, str] = {}
+    for row in phone_rows:
+        normalized = normalize_phone_like(str(row["value"]))
+        display_name = contact_display_name(row)
+        if normalized and display_name and normalized not in phone_map:
+            phone_map[normalized] = display_name
+
+    email_map: dict[str, str] = {}
+    for row in email_rows:
+        normalized = str(row["value"] or "").strip().lower()
+        display_name = contact_display_name(row)
+        if normalized and display_name and normalized not in email_map:
+            email_map[normalized] = display_name
+
+    return email_map, phone_map
+
+
+def lookup_contact_name(
+    handle_id: str,
+    email_map: dict[str, str],
+    phone_map: dict[str, str],
+) -> str:
+    normalized_handle = str(handle_id or "").strip()
+    if not normalized_handle:
+        return ""
+    if "@" in normalized_handle:
+        return email_map.get(normalized_handle.lower(), "")
+    digits = normalize_phone_like(normalized_handle)
+    if digits:
+        return phone_map.get(digits, "")
+    return ""
+
+
+def enrich_handles_from_addressbook(index: sqlite3.Connection) -> None:
+    email_map, phone_map = load_addressbook_contact_maps()
+    if not email_map and not phone_map:
+        index.execute("update handles set contact_name = ''")
+        return
+
+    rows = index.execute("select rowid, handle_id from handles").fetchall()
+    updates = [
+        (
+            lookup_contact_name(str(row["handle_id"] or ""), email_map, phone_map),
+            int(row["rowid"]),
+        )
+        for row in rows
+    ]
+    if updates:
+        index.executemany(
+            "update handles set contact_name = ? where rowid = ?",
+            updates,
+        )
 
 
 def duplicate_key_for_destination(destination_key: str, message_text: str, service_type: str) -> str:
@@ -782,10 +919,11 @@ def exact_handle_match(con: sqlite3.Connection, recipient: str) -> sqlite3.Row |
         select *
         from handles
         where lower(handle_id) = ?
+           or lower(coalesce(contact_name, '')) = ?
         order by last_message_date desc, rowid desc
         limit 1
         """,
-        (lowered,),
+        (lowered, lowered),
     ).fetchone()
     if row is not None:
         return row
@@ -1239,11 +1377,11 @@ def refresh_derived_fields(index: sqlite3.Connection) -> None:
             participant_summary = coalesce((
                 select group_concat(h.handle_id, ', ')
                 from (
-                    select distinct h.handle_id
+                    select distinct coalesce(nullif(h.contact_name, ''), h.handle_id) as handle_id
                     from chat_handles ch
                     join handles h on h.rowid = ch.handle_rowid
                     where ch.chat_rowid = chats.rowid
-                    order by h.handle_id
+                    order by handle_id
                 ) h
             ), ''),
             participant_count = coalesce((
@@ -1313,6 +1451,7 @@ def sync_index(cfg: Config, rebuild: bool = False, quiet: bool = False) -> dict[
             started_at = datetime.now(timezone.utc).isoformat()
 
             refresh_handles(source, index)
+            enrich_handles_from_addressbook(index)
             refresh_chats(source, index)
             refresh_chat_handles(source, index)
             message_summary = refresh_messages_and_attachments(
@@ -1457,8 +1596,39 @@ def message_preview(row: sqlite3.Row | dict[str, Any]) -> str:
     return "[empty]"
 
 
+def message_preview_rank(preview: str) -> int:
+    if preview == "[empty]":
+        return 0
+    if preview in {"[system]", "[edited]", "[retracted]"}:
+        return 1
+    if preview in {"[attachment]"} or preview.startswith("[") and preview.endswith("]"):
+        return 2
+    return 3
+
+
+def best_chat_preview(rows: list[sqlite3.Row]) -> str:
+    best_preview = "[empty]"
+    best_rank = -1
+    for row in rows:
+        preview = message_preview(row)
+        rank = message_preview_rank(preview)
+        if rank > best_rank:
+            best_preview = preview
+            best_rank = rank
+            if rank >= 3:
+                break
+    return best_preview
+
+
 def chat_title(row: sqlite3.Row | dict[str, Any]) -> str:
-    for key in ("display_name", "room_name", "chat_identifier", "participant_summary", "guid"):
+    for key in (
+        "display_name",
+        "room_name",
+        "participant_summary",
+        "last_addressed_handle",
+        "chat_identifier",
+        "guid",
+    ):
         value = row_value(row, key)
         if value not in (None, ""):
             return str(value)
@@ -1595,6 +1765,7 @@ def query_contacts(con: sqlite3.Connection, query: str | None, limit: int) -> li
             select
                 h.rowid,
                 h.handle_id,
+                h.contact_name,
                 h.service,
                 h.uncanonicalized_id,
                 h.person_centric_id,
@@ -1603,12 +1774,13 @@ def query_contacts(con: sqlite3.Connection, query: str | None, limit: int) -> li
             from handles h
             where
                 lower(h.handle_id) like ?
+                or lower(coalesce(h.contact_name, '')) like ?
                 or lower(coalesce(h.uncanonicalized_id, '')) like ?
                 or lower(coalesce(h.person_centric_id, '')) like ?
-            order by h.last_message_date desc, h.message_count desc, h.handle_id asc
+            order by h.last_message_date desc, h.message_count desc, lower(coalesce(h.contact_name, h.handle_id)) asc
             limit ?
             """,
-            (pattern, pattern, pattern, limit),
+            (pattern, pattern, pattern, pattern, limit),
         ).fetchall()
     else:
         rows = con.execute(
@@ -1616,13 +1788,14 @@ def query_contacts(con: sqlite3.Connection, query: str | None, limit: int) -> li
             select
                 h.rowid,
                 h.handle_id,
+                h.contact_name,
                 h.service,
                 h.uncanonicalized_id,
                 h.person_centric_id,
                 h.message_count,
                 h.last_message_date
             from handles h
-            order by h.last_message_date desc, h.message_count desc, h.handle_id asc
+            order by h.last_message_date desc, h.message_count desc, lower(coalesce(h.contact_name, h.handle_id)) asc
             limit ?
             """,
             (limit,),
@@ -1631,6 +1804,8 @@ def query_contacts(con: sqlite3.Connection, query: str | None, limit: int) -> li
         {
             "handle_rowid": int(row["rowid"]),
             "handle_id": row["handle_id"],
+            "contact_name": row["contact_name"] or "",
+            "display_name": row["contact_name"] or row["handle_id"],
             "service": row["service"],
             "uncanonicalized_id": row["uncanonicalized_id"],
             "person_centric_id": row["person_centric_id"],
@@ -1665,36 +1840,58 @@ def query_chats(con: sqlite3.Connection, query: str | None, limit: int, unread_o
         select c.*
         from chats c
         {where_sql}
-        order by c.unread_count desc, c.last_message_date desc, c.rowid desc
+        order by c.last_message_date desc, c.unread_count desc, c.rowid desc
         limit ?
         """,
         tuple(params),
     ).fetchall()
     if not rows:
         return []
-    message_ids = [int(row["last_message_rowid"]) for row in rows if row["last_message_rowid"] not in (None, "")]
-    message_preview_map: dict[int, sqlite3.Row] = {}
-    if message_ids:
-        placeholders = ",".join("?" for _ in message_ids)
+    chat_ids = [int(row["rowid"]) for row in rows]
+    preview_rows_by_chat: dict[int, list[sqlite3.Row]] = {}
+    if chat_ids:
+        placeholders = ",".join("?" for _ in chat_ids)
         preview_rows = con.execute(
             f"""
-            select rowid, text, subject, has_attachments, associated_message_type,
-                   associated_message_emoji, date_edited, date_retracted,
-                   is_system_message, group_action_type, message_action_type
-            from messages
-            where rowid in ({placeholders})
+            with ranked as (
+                select
+                    cm.chat_rowid,
+                    m.rowid,
+                    m.text,
+                    m.subject,
+                    m.has_attachments,
+                    m.associated_message_type,
+                    m.associated_message_emoji,
+                    m.date_edited,
+                    m.date_retracted,
+                    m.is_system_message,
+                    m.group_action_type,
+                    m.message_action_type,
+                    row_number() over (
+                        partition by cm.chat_rowid
+                        order by m.date desc, m.rowid desc
+                    ) as rank_in_chat
+                from chat_messages cm
+                join messages m on m.rowid = cm.message_rowid
+                where cm.chat_rowid in ({placeholders})
+            )
+            select *
+            from ranked
+            where rank_in_chat <= 8
+            order by chat_rowid, rank_in_chat asc
             """,
-            tuple(message_ids),
+            tuple(chat_ids),
         ).fetchall()
-        message_preview_map = {int(row["rowid"]): row for row in preview_rows}
+        for row in preview_rows:
+            preview_rows_by_chat.setdefault(int(row["chat_rowid"]), []).append(row)
 
     result = []
     for row in rows:
+        chat_rowid = int(row["rowid"])
         last_rowid = int(row["last_message_rowid"] or 0)
-        preview_row = message_preview_map.get(last_rowid)
         result.append(
             {
-                "chat_rowid": int(row["rowid"]),
+                "chat_rowid": chat_rowid,
                 "guid": row["guid"],
                 "title": chat_title(row),
                 "participants": row["participant_summary"] or "",
@@ -1704,7 +1901,7 @@ def query_chats(con: sqlite3.Connection, query: str | None, limit: int, unread_o
                 "unread_count": int(row["unread_count"] or 0),
                 "last_message_rowid": last_rowid or None,
                 "last_message_at": apple_ns_to_iso(row["last_message_date"]),
-                "last_message_preview": message_preview(preview_row or {}),
+                "last_message_preview": best_chat_preview(preview_rows_by_chat.get(chat_rowid, [])),
             }
         )
     return result
@@ -1785,7 +1982,9 @@ def query_messages_for_chat(
             m.item_type,
             m.group_action_type,
             m.message_action_type,
-            h.handle_id
+            h.handle_id,
+            h.contact_name,
+            coalesce(nullif(h.contact_name, ''), h.handle_id) as handle_display
         from chat_messages cm
         join messages m on m.rowid = cm.message_rowid
         left join handles h on h.rowid = m.handle_rowid
@@ -1844,6 +2043,7 @@ def query_messages_for_chat(
                 "message_rowid": int(row["rowid"]),
                 "guid": row["guid"],
                 "handle_id": row["handle_id"],
+                "handle_display": row["handle_display"] or row["handle_id"] or "",
                 "service": row["service"],
                 "account": row["account"],
                 "date": int(row["date"] or 0),
@@ -1934,6 +2134,7 @@ def query_attachments_for_chat(
             m.date,
             m.is_from_me,
             h.handle_id,
+            coalesce(nullif(h.contact_name, ''), h.handle_id) as handle_display,
             a.rowid as attachment_rowid,
             a.guid as attachment_guid,
             a.filename,
@@ -1958,7 +2159,9 @@ def query_attachments_for_chat(
             "message_rowid": int(row["message_rowid"]),
             "message_guid": row["message_guid"],
             "timestamp": apple_ns_to_iso(row["date"]),
-            "sender": "me" if int(row["is_from_me"] or 0) else (row["handle_id"] or "unknown"),
+            "sender": "me"
+            if int(row["is_from_me"] or 0)
+            else (row["handle_display"] or row["handle_id"] or "unknown"),
             "attachment_rowid": int(row["attachment_rowid"]),
             "attachment_guid": row["attachment_guid"],
             "filename": row["filename"] or "",
@@ -2012,7 +2215,8 @@ def query_search(con: sqlite3.Connection, query: str, limit: int) -> list[dict[s
             m.associated_message_emoji,
             m.reply_to_guid,
             m.thread_originator_guid,
-            h.handle_id
+            h.handle_id,
+            coalesce(nullif(h.contact_name, ''), h.handle_id) as handle_display
         from messages m
         join chat_messages cm on cm.message_rowid = m.rowid
         join chats c on c.rowid = cm.chat_rowid
@@ -2021,13 +2225,14 @@ def query_search(con: sqlite3.Connection, query: str, limit: int) -> list[dict[s
             lower(coalesce(m.text, '')) like ?
             or lower(coalesce(m.subject, '')) like ?
             or lower(coalesce(h.handle_id, '')) like ?
+            or lower(coalesce(h.contact_name, '')) like ?
             or lower(coalesce(c.display_name, '')) like ?
             or lower(coalesce(c.chat_identifier, '')) like ?
             or lower(coalesce(c.participant_summary, '')) like ?
         order by m.date desc, m.rowid desc
         limit ?
         """,
-        (pattern, pattern, pattern, pattern, pattern, pattern, limit),
+        (pattern, pattern, pattern, pattern, pattern, pattern, pattern, limit),
     ).fetchall()
     return [
         {
@@ -2038,6 +2243,7 @@ def query_search(con: sqlite3.Connection, query: str, limit: int) -> list[dict[s
             "message_rowid": int(row["message_rowid"]),
             "message_guid": row["message_guid"],
             "handle_id": row["handle_id"],
+            "handle_display": row["handle_display"] or row["handle_id"] or "",
             "is_from_me": int(row["is_from_me"] or 0),
             "timestamp": apple_ns_to_iso(row["date"]),
             "preview": message_preview(row),
@@ -2658,8 +2864,11 @@ def render_contacts(rows: list[dict[str, Any]]) -> str:
         return "No contacts matched."
     lines = []
     for row in rows:
+        label = row["display_name"]
+        if label != row["handle_id"]:
+            label = f"{label} ({row['handle_id']})"
         lines.append(
-            f"{row['handle_rowid']}: {row['handle_id']} | service={row['service'] or 'unknown'} "
+            f"{row['handle_rowid']}: {label} | service={row['service'] or 'unknown'} "
             f"| messages={row['message_count']} | latest={row['last_message_at'] or 'unknown'}"
         )
     return "\n".join(lines)
@@ -2693,7 +2902,7 @@ def render_messages(chat: dict[str, Any], rows: list[dict[str, Any]]) -> str:
         lines.append("No messages.")
         return "\n".join(lines)
     for row in rows:
-        actor = "me" if row["is_from_me"] else (row["handle_id"] or "unknown")
+        actor = "me" if row["is_from_me"] else (row["handle_display"] or row["handle_id"] or "unknown")
         prefix = row["kind"]
         preview = row["preview"]
         if prefix == "reaction" and row.get("reaction_label"):
@@ -2720,7 +2929,7 @@ def render_search(rows: list[dict[str, Any]]) -> str:
         return "No messages matched."
     lines = []
     for row in rows:
-        actor = "me" if row["is_from_me"] else (row["handle_id"] or "unknown")
+        actor = "me" if row["is_from_me"] else (row["handle_display"] or row["handle_id"] or "unknown")
         lines.append(
             f"{row['message_rowid']}: {row['chat_title']} | {row['timestamp'] or 'unknown'} | {actor} | {row['kind']} | {row['preview']}"
         )

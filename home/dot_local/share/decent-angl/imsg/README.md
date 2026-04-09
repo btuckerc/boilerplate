@@ -46,6 +46,8 @@ Standalone personal messaging bridge bundle for `decent-angl`.
 - The remote client path is key-only SSH with strict host-key checking, no password fallback, no keyboard-interactive auth, and no forwarded agent state.
 - The TUI is the same app surface, not a separate protocol: it shells through `imsg --json` and inherits the same transport and guardrails.
 - First launch of `imsg tui` or `imsg-tui` compiles the local Rust binary under `~/.local/share/decent-angl/imsg/tui/target`.
+- The shipped list view is conversation-first: it prefers contact names from macOS Contacts, falls back to handles only when needed, and shows recent message previews instead of raw chat identifiers.
+- Chat selection is intentionally lazy-loaded: moving through the conversation list does not reload the full transcript on every keypress.
 - Core TUI controls:
   - `Tab` switch panes
   - `/` search

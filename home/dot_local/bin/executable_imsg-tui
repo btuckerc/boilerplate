@@ -1,0 +1,27 @@
+#!/bin/sh
+set -eu
+
+app_root="${HOME}/.local/share/decent-angl/imsg/tui"
+manifest="${app_root}/Cargo.toml"
+target_dir="${app_root}/target"
+binary="${target_dir}/release/imsg-tui"
+
+if [ ! -f "$manifest" ]; then
+    echo "imsg tui bundle not found at $manifest" >&2
+    exit 1
+fi
+
+needs_build=0
+if [ ! -x "$binary" ]; then
+    needs_build=1
+elif find "$app_root/src" -type f -newer "$binary" | grep -q .; then
+    needs_build=1
+elif [ "$manifest" -nt "$binary" ]; then
+    needs_build=1
+fi
+
+if [ "$needs_build" -eq 1 ]; then
+    CARGO_TARGET_DIR="$target_dir" cargo build --manifest-path "$manifest" --release --locked
+fi
+
+exec "$binary" "$@"

@@ -7,6 +7,8 @@ Standalone personal messaging bridge bundle for `decent-angl`.
 - `imsg_app.py`: shared app entrypoint
 - `~/.local/bin/imsg`: cross-platform client surface
 - `~/.local/bin/imsgd`: local bridge/index surface on `macmini`
+- `~/.local/bin/imsg-tui`: fullscreen TUI frontend
+- `tui/`: Rust `ratatui` + `crossterm` frontend source
 - `~/.config/decent-angl/imsg.env`: rendered machine-specific config
 - `IMSG_STATE_ROOT`: local bridge state root
 
@@ -31,6 +33,8 @@ Standalone personal messaging bridge bundle for `decent-angl`.
 - `imsg send --to <recipient> --text <message>`
 - `imsg reply --message <message> --text <message>`
 - `imsg retry <job-id>`
+- `imsg tui`
+- `imsg-tui`
 - `imsgd sync`
 
 ## Notes
@@ -39,4 +43,14 @@ Standalone personal messaging bridge bundle for `decent-angl`.
 - Send history, idempotency state, and retryable outbox jobs live in the same local state root.
 - The active send backend on `macmini` is provider-backed `imsg send`, with AppleScript fallback kept behind the same app surface.
 - The remote surface is intentionally simple: `imsg` forwards to `imsgd` over Tailscale/SSH.
+- The remote client path is key-only SSH with strict host-key checking, no password fallback, no keyboard-interactive auth, and no forwarded agent state.
+- The TUI is the same app surface, not a separate protocol: it shells through `imsg --json` and inherits the same transport and guardrails.
+- First launch of `imsg tui` or `imsg-tui` compiles the local Rust binary under `~/.local/share/decent-angl/imsg/tui/target`.
+- Core TUI controls:
+  - `Tab` switch panes
+  - `/` search
+  - `c` compose
+  - `r` reply to the selected message
+  - `o` show outbox
+  - `?` help
 - The bundle is intentionally shippable on its own: one app directory, one config file, two thin wrappers.

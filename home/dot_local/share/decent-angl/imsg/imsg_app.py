@@ -1352,7 +1352,27 @@ def local_execable_exists(path_string: str) -> bool:
 
 
 def build_ssh_command(cfg: Config, remote_args: list[str]) -> list[str]:
-    command = ["ssh", "-o", "BatchMode=yes"]
+    command = [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "PubkeyAuthentication=yes",
+        "-o",
+        "PasswordAuthentication=no",
+        "-o",
+        "KbdInteractiveAuthentication=no",
+        "-o",
+        "PreferredAuthentications=publickey",
+        "-o",
+        "StrictHostKeyChecking=yes",
+        "-o",
+        "IdentitiesOnly=yes",
+        "-o",
+        "ForwardAgent=no",
+        "-o",
+        "ClearAllForwardings=yes",
+    ]
     if cfg.server_ssh_identity_file:
         identity_path = Path(os.path.expandvars(cfg.server_ssh_identity_file)).expanduser()
         if identity_path.exists():

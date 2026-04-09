@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+
+app_path="${HOME}/.local/share/decent-angl/imsg/imsg_app.py"
+
+if [ ! -f "$app_path" ]; then
+    echo "imsg app bundle not found at $app_path" >&2
+    exit 1
+fi
+
+exec python3 "$app_path" server "$@"

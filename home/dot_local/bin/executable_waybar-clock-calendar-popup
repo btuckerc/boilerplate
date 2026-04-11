@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+draw() {
+  printf '\033[H\033[2J'
+  cal -m --color=always | sed '${/^[[:space:]]*$/d;}'
+}
+
+trap 'tput cnorm 2>/dev/null || true' EXIT
+tput civis 2>/dev/null || true
+
+current_minute=''
+
+while true; do
+  next_minute="$(date '+%Y-%m-%d %H:%M')"
+  if [[ "${next_minute}" != "${current_minute}" ]]; then
+    current_minute="${next_minute}"
+    draw
+  fi
+
+  if IFS= read -rsn1 -t 0.2 key; then
+    case "${key}" in
+      q | Q | $'\e')
+        exit 0
+        ;;
+    esac
+  fi
+done

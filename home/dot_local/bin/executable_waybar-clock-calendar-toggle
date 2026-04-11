@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CLASS="org.omarchy.clockcalendar"
+TITLE="Omarchy Clock Calendar"
+POPUP_SCRIPT="$HOME/.local/bin/waybar-clock-calendar-popup"
+POPUP_WIDTH=178
+POPUP_HEIGHT=156
+EDGE_GAP=8
+
+find_existing_address() {
+  hyprctl -j clients | jq -r --arg class "$CLASS" '.[] | select(.class == $class) | .address' | head -n1
+}
+
+focused_monitor_json() {
+  hyprctl -j monitors | jq -cr '.[] | select(.focused == true)'
+}
+
+popup_target_position() {
+  local monitor_json="$1"
+  local monitor_x monitor_y monitor_width reserved_top x y
+
+  monitor_x="$(jq -r '.x' <<<"${monitor_json}")"
+  monitor_y="$(jq -r '.y' <<<"${monitor_json}")"
+  monitor_width="$(jq -r '(.width / .scale | floor)' <<<"${monitor_json}")"
+  reserved_top="$(jq -r '.reserved[1]' <<<"${monitor_json}")"
+  x="$((monitor_x + monitor_width - POPUP_WIDTH - EDGE_GAP))"
+  y="$((monitor_y + reserved_top + EDGE_GAP))"
+
+  printf '%s %s\n' "${x}" "${y}"
+}
+
+resolved_terminal_command() {
+  local -a terminal_command=()
+  mapfile -t terminal_command < <(
+    xdg-terminal-exec --print-cmd='\n' \
+      --app-id="${CLASS}" \
+      --title="${TITLE}" \
+      -- bash "${POPUP_SCRIPT}"
+  )
+
+  printf '%q ' "${terminal_command[@]}"
+}
+
+address="$(find_existing_address || true)"
+
+if [[ -n "${address:-}" && "${address}" != "null" ]]; then
+  hyprctl dispatch closewindow "address:${address}" >/dev/null
+  exit 0
+fi
+
+monitor_json="$(focused_monitor_json)"
+read -r target_x target_y <<<"$(popup_target_position "${monitor_json}")"
+launch_command="$(resolved_terminal_command)"
+
+hyprctl dispatch exec "[float; stayfocused; noanim; nodim; size ${POPUP_WIDTH} ${POPUP_HEIGHT}; move ${target_x} ${target_y}; opacity 1 1; rounding 8] ${launch_command% }" >/dev/null

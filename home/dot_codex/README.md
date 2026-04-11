@@ -21,6 +21,12 @@ Current shared skills:
 - `codex-config`: maintain the shared Codex baseline itself
 - `platform-ops`: handle Omarchy/Linux and macOS system settings, hardware preferences, and shared-vs-local config decisions
 
+## Fast Paths
+
+- Omarchy desktop and bar tweaks: start with `platform-ops`
+- Waybar workspace and top-bar changes: inspect `~/.config/waybar/config.jsonc` and `~/.config/waybar/style.css`, then apply with `omarchy-restart-waybar`
+- Omarchy roaming baseline: `omarchy-roaming-sync validate` checks sync, git tracking, and Hyprland health; `omarchy-roaming-sync sync --apply` captures live state into boilerplate and chezmoi; `omarchy-roaming-sync apply` replays that baseline on a new Omarchy machine
+
 ## What Is Not Shared
 
 - `auth.json`

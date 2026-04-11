@@ -1,0 +1,24 @@
+# kind	live_path	repo_relative_path
+# Excluded by design:
+# - ~/.config/hypr/monitors.conf
+# - ~/.config/omarchy/current/theme/*
+# - ~/.config/omarchy/current/background
+file	~/.config/hypr/autostart.conf	home/dot_config/hypr/autostart.conf
+file	~/.config/hypr/bindings.conf	home/dot_config/hypr/bindings.conf
+file	~/.config/hypr/hypridle.conf	home/dot_config/hypr/hypridle.conf
+file	~/.config/hypr/hyprland.conf	home/dot_config/hypr/hyprland.conf
+file	~/.config/hypr/hyprlock.conf	home/dot_config/hypr/hyprlock.conf
+file	~/.config/hypr/hyprsunset.conf	home/dot_config/hypr/hyprsunset.conf
+file	~/.config/hypr/input.conf	home/dot_config/hypr/input.conf
+file	~/.config/hypr/looknfeel.conf	home/dot_config/hypr/looknfeel.conf
+file	~/.config/hypr/xdph.conf	home/dot_config/hypr/xdph.conf
+file	~/.config/waybar/config.jsonc	home/dot_config/waybar/config.jsonc
+file	~/.config/waybar/style.css	home/dot_config/waybar/style.css
+file	~/.config/waybar/clock_menu.xml	home/dot_config/waybar/clock_menu.xml
+exec	~/.local/bin/waybar-clock-calendar-toggle	home/dot_local/bin/executable_waybar-clock-calendar-toggle
+exec	~/.local/bin/waybar-clock-calendar-popup	home/dot_local/bin/executable_waybar-clock-calendar-popup
+exec	~/.local/bin/hyprland-workspace-compactd	home/dot_local/bin/executable_hyprland-workspace-compactd
+file	~/.config/omarchy/branding/about.txt	home/dot_config/omarchy/branding/about.txt
+file	~/.config/omarchy/branding/screensaver.txt	home/dot_config/omarchy/branding/screensaver.txt
+file	~/.config/omarchy/extensions/menu.sh	home/dot_config/omarchy/extensions/menu.sh
+file	~/.config/omarchy/current/theme.name	home/dot_config/omarchy/current/theme.name

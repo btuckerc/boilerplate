@@ -1,0 +1,22 @@
+# Changes require a restart to take effect.
+
+export OMARCHY_PATH="${HOME}/.local/share/omarchy"
+
+# Keep Omarchy and user-managed tools visible to UWSM-launched apps.
+for dir in "$HOME/.local/bin" "$OMARCHY_PATH/bin" "$HOME/shims" "$HOME/.local/share/mise/shims"; do
+    [ -d "$dir" ] || continue
+    case ":${PATH:-}:" in
+        *:"$dir":*) ;;
+        *)
+            if [ -n "${PATH:-}" ]; then
+                PATH="$dir:$PATH"
+            else
+                PATH="$dir"
+            fi
+            ;;
+    esac
+done
+export PATH
+
+# Set default terminal and editor.
+[ -r "$HOME/.config/uwsm/default" ] && . "$HOME/.config/uwsm/default"

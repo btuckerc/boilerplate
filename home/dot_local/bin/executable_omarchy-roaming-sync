@@ -1,0 +1,306 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+MANIFEST="${OMARCHY_ROAMING_MANIFEST:-$HOME/.config/decent-angl/omarchy-roaming-manifest.tsv}"
+REPO_ROOT="${OMARCHY_ROAMING_REPO_ROOT:-$HOME/src/boilerplate}"
+CHEZMOI_ROOT="${OMARCHY_ROAMING_CHEZMOI_ROOT:-$HOME/.local/share/chezmoi}"
+
+usage() {
+  cat <<'EOF'
+Usage: omarchy-roaming-sync <status|sync|apply|list|validate> [--apply]
+
+Commands:
+  status   Show whether the manifest-managed Omarchy files are present and in sync.
+  sync     Copy live files into both the boilerplate repo and chezmoi source.
+  apply    Apply the manifest-managed files from chezmoi to the live machine.
+  list     Print the manifest entries.
+  validate Check live sync status, git tracking, script syntax, and Hyprland config health.
+
+Options:
+  --apply  After sync, run `chezmoi apply` for the manifest-managed live paths.
+EOF
+}
+
+expand_home() {
+  case "$1" in
+    "~") printf '%s\n' "$HOME" ;;
+    "~/"*) printf '%s/%s\n' "$HOME" "${1#\~/}" ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
+
+iter_manifest() {
+  local kind live_path repo_rel
+
+  while IFS=$'\t' read -r kind live_path repo_rel; do
+    [[ -z "${kind}" ]] && continue
+    [[ "${kind}" == \#* ]] && continue
+    printf '%s\t%s\t%s\n' "${kind}" "$(expand_home "${live_path}")" "${repo_rel}"
+  done <"${MANIFEST}"
+}
+
+mode_for_kind() {
+  case "$1" in
+    exec) printf '%s\n' 755 ;;
+    file) printf '%s\n' 644 ;;
+    *)
+      printf 'Unknown manifest kind: %s\n' "$1" >&2
+      exit 1
+      ;;
+  esac
+}
+
+list_manifest() {
+  iter_manifest | while IFS=$'\t' read -r kind live_path repo_rel; do
+    printf '%-4s %s -> %s\n' "${kind}" "${live_path}" "${repo_rel}"
+  done
+}
+
+repo_file_is_tracked() {
+  git -C "${REPO_ROOT}" ls-files --error-unmatch "$1" >/dev/null 2>&1
+}
+
+path_has_segment() {
+  local path_value="$1"
+  local segment="$2"
+
+  case ":${path_value}:" in
+    *:"${segment}":*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+syntax_check_exec() {
+  local repo_path="$1"
+  local shebang
+
+  shebang="$(head -n 1 "${repo_path}" 2>/dev/null || true)"
+  case "${shebang}" in
+    '#!'*python*)
+      python3 -c 'import pathlib, py_compile, sys; py_compile.compile(str(pathlib.Path(sys.argv[1])), doraise=True)' "${repo_path}"
+      ;;
+    '#!'*)
+      bash -n "${repo_path}"
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+}
+
+status_manifest() {
+  local failures=0
+  local repo_path chezmoi_path
+
+  while IFS=$'\t' read -r _kind live_path repo_rel; do
+    repo_path="${REPO_ROOT}/${repo_rel}"
+    chezmoi_path="${CHEZMOI_ROOT}/${repo_rel}"
+
+    if [[ ! -e "${live_path}" ]]; then
+      printf 'MISSING live %s\n' "${live_path}"
+      failures=1
+      continue
+    fi
+
+    if [[ ! -e "${repo_path}" ]]; then
+      printf 'MISSING repo %s\n' "${repo_path}"
+      failures=1
+      continue
+    fi
+
+    if [[ ! -e "${chezmoi_path}" ]]; then
+      printf 'MISSING chezmoi %s\n' "${chezmoi_path}"
+      failures=1
+      continue
+    fi
+
+    if cmp -s "${live_path}" "${repo_path}" && cmp -s "${repo_path}" "${chezmoi_path}"; then
+      printf 'OK      %s\n' "${live_path}"
+    else
+      printf 'DRIFT   %s\n' "${live_path}"
+      failures=1
+    fi
+  done < <(iter_manifest)
+
+  return "${failures}"
+}
+
+validate_manifest() {
+  local failures=0
+  local repo_path
+  local output
+  local env_path
+  local shell_path
+  local systemd_path
+
+  status_manifest || failures=1
+
+  while IFS=$'\t' read -r kind _live_path repo_rel; do
+    repo_path="${REPO_ROOT}/${repo_rel}"
+
+    if repo_file_is_tracked "${repo_rel}"; then
+      printf 'TRACKED %s\n' "${repo_rel}"
+    else
+      printf 'UNTRACKD %s\n' "${repo_rel}"
+      failures=1
+    fi
+
+    if [[ "${kind}" == "exec" ]] && [[ -f "${repo_path}" ]]; then
+      if syntax_check_exec "${repo_path}"; then
+        printf 'SYNTAX  %s\n' "${repo_rel}"
+      else
+        printf 'BROKEN  %s\n' "${repo_rel}"
+        failures=1
+      fi
+    fi
+  done < <(iter_manifest)
+
+  env_path="${REPO_ROOT}/home/dot_config/uwsm/env"
+  if [[ -f "${env_path}" ]]; then
+    if bash -n "${env_path}"; then
+      printf 'SYNTAX  %s\n' "home/dot_config/uwsm/env"
+    else
+      printf 'BROKEN  %s\n' "home/dot_config/uwsm/env"
+      failures=1
+    fi
+  fi
+
+  output="$(env -0 2>/dev/null | tr '\0' '\n' | grep '^PATH=' || true)"
+  if [[ -n "${output}" ]]; then
+    printf 'ENV     ok\n'
+  else
+    printf 'ENV     broken\n'
+    failures=1
+  fi
+
+  shell_path="$(bash -lc 'printf "%s" "$PATH"' 2>/dev/null || true)"
+  if [[ -n "${shell_path}" ]] \
+    && path_has_segment "${shell_path}" "${HOME}/.local/bin" \
+    && path_has_segment "${shell_path}" "${HOME}/.local/share/omarchy/bin"; then
+    printf 'SHELL   ok\n'
+  else
+    printf 'SHELL   broken\n'
+    failures=1
+  fi
+
+  output="$(systemctl --user show-environment 2>/dev/null | grep '^PATH=' || true)"
+  if [[ -n "${output}" ]]; then
+    systemd_path="${output#PATH=}"
+    if path_has_segment "${systemd_path}" "${HOME}/.local/bin" \
+      && path_has_segment "${systemd_path}" "${HOME}/.local/share/omarchy/bin"; then
+      printf 'UWSM    ok\n'
+    else
+      printf 'UWSM    broken\n'
+      failures=1
+    fi
+  else
+    printf 'UWSM    skipped\n'
+  fi
+
+  if [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]] && command -v hyprctl >/dev/null 2>&1; then
+    output="$(hyprctl configerrors 2>/dev/null || true)"
+    if [[ -z "${output}" ]]; then
+      printf 'HYPR    clean\n'
+    else
+      case "${output}" in
+        "Couldn't set socket timeout ("*)
+          printf 'HYPR    skipped\n'
+          ;;
+        *)
+          printf 'HYPR    errors\n'
+          printf '%s\n' "${output}"
+          failures=1
+          ;;
+      esac
+    fi
+  else
+    printf 'HYPR    skipped\n'
+  fi
+
+  return "${failures}"
+}
+
+sync_manifest() {
+  local apply_after="${1:-false}"
+  local mode repo_path chezmoi_path
+  local failures=0
+  local -a live_paths=()
+
+  while IFS=$'\t' read -r kind live_path repo_rel; do
+    if [[ ! -e "${live_path}" ]]; then
+      printf 'MISSING live %s\n' "${live_path}" >&2
+      failures=1
+      continue
+    fi
+
+    mode="$(mode_for_kind "${kind}")"
+    repo_path="${REPO_ROOT}/${repo_rel}"
+    chezmoi_path="${CHEZMOI_ROOT}/${repo_rel}"
+
+    mkdir -p "$(dirname "${repo_path}")" "$(dirname "${chezmoi_path}")"
+    install -m "${mode}" "${live_path}" "${repo_path}"
+    install -m "${mode}" "${live_path}" "${chezmoi_path}"
+    live_paths+=("${live_path}")
+    printf 'SYNC    %s\n' "${live_path}"
+  done < <(iter_manifest)
+
+  (( failures == 0 )) || return 1
+
+  if [[ "${apply_after}" == "true" ]]; then
+    chezmoi apply "${live_paths[@]}"
+  fi
+}
+
+apply_manifest() {
+  local -a live_paths=()
+  local live_path
+
+  while IFS=$'\t' read -r _kind live_path _repo_rel; do
+    live_paths+=("${live_path}")
+  done < <(iter_manifest)
+
+  chezmoi apply "${live_paths[@]}"
+}
+
+main() {
+  local command="${1:-status}"
+  local apply_after_sync=false
+
+  [[ $# -gt 0 ]] && shift
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --apply)
+        apply_after_sync=true
+        ;;
+      -h | --help)
+        usage
+        exit 0
+        ;;
+      *)
+        printf 'Unknown option: %s\n' "$1" >&2
+        usage >&2
+        exit 1
+        ;;
+    esac
+    shift
+  done
+
+  case "${command}" in
+    status) status_manifest ;;
+    sync) sync_manifest "${apply_after_sync}" ;;
+    apply) apply_manifest ;;
+    list) list_manifest ;;
+    validate) validate_manifest ;;
+    -h | --help)
+      usage
+      ;;
+    *)
+      printf 'Unknown command: %s\n' "${command}" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"

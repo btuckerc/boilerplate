@@ -72,20 +72,20 @@ If chezmoi is missing, install it:
 brew install chezmoi
 
 # Linux
-curl -fsSL https://chezmoi.io/get | sh
+BINDIR="$HOME/.local/bin" sh -c "$(curl -fsLS get.chezmoi.io)"
 ```
 
 ### Initial Setup
 
 **One-line install (fresh system)**:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/btuckerc/boilerplate/main/setup | bash
+sh -c "$(curl -fsLS get.chezmoi.io)" -- init --apply btuckerc/boilerplate
 ```
 
 **Local repository setup (if already cloned)**:
 ```bash
 cd /path/to/boilerplate
-chezmoi init --source="$(pwd)/home" --apply
+chezmoi init --source="$(pwd)" --apply
 ```
 
 **Expected output**:

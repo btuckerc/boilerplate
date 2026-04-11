@@ -1,6 +1,6 @@
 # Cross-Platform Dotfiles
 
-Modern, portable dotfiles managed with [chezmoi](https://chezmoi.io) and [mise](https://mise.jdx.dev), supporting macOS (zsh) and Linux (bash).
+Modern, portable dotfiles managed with [chezmoi](https://chezmoi.io) and [mise](https://mise.jdx.dev), supporting macOS and Linux with machine-specific templates where needed.
 
 ## Features
 
@@ -14,13 +14,15 @@ Modern, portable dotfiles managed with [chezmoi](https://chezmoi.io) and [mise](
 
 ## Quick Start
 
-### One-Line Setup
+### Preferred Bootstrap
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/btuckerc/boilerplate/main/setup | bash
+sh -c "$(curl -fsLS get.chezmoi.io)" -- init --apply btuckerc/boilerplate
 ```
 
-Or clone and run:
+That uses chezmoi's official installer and applies this repo in one step.
+
+If you already cloned the repo locally:
 
 ```bash
 git clone https://github.com/btuckerc/boilerplate.git
@@ -28,17 +30,18 @@ cd boilerplate
 ./setup
 ```
 
-That's it! The setup script will:
-1. Set zsh as your default shell (if available)
-2. Install chezmoi (via mise, brew, or direct download)
-3. Apply all dotfiles to your home directory
-4. Install mise-managed tools automatically (chezmoi, starship, fzf, ripgrep, bat, eza, fd, yazi, node, python, go)
-5. Set up shell configuration
+That's it. The bootstrap path will:
+1. Install `chezmoi` if needed
+2. Apply dotfiles from this repo or your local checkout
+3. Run the OS-specific one-time setup hooks
+4. Install mise-managed tools automatically
+
+It does not force a shell change.
 
 ### Manual Setup
 
 ```bash
-# If you already have chezmoi and mise installed
+# Remote repo
 chezmoi init --apply https://github.com/btuckerc/boilerplate.git
 
 # Or if you cloned this repo locally

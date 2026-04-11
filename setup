@@ -1,63 +1,67 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "Starting dotfiles setup..."
-echo ""
+DOTFILES_REPO="${DOTFILES_REPO:-https://github.com/btuckerc/boilerplate.git}"
+CHEZMOI_INSTALL_URL="${CHEZMOI_INSTALL_URL:-https://get.chezmoi.io}"
+CHEZMOI_BIN_DIR="${CHEZMOI_BIN_DIR:-$HOME/.local/bin}"
 
-# Check for Homebrew first (needed for chezmoi, mise, and packages)
-if ! command -v brew >/dev/null 2>&1; then
-    echo "Homebrew not found (important for automatic setup)"
-    read -p "Would you like to install Homebrew? [Y/n] " -r resp
-    if [[ ! "${resp,,}" =~ ^n ]]; then
-        echo "Installing Homebrew..."
-        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-        
-        if [[ $(uname -m) == "arm64" ]]; then
-            eval "$(/opt/homebrew/bin/brew shellenv)"
-        else
-            eval "$(/usr/local/bin/brew shellenv)"
-        fi
-        echo "✓ Homebrew installed"
+export PATH="${CHEZMOI_BIN_DIR}:$PATH"
+
+log() {
+    printf '%s\n' "$*"
+}
+
+detect_local_source() {
+    local src dir
+
+    src="${BASH_SOURCE[0]:-$0}"
+    [ -n "${src}" ] || return 1
+    [ -f "${src}" ] || return 1
+
+    dir="$(cd -- "$(dirname -- "${src}")" && pwd -P)"
+    [ -f "${dir}/.chezmoiroot" ] || return 1
+
+    printf '%s\n' "${dir}"
+}
+
+install_chezmoi() {
+    if command -v chezmoi >/dev/null 2>&1; then
+        return 0
+    fi
+
+    mkdir -p "${CHEZMOI_BIN_DIR}"
+    log "Installing chezmoi to ${CHEZMOI_BIN_DIR}..."
+    BINDIR="${CHEZMOI_BIN_DIR}" sh -c "$(curl -fsLS "${CHEZMOI_INSTALL_URL}")"
+}
+
+apply_dotfiles() {
+    local local_source="${1:-}"
+
+    if [ -n "${local_source}" ]; then
+        log "Applying dotfiles from local checkout: ${local_source}"
+        chezmoi init --source="${local_source}" --apply
+        return
+    fi
+
+    log "Applying dotfiles from ${DOTFILES_REPO}"
+    chezmoi init --apply "${DOTFILES_REPO}"
+}
+
+main() {
+    local local_source=""
+
+    if local_source="$(detect_local_source 2>/dev/null)"; then
+        :
     else
-        echo "Skipped Homebrew installation"
+        local_source=""
     fi
-    echo ""
-fi
 
-# Set zsh as default shell if available
-if command -v zsh >/dev/null 2>&1; then
-    if [ "$SHELL" != "$(command -v zsh)" ]; then
-        echo "Setting zsh as default shell..."
-        sudo chsh -s "$(command -v zsh)" "$USER"
-        echo "Default shell set to zsh (restart shell to apply)"
-    fi
-fi
+    log "Starting boilerplate bootstrap..."
+    install_chezmoi
+    apply_dotfiles "${local_source}"
 
-DOTFILES_REPO="https://github.com/btuckerc/boilerplate.git"
+    log ""
+    log "Bootstrap complete. Restart your shell or run: exec ${SHELL:-/bin/sh}"
+}
 
-# Install chezmoi if not present
-if command -v chezmoi >/dev/null 2>&1; then
-    echo "chezmoi already installed"
-elif command -v brew >/dev/null 2>&1; then
-    echo "Installing chezmoi via Homebrew..."
-    brew install chezmoi
-elif command -v mise >/dev/null 2>&1; then
-    echo "Installing chezmoi via mise..."
-    mise use --global chezmoi@latest
-    eval "$(mise activate bash)"
-elif command -v apt-get >/dev/null 2>&1; then
-    echo "Installing chezmoi via apt..."
-    sudo apt-get install -y chezmoi
-else
-    echo "Installing chezmoi via install script..."
-    sh -c "$(curl -fsLS get.chezmoi.io)" -- init --apply "$DOTFILES_REPO"
-    echo ""
-    echo "Setup complete! Restart your shell or run: exec $SHELL"
-    exit 0
-fi
-
-echo "Applying dotfiles..."
-chezmoi init --apply "$DOTFILES_REPO"
-
-echo ""
-echo "Setup complete! Restart your shell or run: exec $SHELL"
+main "$@"

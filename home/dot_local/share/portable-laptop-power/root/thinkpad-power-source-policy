@@ -1,0 +1,165 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+readonly AC_ONLINE_PATH="/sys/class/power_supply/AC/online"
+readonly CONFIG_FILE="/etc/portable-laptop-power.conf"
+readonly PLATFORM_PROFILE_PATH="/sys/firmware/acpi/platform_profile"
+
+CHARGE_MODE="desk"
+DESK_START_THRESHOLD="80"
+DESK_STOP_THRESHOLD="85"
+TRAVEL_START_THRESHOLD="95"
+TRAVEL_STOP_THRESHOLD="100"
+AC_POWER_PROFILE="performance"
+BAT_POWER_PROFILE="power-saver"
+AC_PLATFORM_PROFILE="performance"
+BAT_PLATFORM_PROFILE="low-power"
+AC_WIFI_POWER_SAVE="off"
+BAT_WIFI_POWER_SAVE="on"
+
+log_warn() {
+    printf 'thinkpad-power-source-policy: %s\n' "$*" >&2
+}
+
+if [[ -r "$CONFIG_FILE" ]]; then
+    # shellcheck disable=SC1090
+    . "$CONFIG_FILE"
+fi
+
+write_value_if_needed() {
+    local path="$1"
+    local target="$2"
+    local current
+
+    [[ -e "$path" ]] || return 0
+    [[ -w "$path" ]] || return 0
+
+    if ! current="$(<"$path" 2>/dev/null)"; then
+        log_warn "unable to read $path"
+        return 0
+    fi
+
+    if [[ "$current" != "$target" ]]; then
+        if ! printf '%s' "$target" | tee "$path" >/dev/null 2>&1; then
+            log_warn "unable to write $target to $path"
+        fi
+    fi
+}
+
+resolve_thresholds() {
+    case "$CHARGE_MODE" in
+        desk)
+            BATTERY_START_THRESHOLD="$DESK_START_THRESHOLD"
+            BATTERY_STOP_THRESHOLD="$DESK_STOP_THRESHOLD"
+            ;;
+        travel)
+            BATTERY_START_THRESHOLD="$TRAVEL_START_THRESHOLD"
+            BATTERY_STOP_THRESHOLD="$TRAVEL_STOP_THRESHOLD"
+            ;;
+        *)
+            log_warn "unknown CHARGE_MODE=$CHARGE_MODE; defaulting to desk"
+            BATTERY_START_THRESHOLD="$DESK_START_THRESHOLD"
+            BATTERY_STOP_THRESHOLD="$DESK_STOP_THRESHOLD"
+            ;;
+    esac
+}
+
+apply_battery_thresholds() {
+    local battery_dir
+
+    for battery_dir in /sys/class/power_supply/BAT*; do
+        [[ -d "$battery_dir" ]] || continue
+        if [[ "$ac_online" == "1" ]]; then
+            write_value_if_needed "$battery_dir/charge_control_start_threshold" "$BATTERY_START_THRESHOLD"
+            write_value_if_needed "$battery_dir/charge_start_threshold" "$BATTERY_START_THRESHOLD"
+        fi
+        write_value_if_needed "$battery_dir/charge_control_end_threshold" "$BATTERY_STOP_THRESHOLD"
+        write_value_if_needed "$battery_dir/charge_stop_threshold" "$BATTERY_STOP_THRESHOLD"
+    done
+}
+
+set_power_profile() {
+    local target_profile="$1"
+    local target_platform_profile="$2"
+    local current_profile
+
+    if command -v powerprofilesctl >/dev/null 2>&1; then
+        current_profile="$(powerprofilesctl get 2>/dev/null || true)"
+        if [[ -n "$current_profile" ]]; then
+            if [[ "$current_profile" != "$target_profile" ]]; then
+                if ! powerprofilesctl set "$target_profile" >/dev/null 2>&1; then
+                    log_warn "unable to set power profile to $target_profile"
+                fi
+            fi
+            return 0
+        fi
+    fi
+
+    write_value_if_needed "$PLATFORM_PROFILE_PATH" "$target_platform_profile"
+}
+
+set_wifi_power_save() {
+    local target_wifi_power_save="$1"
+    local wireless_dir iface current_wifi_power_save
+
+    command -v iw >/dev/null 2>&1 || return 0
+
+    for wireless_dir in /sys/class/net/*/wireless; do
+        [[ -d "$wireless_dir" ]] || continue
+        iface="$(basename "$(dirname "$wireless_dir")")"
+        current_wifi_power_save="$(
+            { iw dev "$iface" get power_save 2>/dev/null || true; } |
+                awk '/Power save:/ { print tolower($3) }'
+        )"
+        if [[ -n "$current_wifi_power_save" && "$current_wifi_power_save" != "$target_wifi_power_save" ]]; then
+            if ! iw dev "$iface" set power_save "$target_wifi_power_save" >/dev/null 2>&1; then
+                log_warn "unable to set Wi-Fi power_save=$target_wifi_power_save for $iface"
+            fi
+        fi
+    done
+}
+
+stop_idle_socket_activated_services_on_battery() {
+    if [[ "$ac_online" == "1" ]]; then
+        return
+    fi
+
+    if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet docker.service 2>/dev/null; then
+        if command -v docker >/dev/null 2>&1 && [[ -z "$(docker ps -q 2>/dev/null)" ]]; then
+            if ! systemctl stop docker.service >/dev/null 2>&1; then
+                log_warn "unable to stop docker.service"
+            fi
+        fi
+    fi
+
+    if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet cups.service 2>/dev/null; then
+        if command -v lpstat >/dev/null 2>&1 && ! lpstat -W not-completed -o 2>/dev/null | grep -q .; then
+            if ! systemctl stop cups.service >/dev/null 2>&1; then
+                log_warn "unable to stop cups.service"
+            fi
+        fi
+    fi
+}
+
+if [[ ! -r "$AC_ONLINE_PATH" ]]; then
+    exit 0
+fi
+
+resolve_thresholds
+
+ac_online="$(<"$AC_ONLINE_PATH")"
+target_profile="$AC_POWER_PROFILE"
+target_platform_profile="$AC_PLATFORM_PROFILE"
+target_wifi_power_save="$AC_WIFI_POWER_SAVE"
+
+if [[ "$ac_online" != "1" ]]; then
+    target_profile="$BAT_POWER_PROFILE"
+    target_platform_profile="$BAT_PLATFORM_PROFILE"
+    target_wifi_power_save="$BAT_WIFI_POWER_SAVE"
+fi
+
+set_power_profile "$target_profile" "$target_platform_profile"
+set_wifi_power_save "$target_wifi_power_save"
+apply_battery_thresholds
+stop_idle_socket_activated_services_on_battery

@@ -1,5 +1,5 @@
 -- Converted Neovim Theme
--- Generated from Kitty theme: /Users/tucker/Documents/GitHub/boilerplate/config/kitty/current-theme.conf
+-- Generated from Kitty theme: home/dot_config/kitty/current-theme.conf
 -- Generated on: Thu Dec 26 17:45:36 EST 2024
 
 local M = {}

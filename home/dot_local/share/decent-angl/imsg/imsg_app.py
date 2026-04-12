@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
+import errno
+import fcntl
 import hashlib
 import json
 import os
@@ -27,6 +30,11 @@ DEFAULT_SERVER_SSH_DEST = "admin@macmini"
 DEFAULT_REMOTE_COMMAND = "~/.local/bin/imsgd"
 DEFAULT_LIMIT = 40
 DEFAULT_BACKFILL_ROWS = 4000
+DEFAULT_SYNC_LOCK_NAME = "sync.lock"
+DEFAULT_SYNC_BUSY_TIMEOUT_MS = 5000
+DEFAULT_SEND_WAIT_SECONDS = 60
+DEFAULT_SEND_POLL_INTERVAL_SECONDS = 1.0
+SEND_WORKER_LABEL = "com.decentangl.imsg.send-worker"
 
 REACTION_LABELS = {
     2000: "Loved",
@@ -79,6 +87,10 @@ class Config:
     duplicate_window_seconds: int
     quiet_hours_start: str
     quiet_hours_end: str
+
+
+class LockBusyError(RuntimeError):
+    pass
 
 
 def load_env_file(path: Path) -> None:
@@ -227,6 +239,29 @@ def ensure_parent(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
 
 
+def state_lock_path(cfg: Config, name: str) -> Path:
+    return cfg.state_root / name
+
+
+@contextmanager
+def exclusive_lock(path: Path, *, blocking: bool) -> Any:
+    ensure_parent(path)
+    with path.open("a+", encoding="utf-8") as handle:
+        flags = fcntl.LOCK_EX
+        if not blocking:
+            flags |= fcntl.LOCK_NB
+        try:
+            fcntl.flock(handle.fileno(), flags)
+        except OSError as exc:
+            if exc.errno in {errno.EACCES, errno.EAGAIN}:
+                raise LockBusyError(str(path)) from exc
+            raise
+        try:
+            yield handle
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
 def now_utc_epoch() -> int:
     return int(time.time())
 
@@ -362,15 +397,24 @@ def row_value(row: sqlite3.Row | dict[str, Any], key: str, default: Any = None) 
 
 
 def sqlite_connect_ro(path: Path) -> sqlite3.Connection:
-    con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    con = sqlite3.connect(
+        f"file:{path}?mode=ro",
+        uri=True,
+        timeout=DEFAULT_SYNC_BUSY_TIMEOUT_MS / 1000,
+    )
     con.row_factory = sqlite3.Row
+    con.execute(f"pragma busy_timeout = {DEFAULT_SYNC_BUSY_TIMEOUT_MS}")
+    con.execute("pragma query_only = on")
     return con
 
 
 def sqlite_connect_rw(path: Path) -> sqlite3.Connection:
     ensure_parent(path)
-    con = sqlite3.connect(path)
+    con = sqlite3.connect(path, timeout=DEFAULT_SYNC_BUSY_TIMEOUT_MS / 1000)
     con.row_factory = sqlite3.Row
+    con.execute(f"pragma busy_timeout = {DEFAULT_SYNC_BUSY_TIMEOUT_MS}")
+    con.execute("pragma journal_mode = wal")
+    con.execute("pragma foreign_keys = on")
     return con
 
 
@@ -799,6 +843,8 @@ def insert_send_job(
     parent_message_guid: str | None,
     parent_preview: str | None,
     status: str,
+    provider_status: str | None = None,
+    provider_detail: str | None = None,
     blocked_reason: str | None = None,
 ) -> int:
     timestamp = now_utc_epoch()
@@ -811,8 +857,8 @@ def insert_send_job(
                 destination_chat_rowid, destination_chat_guid,
                 service_type, message_text, idempotency_key, duplicate_key,
                 status, dry_run, parent_message_rowid, parent_message_guid, parent_preview,
-                blocked_reason
-            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                provider_status, provider_detail, blocked_reason
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 timestamp,
@@ -831,6 +877,8 @@ def insert_send_job(
                 parent_message_rowid,
                 parent_message_guid,
                 parent_preview,
+                provider_status,
+                provider_detail,
                 blocked_reason,
             ),
         )
@@ -959,6 +1007,32 @@ def chats_for_handle(con: sqlite3.Connection, handle_rowid: int) -> list[sqlite3
     ).fetchall()
 
 
+def direct_recipient_for_chat(
+    con: sqlite3.Connection,
+    chat_row: sqlite3.Row,
+) -> str | None:
+    rows = con.execute(
+        """
+        select distinct h.handle_id
+        from handles h
+        join chat_handles ch on ch.handle_rowid = h.rowid
+        where ch.chat_rowid = ?
+          and coalesce(h.handle_id, '') <> ''
+        order by h.rowid
+        """,
+        (int(chat_row["rowid"]),),
+    ).fetchall()
+    handles = [str(row["handle_id"]).strip() for row in rows if str(row["handle_id"]).strip()]
+    if len(handles) == 1:
+        return handles[0]
+    guid = row_value(chat_row, "guid", "").strip()
+    if guid.startswith("any;") and ";" in guid:
+        candidate = guid.rsplit(";", 1)[-1].strip()
+        if candidate and candidate != guid:
+            return candidate
+    return None
+
+
 def resolve_send_target(
     con: sqlite3.Connection,
     *,
@@ -967,16 +1041,18 @@ def resolve_send_target(
 ) -> dict[str, Any]:
     if chat_query:
         chat_row = resolve_single_chat(con, chat_query)
+        direct_recipient = direct_recipient_for_chat(con, chat_row)
         return {
             "mode": "chat",
             "recipient_input": recipient_input or "",
-            "resolved_recipient": chat_title(chat_row),
+            "resolved_recipient": direct_recipient or chat_title(chat_row),
             "chat_rowid": int(chat_row["rowid"]),
             "chat_guid": chat_row["guid"],
             "chat_title": chat_title(chat_row),
             "participant_summary": row_value(chat_row, "participant_summary", "") or "",
             "known_contact": True,
             "ambiguous_candidates": [],
+            "direct_recipient": direct_recipient,
         }
 
     if not recipient_input:
@@ -996,6 +1072,7 @@ def resolve_send_target(
             "participant_summary": row_value(chat_row, "participant_summary", "") if chat_row is not None else exact["handle_id"],
             "known_contact": int(exact["message_count"] or 0) > 0,
             "ambiguous_candidates": [],
+            "direct_recipient": exact["handle_id"],
         }
 
     candidates = query_contacts(con, recipient_input, 5)
@@ -1010,6 +1087,7 @@ def resolve_send_target(
             "participant_summary": "",
             "known_contact": False,
             "ambiguous_candidates": candidates,
+            "direct_recipient": None,
         }
     if len(candidates) == 1:
         resolved = candidates[0]["handle_id"]
@@ -1027,6 +1105,7 @@ def resolve_send_target(
                 "participant_summary": row_value(chat_row, "participant_summary", "") if chat_row is not None else resolved,
                 "known_contact": int(exact["message_count"] or 0) > 0,
                 "ambiguous_candidates": [],
+                "direct_recipient": resolved,
             }
 
     return {
@@ -1039,6 +1118,7 @@ def resolve_send_target(
         "participant_summary": recipient_input,
         "known_contact": False,
         "ambiguous_candidates": [],
+        "direct_recipient": recipient_input,
     }
 
 
@@ -1416,7 +1496,13 @@ def refresh_derived_fields(index: sqlite3.Connection) -> None:
     )
 
 
-def sync_index(cfg: Config, rebuild: bool = False, quiet: bool = False) -> dict[str, Any]:
+def sync_index(
+    cfg: Config,
+    rebuild: bool = False,
+    quiet: bool = False,
+    *,
+    nonblocking: bool = False,
+) -> dict[str, Any]:
     if cfg.chat_db is None:
         raise SystemExit("IMSG_CHAT_DB is not configured on this machine.")
     if not cfg.chat_db.exists():
@@ -1426,50 +1512,54 @@ def sync_index(cfg: Config, rebuild: bool = False, quiet: bool = False) -> dict[
     state_dir = cfg.index_db.parent
     state_dir.mkdir(parents=True, exist_ok=True)
 
-    with sqlite_connect_ro(cfg.chat_db) as source:
-        with sqlite_connect_rw(cfg.index_db) as index:
-            initialize_index_schema(index)
-            if rebuild:
-                index.executescript(
-                    """
-                    delete from chat_messages;
-                    delete from message_attachments;
-                    delete from attachments;
-                    delete from messages;
-                    delete from chat_handles;
-                    delete from chats;
-                    delete from handles;
-                    """
+    with exclusive_lock(
+        state_lock_path(cfg, DEFAULT_SYNC_LOCK_NAME),
+        blocking=not nonblocking,
+    ):
+        with sqlite_connect_ro(cfg.chat_db) as source:
+            with sqlite_connect_rw(cfg.index_db) as index:
+                initialize_index_schema(index)
+                if rebuild:
+                    index.executescript(
+                        """
+                        delete from chat_messages;
+                        delete from message_attachments;
+                        delete from attachments;
+                        delete from messages;
+                        delete from chat_handles;
+                        delete from chats;
+                        delete from handles;
+                        """
+                    )
+                    meta_set(index, "last_message_rowid", "0")
+
+                source_rowid = source_latest_message_rowid(source)
+                source_date = source_latest_message_date(source)
+                previous_rowid = int(meta_get(index, "last_message_rowid", "0") or "0")
+                anchor_rowid = 1 if rebuild else max(1, previous_rowid - cfg.sync_backfill_rows)
+
+                started_at = datetime.now(timezone.utc).isoformat()
+
+                refresh_handles(source, index)
+                enrich_handles_from_addressbook(index)
+                refresh_chats(source, index)
+                refresh_chat_handles(source, index)
+                message_summary = refresh_messages_and_attachments(
+                    source,
+                    index,
+                    cfg.attachments_root,
+                    anchor_rowid,
                 )
-                meta_set(index, "last_message_rowid", "0")
+                refresh_derived_fields(index)
 
-            source_rowid = source_latest_message_rowid(source)
-            source_date = source_latest_message_date(source)
-            previous_rowid = int(meta_get(index, "last_message_rowid", "0") or "0")
-            anchor_rowid = 1 if rebuild else max(1, previous_rowid - cfg.sync_backfill_rows)
-
-            started_at = datetime.now(timezone.utc).isoformat()
-
-            refresh_handles(source, index)
-            enrich_handles_from_addressbook(index)
-            refresh_chats(source, index)
-            refresh_chat_handles(source, index)
-            message_summary = refresh_messages_and_attachments(
-                source,
-                index,
-                cfg.attachments_root,
-                anchor_rowid,
-            )
-            refresh_derived_fields(index)
-
-            meta_set(index, "last_message_rowid", str(source_rowid))
-            meta_set(index, "last_source_message_date", str(source_date))
-            meta_set(index, "last_sync_started_at", started_at)
-            meta_set(index, "last_sync_completed_at", datetime.now(timezone.utc).isoformat())
-            meta_set(index, "chat_db_path", str(cfg.chat_db))
-            meta_set(index, "account_hint", cfg.account_hint)
-            meta_set(index, "phone_account_hint", cfg.phone_account_hint)
-            index.commit()
+                meta_set(index, "last_message_rowid", str(source_rowid))
+                meta_set(index, "last_source_message_date", str(source_date))
+                meta_set(index, "last_sync_started_at", started_at)
+                meta_set(index, "last_sync_completed_at", datetime.now(timezone.utc).isoformat())
+                meta_set(index, "chat_db_path", str(cfg.chat_db))
+                meta_set(index, "account_hint", cfg.account_hint)
+                meta_set(index, "phone_account_hint", cfg.phone_account_hint)
+                index.commit()
 
     summary = {
         "chat_db": str(cfg.chat_db),
@@ -1483,6 +1573,28 @@ def sync_index(cfg: Config, rebuild: bool = False, quiet: bool = False) -> dict[
     if not quiet:
         print(json.dumps(summary, ensure_ascii=False, indent=2))
     return summary
+
+
+def sync_index_safe(
+    cfg: Config,
+    *,
+    rebuild: bool = False,
+    quiet: bool = False,
+    nonblocking: bool = False,
+) -> dict[str, Any] | None:
+    try:
+        return sync_index(
+            cfg,
+            rebuild=rebuild,
+            quiet=quiet,
+            nonblocking=nonblocking,
+        )
+    except LockBusyError:
+        return None
+    except sqlite3.OperationalError as exc:
+        if "database is locked" in str(exc).lower():
+            return None
+        raise
 
 
 def local_execable_exists(path_string: str) -> bool:
@@ -1541,7 +1653,7 @@ def forward_client_to_server(cfg: Config, argv: list[str]) -> int:
 
 def open_index_for_query(cfg: Config, sync_first: bool) -> sqlite3.Connection:
     if sync_first:
-        sync_index(cfg, quiet=True)
+        sync_index_safe(cfg, quiet=True, nonblocking=True)
     if not cfg.index_db.exists():
         raise SystemExit(f"Index database does not exist: {cfg.index_db}. Run imsgd sync first.")
     con = sqlite_connect_ro(cfg.index_db)
@@ -1556,11 +1668,18 @@ def reaction_label(associated_type: int, emoji: str | None) -> str | None:
     return REACTION_LABELS.get(associated_type, f"reaction_{associated_type}")
 
 
+def is_threaded_reply(row: sqlite3.Row | dict[str, Any]) -> bool:
+    return bool(
+        normalize_guid_reference(row_value(row, "thread_originator_guid"))
+        or row_value(row, "thread_originator_part")
+    )
+
+
 def message_kind(row: sqlite3.Row | dict[str, Any]) -> str:
     associated_type = int(row_value(row, "associated_message_type", 0) or 0)
     if associated_type != 0:
         return "reaction"
-    if row_value(row, "reply_to_guid") or row_value(row, "thread_originator_guid"):
+    if is_threaded_reply(row):
         return "reply"
     if int(row_value(row, "date_retracted", 0) or 0) > 0:
         return "retracted"
@@ -1943,12 +2062,22 @@ def query_messages_for_chat(
     chat_rowid: int,
     limit: int,
     newer_than_date: int | None = None,
+    before_date: int | None = None,
+    before_rowid: int | None = None,
 ) -> list[dict[str, Any]]:
     where_new = ""
+    where_before = ""
     params: list[Any] = [chat_rowid]
     if newer_than_date is not None:
         where_new = "and m.date > ?"
         params.append(newer_than_date)
+    if before_date is not None:
+        if before_rowid is not None:
+            where_before = "and (m.date < ? or (m.date = ? and m.rowid < ?))"
+            params.extend([before_date, before_date, before_rowid])
+        else:
+            where_before = "and m.date < ?"
+            params.append(before_date)
     params.append(limit)
     rows = con.execute(
         f"""
@@ -1990,6 +2119,7 @@ def query_messages_for_chat(
         left join handles h on h.rowid = m.handle_rowid
         where cm.chat_rowid = ?
         {where_new}
+        {where_before}
         order by m.date desc, m.rowid desc
         limit ?
         """,
@@ -1997,19 +2127,17 @@ def query_messages_for_chat(
     ).fetchall()
     message_ids = [int(row["rowid"]) for row in rows]
     attachments = attachment_map_for_messages(con, message_ids)
-    parent_guids = {
-        normalize_guid_reference(
-            row["reply_to_guid"]
-            or row["thread_originator_guid"]
-            or row["associated_message_guid_normalized"]
-        )
-        for row in rows
-        if normalize_guid_reference(
-            row["reply_to_guid"]
-            or row["thread_originator_guid"]
-            or row["associated_message_guid_normalized"]
-        )
-    }
+    parent_guids: set[str] = set()
+    for row in rows:
+        if is_threaded_reply(row):
+            reply_target = normalize_guid_reference(row["thread_originator_guid"])
+            if reply_target:
+                parent_guids.add(reply_target)
+        associated_type = int(row["associated_message_type"] or 0)
+        if associated_type != 0:
+            reaction_target = normalize_guid_reference(row["associated_message_guid_normalized"])
+            if reaction_target:
+                parent_guids.add(reaction_target)
     parent_map: dict[str, dict[str, Any]] = {}
     if parent_guids:
         placeholders = ",".join("?" for _ in parent_guids)
@@ -2032,12 +2160,12 @@ def query_messages_for_chat(
         }
     result: list[dict[str, Any]] = []
     for row in reversed(rows):
-        reply_target = normalize_guid_reference(
-            row["reply_to_guid"]
-            or row["thread_originator_guid"]
-            or row["associated_message_guid_normalized"]
-        )
         associated_type = int(row["associated_message_type"] or 0)
+        reply_target = (
+            normalize_guid_reference(row["thread_originator_guid"])
+            if is_threaded_reply(row)
+            else None
+        )
         result.append(
             {
                 "message_rowid": int(row["rowid"]),
@@ -2357,6 +2485,16 @@ def parse_send_result(stdout_text: str, stderr_text: str, returncode: int) -> di
                 payload.update(decoded)
         except json.JSONDecodeError:
             payload["detail"] = compact_text(clean_stdout, 240)
+    combined_detail = "\n".join(
+        value for value in (clean_stderr, clean_stdout) if value
+    ).lower()
+    if "appleevent timed out" in combined_detail:
+        return {
+            "ok": False,
+            "status": "timeout",
+            "detail": compact_text(clean_stderr or clean_stdout or "AppleEvent timed out", 240),
+            "returncode": returncode,
+        }
     if returncode == 0:
         payload.setdefault("ok", True)
         payload.setdefault("status", "sent")
@@ -2369,20 +2507,58 @@ def parse_send_result(stdout_text: str, stderr_text: str, returncode: int) -> di
     return payload
 
 
-def run_send_provider_direct(
+def provider_command_name(provider_send_bin: Path) -> str:
+    return provider_send_bin.name.strip().lower()
+
+
+def provider_supports_native_reply(cfg: Config) -> bool:
+    provider_send_bin = cfg.provider_send_bin
+    if not provider_send_bin:
+        return False
+    provider_name = provider_command_name(provider_send_bin)
+    return provider_name == "openclaw"
+
+
+def build_provider_send_command(
     provider_send_bin: Path,
     recipient: str | None,
     message: str,
     service_type: str,
+    *,
     chat_rowid: int | None = None,
-) -> dict[str, Any]:
+    reply_to_id: str | None = None,
+) -> list[str]:
+    provider_name = provider_command_name(provider_send_bin)
+    if provider_name == "openclaw":
+        if chat_rowid is not None:
+            target = f"chat_id:{chat_rowid}"
+        elif recipient:
+            target = recipient
+        else:
+            raise ValueError("recipient or chat rowid is required")
+        command = [
+            str(provider_send_bin),
+            "message",
+            "send",
+            "--channel",
+            "imessage",
+            "--target",
+            target,
+            "--message",
+            message,
+            "--json",
+        ]
+        if reply_to_id:
+            command.extend(["--reply-to", reply_to_id])
+        return command
+
     command = [str(provider_send_bin), "send"]
     if chat_rowid is not None:
         command.extend(["--chat-id", str(chat_rowid)])
     elif recipient:
         command.extend(["--to", recipient])
     else:
-        return {"ok": False, "status": "error", "detail": "recipient or chat rowid is required"}
+        raise ValueError("recipient or chat rowid is required")
     command.extend(
         [
             "--text",
@@ -2392,6 +2568,29 @@ def run_send_provider_direct(
             "--json",
         ]
     )
+    return command
+
+
+def run_send_provider_direct(
+    provider_send_bin: Path,
+    recipient: str | None,
+    message: str,
+    service_type: str,
+    *,
+    chat_rowid: int | None = None,
+    reply_to_id: str | None = None,
+) -> dict[str, Any]:
+    try:
+        command = build_provider_send_command(
+            provider_send_bin,
+            recipient,
+            message,
+            service_type,
+            chat_rowid=chat_rowid,
+            reply_to_id=reply_to_id,
+        )
+    except ValueError as exc:
+        return {"ok": False, "status": "error", "detail": str(exc)}
     try:
         result = subprocess.run(command, capture_output=True, text=True, timeout=30)
     except subprocess.TimeoutExpired:
@@ -2408,37 +2607,90 @@ def run_send_provider_via_terminal(
     recipient: str | None,
     message: str,
     service_type: str,
+    *,
     chat_rowid: int | None = None,
+    reply_to_id: str | None = None,
 ) -> dict[str, Any]:
     job_dir = Path(tempfile.mkdtemp(prefix="imsg-send-", dir="/tmp"))
     script_path = job_dir / "send.sh"
+    runner_path = job_dir / "runner.py"
     out_path = job_dir / "stdout.json"
     err_path = job_dir / "stderr.txt"
     status_path = job_dir / "status.txt"
-    if chat_rowid is not None:
-        send_target = f"--chat-id {shlex.quote(str(chat_rowid))}"
-    elif recipient:
-        send_target = f"--to {shlex.quote(recipient)}"
-    else:
-        return {"ok": False, "status": "error", "detail": "recipient or chat rowid is required"}
+    try:
+        command = build_provider_send_command(
+            provider_send_bin,
+            recipient,
+            message,
+            service_type,
+            chat_rowid=chat_rowid,
+            reply_to_id=reply_to_id,
+        )
+    except ValueError as exc:
+        return {"ok": False, "status": "error", "detail": str(exc)}
+    runner_path.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import subprocess",
+                "from pathlib import Path",
+                f"command = {json.dumps(command)}",
+                f"out_path = Path({json.dumps(str(out_path))})",
+                f"err_path = Path({json.dumps(str(err_path))})",
+                f"status_path = Path({json.dumps(str(status_path))})",
+                "timeout_seconds = 40",
+                "stdout_text = ''",
+                "stderr_text = ''",
+                "returncode = 1",
+                "try:",
+                "    process = subprocess.Popen(",
+                "        command,",
+                "        stdout=subprocess.PIPE,",
+                "        stderr=subprocess.PIPE,",
+                "        text=True,",
+                "    )",
+                "    try:",
+                "        stdout_text, stderr_text = process.communicate(timeout=timeout_seconds)",
+                "        returncode = process.returncode",
+                "    except subprocess.TimeoutExpired:",
+                "        process.terminate()",
+                "        try:",
+                "            stdout_text, stderr_text = process.communicate(timeout=3)",
+                "        except subprocess.TimeoutExpired:",
+                "            process.kill()",
+                "            stdout_text, stderr_text = process.communicate()",
+                "        timeout_note = f'provider send timed out after {timeout_seconds} seconds'",
+                "        stderr_text = (stderr_text.strip() + '\\n' + timeout_note).strip() if stderr_text else timeout_note",
+                "        returncode = 124",
+                "except Exception as exc:",
+                "    stderr_text = str(exc)",
+                "out_path.write_text(stdout_text or '', encoding='utf-8')",
+                "err_path.write_text(stderr_text or '', encoding='utf-8')",
+                "status_path.write_text(str(returncode), encoding='utf-8')",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    runner_path.chmod(0o700)
     script_path.write_text(
         "\n".join(
             [
                 "#!/bin/bash",
                 "set -u",
-                f"{shlex.quote(str(provider_send_bin))} send {send_target} "
-                f"--text {shlex.quote(message)} --service {shlex.quote(service_type)} --json "
-                f">{shlex.quote(str(out_path))} 2>{shlex.quote(str(err_path))}",
-                f"printf '%s' \"$?\" >{shlex.quote(str(status_path))}",
+                f"{shlex.quote(sys.executable)} {shlex.quote(str(runner_path))}",
             ]
         )
         + "\n",
         encoding="utf-8",
     )
     script_path.chmod(0o700)
+    terminal_command = f"bash {shlex.quote(str(script_path))}"
+    escaped_terminal_command = terminal_command.replace("\\", "\\\\").replace('"', '\\"')
+    apple_script = f'tell application "Terminal" to do script "{escaped_terminal_command}"'
     try:
         open_result = subprocess.run(
-            ["open", "-g", "-a", "Terminal", str(script_path)],
+            ["osascript", "-e", apple_script],
             capture_output=True,
             text=True,
             timeout=10,
@@ -2447,10 +2699,10 @@ def run_send_provider_via_terminal(
         return {
             "ok": False,
             "status": "timeout",
-            "detail": f"opening Terminal timed out; send script kept at {job_dir}",
+            "detail": f"launching Terminal send timed out; inspect {job_dir}",
         }
     except FileNotFoundError:
-        return {"ok": False, "status": "unavailable", "detail": "open command not found"}
+        return {"ok": False, "status": "unavailable", "detail": "osascript not found"}
     except Exception as exc:
         return {"ok": False, "status": "error", "detail": str(exc)}
     if open_result.returncode != 0:
@@ -2461,7 +2713,7 @@ def run_send_provider_via_terminal(
             "returncode": open_result.returncode,
         }
 
-    deadline = time.time() + 45
+    deadline = time.time() + 55
     while time.time() < deadline:
         if status_path.exists():
             try:
@@ -2470,6 +2722,12 @@ def run_send_provider_via_terminal(
                 returncode = 1
             stdout_text = out_path.read_text(encoding="utf-8") if out_path.exists() else ""
             stderr_text = err_path.read_text(encoding="utf-8") if err_path.exists() else ""
+            if returncode == 124:
+                return {
+                    "ok": False,
+                    "status": "timeout",
+                    "detail": compact_text(stderr_text or "provider send timed out", 240),
+                }
             payload = parse_send_result(stdout_text, stderr_text, returncode)
             payload.setdefault("detail", compact_text(payload.get("detail", ""), 240))
             return payload
@@ -2478,7 +2736,7 @@ def run_send_provider_via_terminal(
     return {
         "ok": False,
         "status": "timeout",
-        "detail": f"provider send did not finish within 45 seconds; inspect {job_dir}",
+        "detail": f"provider send did not finish within 55 seconds; inspect {job_dir}",
     }
 
 
@@ -2487,30 +2745,64 @@ def run_send(
     recipient: str | None,
     message: str,
     service_type: str,
+    *,
     chat_rowid: int | None = None,
+    reply_to_id: str | None = None,
 ) -> dict[str, Any]:
     provider_send_bin = cfg.provider_send_bin
     if provider_send_bin and provider_send_bin.exists():
-        if os.environ.get("TERM_PROGRAM") == "Apple_Terminal":
-            return run_send_provider_direct(
-                provider_send_bin,
-                recipient,
-                message,
-                service_type,
-                chat_rowid=chat_rowid,
-            )
-        return run_send_provider_via_terminal(
+        direct_result = run_send_provider_direct(
             provider_send_bin,
             recipient,
             message,
             service_type,
             chat_rowid=chat_rowid,
+            reply_to_id=reply_to_id,
         )
+        if direct_result.get("ok"):
+            return direct_result
+        direct_detail = str(direct_result.get("detail", "") or "").lower()
+        worker_should_retry_via_terminal = os.environ.get("IMSG_SEND_WORKER") == "1" and (
+            "permissiondenied" in direct_detail
+            or "authorization denied" in direct_detail
+            or direct_result.get("status") in {"timeout", "unavailable"}
+        )
+        if not worker_should_retry_via_terminal and (
+            os.environ.get("IMSG_SEND_WORKER") == "1"
+            or os.environ.get("TERM_PROGRAM") == "Apple_Terminal"
+        ):
+            return direct_result
+        terminal_result = run_send_provider_via_terminal(
+            provider_send_bin,
+            recipient,
+            message,
+            service_type,
+            chat_rowid=chat_rowid,
+            reply_to_id=reply_to_id,
+        )
+        if terminal_result.get("ok"):
+            return terminal_result
+        if recipient and not reply_to_id:
+            applescript_result = run_send_applescript(recipient, message, service_type)
+            if applescript_result.get("ok"):
+                return applescript_result
+            if applescript_result.get("status") not in {"unavailable", ""}:
+                return applescript_result
+        if terminal_result.get("status") not in {"unavailable", ""}:
+            return terminal_result
+        return direct_result
     if not recipient:
         return {
             "ok": False,
             "status": "error",
             "detail": "recipient resolution is required when provider chat-id sending is unavailable",
+        }
+    if reply_to_id:
+        return {
+            "ok": False,
+            "status": "blocked",
+            "detail": "native threaded replies are not supported without a reply-capable provider backend",
+            "blocked_reason": "native-threaded-reply-unsupported",
         }
     return run_send_applescript(recipient, message, service_type)
 
@@ -2531,6 +2823,186 @@ def build_send_payload_from_job(row: sqlite3.Row) -> dict[str, Any]:
     return payload
 
 
+def send_should_run_inline(cfg: Config) -> bool:
+    if os.environ.get("IMSG_SEND_WORKER") == "1":
+        return True
+    if cfg.machine_id != cfg.server_machine_id:
+        return False
+    return os.environ.get("TERM_PROGRAM") == "Apple_Terminal"
+
+
+def fetch_send_job_row(con: sqlite3.Connection, job_rowid: int) -> sqlite3.Row | None:
+    return con.execute("select * from send_jobs where rowid = ?", (job_rowid,)).fetchone()
+
+
+def claim_send_job(con: sqlite3.Connection, job_rowid: int) -> sqlite3.Row | None:
+    con.execute("begin immediate")
+    row = fetch_send_job_row(con, job_rowid)
+    if row is None:
+        con.rollback()
+        return None
+    if row["status"] != "queued":
+        con.commit()
+        return row
+    cursor = con.execute(
+        """
+        update send_jobs
+        set status = 'sending',
+            updated_at = ?,
+            attempt_count = attempt_count + 1
+        where rowid = ?
+          and status = 'queued'
+        """,
+        (now_utc_epoch(), job_rowid),
+    )
+    con.commit()
+    if cursor.rowcount != 1:
+        return fetch_send_job_row(con, job_rowid)
+    return fetch_send_job_row(con, job_rowid)
+
+
+def claim_next_queued_send_job(con: sqlite3.Connection) -> sqlite3.Row | None:
+    con.execute("begin immediate")
+    row = con.execute(
+        """
+        select rowid
+        from send_jobs
+        where status = 'queued'
+        order by created_at asc, rowid asc
+        limit 1
+        """
+    ).fetchone()
+    if row is None:
+        con.rollback()
+        return None
+    job_rowid = int(row["rowid"])
+    cursor = con.execute(
+        """
+        update send_jobs
+        set status = 'sending',
+            updated_at = ?,
+            attempt_count = attempt_count + 1
+        where rowid = ?
+          and status = 'queued'
+        """,
+        (now_utc_epoch(), job_rowid),
+    )
+    con.commit()
+    if cursor.rowcount != 1:
+        return None
+    return fetch_send_job_row(con, job_rowid)
+
+
+def execute_claimed_send_job(cfg: Config, row: sqlite3.Row) -> sqlite3.Row:
+    job_rowid = int(row["rowid"])
+    chat_rowid = int(row["destination_chat_rowid"]) if row["destination_chat_rowid"] not in (None, "") else None
+    recipient = row["resolved_recipient"] or row["recipient_input"] or None
+    reply_to_id = row["parent_message_guid"] or None
+    send_result = run_send(
+        cfg,
+        recipient,
+        row["message_text"],
+        row["service_type"],
+        chat_rowid=chat_rowid,
+        reply_to_id=reply_to_id,
+    )
+
+    blocked_reason = str(send_result.get("blocked_reason", "") or "")
+    provider_status = str(send_result.get("status", "") or "")
+    provider_detail = str(send_result.get("detail", "") or "")
+    if send_result.get("ok"):
+        final_status = "sent"
+    elif blocked_reason or provider_status == "blocked":
+        final_status = "blocked"
+    else:
+        final_status = "failed"
+    sent_at = now_utc_epoch() if final_status == "sent" else 0
+
+    with sqlite_connect_rw(cfg.index_db) as index:
+        initialize_index_schema(index)
+        update_send_job(
+            index,
+            job_rowid,
+            status=final_status,
+            provider_status=provider_status,
+            provider_detail=provider_detail,
+            blocked_reason=blocked_reason,
+            increment_attempt=False,
+            sent_at=sent_at,
+        )
+        updated_row = fetch_send_job_row(index, job_rowid)
+        index.commit()
+
+    if final_status == "sent":
+        sync_index_safe(cfg, quiet=True)
+    if updated_row is None:
+        raise SystemExit(f"Send job disappeared after processing: {job_rowid}")
+    return updated_row
+
+
+def execute_send_job(cfg: Config, job_rowid: int) -> sqlite3.Row:
+    with sqlite_connect_rw(cfg.index_db) as index:
+        initialize_index_schema(index)
+        row = claim_send_job(index, job_rowid)
+        index.commit()
+    if row is None:
+        raise SystemExit(f"No send job matched: {job_rowid}")
+    if row["status"] != "sending":
+        return row
+    return execute_claimed_send_job(cfg, row)
+
+
+def wait_for_send_job(
+    cfg: Config,
+    job_rowid: int,
+    *,
+    timeout_seconds: int = DEFAULT_SEND_WAIT_SECONDS,
+) -> sqlite3.Row | None:
+    deadline = time.time() + max(1, timeout_seconds)
+    latest_row: sqlite3.Row | None = None
+    while time.time() < deadline:
+        with sqlite_connect_ro(cfg.index_db) as index:
+            latest_row = fetch_send_job_row(index, job_rowid)
+        if latest_row is None:
+            return None
+        if latest_row["status"] not in {"queued", "sending"}:
+            return latest_row
+        time.sleep(DEFAULT_SEND_POLL_INTERVAL_SECONDS)
+    return latest_row
+
+
+def run_send_worker(cfg: Config, *, loop: bool, poll_interval: float) -> int:
+    if cfg.machine_id != cfg.server_machine_id:
+        raise SystemExit("send-worker is only valid on the bridge host.")
+
+    sleep_seconds = max(0.2, float(poll_interval))
+    while True:
+        with sqlite_connect_rw(cfg.index_db) as index:
+            initialize_index_schema(index)
+            row = claim_next_queued_send_job(index)
+            index.commit()
+        if row is None:
+            if not loop:
+                return 0
+            time.sleep(sleep_seconds)
+            continue
+
+        final_row = execute_claimed_send_job(cfg, row)
+        print(
+            json.dumps(
+                {
+                    "job_rowid": int(final_row["rowid"]),
+                    "status": final_row["status"],
+                    "provider_status": final_row["provider_status"] or "",
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
+        if not loop:
+            return 0
+
+
 def perform_send_request(
     cfg: Config,
     *,
@@ -2545,7 +3017,7 @@ def perform_send_request(
     allow_first_contact: bool,
     ignore_quiet_hours: bool,
 ) -> tuple[dict[str, Any], int]:
-    sync_index(cfg, quiet=True)
+    sync_index_safe(cfg, quiet=True)
     requested_by = requesting_machine_id(cfg)
 
     with sqlite_connect_rw(cfg.index_db) as index:
@@ -2570,6 +3042,7 @@ def perform_send_request(
         destination_chat_guid = resolved["chat_guid"]
         destination_key = destination_chat_guid or resolved_recipient or (recipient_input or "")
         duplicate_key = duplicate_key_for_destination(destination_key, message_text, service_type)
+        provider_reply_supported = provider_supports_native_reply(cfg)
 
         if idempotency_key:
             existing = lookup_send_job_by_idempotency(index, idempotency_key)
@@ -2606,6 +3079,45 @@ def perform_send_request(
                     "status": "blocked",
                     "blocked_reason": "ambiguous-recipient",
                     "candidates": resolved["ambiguous_candidates"],
+                },
+                1,
+            )
+
+        if parent_row is not None and not provider_reply_supported:
+            blocked_reason = "native-threaded-reply-unsupported"
+            provider_detail = "current send backend does not support native iMessage threaded replies"
+            job_rowid = insert_send_job(
+                index,
+                requested_by_machine_id=requested_by,
+                recipient_input=recipient_input,
+                resolved_recipient=resolved_recipient,
+                destination_chat_rowid=destination_chat_rowid,
+                destination_chat_guid=destination_chat_guid,
+                service_type=service_type,
+                message_text=message_text,
+                idempotency_key=idempotency_key,
+                duplicate_key=duplicate_key,
+                dry_run=dry_run,
+                parent_message_rowid=int(parent_row["rowid"]),
+                parent_message_guid=parent_row["guid"],
+                parent_preview=parent_preview,
+                status="blocked",
+                blocked_reason=blocked_reason,
+                provider_detail=provider_detail,
+            )
+            index.commit()
+            return (
+                {
+                    "job_rowid": job_rowid,
+                    "ok": False,
+                    "status": "blocked",
+                    "blocked_reason": blocked_reason,
+                    "detail": provider_detail,
+                    "recipient": resolved_recipient,
+                    "destination_chat_rowid": destination_chat_rowid,
+                    "parent_message_rowid": int(parent_row["rowid"]),
+                    "parent_message_guid": parent_row["guid"],
+                    "parent_preview": parent_preview or "",
                 },
                 1,
             )
@@ -2740,30 +3252,14 @@ def perform_send_request(
             payload["parent_preview"] = parent_preview or ""
             return payload, 0
 
-        update_send_job(index, job_rowid, status="sending", increment_attempt=True)
         index.commit()
 
-    send_result = run_send(
-        cfg,
-        resolved_recipient or recipient_input,
-        message_text,
-        service_type,
-        chat_rowid=destination_chat_rowid,
-    )
-    sent_at = now_utc_epoch() if send_result.get("ok") else 0
-    with sqlite_connect_rw(cfg.index_db) as index:
-        initialize_index_schema(index)
-        update_send_job(
-            index,
-            job_rowid,
-            status="sent" if send_result.get("ok") else "failed",
-            provider_status=str(send_result.get("status", "")),
-            provider_detail=str(send_result.get("detail", "")),
-            increment_attempt=False,
-            sent_at=sent_at,
-        )
-        row = index.execute("select * from send_jobs where rowid = ?", (job_rowid,)).fetchone()
-        index.commit()
+    if send_should_run_inline(cfg):
+        row = execute_send_job(cfg, job_rowid)
+    else:
+        row = wait_for_send_job(cfg, job_rowid)
+        if row is None:
+            raise SystemExit(f"Send job disappeared while waiting: {job_rowid}")
 
     payload = build_send_payload_from_job(row)
     payload.update(
@@ -2779,10 +3275,10 @@ def perform_send_request(
             "parent_preview": parent_preview or "",
         }
     )
-    if send_result.get("ok"):
-        sync_index(cfg, quiet=True)
-        return payload, 0
-    return payload, 1
+    if row["status"] == "queued":
+        payload["detail"] = payload.get("detail") or "waiting for send worker"
+        return payload, 1
+    return payload, 0 if payload.get("ok") else 1
 
 
 def retry_send_job(
@@ -2827,6 +3323,38 @@ def retry_send_job(
     )
 
 
+def probe_send_worker(cfg: Config) -> dict[str, Any]:
+    if cfg.machine_id != cfg.server_machine_id or sys.platform != "darwin":
+        return {"status": "not-applicable"}
+
+    label = SEND_WORKER_LABEL
+    domain = f"gui/{os.getuid()}/{label}"
+    try:
+        result = subprocess.run(
+            ["launchctl", "print", domain],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except subprocess.TimeoutExpired:
+        return {"status": "timeout", "detail": "launchctl print timed out after 5 seconds"}
+    except FileNotFoundError:
+        return {"status": "unavailable", "detail": "launchctl not found"}
+    except Exception as exc:
+        return {"status": "error", "detail": str(exc)}
+    if result.returncode != 0:
+        detail = compact_text(result.stderr.strip() or result.stdout.strip(), 240)
+        return {"status": "missing", "label": label, "detail": detail}
+
+    stdout = result.stdout
+    status = "loaded"
+    if "state = running" in stdout:
+        status = "running"
+    elif "state = waiting" in stdout:
+        status = "waiting"
+    return {"status": status, "label": label}
+
+
 def doctor_payload(cfg: Config) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "machine_id": cfg.machine_id,
@@ -2841,6 +3369,7 @@ def doctor_payload(cfg: Config) -> dict[str, Any]:
         "account_hint": cfg.account_hint,
         "phone_account_hint": cfg.phone_account_hint,
         "automation": probe_messages_automation() if cfg.machine_id == cfg.server_machine_id else {"status": "remote-only"},
+        "send_worker": probe_send_worker(cfg),
     }
     if cfg.chat_db and cfg.chat_db.exists():
         with sqlite_connect_ro(cfg.chat_db) as source:
@@ -2907,9 +3436,11 @@ def render_messages(chat: dict[str, Any], rows: list[dict[str, Any]]) -> str:
         preview = row["preview"]
         if prefix == "reaction" and row.get("reaction_label"):
             preview = f"[{row['reaction_label']}]"
-        lines.append(
-            f"{display_timestamp(row['date'])} | {actor} | {prefix} | {preview}"
-        )
+        segments = [display_timestamp(row["date"]), actor]
+        if prefix != "message":
+            segments.append(prefix)
+        segments.append(preview)
+        lines.append(" | ".join(segments))
         if row["reply_target_guid"]:
             target_preview = row["reply_target_preview"] or row["reply_target_guid"]
             lines.append(f"  parent: {target_preview}")
@@ -2996,6 +3527,15 @@ def render_doctor(payload: dict[str, Any]) -> str:
         detail = automation.get("detail")
         if detail:
             lines.append(f"automation_detail={detail}")
+    send_worker = payload.get("send_worker", {})
+    if send_worker:
+        lines.append(f"send_worker_status={send_worker.get('status', 'unknown')}")
+        label = send_worker.get("label")
+        if label:
+            lines.append(f"send_worker_label={label}")
+        detail = send_worker.get("detail")
+        if detail:
+            lines.append(f"send_worker_detail={detail}")
     accounts = payload.get("accounts", [])
     if accounts:
         lines.append("accounts:")
@@ -3040,21 +3580,27 @@ def run_server(argv: list[str]) -> int:
     contacts_parser = subparsers.add_parser("contacts", help="Search known handles and contacts in the index.")
     contacts_parser.add_argument("query", nargs="?", help="Optional search query.")
     contacts_parser.add_argument("--limit", type=int, default=cfg.default_limit, help="Result limit.")
+    contacts_parser.add_argument("--no-sync", action="store_true", help="Use the current index without refreshing it first.")
     contacts_parser.add_argument("--json", action="store_true", help="Print JSON output.")
 
     chats_parser = subparsers.add_parser("chats", help="List known chats.")
     chats_parser.add_argument("query", nargs="?", help="Optional chat search query.")
     chats_parser.add_argument("--limit", type=int, default=cfg.default_limit, help="Result limit.")
+    chats_parser.add_argument("--no-sync", action="store_true", help="Use the current index without refreshing it first.")
     chats_parser.add_argument("--json", action="store_true", help="Print JSON output.")
 
     unreads_parser = subparsers.add_parser("unreads", help="List chats with unread messages.")
     unreads_parser.add_argument("query", nargs="?", help="Optional chat search query.")
     unreads_parser.add_argument("--limit", type=int, default=cfg.default_limit, help="Result limit.")
+    unreads_parser.add_argument("--no-sync", action="store_true", help="Use the current index without refreshing it first.")
     unreads_parser.add_argument("--json", action="store_true", help="Print JSON output.")
 
     show_parser = subparsers.add_parser("show", help="Show the latest messages in a chat.")
     show_parser.add_argument("chat", help="Chat id, guid, title, or participant query.")
     show_parser.add_argument("--limit", type=int, default=cfg.default_limit, help="Message limit.")
+    show_parser.add_argument("--before-date", type=int, help="Only return messages older than this Apple nanoseconds timestamp.")
+    show_parser.add_argument("--before-rowid", type=int, help="When paired with --before-date, page older than this message rowid.")
+    show_parser.add_argument("--no-sync", action="store_true", help="Use the current index without refreshing it first.")
     show_parser.add_argument("--json", action="store_true", help="Print JSON output.")
 
     tail_parser = subparsers.add_parser("tail", help="Tail a chat.")
@@ -3062,16 +3608,19 @@ def run_server(argv: list[str]) -> int:
     tail_parser.add_argument("--limit", type=int, default=cfg.default_limit, help="Message limit.")
     tail_parser.add_argument("--follow", action="store_true", help="Poll for new messages.")
     tail_parser.add_argument("--interval", type=int, default=5, help="Poll interval in seconds.")
+    tail_parser.add_argument("--no-sync", action="store_true", help="Use the current index without refreshing it first.")
     tail_parser.add_argument("--json", action="store_true", help="Print JSON output.")
 
     search_parser = subparsers.add_parser("search", help="Search indexed messages.")
     search_parser.add_argument("query", help="Search term.")
     search_parser.add_argument("--limit", type=int, default=cfg.default_limit, help="Result limit.")
+    search_parser.add_argument("--no-sync", action="store_true", help="Use the current index without refreshing it first.")
     search_parser.add_argument("--json", action="store_true", help="Print JSON output.")
 
     attachments_parser = subparsers.add_parser("attachments", help="List recent attachments for a chat.")
     attachments_parser.add_argument("chat", help="Chat id, guid, title, or participant query.")
     attachments_parser.add_argument("--limit", type=int, default=cfg.default_limit, help="Attachment limit.")
+    attachments_parser.add_argument("--no-sync", action="store_true", help="Use the current index without refreshing it first.")
     attachments_parser.add_argument("--json", action="store_true", help="Print JSON output.")
 
     outbox_parser = subparsers.add_parser("outbox", help="List recent send jobs.")
@@ -3082,6 +3631,7 @@ def run_server(argv: list[str]) -> int:
         help="Optional job-status filter.",
     )
     outbox_parser.add_argument("--limit", type=int, default=cfg.default_limit, help="Result limit.")
+    outbox_parser.add_argument("--no-sync", action="store_true", help="Use the current index without refreshing it first.")
     outbox_parser.add_argument("--json", action="store_true", help="Print JSON output.")
 
     retry_parser = subparsers.add_parser("retry", help="Retry a previous send job.")
@@ -3126,6 +3676,10 @@ def run_server(argv: list[str]) -> int:
     reply_parser.add_argument("--dry-run", action="store_true", help="Print what would be sent without sending.")
     reply_parser.add_argument("--json", action="store_true", help="Print JSON output.")
 
+    send_worker_parser = subparsers.add_parser("send-worker", help="Run the queued-send worker on the bridge host.")
+    send_worker_parser.add_argument("--loop", action="store_true", help="Keep polling for queued work.")
+    send_worker_parser.add_argument("--poll-interval", type=float, default=DEFAULT_SEND_POLL_INTERVAL_SECONDS, help="Seconds to sleep between queue polls.")
+
     args = parser.parse_args(argv)
 
     if args.command == "sync":
@@ -3138,7 +3692,18 @@ def run_server(argv: list[str]) -> int:
         emit_payload(payload, args.json, render_doctor)
         return 0
 
-    sync_first = cfg.sync_on_read and args.command in {"contacts", "chats", "unreads", "show", "tail", "search", "attachments", "outbox"}
+    if args.command == "send-worker":
+        return run_send_worker(
+            cfg,
+            loop=bool(args.loop),
+            poll_interval=float(args.poll_interval),
+        )
+
+    sync_first = (
+        cfg.sync_on_read
+        and args.command in {"contacts", "chats", "unreads", "show", "tail", "search", "attachments", "outbox"}
+        and not bool(getattr(args, "no_sync", False))
+    )
     with open_index_for_query(cfg, sync_first=sync_first) as con:
         if args.command == "contacts":
             rows = query_contacts(con, args.query, args.limit)
@@ -3153,7 +3718,13 @@ def run_server(argv: list[str]) -> int:
         if args.command == "show":
             chat_row = resolve_single_chat(con, args.chat)
             chat_payload = chat_payload_from_row(con, chat_row)
-            rows = query_messages_for_chat(con, int(chat_row["rowid"]), args.limit)
+            rows = query_messages_for_chat(
+                con,
+                int(chat_row["rowid"]),
+                args.limit,
+                before_date=args.before_date,
+                before_rowid=args.before_rowid,
+            )
             payload = {"chat": chat_payload, "messages": rows}
             if args.json:
                 print(json.dumps(payload, ensure_ascii=False, indent=2))
@@ -3176,7 +3747,7 @@ def run_server(argv: list[str]) -> int:
             last_seen_date = 0
             first_pass = True
             while True:
-                with open_index_for_query(cfg, sync_first=True) as follow_con:
+                with open_index_for_query(cfg, sync_first=not bool(args.no_sync)) as follow_con:
                     chat_row = resolve_single_chat(follow_con, str(chat_row["rowid"]))
                     chat_payload = chat_payload_from_row(follow_con, chat_row)
                     rows = query_messages_for_chat(

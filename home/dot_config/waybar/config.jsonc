@@ -7,7 +7,6 @@
   "modules-left": ["custom/omarchy", "hyprland/workspaces"],
   "modules-center": ["custom/update", "custom/voxtype", "custom/screenrecording-indicator", "custom/idle-indicator", "custom/notification-silencing-indicator"],
   "modules-right": [
-    "tray",
     "bluetooth",
     "cpu",
     "pulseaudio",
@@ -152,9 +151,5 @@
     "tooltip": true,
     "on-click-right": "omarchy-voxtype-config",
     "on-click": "omarchy-voxtype-model"
-  },
-  "tray": {
-    "icon-size": 12,
-    "spacing": 17
   }
 }

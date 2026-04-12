@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Linux-only helper for Omarchy/Hyprland hosts that use xdg-terminal-exec.
+# Keep the preferred terminal first while retaining sane fallbacks.
+
+if (($# == 0)); then
+  echo "Usage: omarchy-install-terminal <terminal>"
+  echo "Supported terminals:{{- range .ui.terminals.linux.options }} {{ .name }}{{- end }}"
+  exit 1
+fi
+
+package="$1"
+desktop_id=""
+copy_omarchy_desktop="0"
+
+case "$package" in
+{{- range .ui.terminals.linux.options }}
+  {{ .name }})
+    desktop_id="{{ .desktop_id }}"
+{{- if hasKey . "copy_desktop_entry_from_omarchy" }}
+    copy_omarchy_desktop="1"
+{{- else }}
+    copy_omarchy_desktop="0"
+{{- end }}
+    ;;
+{{- end }}
+  *)
+    echo "Unknown terminal: $package"
+    echo "Supported terminals:{{- range .ui.terminals.linux.options }} {{ .name }}{{- end }}"
+    exit 1
+    ;;
+esac
+
+if ! omarchy-pkg-add "$package"; then
+  echo "Failed to install $package"
+  exit 1
+fi
+
+if [[ "$copy_omarchy_desktop" == "1" ]]; then
+  mkdir -p "$HOME/.local/share/applications"
+  cp "$OMARCHY_PATH/applications/Alacritty.desktop" "$HOME/.local/share/applications/"
+fi
+
+mkdir -p "$HOME/.config"
+
+{
+  echo "# Terminal emulator preference order for xdg-terminal-exec"
+  echo "# Linux uses this selector; macOS and future Windows hosts stay independent."
+  echo "# The first installed and valid desktop entry will be used."
+  echo "$desktop_id"
+
+{{- range .ui.terminals.linux.options }}
+  [[ "{{ .desktop_id }}" == "$desktop_id" ]] || echo "{{ .desktop_id }}"
+{{- end }}
+} >"$HOME/.config/xdg-terminals.list"
+
+echo "Default terminal preference updated:"
+sed -n '1,20p' "$HOME/.config/xdg-terminals.list"

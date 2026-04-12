@@ -1,0 +1,505 @@
+#!/bin/sh
+set -eu
+
+usage() {
+    cat <<'EOF' >&2
+Usage:
+  obsidian-livesync-macmini-client status
+  obsidian-livesync-macmini-client apply
+  obsidian-livesync-macmini-client run
+  obsidian-livesync-macmini-client launch
+
+Manage the lightweight always-on Obsidian LiveSync client for macmini.
+
+Commands:
+  status  Show current vault, launchd, and app readiness.
+  apply   Normalize the vault client config, install the launch agent, and kick it.
+  run     Supervisor mode used by launchd. Keeps Obsidian lightly attached to the vault.
+  launch  Start Obsidian and point it at the registered vault once.
+EOF
+}
+
+CONFIG_FILE="${OBSIDIAN_LIVESYNC_CONFIG_FILE:-$HOME/.config/decent-angl/obsidian-livesync.env}"
+if [ -f "$CONFIG_FILE" ]; then
+    # shellcheck disable=SC1090
+    . "$CONFIG_FILE"
+fi
+
+COMMAND="${1:-status}"
+case "$COMMAND" in
+    status|apply|run|launch)
+        ;;
+    -h|--help)
+        usage
+        exit 0
+        ;;
+    *)
+        usage
+        exit 1
+        ;;
+esac
+
+MACHINE_ID="${OBSIDIAN_LIVESYNC_MACHINE_ID:-unknown}"
+VAULT_DIR="${OBSIDIAN_LIVESYNC_VAULT_DIR:-$HOME/notes/obsidian/weavedweb}"
+VAULT_NAME="${OBSIDIAN_LIVESYNC_VAULT_NAME:-$(basename "$VAULT_DIR")}"
+CONFIG_DIR="${OBSIDIAN_LIVESYNC_CONFIG_DIR:-$VAULT_DIR/.obsidian-macmini}"
+APP_SOURCE_PATH="${OBSIDIAN_APP_SOURCE_PATH:-/Applications/Obsidian.app}"
+APP_PATH="${OBSIDIAN_APP_PATH:-$HOME/Applications/Obsidian.app}"
+APP_BIN="${OBSIDIAN_APP_BIN:-$APP_PATH/Contents/MacOS/Obsidian}"
+CLI_BIN="${OBSIDIAN_APP_CLI_BIN:-$APP_PATH/Contents/MacOS/obsidian-cli}"
+CLI_SOCKET="${OBSIDIAN_APP_CLI_SOCKET:-$HOME/.obsidian-cli.sock}"
+DEBUG_PORT="${OBSIDIAN_REMOTE_DEBUG_PORT:-9222}"
+STATE_DIR="${OBSIDIAN_GLOBAL_STATE_DIR:-$HOME/Library/Application Support/obsidian}"
+LAUNCH_AGENT_LABEL="${OBSIDIAN_LIVESYNC_AGENT_LABEL:-com.decentangl.obsidian-livesync-client}"
+LAUNCH_AGENT_PATH="${HOME}/Library/LaunchAgents/${LAUNCH_AGENT_LABEL}.plist"
+LOG_DIR="${OBSIDIAN_LIVESYNC_AGENT_LOG_DIR:-$HOME/Library/Logs/decent-angl}"
+STDOUT_LOG="${LOG_DIR}/${LAUNCH_AGENT_LABEL}.stdout.log"
+STDERR_LOG="${LOG_DIR}/${LAUNCH_AGENT_LABEL}.stderr.log"
+PYTHON_BIN="${PYTHON_BIN:-$(command -v python3 2>/dev/null || true)}"
+NODE_BIN="${NODE_BIN:-$(command -v node 2>/dev/null || true)}"
+JQ_BIN="${JQ_BIN:-$(command -v jq 2>/dev/null || true)}"
+
+[ -n "$PYTHON_BIN" ] || {
+    echo "python3 is required." >&2
+    exit 1
+}
+
+log() {
+    printf '%s %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$*"
+}
+
+run_with_timeout() {
+    seconds="$1"
+    shift
+    "$PYTHON_BIN" - "$seconds" "$@" <<'PY'
+import subprocess
+import sys
+
+timeout = float(sys.argv[1])
+cmd = sys.argv[2:]
+try:
+    completed = subprocess.run(cmd, timeout=timeout, check=False)
+except subprocess.TimeoutExpired:
+    sys.exit(124)
+sys.exit(completed.returncode)
+PY
+}
+
+app_bundle_ready() {
+    [ -x "$APP_BIN" ] || return 1
+    [ -x "$CLI_BIN" ] || return 1
+    run_with_timeout 5 "$CLI_BIN" version >/dev/null 2>&1
+}
+
+quarantine_present() {
+    xattr -lr "$APP_PATH" 2>/dev/null | grep -F 'com.apple.quarantine:' >/dev/null 2>&1
+}
+
+bundle_version() {
+    target="$1"
+    if [ ! -f "$target/Contents/Info.plist" ]; then
+        return 1
+    fi
+    defaults read "$target/Contents/Info" CFBundleShortVersionString 2>/dev/null || return 1
+}
+
+ensure_obsidian_app() {
+    source_path="$APP_SOURCE_PATH"
+    target_path="$APP_PATH"
+    needs_refresh=false
+
+    if [ ! -d "$target_path" ]; then
+        needs_refresh=true
+    elif quarantine_present; then
+        needs_refresh=true
+    elif ! app_bundle_ready; then
+        needs_refresh=true
+    elif [ "$target_path" != "$source_path" ] && [ -d "$source_path" ]; then
+        source_version="$(bundle_version "$source_path" || true)"
+        target_version="$(bundle_version "$target_path" || true)"
+        if [ -n "$source_version" ] && [ "$source_version" != "$target_version" ]; then
+            needs_refresh=true
+        fi
+    fi
+
+    if [ "$needs_refresh" = true ]; then
+        [ -d "$source_path" ] || {
+            echo "Obsidian source bundle is missing at $source_path" >&2
+            exit 1
+        }
+        mkdir -p "$(dirname "$target_path")"
+        tmp_path="${target_path}.tmp"
+        rm -rf "$tmp_path"
+        ditto --noqtn "$source_path" "$tmp_path"
+        xattr -dr com.apple.quarantine "$tmp_path" >/dev/null 2>&1 || true
+        rm -rf "$target_path"
+        mv "$tmp_path" "$target_path"
+    else
+        xattr -dr com.apple.quarantine "$target_path" >/dev/null 2>&1 || true
+    fi
+}
+
+ensure_obsidian_symlink() {
+    mkdir -p "$VAULT_DIR" "$CONFIG_DIR"
+    if [ "$CONFIG_DIR" = "$VAULT_DIR/.obsidian" ]; then
+        return 0
+    fi
+    ln -snf "$(basename "$CONFIG_DIR")" "$VAULT_DIR/.obsidian"
+}
+
+ensure_client_config() {
+    "$HOME/.local/bin/obsidian-livesync-install-plugin" >/dev/null
+    "$HOME/.local/bin/obsidian-livesync-apply-setup-uri" apply >/dev/null
+}
+
+ensure_vault_registry() {
+    "$PYTHON_BIN" - "$STATE_DIR" "$VAULT_DIR" <<'PY'
+import json
+import secrets
+import sys
+import time
+from pathlib import Path
+
+state_dir = Path(sys.argv[1]).expanduser()
+vault_dir = str(Path(sys.argv[2]).expanduser())
+state_dir.mkdir(parents=True, exist_ok=True)
+obsidian_json = state_dir / "obsidian.json"
+
+if obsidian_json.exists():
+    try:
+        payload = json.loads(obsidian_json.read_text())
+    except Exception:
+        payload = {}
+else:
+    payload = {}
+
+vaults = payload.get("vaults")
+if not isinstance(vaults, dict):
+    vaults = {}
+
+vault_id = None
+for candidate, meta in vaults.items():
+    if isinstance(meta, dict) and meta.get("path") == vault_dir:
+        vault_id = candidate
+        break
+
+if vault_id is None:
+    vault_id = secrets.token_hex(8)
+
+vaults[vault_id] = {
+    "path": vault_dir,
+    "ts": int(time.time() * 1000),
+    "open": True,
+}
+payload["vaults"] = vaults
+obsidian_json.write_text(json.dumps(payload, separators=(",", ":")) + "\n")
+
+companion = state_dir / f"{vault_id}.json"
+companion_payload = {"isMaximized": False, "devTools": False, "zoom": 0}
+rewrite_companion = True
+if companion.exists():
+    try:
+        existing = json.loads(companion.read_text())
+        rewrite_companion = not isinstance(existing, dict)
+    except Exception:
+        rewrite_companion = True
+if rewrite_companion:
+    companion.write_text(json.dumps(companion_payload, separators=(",", ":")) + "\n")
+
+print(vault_id)
+PY
+}
+
+launch_obsidian() {
+    vault_id="$1"
+    [ -d "$APP_PATH" ] || return 1
+    open -na "$APP_PATH" --args "--remote-debugging-port=${DEBUG_PORT}" "$VAULT_DIR" >/dev/null 2>&1 || true
+    sleep 6
+    open -gj "obsidian://open?vault=${vault_id}&file=Home" >/dev/null 2>&1 || true
+}
+
+launch_obsidian_debug() {
+    launch_obsidian "$1"
+}
+
+obsidian_running() {
+    pgrep -f "$APP_BIN" >/dev/null 2>&1
+}
+
+obsidian_ready() {
+    [ -S "$CLI_SOCKET" ] || return 1
+    run_with_timeout 5 "$CLI_BIN" vaults verbose >/dev/null 2>&1
+}
+
+wait_for_obsidian_ready() {
+    i=0
+    while [ "$i" -lt 30 ]; do
+        if obsidian_ready; then
+            return 0
+        fi
+        i=$((i + 1))
+        sleep 1
+    done
+    return 1
+}
+
+run_obsidian_command() {
+    command_id="$1"
+    run_with_timeout 15 "$CLI_BIN" "vault=${VAULT_NAME}" command "id=${command_id}" >/dev/null 2>&1
+}
+
+plugin_commands_available() {
+    run_with_timeout 15 "$CLI_BIN" "vault=${VAULT_NAME}" commands 2>/dev/null | grep -F 'obsidian-livesync:livesync-replicate' >/dev/null 2>&1
+}
+
+debugger_page_ws_url() {
+    [ -n "$JQ_BIN" ] || return 1
+    curl -sf "http://127.0.0.1:${DEBUG_PORT}/json/list" 2>/dev/null \
+        | "$JQ_BIN" -r '.[] | select(.type == "page" and .url == "app://obsidian.md/index.html") | .webSocketDebuggerUrl' \
+        | head -n 1
+}
+
+wait_for_debugger_page() {
+    i=0
+    while [ "$i" -lt 30 ]; do
+        ws_url="$(debugger_page_ws_url || true)"
+        if [ -n "$ws_url" ]; then
+            return 0
+        fi
+        i=$((i + 1))
+        sleep 1
+    done
+    return 1
+}
+
+eval_devtools_expr() {
+    expr="$1"
+    [ -n "$NODE_BIN" ] || return 1
+    ws_url="$(debugger_page_ws_url || true)"
+    [ -n "$ws_url" ] || return 1
+    expr_b64="$(printf '%s' "$expr" | base64 | tr -d '\n')"
+    "$NODE_BIN" - "$ws_url" "$expr_b64" <<'NODE'
+const [wsUrl, exprB64] = process.argv.slice(2);
+const expr = Buffer.from(exprB64, "base64").toString("utf8");
+const ws = new WebSocket(wsUrl);
+let handled = false;
+ws.onopen = () => {
+  ws.send(JSON.stringify({
+    id: 1,
+    method: "Runtime.evaluate",
+    params: {
+      expression: expr,
+      awaitPromise: true,
+      returnByValue: true,
+    },
+  }));
+};
+ws.onmessage = (event) => {
+  const message = JSON.parse(event.data.toString());
+  if (message.id !== 1) {
+    return;
+  }
+  handled = true;
+  if (message.result?.exceptionDetails) {
+    console.error(JSON.stringify(message.result.exceptionDetails, null, 2));
+    process.exit(1);
+  }
+  console.log(JSON.stringify(message.result?.result?.value ?? null, null, 2));
+  ws.close();
+};
+ws.onerror = (error) => {
+  console.error(String(error));
+  process.exit(1);
+};
+ws.onclose = () => {
+  if (!handled) {
+    process.exit(1);
+  }
+};
+NODE
+}
+
+ensure_plugin_trusted() {
+    vault_id="$1"
+    if plugin_commands_available; then
+        return 0
+    fi
+    log "obsidian-livesync commands unavailable; relaunching with local debugger to enable community plugin trust"
+    pkill -f "$APP_BIN" >/dev/null 2>&1 || true
+    rm -f "$CLI_SOCKET"
+    sleep 3
+    launch_obsidian_debug "$vault_id"
+    wait_for_obsidian_ready
+    wait_for_debugger_page
+    eval_devtools_expr '(async () => { const key = "enable-plugin-" + app.appId; localStorage.setItem(key, "true"); return { appId: app.appId, trusted: localStorage.getItem(key) }; })()' >/dev/null
+    run_obsidian_command 'app:reload' || true
+    sleep 5
+    plugin_commands_available
+}
+
+current_livesync_state_json() {
+    eval_devtools_expr '(async () => { const active = app.plugins.plugins["obsidian-livesync"]?.core?.services?._replicator?._activeReplicator; return { nodeid: active?.nodeid ?? null, syncStatus: active?.syncStatus ?? null, remoteLocked: Boolean(active?.remoteLocked), remoteLockedAndDeviceNotAccepted: Boolean(active?.remoteLockedAndDeviceNotAccepted) }; })()'
+}
+
+bootstrap_livesync_runtime() {
+    vault_id="$1"
+    ensure_plugin_trusted "$vault_id" || return 1
+
+    state_json="$(current_livesync_state_json 2>/dev/null || true)"
+    if [ -n "$state_json" ] && printf '%s\n' "$state_json" | "$JQ_BIN" -e '.remoteLockedAndDeviceNotAccepted == true' >/dev/null 2>&1; then
+        log "remote database requires this device to be marked resolved; updating the milestone through the running client"
+        eval_devtools_expr '(async () => { const services = app.plugins.plugins["obsidian-livesync"]?.core?.services; await services.replication.markResolved(); const active = services?._replicator?._activeReplicator; return { nodeid: active?.nodeid ?? null, syncStatus: active?.syncStatus ?? null, remoteLocked: Boolean(active?.remoteLocked), remoteLockedAndDeviceNotAccepted: Boolean(active?.remoteLockedAndDeviceNotAccepted) }; })()' >/dev/null || true
+    fi
+
+    if plugin_commands_available; then
+        run_obsidian_command 'obsidian-livesync:livesync-scan-files' || true
+        run_obsidian_command 'obsidian-livesync:livesync-replicate' || true
+    fi
+}
+
+write_launch_agent() {
+    mkdir -p "$(dirname "$LAUNCH_AGENT_PATH")" "$LOG_DIR"
+    cat >"$LAUNCH_AGENT_PATH" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${LAUNCH_AGENT_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>${HOME}/.local/bin/obsidian-livesync-macmini-client</string>
+    <string>run</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ProcessType</key>
+  <string>Interactive</string>
+  <key>WorkingDirectory</key>
+  <string>${HOME}</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${HOME}/.local/bin:${HOME}/.local/share/mise/shims</string>
+    <key>HOME</key>
+    <string>${HOME}</string>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>${STDOUT_LOG}</string>
+  <key>StandardErrorPath</key>
+  <string>${STDERR_LOG}</string>
+</dict>
+</plist>
+EOF
+}
+
+bootstrap_launch_agent() {
+    uid="$(id -u)"
+    launchctl bootout "gui/${uid}" "$LAUNCH_AGENT_PATH" >/dev/null 2>&1 || true
+    launchctl bootstrap "gui/${uid}" "$LAUNCH_AGENT_PATH"
+    launchctl enable "gui/${uid}/${LAUNCH_AGENT_LABEL}" >/dev/null 2>&1 || true
+    launchctl kickstart -k "gui/${uid}/${LAUNCH_AGENT_LABEL}"
+}
+
+print_status() {
+    uid="$(id -u)"
+    vault_id="$(ensure_vault_registry)"
+    plugin_commands=false
+    if plugin_commands_available; then
+        plugin_commands=true
+    fi
+    state_json="$(current_livesync_state_json 2>/dev/null || true)"
+    printf 'machine_id=%s\n' "$MACHINE_ID"
+    printf 'vault_dir=%s\n' "$VAULT_DIR"
+    printf 'config_dir=%s\n' "$CONFIG_DIR"
+    printf 'vault_id=%s\n' "$vault_id"
+    printf 'vault_registry=%s\n' "${STATE_DIR}/obsidian.json"
+    printf 'app_source_path=%s\n' "$APP_SOURCE_PATH"
+    printf 'app_path=%s\n' "$APP_PATH"
+    printf 'app_installed=%s\n' "$(test -d "$APP_PATH" && echo true || echo false)"
+    printf 'app_running=%s\n' "$(obsidian_running && echo true || echo false)"
+    printf 'app_ready=%s\n' "$(obsidian_ready && echo true || echo false)"
+    printf 'cli_socket=%s\n' "$CLI_SOCKET"
+    printf 'cli_socket_exists=%s\n' "$(test -S "$CLI_SOCKET" && echo true || echo false)"
+    printf 'launch_agent_path=%s\n' "$LAUNCH_AGENT_PATH"
+    printf 'launch_agent_loaded=%s\n' "$(launchctl print "gui/${uid}/${LAUNCH_AGENT_LABEL}" >/dev/null 2>&1 && echo true || echo false)"
+    printf 'plugin_commands_available=%s\n' "$plugin_commands"
+    if [ -n "$state_json" ]; then
+        printf 'replication_nodeid=%s\n' "$(printf '%s\n' "$state_json" | "$JQ_BIN" -r '.nodeid // ""')"
+        printf 'replication_sync_status=%s\n' "$(printf '%s\n' "$state_json" | "$JQ_BIN" -r '.syncStatus // ""')"
+        printf 'replication_remote_locked=%s\n' "$(printf '%s\n' "$state_json" | "$JQ_BIN" -r '.remoteLocked')"
+        printf 'replication_requires_resolve=%s\n' "$(printf '%s\n' "$state_json" | "$JQ_BIN" -r '.remoteLockedAndDeviceNotAccepted')"
+    else
+        printf 'replication_nodeid=\n'
+        printf 'replication_sync_status=\n'
+        printf 'replication_remote_locked=\n'
+        printf 'replication_requires_resolve=\n'
+    fi
+    "$HOME/.local/bin/obsidian-livesync-apply-setup-uri" status
+}
+
+run_supervisor() {
+    ensure_obsidian_app
+    ensure_obsidian_symlink
+    ensure_client_config
+    vault_id="$(ensure_vault_registry)"
+    log "obsidian-livesync-macmini-client starting for vault ${vault_id}"
+    cycle=0
+    bootstrapped=false
+    while :; do
+        if ! obsidian_running; then
+            log "obsidian not running; launching"
+            launch_obsidian "$vault_id" || true
+            bootstrapped=false
+        elif ! obsidian_ready; then
+            log "obsidian cli is not ready; relaunching"
+            pkill -f "$APP_BIN" >/dev/null 2>&1 || true
+            sleep 3
+            launch_obsidian "$vault_id" || true
+            bootstrapped=false
+        elif [ "$bootstrapped" = false ]; then
+            if bootstrap_livesync_runtime "$vault_id"; then
+                bootstrapped=true
+            fi
+        elif [ $((cycle % 15)) -eq 0 ]; then
+            "$CLI_BIN" vaults verbose >/dev/null 2>&1 || true
+        fi
+        cycle=$((cycle + 1))
+        sleep 60
+    done
+}
+
+case "$COMMAND" in
+    status)
+        print_status
+        ;;
+    apply)
+        ensure_obsidian_app
+        ensure_obsidian_symlink
+        ensure_client_config
+        vault_id="$(ensure_vault_registry)"
+        if ! obsidian_running || ! obsidian_ready; then
+            launch_obsidian "$vault_id" || true
+            wait_for_obsidian_ready || true
+        fi
+        bootstrap_livesync_runtime "$vault_id" || true
+        write_launch_agent
+        bootstrap_launch_agent
+        print_status
+        ;;
+    launch)
+        ensure_obsidian_app
+        ensure_obsidian_symlink
+        ensure_client_config
+        vault_id="$(ensure_vault_registry)"
+        launch_obsidian "$vault_id"
+        wait_for_obsidian_ready || true
+        bootstrap_livesync_runtime "$vault_id" || true
+        print_status
+        ;;
+    run)
+        run_supervisor
+        ;;
+esac

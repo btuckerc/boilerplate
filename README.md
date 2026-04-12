@@ -1,6 +1,6 @@
 # Cross-Platform Dotfiles
 
-Modern, portable dotfiles managed with [chezmoi](https://chezmoi.io) and [mise](https://mise.jdx.dev), supporting macOS (zsh) and Linux (bash).
+Modern, portable dotfiles managed with [chezmoi](https://chezmoi.io) and [mise](https://mise.jdx.dev), supporting macOS and Linux with machine-specific templates where needed.
 
 ## Features
 
@@ -14,13 +14,15 @@ Modern, portable dotfiles managed with [chezmoi](https://chezmoi.io) and [mise](
 
 ## Quick Start
 
-### One-Line Setup
+### Preferred Bootstrap
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/btuckerc/boilerplate/main/setup | bash
+sh -c "$(curl -fsLS get.chezmoi.io)" -- init --apply btuckerc/boilerplate
 ```
 
-Or clone and run:
+That uses chezmoi's official installer and applies this repo in one step.
+
+If you already cloned the repo locally:
 
 ```bash
 git clone https://github.com/btuckerc/boilerplate.git
@@ -28,17 +30,18 @@ cd boilerplate
 ./setup
 ```
 
-That's it! The setup script will:
-1. Set zsh as your default shell (if available)
-2. Install chezmoi (via mise, brew, or direct download)
-3. Apply all dotfiles to your home directory
-4. Install mise-managed tools automatically (chezmoi, starship, fzf, ripgrep, bat, eza, fd, yazi, node, python, go)
-5. Set up shell configuration
+That's it. The bootstrap path will:
+1. Install `chezmoi` if needed
+2. Apply dotfiles from this repo or your local checkout
+3. Run the OS-specific one-time setup hooks
+4. Install mise-managed tools automatically
+
+It does not force a shell change.
 
 ### Manual Setup
 
 ```bash
-# If you already have chezmoi and mise installed
+# Remote repo
 chezmoi init --apply https://github.com/btuckerc/boilerplate.git
 
 # Or if you cloned this repo locally
@@ -92,6 +95,8 @@ mise will automatically install these essential tools:
 - **Shared config**: `~/.config/shell/common.sh` - POSIX-compatible configuration
 - **Zsh**: `~/.zshrc`, `~/.zprofile`, `~/.zshenv` with macOS-specific enhancements
 - **Bash**: `~/.bashrc`, `~/.bash_profile` with Linux compatibility
+- **Omarchy/UWSM**: Linux-only `~/.config/uwsm/env` keeps user-managed bins available to Hyprland-launched apps
+- **Terminal policy**: per-OS by design; Linux uses `xdg-terminal-exec` plus `~/.config/xdg-terminals.list`, while macOS terminal choice stays independent
 - **Starship**: Modern, minimal prompt
 - **Git**: `~/.gitconfig` with aliases and sensible defaults
 
@@ -124,7 +129,7 @@ brew bundle install --file=~/.local/share/chezmoi/Brewfile
 ├── .chezmoiroot                    # Points chezmoi to home/ directory
 ├── Brewfile                        # Optional Homebrew packages
 ├── home/                           # chezmoi source directory
-│   ├── .chezmoiignore              # Files to exclude from home directory
+│   ├── .chezmoiignore.tmpl         # Files to exclude from home directory (OS-aware)
 │   ├── dot_gitconfig               # Git configuration
 │   ├── dot_zshrc.tmpl              # Zsh configuration (OS-aware)
 │   ├── dot_bashrc.tmpl             # Bash configuration (OS-aware)
@@ -134,6 +139,9 @@ brew bundle install --file=~/.local/share/chezmoi/Brewfile
 │   ├── dot_config/                 # XDG config directory
 │   │   ├── shell/
 │   │   │   └── common.sh           # Shared POSIX shell configuration
+│   │   ├── uwsm/
+│   │   │   └── env                 # Linux-only Omarchy/UWSM session environment
+│   │   ├── xdg-terminals.list.tmpl # Linux terminal preference order for xdg-terminal-exec
 │   │   ├── mise/
 │   │   │   └── config.toml         # Tool management (primary)
 │   │   ├── nvim/                   # Neovim configuration
@@ -150,7 +158,7 @@ brew bundle install --file=~/.local/share/chezmoi/Brewfile
 │   ├── go/                         # Go project template
 │   └── python/                     # Python project template
 └── utils/                          # Utility scripts
-    ├── init-mac                    # Legacy macOS setup script
+    ├── init-mac                    # Deprecated macOS setup shim; use ./setup
     ├── init-project                # Project initialization
     ├── fonts/                      # Nerd Fonts
     └── scripts/                    # Helper scripts
@@ -263,6 +271,18 @@ To avoid duplicating shell configuration between bash and zsh, common functional
 
 Both `~/.zshrc` and `~/.bashrc` source this file, then add shell-specific features.
 
+On Omarchy, `~/.zshenv` and `~/.config/uwsm/env` mirror the same path floor for `~/.local/bin`, `~/.local/share/omarchy/bin`, and `mise` shims so interactive shells and UWSM-launched apps resolve the same commands.
+
+### Terminal Policy
+
+Terminal choice is split per operating system on purpose.
+
+- Linux: launch through `xdg-terminal-exec`, with ordered preference in `~/.config/xdg-terminals.list`
+- macOS: use the terminal app you want for macOS without consuming Omarchy/Linux selector files
+- Windows: follow the same model when added later, with a separate host-specific selector instead of reusing Linux assumptions
+
+The source of truth for this lives in `home/.chezmoidata/ui.yaml`. `kitty` and `ghostty` configs can exist side by side, but the default selection mechanism is platform-specific.
+
 ### Tool Installation
 
 All essential tools are managed by **mise** and installed automatically when you run:
@@ -280,6 +300,10 @@ No manual installation required!
 - Homebrew integration
 - Kitty/Ghostty shell integration
 - macOS-specific aliases and functions
+
+### Linux (Omarchy/Hyprland)
+- Linux-only Omarchy, Hyprland, Waybar, and UWSM files are excluded on non-Linux hosts via `.chezmoiignore.tmpl`
+- Terminal selection uses `xdg-terminal-exec` and `~/.config/xdg-terminals.list`
 - zsh-specific features (completion, history)
 
 ### Linux (bash)

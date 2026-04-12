@@ -16,8 +16,8 @@ else
 fi
 
 # Define paths
-KITTY_THEME="$REPO_ROOT/config/kitty/current-theme.conf"
-REPO_EXTENSION_DIR="$REPO_ROOT/config/vscode/extensions/current-theme"
+KITTY_THEME="$REPO_ROOT/home/dot_config/kitty/current-theme.conf"
+REPO_EXTENSION_DIR="$REPO_ROOT/home/dot_config/vscode/extensions/current-theme"
 REPO_THEMES_DIR="$REPO_EXTENSION_DIR/themes"
 OUTPUT_THEME="$REPO_THEMES_DIR/current-theme.json"
 

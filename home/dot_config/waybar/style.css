@@ -1,4 +1,5 @@
 @import "../omarchy/current/theme/waybar.css";
+@import url("codex-workspace-attention.runtime.css");
 
 * {
   background-color: @background;

@@ -1,0 +1,32 @@
+#!/bin/sh
+set -eu
+
+if [ "$(uname -s)" != "Darwin" ]; then
+    echo "imsg-send-worker-apply is only supported on macOS." >&2
+    exit 1
+fi
+
+label="com.decentangl.imsg.send-worker"
+source_plist="${HOME}/.local/share/decent-angl/launchd/${label}.plist"
+target_plist="${HOME}/Library/LaunchAgents/${label}.plist"
+log_dir="${HOME}/.local/state/decent-angl/imsg/logs"
+uid="$(id -u)"
+domain="gui/${uid}"
+
+if [ ! -f "$source_plist" ]; then
+    echo "Rendered launch agent not found at ${source_plist}." >&2
+    exit 1
+fi
+
+mkdir -p "$(dirname "$target_plist")" "$log_dir"
+plutil -lint "$source_plist" >/dev/null
+launchctl bootout "$domain" "$target_plist" >/dev/null 2>&1 || true
+install -m 644 "$source_plist" "$target_plist"
+launchctl bootstrap "$domain" "$target_plist"
+launchctl enable "${domain}/${label}" >/dev/null 2>&1 || true
+launchctl kickstart -k "${domain}/${label}"
+launchctl print "${domain}/${label}" >/dev/null
+
+printf 'source=%s\n' "$source_plist"
+printf 'target=%s\n' "$target_plist"
+printf 'launch_agent=%s\n' "${domain}/${label}"

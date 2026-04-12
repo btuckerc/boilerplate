@@ -329,7 +329,7 @@ For machine-specific customizations, use `.local` files that aren't tracked:
 
 **Pattern 2: chezmoiignore**
 
-Add to `home/.chezmoiignore`:
+Add to `home/.chezmoiignore.tmpl`:
 
 ```gitignore
 # Machine-specific files

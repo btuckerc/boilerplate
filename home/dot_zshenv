@@ -26,16 +26,36 @@ if [ "$(uname -s)" = "Darwin" ]; then
     export PATH
 fi
 
-# Keep user-managed shims ahead of OS package-manager bins.
-for dir in "$HOME/.local/bin" "$HOME/shims" "$HOME/.local/share/mise/shims"; do
-    case ":$PATH:" in
-        *":$dir:"*) ;;
-        *) [ -d "$dir" ] && PATH="$dir:$PATH" ;;
-    esac
+# Keep user-managed bins and shims ahead of OS package-manager bins.
+# Iterate from lowest to highest precedence because each directory is prepended.
+prepend_path_dir() {
+    path_dir="$1"
+    [ -d "$path_dir" ] || return 0
+
+    path_new="$path_dir"
+    path_old_ifs="$IFS"
+    IFS=:
+    for path_entry in ${PATH:-}; do
+        [ -n "$path_entry" ] || continue
+        [ "$path_entry" = "$path_dir" ] && continue
+        path_new="${path_new}:$path_entry"
+    done
+    IFS="$path_old_ifs"
+    PATH="$path_new"
+}
+
+for dir in "$HOME/.local/share/mise/shims" "$HOME/shims"; do
+    prepend_path_dir "$dir"
 done
+if [ "$(uname -s 2>/dev/null)" = "Linux" ]; then
+    prepend_path_dir "$HOME/.local/share/omarchy/bin"
+fi
+prepend_path_dir "$HOME/.local/bin"
+unset dir path_dir path_entry path_new path_old_ifs
+unset -f prepend_path_dir 2>/dev/null || true
 
 # Load Cargo environment if available
 CARGODIR="$HOME/.cargo"
-if [ -d "$CARGODIR" ]; then
+if [ -f "$CARGODIR/env" ]; then
     . "$CARGODIR/env"
 fi

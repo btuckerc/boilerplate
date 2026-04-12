@@ -43,6 +43,8 @@ boilerplate/
 │   │   │   └── dot_zprofile.tmpl # Template → ~/.config/zsh/.zprofile
 │   │   ├── shell/
 │   │   │   └── common.sh         # Plain file → ~/.config/shell/common.sh
+│   │   ├── uwsm/
+│   │   │   └── env               # Plain file → ~/.config/uwsm/env
 │   │   ├── mise/
 │   │   │   ├── config.toml       # Plain file → ~/.config/mise/config.toml
 │   │   │   └── config.optional.toml
@@ -57,7 +59,7 @@ boilerplate/
 │   ├── run_once_after_02-setup-packages.sh.tmpl
 │   └── run_once_after_03-setup-tools.sh.tmpl
 ├── .chezmoiroot                  # Points to "home" subdirectory
-├── .chezmoiignore               # Global ignore patterns
+├── .chezmoiignore.tmpl          # Global ignore patterns (OS-aware)
 └── .chezmoi.toml.tmpl           # Configuration template
 ```
 
@@ -108,8 +110,8 @@ Tells chezmoi that source files are in the `home/` subdirectory, not at reposito
 **`.chezmoi.toml.tmpl`** (in `home/`):
 Template that generates `~/.config/chezmoi/chezmoi.toml` on first run. Prompts for git name/email and stores them as template data.
 
-**`.chezmoiignore`** (in `home/`):
-Patterns for files to exclude from management. See Section 5 for details.
+**`.chezmoiignore.tmpl`** (in `home/`):
+Patterns for files to exclude from management, including OS-aware ignores. See Section 5 for details.
 
 ---
 
@@ -759,7 +761,7 @@ git mv home/* dotfiles/
 
 ### `.chezmoiignore`
 
-**Location:** `home/.chezmoiignore`
+**Location:** `home/.chezmoiignore.tmpl`
 **Purpose:** Patterns for files chezmoi should ignore
 
 **Current patterns:**
@@ -808,10 +810,12 @@ nvim.backup.*
 - `.config/mise/mise.local.toml` - Ignore specific path
 - `dir/**` - Ignore directory contents
 
+This file is templated so Linux-only Omarchy desktop files can stay out of macOS and future Windows installs.
+
 **Adding new ignores:**
 ```bash
-chezmoi edit ~/.chezmoiignore
-# Add patterns
+${EDITOR:-nvim} home/.chezmoiignore.tmpl
+# Add patterns, then:
 chezmoi apply
 ```
 
@@ -859,8 +863,9 @@ External resources are managed manually rather than through `.chezmoiexternal.to
 | `home/dot_config/tmux/tmux.conf` | `~/.config/tmux/tmux.conf` | No | Tmux configuration |
 | `home/dot_config/starship/starship.toml` | `~/.config/starship/starship.toml` | No | Starship prompt config |
 | `home/dot_config/yazi/` | `~/.config/yazi/` | No | Yazi file manager |
-| `home/dot_config/kitty/` | `~/.config/kitty/` | No | Kitty terminal |
-| `home/dot_config/ghostty/config` | `~/.config/ghostty/config` | No | Ghostty terminal |
+| `home/dot_config/kitty/` | `~/.config/kitty/` | No | Kitty terminal (per-OS profile content) |
+| `home/dot_config/ghostty/config` | `~/.config/ghostty/config` | No | Ghostty terminal (per-OS profile content) |
+| `home/dot_config/xdg-terminals.list.tmpl` | `~/.config/xdg-terminals.list` | Yes | Linux terminal selector for `xdg-terminal-exec` |
 | `home/dot_config/btop/btop.conf` | `~/.config/btop/btop.conf` | No | Btop system monitor |
 
 ### Adding New Mappings

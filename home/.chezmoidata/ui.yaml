@@ -2,7 +2,29 @@ ui:
   btop:
     color_theme:
       linux: "current"
-      darwin: "/opt/homebrew/Cellar/btop/1.4.0/share/btop/themes/adapta.theme"
+      darwin: "/opt/homebrew/opt/btop/share/btop/themes/adapta.theme"
+      windows: "Default"
+  terminals:
+    defaults:
+      linux: "kitty"
+      darwin: "ghostty"
+      windows: ""
+    linux:
+      launcher: "xdg-terminal-exec"
+      options:
+        - name: "kitty"
+          package: "kitty"
+          desktop_id: "kitty.desktop"
+        - name: "alacritty"
+          package: "alacritty"
+          desktop_id: "Alacritty.desktop"
+          copy_desktop_entry_from_omarchy: true
+        - name: "ghostty"
+          package: "ghostty"
+          desktop_id: "com.mitchellh.ghostty.desktop"
+        - name: "foot"
+          package: "foot"
+          desktop_id: "foot.desktop"
   ghostty:
     profiles:
       linux:
@@ -66,6 +88,7 @@ ui:
         - "keybind = super+i=inspector:toggle"
         - "macos-non-native-fullscreen = true"
         - "title = \" \""
+      windows: []
   kitty:
     profiles:
       linux:
@@ -203,3 +226,4 @@ ui:
         - ""
         - "# Shell integration"
         - "shell_integration enabled"
+      windows: []

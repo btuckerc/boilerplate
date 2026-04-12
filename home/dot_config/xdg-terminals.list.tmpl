@@ -1,0 +1,11 @@
+# Terminal emulator preference order for xdg-terminal-exec
+# Generated from `home/.chezmoidata/ui.yaml`.
+# Linux uses this selector; macOS and future Windows hosts stay independent.
+# The first installed and valid desktop entry will be used.
+{{ $default := index .ui.terminals.defaults "linux" -}}
+{{- range .ui.terminals.linux.options -}}
+{{- if eq .name $default }}{{ .desktop_id }}{{ "\n" -}}{{- end -}}
+{{- end -}}
+{{- range .ui.terminals.linux.options -}}
+{{- if ne .name $default }}{{ .desktop_id }}{{ "\n" -}}{{- end -}}
+{{- end }}

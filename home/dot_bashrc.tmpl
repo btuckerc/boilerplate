@@ -57,6 +57,17 @@ if command -v mise >/dev/null; then
     eval "$(mise activate bash)"
 fi
 
+# Skip prompt/UI shell setup for non-interactive or TERM=dumb shells.
+# This keeps batch/login shells like `bash -lc` quiet for tools.
+case "$-" in
+    *i*) ;;
+    *) return 0 2>/dev/null || true ;;
+esac
+
+if [ "${TERM:-}" = "dumb" ]; then
+    return 0 2>/dev/null || true
+fi
+
 # === Starship prompt ===
 if command -v starship >/dev/null; then
     export STARSHIP_CONFIG="$HOME/.config/starship/starship.toml"

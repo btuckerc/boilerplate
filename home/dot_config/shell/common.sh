@@ -20,15 +20,33 @@ export PYTHON_HISTORY="$XDG_DATA_HOME/python/history"
 
 # === PATH Setup ===
 # Add key user-level bin directories to PATH if they exist.
-for dir in "$HOME/.local/bin" "$HOME/shims" "$HOME/.local/share/mise/shims"; do
-	if [ -d "$dir" ]; then
-		case ":$PATH:" in
-		*":$dir:"*) ;;
-		*) PATH="$dir:$PATH" ;;
-		esac
-	fi
+# Iterate from lowest to highest precedence because each directory is prepended.
+prepend_path_dir() {
+	path_dir="$1"
+	[ -d "$path_dir" ] || return 0
+
+	path_new="$path_dir"
+	path_old_ifs="$IFS"
+	IFS=:
+	for path_entry in ${PATH:-}; do
+		[ -n "$path_entry" ] || continue
+		[ "$path_entry" = "$path_dir" ] && continue
+		path_new="${path_new}:$path_entry"
+	done
+	IFS="$path_old_ifs"
+	PATH="$path_new"
+}
+
+for dir in "$HOME/.local/share/mise/shims" "$HOME/shims"; do
+	prepend_path_dir "$dir"
 done
+if [ "$(uname -s 2>/dev/null)" = "Linux" ]; then
+	prepend_path_dir "$HOME/.local/share/omarchy/bin"
+fi
+prepend_path_dir "$HOME/.local/bin"
 export PATH
+unset dir path_dir path_entry path_new path_old_ifs
+unset -f prepend_path_dir 2>/dev/null || true
 
 # === Pager Configuration ===
 export MANPAGER="less -R --use-color -Dd+r -Du+b"
@@ -62,6 +80,10 @@ alias lg='lazygit'
 alias vim='nvim'
 alias v.='nvim .'
 alias practice='nvim +VimBeGood'
+
+# Codex aliases
+alias c='codex'
+alias cx='codex --dangerously-bypass-approvals-and-sandbox'
 
 # Python virtual environment
 alias venv_activate='source venv/bin/activate'

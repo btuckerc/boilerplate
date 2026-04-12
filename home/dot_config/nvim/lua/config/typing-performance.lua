@@ -20,15 +20,13 @@ vim.api.nvim_create_autocmd("BufReadPost", {
 
     -- For files with many lines or large size, optimize treesitter
     if lines > 1000 or file_size > 100 * 1024 then -- 100KB
+      vim.b.large_file = true
+
       -- Limit treesitter sync for large files
       vim.cmd("syntax sync minlines=50 maxlines=500")
 
-      -- Disable some treesitter features that cause input lag
-      local ok, ts_config = pcall(require, "nvim-treesitter.configs")
-      if ok then
-        -- Disable incremental selection for large files
-        vim.b.ts_disable_incremental_selection = true
-      end
+      -- Stop treesitter highlighting if it was already started for this buffer.
+      pcall(vim.treesitter.stop, 0)
     end
   end,
 })

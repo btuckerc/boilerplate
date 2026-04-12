@@ -3,20 +3,29 @@
 export OMARCHY_PATH="${HOME}/.local/share/omarchy"
 
 # Keep Omarchy and user-managed tools visible to UWSM-launched apps.
-for dir in "$HOME/.local/bin" "$OMARCHY_PATH/bin" "$HOME/shims" "$HOME/.local/share/mise/shims"; do
-    [ -d "$dir" ] || continue
-    case ":${PATH:-}:" in
-        *:"$dir":*) ;;
-        *)
-            if [ -n "${PATH:-}" ]; then
-                PATH="$dir:$PATH"
-            else
-                PATH="$dir"
-            fi
-            ;;
-    esac
+# Iterate from lowest to highest precedence because each directory is prepended.
+prepend_path_dir() {
+    path_dir="$1"
+    [ -d "$path_dir" ] || return 0
+
+    path_new="$path_dir"
+    path_old_ifs="${IFS}"
+    IFS=:
+    for path_entry in ${PATH:-}; do
+        [ -n "$path_entry" ] || continue
+        [ "$path_entry" = "$path_dir" ] && continue
+        path_new="${path_new}:$path_entry"
+    done
+    IFS="${path_old_ifs}"
+    PATH="${path_new}"
+}
+
+for dir in "$HOME/.local/share/mise/shims" "$HOME/shims" "$OMARCHY_PATH/bin" "$HOME/.local/bin"; do
+    prepend_path_dir "$dir"
 done
 export PATH
+unset dir path_dir path_entry path_new path_old_ifs
+unset -f prepend_path_dir 2>/dev/null || true
 
 # Set default terminal and editor.
 [ -r "$HOME/.config/uwsm/default" ] && . "$HOME/.config/uwsm/default"

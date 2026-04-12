@@ -26,8 +26,11 @@ home/.chezmoistate
 # Temp files
 *.tmp
 *.log
+*.pyc
+__pycache__/
 
 # Planning documents (untracked)
 PLAN.md
 
 .env
+home/dot_local/share/decent-angl/imsg/tui/target/

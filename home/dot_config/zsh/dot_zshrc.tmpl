@@ -13,7 +13,7 @@ export LOGFILE="${LOGFILE:-$HOME/.shellrc_log}"
 # === Zsh-Specific Configuration ===
 
 # Load Starship prompt early for proper initialization
-if command -v starship >/dev/null; then
+if [ "${TERM:-}" != "dumb" ] && command -v starship >/dev/null; then
     export STARSHIP_SHELL="zsh"
     export STARSHIP_CONFIG="$HOME/.config/starship/starship.toml"
     eval "$(starship init zsh)"

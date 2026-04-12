@@ -42,11 +42,23 @@ Use this when the user asks to inspect or change machine settings, desktop behav
   - source: `~/src/boilerplate/home/dot_config/hypr/`
   - live: `~/.config/hypr/`
   - related desktops/apps: `~/.config/omarchy/`, `~/.config/waybar/`, `~/.config/mako/`, `~/.config/walker/`, `~/.config/systemd/user/`
+- Omarchy desktop fast path:
+  - top bar and workspace indicator changes usually start in `~/.config/waybar/config.jsonc` and `~/.config/waybar/style.css`
+  - Omarchy launches Waybar from `~/.local/share/omarchy/default/hypr/autostart.conf` with `uwsm-app -- waybar`
+  - `persistent-workspaces` keeps empty workspace buttons visible and `format-icons.active` overrides the active workspace label
+  - for custom Waybar popups, prefer the existing manifest-managed scripts in `~/.local/bin/`, especially `waybar-clock-calendar-toggle`, over rebuilding the pattern from scratch
+  - use `omarchy-roaming-sync validate` to check live sync, git tracking, and Hyprland config health; `omarchy-roaming-sync sync --apply` captures live Omarchy state into boilerplate and chezmoi; `omarchy-roaming-sync apply` replays that baseline on a new Omarchy machine
+  - `~/.config/hypr/monitors.conf`, `~/.config/omarchy/current/theme/*`, and `~/.config/omarchy/current/background` stay local by design
+  - Waybar config changes need `omarchy-restart-waybar`
 - Trackpad and input workflow:
   1. Inspect `hyprctl devices` and the live `~/.config/hypr/input.conf`.
   2. If the behavior should be part of the standard workstation setup, edit the source `home/dot_config/hypr/input.conf`.
   3. Apply with `chezmoi apply ~/.config/hypr/input.conf`.
   4. Reload with `hyprctl reload`.
+- Hyprland config verification:
+  1. Reload with `hyprctl reload`.
+  2. Check parser output with `hyprctl configerrors`.
+  3. Treat any output there as a blocking config error and fix it before closing the task.
 - Treat Omarchy desktop changes as shared only when they are part of your normal workstation baseline.
 
 ## macOS

@@ -15,3 +15,10 @@ commit_attribution = ""
 
 [plugins."github@openai-curated"]
 enabled = true
+
+[tui]
+status_line = ["model-name", "five-hour-limit", "weekly-limit", "used-tokens", "fast-mode"]
+theme = "dracula"
+# Prefer non-intrusive notifications over focus-stealing prompts.
+notifications = ["agent-turn-complete", "user-input-requested", "approval-requested", "plan-mode-prompt"]
+notification_condition = "unfocused"

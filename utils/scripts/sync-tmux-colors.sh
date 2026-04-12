@@ -3,8 +3,8 @@
 # Get the directory of this script
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-KITTY_THEME="$REPO_ROOT/config/kitty/current-theme.conf"
-TMUX_CONFIG="$REPO_ROOT/config/tmux/tmux.conf"
+KITTY_THEME="$REPO_ROOT/home/dot_config/kitty/current-theme.conf"
+TMUX_CONFIG="$REPO_ROOT/home/dot_config/tmux/tmux.conf"
 
 # Function to extract color from kitty theme
 extract_color() {

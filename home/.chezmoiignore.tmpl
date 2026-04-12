@@ -51,3 +51,23 @@ nvim.backup.*
 
 # Neovim lazy-lock.json (plugin lockfile)
 .config/nvim/lazy-lock.json
+
+{{- if ne .chezmoi.os "linux" }}
+# Linux / Omarchy-only desktop stack
+.config/decent-angl/omarchy-roaming-manifest.tsv
+.config/hypr
+.config/hypr/**
+.config/omarchy
+.config/omarchy/**
+.config/systemd/user/omarchy-battery-monitor.service
+.config/uwsm
+.config/uwsm/**
+.config/waybar
+.config/waybar/**
+.config/xdg-terminals.list
+.local/bin/hyprland-workspace-compactd
+.local/bin/omarchy-install-terminal
+.local/bin/omarchy-roaming-sync
+.local/bin/waybar-clock-calendar-popup
+.local/bin/waybar-clock-calendar-toggle
+{{- end }}

@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.decentangl.imsg.send-worker</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{{ .chezmoi.homeDir }}/.local/bin/imsgd</string>
+        <string>send-worker</string>
+        <string>--loop</string>
+    </array>
+    <key>UserName</key>
+    <string>{{ base .chezmoi.homeDir }}</string>
+    <key>WorkingDirectory</key>
+    <string>{{ .chezmoi.homeDir }}</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>{{ .chezmoi.homeDir }}</string>
+        <key>IMSG_SEND_WORKER</key>
+        <string>1</string>
+        <key>PATH</key>
+        <string>{{ .chezmoi.homeDir }}/.local/bin:{{ .chezmoi.homeDir }}/.local/share/mise/shims:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+    <key>KeepAlive</key>
+    <true/>
+    <key>LimitLoadToSessionType</key>
+    <array>
+        <string>Aqua</string>
+    </array>
+    <key>ProcessType</key>
+    <string>Interactive</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>{{ .chezmoi.homeDir }}/.local/state/decent-angl/imsg/logs/send-worker.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>{{ .chezmoi.homeDir }}/.local/state/decent-angl/imsg/logs/send-worker.err.log</string>
+</dict>
+</plist>

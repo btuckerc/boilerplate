@@ -33,12 +33,12 @@ boilerplate/
 │   │   ├── nvim/                  # Neovim configuration
 │   │   ├── tmux/                  # Tmux configuration
 │   │   ├── shell/common.sh        # Shared shell config
+│   ├── Brewfile                   # Homebrew packages -> ~/Brewfile
 │   ├── dot_codex/skills/          # Shared Codex skills
 │   ├── dot_zshrc.tmpl             # Zsh configuration
 │   ├── dot_bashrc.tmpl            # Bash configuration
 │   └── run_once_*.sh.tmpl         # Setup hooks
 ├── setup                          # Bootstrap script
-├── Brewfile                       # Homebrew packages
 └── README.md                      # User documentation
 ```
 

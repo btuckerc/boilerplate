@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REAL_NPM="${HOME}/.local/share/mise/shims/npm"
+MISE_BIN="$(command -v mise 2>/dev/null || true)"
+if [ -z "${MISE_BIN}" ]; then
+    echo "mise is required for Codex updates." >&2
+    exit 127
+fi
+MISE_LOCAL_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/mise/mise.local.toml"
+
+is_codex_only_global_install() {
+    local has_global=false
+    local cmd=""
+    local codex_spec=""
+    local package_count=0
+
+    for arg in "$@"; do
+        case "$arg" in
+        -g|--global)
+            has_global=true
+            ;;
+        install|i|in|ins|inst|insta|instal|isnt|isnta|isntal|add)
+            if [ -z "$cmd" ]; then
+                cmd="install"
+            fi
+            ;;
+        -*)
+            ;;
+        @openai/codex|@openai/codex@*)
+            codex_spec="$arg"
+            package_count=$((package_count + 1))
+            ;;
+        *)
+            if [ "$cmd" = "install" ]; then
+                package_count=$((package_count + 1))
+            fi
+            ;;
+        esac
+    done
+
+    [ "$has_global" = true ] && [ "$cmd" = "install" ] && [ "$package_count" -eq 1 ] && [ -n "$codex_spec" ]
+}
+
+requested_codex_version() {
+    local arg
+    for arg in "$@"; do
+        case "$arg" in
+        @openai/codex)
+            printf '%s\n' "latest"
+            return 0
+            ;;
+        @openai/codex@*)
+            printf '%s\n' "${arg#@openai/codex@}"
+            return 0
+            ;;
+        esac
+    done
+
+    printf '%s\n' "latest"
+}
+
+resolved_codex_version() {
+    local requested="$1"
+    local latest_link="${HOME}/.local/share/mise/installs/npm-openai-codex/latest"
+
+    if [ "$requested" = "latest" ] && [ -L "$latest_link" ]; then
+        readlink "$latest_link" | sed 's#^\./##'
+        return 0
+    fi
+
+    printf '%s\n' "$requested"
+}
+
+write_local_override() {
+    local resolved="$1"
+
+    mkdir -p "$(dirname "${MISE_LOCAL_CONFIG}")"
+    cat > "${MISE_LOCAL_CONFIG}" <<LOCAL_EOF
+# Machine-local mise overrides.
+# Codex self-update writes here so the CLI can update this machine
+# without mutating the shared chezmoi baseline.
+
+[tools]
+"npm:@openai/codex" = "${resolved}"
+LOCAL_EOF
+}
+
+install_codex_via_mise() {
+    local requested="$1"
+    local resolved=""
+
+    "${MISE_BIN}" install "npm:@openai/codex@${requested}"
+    resolved="$(resolved_codex_version "$requested")"
+    write_local_override "$resolved"
+    "${MISE_BIN}" reshim
+
+    printf 'Updated Codex via mise to %s\n' "$resolved" >&2
+}
+
+if is_codex_only_global_install "$@"; then
+    install_codex_via_mise "$(requested_codex_version "$@")"
+    exit 0
+fi
+
+exec "${REAL_NPM}" "$@"

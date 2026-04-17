@@ -1,0 +1,359 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "$(uname -s)" != "Darwin" ]]; then
+  echo "macos-performance-audit is for macOS only." >&2
+  exit 1
+fi
+
+section() {
+  printf '\n%s\n' "$1"
+}
+
+line() {
+  printf '  %s\n' "$1"
+}
+
+size_kb() {
+  local path="$1"
+  if [[ ! -e "$path" ]]; then
+    printf '0\n'
+    return 0
+  fi
+  du -sk "$path" 2>/dev/null | awk 'NR==1 { print $1 }'
+}
+
+size_human() {
+  local path="$1"
+  if [[ ! -e "$path" ]]; then
+    printf '0B\n'
+    return 0
+  fi
+  du -sh "$path" 2>/dev/null | awk 'NR==1 { print $1 }'
+}
+
+file_size_bytes() {
+  local path="$1"
+  if [[ ! -f "$path" ]]; then
+    printf '0\n'
+    return 0
+  fi
+  stat -f '%z' "$path" 2>/dev/null || printf '0\n'
+}
+
+file_size_human() {
+  local path="$1"
+  local bytes
+  bytes="$(file_size_bytes "$path")"
+  awk -v bytes="$bytes" '
+    function human(value) {
+      split("B KB MB GB TB PB", units, " ")
+      unit = 1
+      while (value >= 1024 && unit < 6) {
+        value /= 1024
+        unit++
+      }
+      if (unit == 1) {
+        return sprintf("%d%s", value, units[unit])
+      }
+      return sprintf("%.1f%s", value, units[unit])
+    }
+    BEGIN {
+      print human(bytes)
+    }
+  '
+}
+
+percent_value() {
+  local value="$1"
+  printf '%s\n' "$value" | tr -d '%'
+}
+
+add_finding() {
+  local level="$1"
+  local message="$2"
+  FINDINGS+=("[$level] $message")
+}
+
+print_path_size() {
+  local label="$1"
+  local path="$2"
+  if [[ -e "$path" ]]; then
+    line "$label: $(size_human "$path") ($path)"
+  else
+    line "$label: missing ($path)"
+  fi
+}
+
+join_by() {
+  local separator="$1"
+  shift || true
+  local first=1
+  local item
+  for item in "$@"; do
+    if [[ $first -eq 1 ]]; then
+      printf '%s' "$item"
+      first=0
+    else
+      printf '%s%s' "$separator" "$item"
+    fi
+  done
+}
+
+declare -a FINDINGS=()
+
+host_name="$(scutil --get ComputerName 2>/dev/null || hostname)"
+os_summary="$(sw_vers | awk -F': *' '
+  $1 == "ProductName" { name = $2; gsub(/^[ \t]+|[ \t]+$/, "", name) }
+  $1 == "ProductVersion" { version = $2; gsub(/^[ \t]+|[ \t]+$/, "", version) }
+  $1 == "BuildVersion" { build = $2; gsub(/^[ \t]+|[ \t]+$/, "", build) }
+  END { printf "%s %s (%s)\n", name, version, build }
+')"
+
+hardware_summary="$(system_profiler SPHardwareDataType 2>/dev/null | awk -F': ' '
+  /Model Name/ { model = $2 }
+  /Model Identifier/ { identifier = $2 }
+  /Chip/ { chip = $2 }
+  /Memory/ { memory = $2 }
+  END {
+    printf "%s, %s, %s, %s\n", model, identifier, chip, memory
+  }
+')"
+
+data_volume_df="$(df -h /System/Volumes/Data | awk 'NR==2 { print $2, $3, $4, $5 }')"
+read -r data_total data_used data_avail data_capacity <<<"$data_volume_df"
+data_capacity_value="$(percent_value "$data_capacity")"
+
+memory_line="$(memory_pressure 2>/dev/null | awk -F': *' '
+  /System-wide memory free percentage/ { free = $2 }
+  /Pages used by compressor/ { compressor_pages = $2 }
+  END {
+    if (free == "") {
+      free = "unknown"
+    }
+    printf "free=%s\n", free
+  }
+')"
+memory_free="$(printf '%s\n' "$memory_line" | awk -F'=' '/^free=/{print $2}')"
+swap_usage="$(sysctl vm.swapusage 2>/dev/null | sed 's/^vm.swapusage: //')"
+
+docker_settings_file="$HOME/Library/Group Containers/group.com.docker/settings-store.json"
+docker_raw_path="$HOME/Library/Containers/com.docker.docker/Data/vms/0/data/Docker.raw"
+docker_data_path="$HOME/Library/Containers/com.docker.docker"
+docker_data_size="$(size_human "$docker_data_path")"
+docker_raw_size="$(file_size_human "$docker_raw_path")"
+docker_summary=""
+docker_build_cache=""
+docker_ps_count=""
+docker_settings_summary=""
+
+if command -v docker >/dev/null 2>&1; then
+  docker_ps_count="$(docker ps -q 2>/dev/null | wc -l | tr -d ' ')"
+  docker_summary="$(docker system df 2>/dev/null || true)"
+  docker_build_cache="$(docker system df -v 2>/dev/null | awk -F': ' '/^Build cache usage:/ { print $2 }')"
+fi
+
+if [[ -f "$docker_settings_file" ]] && command -v python3 >/dev/null 2>&1; then
+  docker_settings_summary="$(python3 - "$docker_settings_file" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, "r", encoding="utf-8") as fh:
+    data = json.load(fh)
+
+items = {
+    "AutoStart": data.get("AutoStart"),
+    "UseResourceSaver": data.get("UseResourceSaver"),
+    "AutoPauseTimeoutSeconds": data.get("AutoPauseTimeoutSeconds"),
+    "Cpus": data.get("Cpus"),
+    "MemoryMiB": data.get("MemoryMiB"),
+    "DiskSizeMiB": data.get("DiskSizeMiB"),
+}
+
+for key, value in items.items():
+    print(f"{key}={value}")
+PY
+)"
+fi
+
+cloudkit_path="$HOME/Library/Caches/CloudKit"
+cloudkit_size="$(size_human "$cloudkit_path")"
+cloudkit_kb="$(size_kb "$cloudkit_path")"
+cloudkit_db_size="$(size_human "$cloudkit_path/cloudd_db")"
+bird_cache_size="$(size_human "$cloudkit_path/com.apple.bird")"
+fileprovider_path="$HOME/Library/Application Support/FileProvider"
+fileprovider_size="$(size_human "$fileprovider_path")"
+clouddocs_path="$HOME/Library/Application Support/CloudDocs"
+clouddocs_size="$(size_human "$clouddocs_path")"
+
+downloads_path="$HOME/Downloads"
+downloads_size="$(size_human "$downloads_path")"
+movies_path="$HOME/Movies"
+movies_size="$(size_human "$movies_path")"
+crossover_path="$HOME/Library/Application Support/CrossOver"
+crossover_size="$(size_human "$crossover_path")"
+xcode_path="$HOME/Library/Developer/Xcode"
+xcode_size="$(size_human "$xcode_path")"
+coresimulator_path="$HOME/Library/Developer/CoreSimulator"
+coresimulator_size="$(size_human "$coresimulator_path")"
+derived_data_path="$HOME/Library/Developer/Xcode/DerivedData"
+device_support_path="$HOME/Library/Developer/Xcode/iOS DeviceSupport"
+
+mongodb_log_path="/opt/homebrew/var/log/mongodb/mongo.log"
+mongodb_log_size="$(file_size_human "$mongodb_log_path")"
+mongodb_log_bytes="$(file_size_bytes "$mongodb_log_path")"
+
+login_items=()
+while IFS= read -r item; do
+  [[ -n "$item" ]] && login_items+=("$item")
+done < <(osascript -e 'tell application "System Events" to get the name of every login item' 2>/dev/null | tr ',' '\n' | sed 's/^ *//; s/ *$//')
+
+launch_agents=()
+while IFS= read -r item; do
+  [[ -n "$item" ]] && launch_agents+=("$item")
+done < <(find "$HOME/Library/LaunchAgents" -maxdepth 1 -type f -name '*.plist' -print 2>/dev/null | xargs -n1 basename 2>/dev/null | sort)
+
+brew_services_output=""
+if command -v brew >/dev/null 2>&1; then
+  brew_services_output="$(brew services list 2>/dev/null || true)"
+fi
+
+brew_taps=""
+if command -v brew >/dev/null 2>&1; then
+  brew_taps="$(brew tap 2>/dev/null || true)"
+fi
+
+xcode_version="$(xcodebuild -version 2>/dev/null | paste -sd ';' - || true)"
+
+simctl_unavailable="$(xcrun simctl list devices unavailable 2>/dev/null | tail -n +2 || true)"
+simctl_runtimes="$(xcrun simctl list runtimes 2>/dev/null || true)"
+
+if (( data_capacity_value >= 90 )); then
+  add_finding "critical" "Startup volume is ${data_capacity} full (${data_used} used, ${data_avail} available). Apple recommends freeing storage before performance troubleshooting."
+elif (( data_capacity_value >= 85 )); then
+  add_finding "high" "Startup volume is ${data_capacity} full. APFS snapshots, swap, Spotlight, and app caches have less headroom than usual."
+fi
+
+if (( cloudkit_kb >= 5 * 1024 * 1024 )); then
+  add_finding "high" "CloudKit cache is ${cloudkit_size} (${cloudkit_db_size} in cloudd_db, ${bird_cache_size} in com.apple.bird), which often correlates with iCloud Drive and File Provider slowdowns."
+fi
+
+if (( $(size_kb "$downloads_path") >= 20 * 1024 * 1024 )); then
+  add_finding "high" "Downloads is ${downloads_size}; large cold-storage media and installers are prime cleanup candidates."
+fi
+
+if (( $(size_kb "$movies_path") >= 100 * 1024 * 1024 )); then
+  add_finding "high" "Movies is ${movies_size}; moving archival media off the internal SSD would free the most space with the least operational risk."
+fi
+
+if (( $(size_kb "$docker_data_path") >= 30 * 1024 * 1024 )); then
+  add_finding "high" "Docker data is ${docker_data_size} and Docker.raw is ${docker_raw_size}; active containers plus retained build cache are consuming substantial local SSD."
+fi
+
+if [[ -n "$docker_build_cache" ]] && [[ "$docker_build_cache" != "0B" ]]; then
+  add_finding "high" "Docker build cache reports ${docker_build_cache}; pruneable cache is one of the fastest safe wins when you no longer need old image layers."
+fi
+
+if (( $(size_kb "$coresimulator_path") >= 10 * 1024 * 1024 )); then
+  add_finding "medium" "CoreSimulator is ${coresimulator_size}; old runtimes and unavailable devices can usually be removed through Xcode's supported simulator management flow."
+fi
+
+if (( $(size_kb "$xcode_path") >= 10 * 1024 * 1024 )); then
+  add_finding "medium" "Xcode support files are ${xcode_size}, including DerivedData $(size_human "$derived_data_path") and iOS DeviceSupport $(size_human "$device_support_path")."
+fi
+
+if (( $(size_kb "$crossover_path") >= 20 * 1024 * 1024 )); then
+  add_finding "medium" "CrossOver bottles are ${crossover_size}; unused bottles can reclaim significant space if they are no longer needed."
+fi
+
+if (( mongodb_log_bytes >= 1024 * 1024 * 1024 )); then
+  add_finding "high" "MongoDB log file is ${mongodb_log_size}; log rotation or disabling the service is worth reviewing before it grows again."
+fi
+
+if grep -q '^homebrew/services$' <<<"$brew_taps"; then
+  add_finding "low" "Deprecated Homebrew tap homebrew/services is still installed; remove it after confirming no workflow still depends on that archived tap."
+fi
+
+section "System"
+line "Host: $host_name"
+line "OS: $os_summary"
+line "Hardware: $hardware_summary"
+line "Uptime: $(uptime | sed 's/^ *//')"
+
+section "Storage"
+line "Data volume: $data_used / $data_total used, $data_avail available (${data_capacity})"
+print_path_size "Downloads" "$downloads_path"
+print_path_size "Movies" "$movies_path"
+print_path_size "CloudKit cache" "$cloudkit_path"
+print_path_size "FileProvider state" "$fileprovider_path"
+print_path_size "CloudDocs session" "$clouddocs_path"
+print_path_size "CrossOver" "$crossover_path"
+print_path_size "Docker data" "$docker_data_path"
+print_path_size "Xcode support" "$xcode_path"
+print_path_size "CoreSimulator" "$coresimulator_path"
+line "MongoDB log: ${mongodb_log_size} (${mongodb_log_path})"
+
+section "Memory"
+line "Memory pressure free percentage: ${memory_free:-unknown}"
+if [[ -n "$swap_usage" ]]; then
+  line "Swap: $swap_usage"
+fi
+
+section "Background"
+if ((${#login_items[@]} > 0)); then
+  line "Login items: $(join_by ', ' "${login_items[@]}")"
+else
+  line "Login items: none detected"
+fi
+if ((${#launch_agents[@]} > 0)); then
+  line "User LaunchAgents: $(join_by ', ' "${launch_agents[@]}")"
+else
+  line "User LaunchAgents: none detected"
+fi
+if [[ -n "$brew_services_output" ]]; then
+  line "Homebrew services:"
+  printf '%s\n' "$brew_services_output" | sed 's/^/    /'
+fi
+
+section "Docker"
+line "Data directory: ${docker_data_size} (${docker_data_path})"
+line "Disk image: ${docker_raw_size} (${docker_raw_path})"
+if [[ -n "$docker_ps_count" ]]; then
+  line "Running containers: ${docker_ps_count}"
+fi
+if [[ -n "$docker_build_cache" ]]; then
+  line "Build cache: ${docker_build_cache}"
+fi
+if [[ -n "$docker_settings_summary" ]]; then
+  printf '%s\n' "$docker_settings_summary" | sed 's/^/  settings: /'
+fi
+
+section "Developer"
+line "Xcode: ${xcode_version:-not installed}"
+line "DerivedData: $(size_human "$derived_data_path")"
+line "iOS DeviceSupport: $(size_human "$device_support_path")"
+if [[ -n "$simctl_runtimes" ]]; then
+  line "Simulator runtimes:"
+  printf '%s\n' "$simctl_runtimes" | sed 's/^/    /'
+fi
+if [[ -n "$simctl_unavailable" ]]; then
+  line "Unavailable simulator devices:"
+  printf '%s\n' "$simctl_unavailable" | sed 's/^/    /'
+fi
+
+section "Findings"
+if ((${#FINDINGS[@]} == 0)); then
+  line "No threshold-triggered findings. Review the sections above for workload-specific cleanup opportunities."
+else
+  for finding in "${FINDINGS[@]}"; do
+    line "$finding"
+  done
+fi
+
+section "Next Steps"
+line "Review large media folders before deleting anything."
+line "Prune Docker build cache and old images only after confirming active projects won't need them."
+line "Use Xcode > Settings > Components and Devices & Simulators to remove old runtimes instead of deleting simulator files by hand."
+line "Treat oversized CloudKit and FileProvider state as an iCloud sync issue first; clear caches only after confirming sync is healthy."
+line "Rotate or cap MongoDB logging if you keep the service enabled."

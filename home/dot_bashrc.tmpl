@@ -10,6 +10,11 @@ unset COMMON_SH
 # Safe fallback if common.sh is temporarily missing
 export LOGFILE="${LOGFILE:-$HOME/.shellrc_log}"
 
+# Load Ghostty's shell integration early so nested shells keep prompt marks.
+if [ -n "${GHOSTTY_RESOURCES_DIR:-}" ] && [ -r "${GHOSTTY_RESOURCES_DIR}/shell-integration/bash/ghostty.bash" ]; then
+    builtin source "${GHOSTTY_RESOURCES_DIR}/shell-integration/bash/ghostty.bash"
+fi
+
 # === Bash-Specific Configuration ===
 
 {{- if eq .chezmoi.os "darwin" }}

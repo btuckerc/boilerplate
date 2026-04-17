@@ -39,6 +39,5 @@ Current shared skills:
 - User CLIs: `mise`
 - Network identity: Tailscale
 - Dotfiles sync: `chezmoi`
-
 For this setup, the standard hosts are `omarchy`, `macbook`, and `macmini`, and the home Git mirror lives on `macmini`.
 Use chezmoi templating for platform or machine-specific Codex context. Do not teach Codex to infer host identity by shelling out in shared instructions.

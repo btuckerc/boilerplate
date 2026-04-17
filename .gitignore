@@ -26,6 +26,8 @@ home/.chezmoistate
 # Temp files
 *.tmp
 *.log
+__pycache__/
+*.pyc
 
 # Planning documents (untracked)
 PLAN.md

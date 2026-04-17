@@ -105,16 +105,16 @@ mise will automatically install these essential tools:
 
 ### Optional: Additional Packages (Brewfile)
 
-A `Brewfile` is included for additional applications you may want:
-- GUI apps: Docker, Ghostty, Kitty
-- System tools: btop, tmux, gh, jq
-- Development: Additional language tools
+A `Brewfile` is included for additional packages you may want:
+- GUI apps: Ghostty
+- CLI tools: btop, tmux, gh, jq, lazygit
+- Fonts used by the shared macOS configs: BlexMono Nerd Font, Meslo LG Nerd Font, Source Code Pro, Symbols Nerd Font
 
 To install Brewfile packages (optional):
 ```bash
 brew bundle install --file=~/Brewfile
 # Or from the repo
-brew bundle install --file=~/.local/share/chezmoi/Brewfile
+brew bundle install --file=~/.local/share/chezmoi/home/Brewfile
 ```
 
 **Note**: Brewfile is NOT automatically installed. Essential CLI tools come from mise.
@@ -125,9 +125,9 @@ brew bundle install --file=~/.local/share/chezmoi/Brewfile
 .
 ├── setup                           # Bootstrap script (main entry point)
 ├── .chezmoiroot                    # Points chezmoi to home/ directory
-├── Brewfile                        # Optional Homebrew packages
 ├── home/                           # chezmoi source directory
 │   ├── .chezmoiignore              # Files to exclude from home directory
+│   ├── Brewfile                    # Optional Homebrew packages → ~/Brewfile
 │   ├── dot_gitconfig               # Git configuration
 │   ├── dot_zshrc.tmpl              # Zsh configuration (OS-aware)
 │   ├── dot_bashrc.tmpl             # Bash configuration (OS-aware)
@@ -182,6 +182,16 @@ chezmoi add ~/.gitconfig
 # Update from remote repository
 chezmoi update
 ```
+
+### macOS Performance Audit
+
+On macOS hosts, the shared dotfiles also install a local audit helper:
+
+```bash
+macos-performance-audit
+```
+
+It summarizes storage pressure, large cache and media directories, Docker disk usage, simulator and Xcode support files, login items, launch agents, and Homebrew services without deleting anything.
 
 ### Managing Tool Versions
 

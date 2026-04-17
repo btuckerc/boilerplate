@@ -7,7 +7,7 @@ node = "24.14.1"
 go = "1.25.9"
 
 # Pin core operational CLIs so machines stay aligned.
-"npm:@openai/codex" = "0.118.0"
+"npm:@openai/codex" = "0.121.0"
 
 # CLI tools (fast binary downloads)
 "ubi:twpayne/chezmoi" = "2.66.0"
@@ -50,7 +50,7 @@ go = "1.25.9"
 
 "github:LuaLS/lua-language-server" = "3.17.1"
 "github:rust-lang/rust-analyzer" = "2026-03-30"
-"aqua:hashicorp/terraform-ls" = "0.38.0"
+"github:hashicorp/terraform-ls" = "0.38.0"
 "github:JohnnyMorganz/StyLua" = "2.1.0"
 "go:mvdan.cc/gofumpt" = "latest"
 "go:mvdan.cc/sh/v3/cmd/shfmt" = "latest"

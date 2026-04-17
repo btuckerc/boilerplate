@@ -1,0 +1,17 @@
+#!/bin/sh
+set -eu
+
+app_path="${HOME}/.local/share/decent-angl/imsg/imsg_app.py"
+tui_wrapper="${HOME}/.local/bin/imsg-tui"
+
+if [ ! -f "$app_path" ]; then
+    echo "imsg app bundle not found at $app_path" >&2
+    exit 1
+fi
+
+if [ "${1-}" = "tui" ]; then
+    shift
+    exec "$tui_wrapper" "$@"
+fi
+
+exec python3 "$app_path" client "$@"

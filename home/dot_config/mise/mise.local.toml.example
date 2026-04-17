@@ -2,5 +2,6 @@
 # RUBY_CONFIGURE_OPTS = "--with-openssl-dir=/custom/path --enable-yjit"
 
 [tools]
+# "npm:@openai/codex" = "0.121.0"  # Local Codex override for the npm self-update shim
 # ruby = "3.3.6"
 # node = "22"

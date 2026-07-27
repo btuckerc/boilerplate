@@ -16,7 +16,7 @@ On the `macbook`, source and build churn under iCloud-managed Documents produced
 
 ## 2026-07-26 migration
 
-The following fully local repositories were checksum-verified under `~/src`. Their former paths are compatibility symlinks. Their source and Git trees remain beside them with the suffix `.icloud-archive-20260726`; reproducible dependency and build trees were moved out of those archives after verification.
+The following fully local repositories were checksum-verified under `~/src`. Their former paths are compatibility symlinks. The first eight source/Git archives use the suffix `.icloud-archive-20260726`; the five deeper-audit archives use `.icloud-archive-20260727`. Reproducible dependency and build trees were removed or moved out of those archives after verification.
 
 | Former path under `~/Documents` | Active local path |
 | --- | --- |
@@ -28,6 +28,11 @@ The following fully local repositories were checksum-verified under `~/src`. The
 | `GitHub/2025/ascii` | `~/src/ascii` |
 | `cluewell/server` | `~/src/cluewell/server` |
 | `GitHub/jeopardy` | `~/src/jeopardy` |
+| `GitHub/2025/_angl-advantage` | `~/src/_angl-advantage` |
+| `GitHub/2025/angl-comic-scanner` | `~/src/angl-comic-scanner` |
+| `GitHub/dev-practice` | `~/src/dev-practice` |
+| `GitHub/code-can` | `~/src/code-can` |
+| `GitHub/helium-macos` | `~/src/helium-macos` |
 
 `cluewell/server` now uses `~/src/jeopardy` as its local Git remote. An invalid iCloud-created `.git/refs/.DS_Store` from `ascii` is preserved at `~/src/ascii/.git/icloud-artifacts/refs.DS_Store`; the migrated repository passes `git fsck`.
 
@@ -43,7 +48,9 @@ The 27 dependency/build roots omitted from the eight active copies were moved in
 
 That quarantine contains 8,707,004 KiB (about 8.30 GiB) and preserves paths relative to `~/Documents`. It includes only `node_modules`, `.next`, `.build`, `_build`, virtual environments, and Python bytecode caches. The dated iCloud archives contain none of those 27 roots.
 
-A separate whole-Documents audit found 15,291 top-level matches before nested environments were opened. The cleanup removed 32,858 generated cache/environment directories outside the active Codex task, then removed three verified build-cache leftovers and three caches from inactive Codex task artifacts. The higher removal count includes bytecode caches nested inside structurally verified virtual environments. The final audit leaves only eight false-positive directory names: three Python standard-library source modules named `venv` and five Chromium/Helium source directories named `target`. They were deliberately preserved.
+A separate whole-Documents audit found 15,291 top-level matches before nested environments were opened. The cleanup removed 32,858 generated cache/environment directories outside the active Codex task, then removed three verified build-cache leftovers and three caches from inactive Codex task artifacts. The higher removal count includes bytecode caches nested inside structurally verified virtual environments.
+
+A Git-index audit then caught 30,088 tracked files inside generated-looking paths. No tracked deletion was left silent: 59 vendored Copilot files were restored in their inactive Codex artifact, and the other 30,029 files were restored into five newly migrated local project trees (including Helium's nested Chromium repositories). Each destination matches its source outside the intentionally pruned paths and passes `git fsck`. The final Documents audit has nine intentional matches: three Python standard-library source modules named `venv`, five Chromium/Helium source directories named `target`, and the 59-file Git-tracked Copilot dependency snapshot. They were deliberately preserved.
 
 Historical dependency trees removed by the whole-Documents cleanup are not quarantined. They were limited to reproducible paths such as `node_modules`, `.next`, bytecode/test/lint/Turbo caches, structurally verified Python virtual environments (`pyvenv.cfg` present), Swift `.build` beside `Package.swift`, and Rust `target` beside `Cargo.toml`. Reinstall dependencies or rebuild those historical projects before use.
 
@@ -59,4 +66,4 @@ Do not bulk-delete the dated archives until active projects, dirty worktrees, lo
 
 ## Reversal
 
-For one project, stop its processes, remove only its compatibility symlink, and rename the corresponding `.icloud-archive-20260726` directory back to the original name. Restore a quarantined generated tree only if it cannot be rebuilt; copy its matching relative path from the quarantine back into the restored project. Never run a recursive cleanup against `~/Documents`, `~/src`, or a variable that has not been resolved to one exact project path.
+For one project, stop its processes, remove only its compatibility symlink, and rename the corresponding dated `.icloud-archive-YYYYMMDD` directory back to the original name. Restore a quarantined generated tree only if it cannot be rebuilt; copy its matching relative path from the quarantine back into the restored project. Never run a recursive cleanup against `~/Documents`, `~/src`, or a variable that has not been resolved to one exact project path.

@@ -194,7 +194,9 @@ _warn_icloud_dev_path() {
     local probe="$PWD"
     while [[ "$probe" == "$HOME/Documents"* || "$probe" == "$HOME/Desktop"* ]]; do
         if [[ -e "$probe/.git" || -e "$probe/package.json" || -e "$probe/pyproject.toml" ||
-              -e "$probe/Cargo.toml" || -e "$probe/go.mod" || -e "$probe/Package.swift" ]]; then
+              -e "$probe/Cargo.toml" || -e "$probe/go.mod" || -e "$probe/Package.swift" ||
+              -d "$probe/node_modules" || -d "$probe/.venv" || -d "$probe/venv" ||
+              -d "$probe/jupyter_env" ]]; then
             [[ ${_ICLOUD_DEV_WARNING_ROOT:-} == "$probe" ]] && return
             typeset -g _ICLOUD_DEV_WARNING_ROOT="$probe"
             print -u2 -- "Warning: development tree is inside iCloud: $probe"

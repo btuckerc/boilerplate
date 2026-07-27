@@ -180,5 +180,36 @@ t() {
     fi
 }
 
+{{- if eq .chezmoi.os "darwin" }}
+# Warn once per project when development starts inside iCloud-managed folders.
+_warn_icloud_dev_path() {
+    case "$PWD/" in
+        "$HOME/Documents/"*|"$HOME/Desktop/"*) ;;
+        *)
+            unset _ICLOUD_DEV_WARNING_ROOT
+            return
+            ;;
+    esac
+
+    local probe="$PWD"
+    while [[ "$probe" == "$HOME/Documents"* || "$probe" == "$HOME/Desktop"* ]]; do
+        if [[ -e "$probe/.git" || -e "$probe/package.json" || -e "$probe/pyproject.toml" ||
+              -e "$probe/Cargo.toml" || -e "$probe/go.mod" || -e "$probe/Package.swift" ]]; then
+            [[ ${_ICLOUD_DEV_WARNING_ROOT:-} == "$probe" ]] && return
+            typeset -g _ICLOUD_DEV_WARNING_ROOT="$probe"
+            print -u2 -- "Warning: development tree is inside iCloud: $probe"
+            print -u2 -- "Use $DEV_DIR instead (dev or mkproject <name>)."
+            return
+        fi
+        [[ "$probe" == "$HOME/Documents" || "$probe" == "$HOME/Desktop" ]] && break
+        probe=${probe:h}
+    done
+}
+
+autoload -Uz add-zsh-hook
+add-zsh-hook chpwd _warn_icloud_dev_path
+_warn_icloud_dev_path
+{{- end }}
+
 # Logging
 printf '%s: Zsh shell loaded\n' "$(date)" >>"$LOGFILE" 2>/dev/null || true

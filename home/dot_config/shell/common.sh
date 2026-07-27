@@ -5,7 +5,8 @@
 
 # === Environment Variables ===
 export EDITOR="nvim"
-export DEV_DIR="$HOME/src"
+export PROJECTS_ROOT="${PROJECTS_ROOT:-$HOME/src}"
+export DEV_DIR="${DEV_DIR:-$PROJECTS_ROOT}"
 export LOGFILE="${LOGFILE:-$HOME/.shellrc_log}"
 
 # XDG Base Directory Specification
@@ -79,12 +80,23 @@ alias dunnet="emacs -batch -l dunnet"
 
 # Navigate to source directory
 dev() {
-	TARGET_DIR="$HOME/src"
-	if [ ! -d "$TARGET_DIR" ]; then
+	if [ ! -d "$DEV_DIR" ]; then
 		echo "$(date): source directory not found. Creating..." >>"$LOGFILE"
-		mkdir -p "$TARGET_DIR"
+		mkdir -p "$DEV_DIR"
 	fi
-	cd "$TARGET_DIR" || echo "$(date): Failed to navigate to $TARGET_DIR" >>"$LOGFILE"
+	cd "$DEV_DIR" || echo "$(date): Failed to navigate to $DEV_DIR" >>"$LOGFILE"
+}
+
+# Create projects outside cloud-synced Documents/Desktop trees.
+mkproject() {
+	case ${1-} in
+	"" | /* | .. | ../* | */../* | */..)
+		echo "Usage: mkproject <name-or-relative-path>" >&2
+		return 2
+		;;
+	esac
+	mkdir -p "$DEV_DIR/$1" || return
+	cd "$DEV_DIR/$1" || return
 }
 
 # Create and activate Python virtual environment

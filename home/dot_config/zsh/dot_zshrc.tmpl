@@ -183,7 +183,10 @@ t() {
 {{- if eq .chezmoi.os "darwin" }}
 # Warn once per project when development starts inside iCloud-managed folders.
 _warn_icloud_dev_path() {
-    case "$PWD/" in
+    # Resolve compatibility symlinks before deciding whether the project itself
+    # lives in iCloud. A logical ~/Documents/foo path may point safely to ~/src.
+    local physical_pwd=${PWD:A}
+    case "$physical_pwd/" in
         "$HOME/Documents/"*|"$HOME/Desktop/"*) ;;
         *)
             unset _ICLOUD_DEV_WARNING_ROOT
@@ -191,7 +194,7 @@ _warn_icloud_dev_path() {
             ;;
     esac
 
-    local probe="$PWD"
+    local probe="$physical_pwd"
     while [[ "$probe" == "$HOME/Documents"* || "$probe" == "$HOME/Desktop"* ]]; do
         if [[ -e "$probe/.git" || -e "$probe/package.json" || -e "$probe/pyproject.toml" ||
               -e "$probe/Cargo.toml" || -e "$probe/go.mod" || -e "$probe/Package.swift" ||

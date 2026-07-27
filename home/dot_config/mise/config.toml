@@ -7,7 +7,7 @@ node = "24.14.1"
 go = "1.25.9"
 
 # Pin core operational CLIs so machines stay aligned.
-"npm:@openai/codex" = "0.121.0"
+"npm:@openai/codex" = "0.145.0"
 
 # CLI tools (fast binary downloads)
 "ubi:twpayne/chezmoi" = "2.66.0"

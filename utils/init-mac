@@ -297,8 +297,14 @@ setup_neovim() {
 
     if ! command -v nvim &> /dev/null; then
         if confirm "Neovim not found. Would you like to install it?"; then
-            brew install neovim
-            print_success "Neovim installed"
+            if command -v mise &> /dev/null; then
+                mise install github:neovim/neovim@0.12.1
+                mise reshim
+                print_success "Neovim installed with mise"
+            else
+                brew install neovim
+                print_success "Neovim installed with Homebrew"
+            fi
         else
             print_warning "Neovim installation skipped"
             return
@@ -313,7 +319,7 @@ setup_neovim() {
     fi
 
     mkdir -p ~/.config
-    ln -sf "$REPO_DIR/config/nvim" ~/.config/nvim
+    ln -sf "$REPO_DIR/home/dot_config/nvim" ~/.config/nvim
     print_success "Neovim configuration linked"
 }
 

@@ -4,85 +4,75 @@ return {
   -- Syntax highlighting
   {
     "nvim-treesitter/nvim-treesitter",
+    branch = "main",
+    lazy = false,
     build = ":TSUpdate",
-    event = { "BufReadPre", "BufNewFile" },
     config = function()
-      -- Add custom parser for Templ (Go templates)
-      local parser_config = require("nvim-treesitter.parsers").get_parser_configs()
-      parser_config.templ = {
-        install_info = {
-          url = "https://github.com/vrischmann/tree-sitter-templ",
-          files = { "src/parser.c", "src/scanner.c" },
-          branch = "main",
-        },
+      require("config.mise").prefer_install_dirs({
+        "/node/",
+        "/ubi-tree-sitter-tree-sitter/",
+      })
+
+      local treesitter = require("nvim-treesitter")
+      treesitter.setup()
+
+      local parsers = {
+        "bash",
+        "c",
+        "dockerfile",
+        "go",
+        "html",
+        "javascript",
+        "jsdoc",
+        "json",
+        "lua",
+        "luadoc",
+        "markdown",
+        "markdown_inline",
+        "python",
+        "rust",
+        "sql",
+        "templ",
+        "terraform",
+        "toml",
+        "typescript",
+        "vim",
+        "vimdoc",
+        "yaml",
       }
 
-      local uv = vim.loop
+      local installed = {}
+      for _, lang in ipairs(treesitter.get_installed("parsers")) do
+        installed[lang] = true
+      end
 
-      require("nvim-treesitter.configs").setup({
-        ensure_installed = {
-          "bash",
-          "c",
-          "html",
-          "lua",
-          "luadoc",
-          "markdown",
-          "markdown_inline",
-          "vim",
-          "vimdoc",
-          "javascript",
-          "typescript",
-          "python",
-          "go",
-          "rust",
-          "json",
-          "yaml",
-          "toml",
-          "dockerfile",
-          "terraform",
-          "sql",
-          "jsdoc",
-          "templ",
-        },
-        auto_install = true,
-        highlight = {
-          enable = true,
-          disable = function(lang, buf)
-            -- Disable HTML parsing as it can be problematic
-            if lang == "html" then
-              return true
-            end
+      local missing = vim.tbl_filter(function(lang)
+        return not installed[lang]
+      end, parsers)
 
-            -- Performance optimization: disable for large files
-            local max_filesize = 100 * 1024 -- 100 KB
-            local ok, stats = pcall(uv.fs_stat, vim.api.nvim_buf_get_name(buf))
-            if ok and stats and stats.size > max_filesize then
-              vim.notify(
-                "File larger than 100KB, Treesitter disabled for performance",
-                vim.log.levels.WARN,
-                { title = "Treesitter" }
-              )
-              return true
-            end
-
-            -- Check line count for typing performance
-            local lines = vim.api.nvim_buf_line_count(buf)
-            if lines > 2000 then
-              return true
-            end
+      if #missing > 0 and #vim.api.nvim_list_uis() > 0 then
+        vim.api.nvim_create_autocmd("User", {
+          group = vim.api.nvim_create_augroup("nvim_treesitter_install", { clear = true }),
+          pattern = "LazyDone",
+          once = true,
+          callback = function()
+            treesitter.install(missing, { summary = true })
           end,
-          -- Better Markdown rendering with both Treesitter and Vim regex
-          additional_vim_regex_highlighting = { "markdown" },
-        },
-        -- Optimize incremental selection for performance
-        incremental_selection = {
-          enable = true,
-          disable = function(lang, buf)
-            local lines = vim.api.nvim_buf_line_count(buf)
-            return lines > 1000 -- Disable for large files
-          end,
-        },
-        indent = { enable = true },
+        })
+      end
+
+      vim.api.nvim_create_autocmd("FileType", {
+        group = vim.api.nvim_create_augroup("nvim_treesitter_features", { clear = true }),
+        callback = function(event)
+          if vim.bo[event.buf].buftype ~= "" or vim.b[event.buf].large_file then
+            return
+          end
+
+          local ok = pcall(vim.treesitter.start, event.buf)
+          if ok then
+            vim.bo[event.buf].indentexpr = "v:lua.require'nvim-treesitter'.indentexpr()"
+          end
+        end,
       })
     end,
   },
@@ -112,14 +102,5 @@ return {
     keys = {
       { "<leader>u", "<cmd>UndotreeToggle<cr>", desc = "Toggle undotree" },
     },
-  },
-
-  -- Vim practice game
-  {
-    "theprimeagen/vim-be-good",
-    dependencies = {
-      "nvim-lua/plenary.nvim",
-    },
-    config = function() end,
   },
 }

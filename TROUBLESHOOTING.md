@@ -926,12 +926,12 @@ nvim 2>&1 | head -20
 rm -rf ~/.local/share/nvim/lazy/lazy.nvim
 git clone --filter=blob:none https://github.com/folke/lazy.nvim.git --branch=stable ~/.local/share/nvim/lazy/lazy.nvim
 
-# Check LSP installation
-nvim --headless '+Mason' +qa 2>&1 | head -20
+# Check LSP health
+nvim --headless '+checkhealth vim.lsp' +qa 2>&1 | head -20
 
-# Reinstall Mason packages
-rm -rf ~/.local/share/nvim/mason
-nvim --headless '+MasonToolsInstallSync' +qa
+# Reinstall mise-managed LSP binaries
+mise install
+mise reshim
 ```
 
 **Verification:**

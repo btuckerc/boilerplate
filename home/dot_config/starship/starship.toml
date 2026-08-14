@@ -1,5 +1,6 @@
 # Minimal white-on-black starship config with clear separation
-format = "$directory$git_branch$git_status$line_break$character"
+add_newline = false
+format = "$directory$git_branch$line_break$character"
 
 [directory]
 style = "fg:white"
@@ -13,6 +14,7 @@ style = "fg:bright-white"
 format = " on [$symbol$branch]($style)"
 
 [git_status]
+disabled = true
 style = "fg:white"
 format = " ·[$all_status$ahead_behind]($style)"
 conflicted = " conflict"

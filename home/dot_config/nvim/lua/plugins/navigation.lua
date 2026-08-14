@@ -5,7 +5,36 @@ return {
   {
     "nvim-telescope/telescope.nvim",
     branch = "0.1.x",
-    event = "VimEnter",
+    cmd = "Telescope",
+    keys = {
+      { "<leader>ff", function() require("telescope.builtin").find_files() end, desc = "Find files" },
+      { "<leader>fg", function() require("telescope.builtin").live_grep() end, desc = "Live grep" },
+      { "<leader>fb", function() require("telescope.builtin").buffers() end, desc = "Find buffers" },
+      { "<leader>fh", function() require("telescope.builtin").help_tags() end, desc = "Help tags" },
+      { "<leader>fr", function() require("telescope.builtin").oldfiles() end, desc = "Recent files" },
+      { "<leader>fs", function() require("telescope.builtin").lsp_document_symbols() end, desc = "Document symbols" },
+      { "<leader>fS", function() require("telescope.builtin").lsp_dynamic_workspace_symbols() end, desc = "Workspace symbols" },
+      {
+        "<leader>fm",
+        function()
+          require("telescope.builtin").lsp_document_symbols({
+            symbols = { "method", "function" },
+            prompt_title = "Functions & Methods",
+          })
+        end,
+        desc = "Find methods/functions",
+      },
+      {
+        "<leader>fc",
+        function()
+          require("telescope.builtin").lsp_document_symbols({
+            symbols = { "class", "struct", "interface", "enum" },
+            prompt_title = "Classes & Structs",
+          })
+        end,
+        desc = "Find classes/structs",
+      },
+    },
     dependencies = {
       "nvim-lua/plenary.nvim",
       {
@@ -59,34 +88,6 @@ return {
       })
 
       pcall(require("telescope").load_extension, "fzf")
-
-      local builtin = require("telescope.builtin")
-      vim.keymap.set("n", "<leader>ff", builtin.find_files, { desc = "Find files" })
-      vim.keymap.set("n", "<leader>fg", builtin.live_grep, { desc = "Live grep" })
-      vim.keymap.set("n", "<leader>fb", builtin.buffers, { desc = "Find buffers" })
-      vim.keymap.set("n", "<leader>fh", builtin.help_tags, { desc = "Help tags" })
-      vim.keymap.set("n", "<leader>fr", builtin.oldfiles, { desc = "Recent files" })
-
-      -- LSP Symbol Navigation
-      vim.keymap.set("n", "<leader>fs", builtin.lsp_document_symbols, { desc = "Document symbols" })
-      vim.keymap.set("n", "<leader>fS", builtin.lsp_dynamic_workspace_symbols, { desc = "Workspace symbols" })
-
-      -- Quick function/method navigation
-      -- Use :methods: or :functions: filter in the prompt to filter by type
-      vim.keymap.set("n", "<leader>fm", function()
-        builtin.lsp_document_symbols({
-          symbols = { "method", "function" },
-          prompt_title = "Functions & Methods",
-        })
-      end, { desc = "Find methods/functions" })
-
-      -- Class/struct navigation
-      vim.keymap.set("n", "<leader>fc", function()
-        builtin.lsp_document_symbols({
-          symbols = { "class", "struct", "interface", "enum" },
-          prompt_title = "Classes & Structs",
-        })
-      end, { desc = "Find classes/structs" })
     end,
   },
 

@@ -47,10 +47,11 @@ if command -v apt >/dev/null 2>&1; then
     echo "Detected apt (Debian/Ubuntu)"
     sudo apt update
     sudo apt install -y \
-        curl git build-essential autoconf \
+        curl git file build-essential autoconf \
         libssl-dev libyaml-dev zlib1g-dev libffi-dev libgmp-dev \
         libreadline-dev libncurses5-dev libgdbm-dev rustc \
-        libpcsclite-dev pcscd
+        libpcsclite-dev pcscd \
+        wl-clipboard xclip xsel
 
 elif command -v dnf >/dev/null 2>&1; then
     echo "Detected dnf (Fedora/RHEL)"
@@ -63,16 +64,18 @@ elif command -v dnf >/dev/null 2>&1; then
     fi
     
     sudo dnf install -y \
-        curl git gcc gcc-c++ make autoconf rust patch bzip2 \
+        curl git file gcc gcc-c++ make autoconf rust patch bzip2 \
         openssl-devel libffi-devel readline-devel gdbm-devel \
         ncurses-devel libyaml-devel "$ZLIB_PKG" \
-        pcsc-lite pcsc-lite-devel ccid
+        pcsc-lite pcsc-lite-devel ccid \
+        wl-clipboard xclip xsel
 
 elif command -v pacman >/dev/null 2>&1; then
     echo "Detected pacman (Arch Linux)"
     sudo pacman -Sy --noconfirm \
-        curl git base-devel rust libffi libyaml openssl zlib \
-        readline gdbm ncurses pcsclite ccid
+        curl git file base-devel rust libffi libyaml openssl zlib \
+        readline gdbm ncurses pcsclite ccid \
+        wl-clipboard xclip xsel
 
 else
     echo "WARNING: Unknown package manager. Please install tools manually."

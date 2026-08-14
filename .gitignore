@@ -33,3 +33,9 @@ __pycache__/
 PLAN.md
 
 .env
+
+# Pi runtime/auth state is per-machine and must not be committed.
+home/dot_pi/agent/auth.json
+home/dot_pi/agent/sessions/
+home/dot_pi/agent/pi-debug.log
+home/dot_pi/agent/image-paste/

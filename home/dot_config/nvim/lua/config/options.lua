@@ -21,7 +21,7 @@ opt.termguicolors = true
 opt.wrap = false
 opt.showmatch = true
 opt.matchtime = 2
-opt.showmode = true
+opt.showmode = false
 
 -- Indentation
 opt.tabstop = 4
@@ -37,9 +37,9 @@ opt.hlsearch = true
 opt.incsearch = true
 
 -- Performance
-opt.lazyredraw = true
 opt.synmaxcol = 240
-opt.updatetime = 300
+opt.updatetime = 250
+opt.redrawtime = 10000
 
 -- Files & Backups
 opt.undofile = true
@@ -56,10 +56,12 @@ opt.scrolloff = 8
 opt.sidescrolloff = 8
 
 -- Timeouts
-opt.timeoutlen = 500
+opt.timeoutlen = 400
+opt.ttimeout = true
+opt.ttimeoutlen = 50
 
 -- Completion
-opt.completeopt = { "menuone", "noselect" }
+opt.completeopt = { "menuone", "noselect", "popup" }
 opt.shortmess:append("c")
 
 -- Command line
@@ -81,6 +83,8 @@ opt.foldenable = true
 opt.encoding = "utf-8"
 opt.fileencoding = "utf-8"
 opt.formatoptions:remove({ "c", "r", "o" })
+opt.directory = vim.fn.stdpath("state") .. "/swap"
+opt.updatecount = 100
 
 -- External tools
 opt.grepprg = "rg --vimgrep --smart-case --follow"

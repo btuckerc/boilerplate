@@ -1,6 +1,15 @@
+-- Enable Neovim 0.12 UI2 early so startup errors don't trigger hit-enter spam.
+if vim.fn.has("nvim-0.12") == 1 then
+  local ok, ui2 = pcall(require, "vim._core.ui2")
+  if ok then
+    ui2.enable()
+  end
+end
+
 -- Bootstrap lazy.nvim
 local lazypath = vim.fn.stdpath("data") .. "/lazy/lazy.nvim"
-if not vim.loop.fs_stat(lazypath) then
+local uv = vim.uv
+if not uv.fs_stat(lazypath) then
   vim.fn.system({
     "git",
     "clone",
@@ -18,7 +27,6 @@ require("config.keymaps")
 require("config.autocmds")
 require("config.python-optimization")
 require("config.performance-utils")
-require("config.typing-performance")
 
 -- Setup plugins
 require("lazy").setup("plugins", {
@@ -27,7 +35,7 @@ require("lazy").setup("plugins", {
     version = false, -- Don't use version constraints for git plugins
   },
   checker = {
-    enabled = true,
+    enabled = false,
     notify = false,
   },
   change_detection = {

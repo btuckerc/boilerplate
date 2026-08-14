@@ -10,13 +10,6 @@ return {
     config = function()
       -- All LSP servers are installed via mise and available in PATH
       -- See ~/.config/mise/config.toml for LSP installation
-      local capabilities = vim.lsp.protocol.make_client_capabilities()
-
-      -- Enable native completion
-      vim.lsp.completion.enable()
-
-      -- Performance optimization: Set large file threshold for LSP
-      vim.lsp.buf.large_file_threshold = 1024 * 1024 -- 1MB threshold
 
       -- Global LSP performance settings
       vim.diagnostic.config({
@@ -46,18 +39,20 @@ return {
           map("gd", vim.lsp.buf.definition, "Go to definition")
           map("gr", vim.lsp.buf.references, "Go to references")
           map("gI", vim.lsp.buf.implementation, "Go to implementation")
-          map("gD", vim.lsp.buf.type_definition, "Type definition")
+          map("gD", vim.lsp.buf.declaration, "Go to declaration")
+          map("grt", vim.lsp.buf.type_definition, "Type definition")
           map("<leader>rn", vim.lsp.buf.rename, "Rename")
           map("<leader>ca", vim.lsp.buf.code_action, "Code action")
           map("K", vim.lsp.buf.hover, "Hover documentation")
 
-          -- Diagnostics
-          map("[d", vim.diagnostic.goto_prev, "Previous diagnostic")
-          map("]d", vim.diagnostic.goto_next, "Next diagnostic")
-          map("<leader>df", vim.diagnostic.open_float, "Show diagnostic")
+          if client and client.server_capabilities.inlayHintProvider then
+            pcall(function()
+              vim.lsp.inlay_hint.enable(false, { bufnr = event.buf })
+            end)
+          end
 
           -- Enable native LSP completion for this buffer/client
-          if client and client.supports_method("textDocument/completion") then
+          if client and client:supports_method("textDocument/completion") then
             vim.lsp.completion.enable(true, client.id, event.buf, { autotrigger = true })
           end
         end,
@@ -106,7 +101,7 @@ return {
           python = {
             analysis = {
               autoSearchPaths = true,
-              diagnosticMode = "workspace",
+              diagnosticMode = "openFilesOnly",
               useLibraryCodeForTypes = true,
             },
           },
@@ -215,21 +210,51 @@ return {
       },
     },
     config = function()
+      local function command_works(cmd)
+        local ok, result = pcall(vim.system, cmd, { text = true })
+        if not ok then
+          return false
+        end
+
+        return result:wait().code == 0
+      end
+
+      local formatters_by_ft = {
+        lua = { "stylua" },
+        python = { "black" },
+        javascript = { "prettier" },
+        typescript = { "prettier" },
+        json = { "prettier" },
+        yaml = { "prettier" },
+        markdown = { "prettier" },
+        go = { "gofmt" },
+        rust = { "rustfmt" },
+      }
+
+      if command_works({ "ruff", "--version" }) then
+        formatters_by_ft.python = { "ruff_format", "black" }
+      end
+
+      if command_works({ "gofumpt", "--version" }) and command_works({ "goimports", "-help" }) then
+        formatters_by_ft.go = { "gofumpt", "goimports" }
+      elseif command_works({ "goimports", "-help" }) then
+        formatters_by_ft.go = { "goimports" }
+      end
+
+      if command_works({ "rubocop", "--version" }) then
+        formatters_by_ft.ruby = { "robocop" }
+      end
+
+      if command_works({ "terraform", "version" }) then
+        formatters_by_ft.terraform = { "terraform_fmt" }
+      end
+
+      if command_works({ "shfmt", "--version" }) then
+        formatters_by_ft.sh = { "shfmt" }
+      end
+
       require("conform").setup({
-        formatters_by_ft = {
-          lua = { "stylua" },
-          python = { "ruff_format" },
-          javascript = { "prettier" },
-          typescript = { "prettier" },
-          json = { "prettier" },
-          yaml = { "prettier" },
-          markdown = { "prettier" },
-          go = { "gofumpt", "goimports" },
-          ruby = { "robocop" },
-          rust = { "rustfmt" },
-          terraform = { "terraform_fmt" },
-          sh = { "shfmt" },
-        },
+        formatters_by_ft = formatters_by_ft,
         format_on_save = {
           timeout_ms = 500,
           lsp_fallback = true,

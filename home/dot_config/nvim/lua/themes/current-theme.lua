@@ -1,5 +1,5 @@
 -- Converted Neovim Theme
--- Generated from Kitty theme: /Users/tucker/Documents/GitHub/boilerplate/config/kitty/current-theme.conf
+-- Generated from Kitty theme: /Users/tucker/src/boilerplate/home/dot_config/kitty/current-theme.conf
 -- Generated on: Thu Dec 26 17:45:36 EST 2024
 
 local M = {}
@@ -44,6 +44,45 @@ function M.apply(transparent)
   -- Basic highlights
   vim.cmd("highlight Normal guifg=" .. colors.foreground .. " guibg=" .. bg)
   vim.cmd("highlight NormalNC guifg=" .. colors.foreground .. " guibg=" .. bg)
+  vim.cmd("highlight MsgArea guifg=" .. colors.foreground .. " guibg=" .. bg)
+  vim.cmd("highlight ModeMsg guifg=" .. colors.foreground .. " guibg=" .. bg .. " gui=NONE")
+  vim.cmd("highlight MoreMsg guifg=" .. colors.foreground .. " guibg=" .. bg .. " gui=NONE")
+  vim.cmd("highlight Question guifg=" .. colors.foreground .. " guibg=" .. bg .. " gui=NONE")
+
+  -- Keep command-line input quiet. Neovim syntax-highlights the ":" prompt
+  -- separately, and command keywords otherwise inherit the loud Statement color.
+  for _, group in ipairs({
+    "@keyword.command",
+    "@keyword.operator.command",
+    "@keyword.vim",
+    "@function.macro.command",
+    "@function.builtin.command",
+    "@function.builtin.vim",
+    "@function.call.vim",
+    "@variable.builtin.command",
+    "@variable.builtin.vim",
+    "@variable.parameter.command",
+    "@variable.vim",
+    "@module.command",
+    "@operator.vim",
+    "@punctuation.bracket.vim",
+    "@punctuation.delimiter.command",
+    "@punctuation.delimiter.vim",
+    "@punctuation.special.command",
+    "@punctuation.special.vim",
+    "@string.special.path.vim",
+    "@string.special.vim",
+    "@string.vim",
+    "vimBang",
+    "vimCmdSep",
+    "vimCommand",
+    "vimCommandModifier",
+    "vimCommandModifierBang",
+    "vimIsCommand",
+    "vimOper",
+  }) do
+    vim.api.nvim_set_hl(0, group, { fg = colors.foreground, bg = transparent and "NONE" or colors.background, bold = false })
+  end
 
   -- Make more backgrounds transparent
   vim.cmd("highlight SignColumn guibg=" .. bg)

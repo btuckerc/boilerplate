@@ -1,0 +1,93 @@
+{{- $fireModel := "accounts/fireworks/routers/kimi-k2p5-turbo" -}}
+{{- $fireKimi26Model := "accounts/fireworks/models/kimi-k2p6" -}}
+{{- $fireModelSpec := printf "fireworks/%s" $fireModel -}}
+{
+  "defaultProvider": "fireworks",
+  "defaultModel": "{{ $fireModel }}",
+  "defaultThinkingLevel": "off",
+  "enabledModels": [
+    "fireworks/{{ $fireModel }}",
+    "fireworks/{{ $fireKimi26Model }}",
+    "openai-codex/gpt-5.3-codex-spark",
+    "openai-codex/gpt-5.4"
+  ],
+  "hideThinkingBlock": true,
+  "enableInstallTelemetry": false,
+  "quietStartup": true,
+  "collapseChangelog": true,
+  "doubleEscapeAction": "tree",
+  "treeFilterMode": "default",
+  "autocompleteMaxVisible": 8,
+  "transport": "auto",
+  "thinkingBudgets": {
+    "minimal": 1024,
+    "low": 4096,
+    "medium": 10240,
+    "high": 32768,
+    "xhigh": 65536
+  },
+  "compaction": {
+    "enabled": true,
+    "reserveTokens": 32768,
+    "keepRecentTokens": 24000
+  },
+  "branchSummary": {
+    "reserveTokens": 32768,
+    "skipPrompt": false
+  },
+  "retry": {
+    "enabled": true,
+    "maxRetries": 3,
+    "baseDelayMs": 2000,
+    "maxDelayMs": 60000
+  },
+  "terminal": {
+    "showImages": true,
+    "imageWidthCells": 72
+  },
+  "npmCommand": [
+    "/bin/sh",
+    "-c",
+    "PATH=\"$HOME/.local/share/mise/installs/node/24.14.1/bin:$PATH\" exec \"$HOME/.local/share/mise/installs/node/24.14.1/bin/npm\" \"$@\"",
+    "npm"
+  ],
+  "packages": [
+    "npm:pi-rtk-optimizer@0.5.4",
+    "npm:pi-show-diffs@0.2.8",
+    "npm:pi-prompt-template-model@0.8.2",
+    "npm:pi-subagents@0.17.2",
+    "npm:pi-resource-center@0.2.3"
+  ],
+  "extensions": [
+    "extensions/*.ts"
+  ],
+  "subagents": {
+    "agentOverrides": {
+      "scout": {
+        "model": "{{ $fireModelSpec }}",
+        "thinking": "off"
+      },
+      "context-builder": {
+        "model": "{{ $fireModelSpec }}",
+        "thinking": "off"
+      },
+      "planner": {
+        "model": "{{ $fireModelSpec }}",
+        "thinking": "off"
+      },
+      "worker": {
+        "model": "{{ $fireModelSpec }}",
+        "thinking": "off"
+      },
+      "reviewer": {
+        "model": "{{ $fireModelSpec }}",
+        "thinking": "off"
+      },
+      "delegate": {
+        "model": "{{ $fireModelSpec }}",
+        "thinking": "off"
+      }
+    }
+  },
+  "lastChangelogVersion": "0.75.0"
+}

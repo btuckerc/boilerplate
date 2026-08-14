@@ -10,5 +10,4 @@ return {
   { import = "plugins.git" },
   { import = "plugins.lsp" },
   { import = "plugins.integrations" },
-  { import = "plugins.ai" },
 }

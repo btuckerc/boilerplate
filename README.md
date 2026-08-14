@@ -6,6 +6,7 @@ Modern, portable dotfiles managed with [chezmoi](https://chezmoi.io) and [mise](
 
 - **Cross-platform**: macOS (zsh) and Linux (bash) support with shared configuration
 - **Tool management**: mise installs and manages all required tools automatically
+- **Agentic coding**: Codex plus a lightweight Pi + RTK terminal path are pinned through mise
 - **Automated setup**: One command to bootstrap everything
 - **Idempotent**: Safe to run repeatedly
 - **OS-aware templates**: Platform-specific configurations where needed
@@ -77,6 +78,9 @@ For most users, this README covers what you need. Legacy Claude/OpenCode files w
 ### What Gets Installed Automatically
 
 mise will automatically install these essential tools:
+- **codex** - OpenAI Codex CLI
+- **pi** - Lightweight terminal coding harness
+- **rtk** - Token/output reduction proxy for coding agents
 - **chezmoi** - Dotfile manager
 - **starship** - Cross-shell prompt
 - **fzf** - Fuzzy finder
@@ -99,7 +103,7 @@ mise will automatically install these essential tools:
 - **Git**: `~/.gitconfig` with aliases and sensible defaults
 
 ### Editor Configurations
-- **Neovim**: Full LSP setup with plugins (Treesitter, Telescope, Copilot, etc.)
+- **Neovim**: Neovim 0.12 with native LSP/completion, Treesitter, Telescope, Oil, and lazy.nvim
 - **VSCode**: Settings and custom snippets
 - **tmux**: With TPM (Tmux Plugin Manager) and sensible defaults
 
@@ -348,13 +352,13 @@ chezmoi add ~/.config/mise/config.toml
 ## Neovim Configuration
 
 Full-featured Neovim setup with:
-- **LSP**: Language Server Protocol support via Mason
+- **Neovim**: Pinned via `mise` to 0.12.x
+- **LSP**: Native `vim.lsp.config()` / `vim.lsp.enable()` with mise-managed servers
 - **Treesitter**: Advanced syntax highlighting
-- **Telescope**: Fuzzy finder for files, grep, buffers
-- **Git**: fugitive, gitsigns integration
-- **Copilot**: AI pair programming
-- **Completion**: nvim-cmp with multiple sources
-- **File navigation**: oil.nvim, harpoon
+- **Completion**: Native `vim.lsp.completion`
+- **Navigation**: Telescope + Oil
+- **Git**: gitsigns + LazyGit integration
+- **AI**: Codex-first workflow outside the editor; no Neovim AI plugin enabled by default
 - **Theme**: Custom colorscheme synced with terminal
 
 Configuration location: `~/.config/nvim/`
@@ -367,7 +371,6 @@ lua/plugins/
 ├── navigation.lua   # File/code navigation
 ├── ui.lua           # Visual elements
 ├── git.lua          # Git integration
-├── ai.lua           # Copilot
 └── integrations.lua # External tools
 ```
 

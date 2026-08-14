@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+print_key_from_env_file() {
+    local file="$1"
+
+    [ -r "$file" ] || return 1
+
+    awk '
+        /^[[:space:]]*(export[[:space:]]+)?FIREWORKS_API_KEY[[:space:]]*=/ {
+            line = $0
+            sub(/^[[:space:]]*export[[:space:]]+/, "", line)
+            sub(/^[^=]*=[[:space:]]*/, "", line)
+            gsub(/[[:space:]]+$/, "", line)
+            if (line ~ /^".*"$/ || line ~ /^\047.*\047$/) {
+                line = substr(line, 2, length(line) - 2)
+            }
+            if (length(line) > 0) {
+                value = line
+            }
+        }
+        END {
+            if (length(value) > 0) {
+                print value
+            } else {
+                exit 1
+            }
+        }
+    ' "$file"
+}
+
+if [ -n "${FIREWORKS_API_KEY:-}" ]; then
+    printf '%s\n' "$FIREWORKS_API_KEY"
+    exit 0
+fi
+
+extra_files=()
+if [ -n "${PI_FIREWORKS_KEY_FILES:-}" ]; then
+    IFS=':' read -r -a extra_files <<< "$PI_FIREWORKS_KEY_FILES"
+fi
+if [ "${#extra_files[@]}" -gt 0 ]; then
+    for file in "${extra_files[@]}"; do
+        [ -n "${file:-}" ] || continue
+        if key="$(print_key_from_env_file "$file" 2>/dev/null)"; then
+            printf '%s\n' "$key"
+            exit 0
+        fi
+    done
+fi
+
+for file in \
+    "$HOME/.config/decent-angl/fireworks.env" \
+    "$HOME/homelab/jobs/.env" \
+    "$HOME/src/job-hunt/.env" \
+    "/Users/admin/homelab/jobs/.env"; do
+    if key="$(print_key_from_env_file "$file" 2>/dev/null)"; then
+        printf '%s\n' "$key"
+        exit 0
+    fi
+done
+
+if [ "${PI_FIREWORKS_KEY_SKIP_SSH:-0}" != "1" ] && command -v ssh >/dev/null 2>&1; then
+    remote="${PI_FIREWORKS_KEY_REMOTE_SSH:-admin@macmini}"
+    remote_script='
+print_key() {
+    awk '\''
+        /^[[:space:]]*(export[[:space:]]+)?FIREWORKS_API_KEY[[:space:]]*=/ {
+            line = $0
+            sub(/^[[:space:]]*export[[:space:]]+/, "", line)
+            sub(/^[^=]*=[[:space:]]*/, "", line)
+            gsub(/[[:space:]]+$/, "", line)
+            if (line ~ /^".*"$/ || line ~ /^\047.*\047$/) {
+                line = substr(line, 2, length(line) - 2)
+            }
+            if (length(line) > 0) {
+                value = line
+            }
+        }
+        END {
+            if (length(value) > 0) {
+                print value
+            } else {
+                exit 1
+            }
+        }
+    '\'' "$1"
+}
+for file in "$HOME/.config/decent-angl/fireworks.env" "$HOME/homelab/jobs/.env" /Users/admin/homelab/jobs/.env /Users/admin/homelab/jobs/deploy/prod.env; do
+    [ -r "$file" ] || continue
+    if print_key "$file"; then
+        exit 0
+    fi
+done
+exit 1
+'
+
+    if key="$(ssh -o BatchMode=yes -o ConnectTimeout=3 "$remote" "$remote_script" 2>/dev/null)"; then
+        printf '%s\n' "$key"
+        exit 0
+    fi
+fi
+
+echo "FIREWORKS_API_KEY not found. Set it in the environment or ~/.config/decent-angl/fireworks.env." >&2
+exit 1

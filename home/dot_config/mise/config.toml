@@ -8,6 +8,8 @@ go = "1.25.9"
 
 # Pin core operational CLIs so machines stay aligned.
 "npm:@openai/codex" = "0.145.0"
+pi = "0.75.0"
+rtk = "0.37.2"
 
 # CLI tools (fast binary downloads)
 "ubi:twpayne/chezmoi" = "2.66.0"
@@ -26,9 +28,9 @@ go = "1.25.9"
 "aqua:restic/restic" = "0.18.1"
 
 # Editor and dev tools
-"github:neovim/neovim" = "0.12.1"
-"github:cli/cli" = "2.89.0"
-"github:BurntSushi/ripgrep" = "15.1.0"
+"aqua:neovim/neovim" = "0.12.1"
+"aqua:cli/cli" = "2.89.0"
+"aqua:BurntSushi/ripgrep" = "15.1.0"
 "asdf:mise-plugins/mise-tmux" = "3.6a"
 
 # Language servers (require node/python/go)
@@ -48,10 +50,12 @@ go = "1.25.9"
 "pipx:black" = "26.3.1"
 "pipx:yubikey-manager" = "5.9.0"
 
-"github:LuaLS/lua-language-server" = "3.17.1"
-"github:rust-lang/rust-analyzer" = "2026-03-30"
-"github:hashicorp/terraform-ls" = "0.38.0"
-"github:JohnnyMorganz/StyLua" = "2.1.0"
+"aqua:LuaLS/lua-language-server" = "3.17.1"
+"aqua:rust-lang/rust-analyzer" = "2026-03-30"
+# Use mise's registry/aqua backend for release assets instead of the generic
+# github backend; registry metadata handles platform-specific asset names.
+"aqua:hashicorp/terraform-ls" = "0.38.6"
+"aqua:JohnnyMorganz/StyLua" = "2.1.0"
 "go:mvdan.cc/gofumpt" = "latest"
 "go:mvdan.cc/sh/v3/cmd/shfmt" = "latest"
 
@@ -67,6 +71,9 @@ always_keep_download = false
 plugin_autoupdate_last_check_duration = "7d"
 jobs = 2
 verbose = false
+# Keep operational one-offs like `mise exec -- chezmoi ...` from hydrating
+# unrelated missing editor/dev tools. Use `mise install` when preparing tools.
+exec_auto_install = false
 asdf_compat = true
 color = true
 task_output = "prefix"

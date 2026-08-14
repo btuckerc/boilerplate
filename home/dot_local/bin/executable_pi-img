@@ -1,0 +1,340 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+    cat <<'USAGE'
+Usage: pi-img [--json] [--copy] [--path] [--cwd DIR] [IMAGE_FILE]
+
+Save an image from the clipboard, or normalize IMAGE_FILE, into a managed Pi
+image-paste directory and print an attachment path.
+
+Default output: @/absolute/path/to/image.png
+USAGE
+}
+
+mode="at"
+copy_to_clipboard=false
+cwd="$PWD"
+source_file=""
+keep="${PI_IMAGE_PASTE_KEEP:-60}"
+save_root="${PI_IMAGE_PASTE_DIR:-$HOME/.pi/agent/image-paste}"
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --json)
+            mode="json"
+            ;;
+        --copy)
+            copy_to_clipboard=true
+            ;;
+        --path)
+            mode="path"
+            ;;
+        --cwd)
+            shift
+            [ "$#" -gt 0 ] || { echo "pi-img: --cwd requires a directory" >&2; exit 2; }
+            cwd="$1"
+            ;;
+        --help|-h)
+            usage
+            exit 0
+            ;;
+        --*)
+            echo "pi-img: unknown option $1" >&2
+            usage >&2
+            exit 2
+            ;;
+        *)
+            if [ -n "$source_file" ]; then
+                echo "pi-img: only one IMAGE_FILE is supported" >&2
+                exit 2
+            fi
+            source_file="$1"
+            ;;
+    esac
+    shift
+done
+
+if [ -d "$cwd" ]; then
+    cwd="$(cd "$cwd" && pwd -P)"
+else
+    echo "pi-img: cwd does not exist: $cwd" >&2
+    exit 2
+fi
+
+sanitize() {
+    printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '-' | sed -E 's/-+/-/g; s/^-//; s/-$//'
+}
+
+project_slug="$(sanitize "$(basename "$cwd")")"
+[ -n "$project_slug" ] || project_slug="project"
+if command -v shasum >/dev/null 2>&1; then
+    project_hash="$(printf '%s' "$cwd" | shasum -a 256 | awk '{print substr($1,1,12)}')"
+elif command -v sha256sum >/dev/null 2>&1; then
+    project_hash="$(printf '%s' "$cwd" | sha256sum | awk '{print substr($1,1,12)}')"
+else
+    project_hash="$(printf '%s' "$cwd" | cksum | awk '{print $1}')"
+fi
+save_dir="$save_root/${project_slug}-${project_hash}"
+mkdir -p "$save_dir"
+
+tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/pi-img.XXXXXX")"
+trap 'rm -rf "$tmp_dir"' EXIT
+
+mime_of() {
+    file --mime-type -b "$1" 2>/dev/null || true
+}
+
+extension_for_mime() {
+    case "$1" in
+        image/png) printf 'png' ;;
+        image/jpeg) printf 'jpg' ;;
+        image/gif) printf 'gif' ;;
+        image/webp) printf 'webp' ;;
+        image/svg+xml) printf 'svg' ;;
+        image/tiff) printf 'tiff' ;;
+        image/bmp|image/x-ms-bmp) printf 'bmp' ;;
+        *) printf '' ;;
+    esac
+}
+
+validate_image() {
+    local file="$1"
+    local mime
+    mime="$(mime_of "$file")"
+    case "$mime" in
+        image/png|image/jpeg|image/gif|image/webp|image/svg+xml|image/tiff|image/bmp|image/x-ms-bmp)
+            printf '%s' "$mime"
+            return 0
+            ;;
+    esac
+    return 1
+}
+
+copy_text_to_clipboard() {
+    if command -v pbcopy >/dev/null 2>&1; then
+        printf '%s' "$1" | pbcopy
+    elif command -v wl-copy >/dev/null 2>&1; then
+        printf '%s' "$1" | wl-copy
+    elif command -v xclip >/dev/null 2>&1; then
+        printf '%s' "$1" | xclip -selection clipboard
+    elif command -v xsel >/dev/null 2>&1; then
+        printf '%s' "$1" | xsel --clipboard --input
+    else
+        return 1
+    fi
+}
+
+clipboard_text() {
+    if command -v pbpaste >/dev/null 2>&1; then
+        pbpaste 2>/dev/null || true
+    elif command -v wl-paste >/dev/null 2>&1; then
+        wl-paste --no-newline 2>/dev/null || true
+    elif command -v xclip >/dev/null 2>&1; then
+        xclip -selection clipboard -out -target UTF8_STRING 2>/dev/null || true
+    elif command -v xsel >/dev/null 2>&1; then
+        xsel --clipboard --output 2>/dev/null || true
+    fi
+}
+
+normalize_text_path() {
+    local text="$1"
+    local first
+    first="$(printf '%s' "$text" | tr -d '\r' | sed -n '1p' | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+    first="${first#@}"
+    first="${first#file://}"
+    first="${first/#\~/$HOME}"
+    printf '%s' "$first"
+}
+
+save_macos_clipboard_image() {
+    local out_png="$1"
+    local tmp_png="$tmp_dir/clipboard.png"
+    local tmp_tiff="$tmp_dir/clipboard.tiff"
+
+    if command -v pngpaste >/dev/null 2>&1 && pngpaste "$tmp_png" >/dev/null 2>&1; then
+        cp "$tmp_png" "$out_png"
+        return 0
+    fi
+
+    if osascript - "$tmp_png" >/dev/null 2>&1 <<'OSA'
+on run argv
+  set outPath to item 1 of argv
+  set imageData to the clipboard as «class PNGf»
+  set outFile to open for access (POSIX file outPath) with write permission
+  try
+    set eof outFile to 0
+    write imageData to outFile
+    close access outFile
+  on error errMsg number errNum
+    try
+      close access outFile
+    end try
+    error errMsg number errNum
+  end try
+end run
+OSA
+    then
+        if [ -s "$tmp_png" ] && [ "$(mime_of "$tmp_png")" = "image/png" ]; then
+            cp "$tmp_png" "$out_png"
+            return 0
+        fi
+    fi
+
+    if osascript - "$tmp_tiff" >/dev/null 2>&1 <<'OSA'
+on run argv
+  set outPath to item 1 of argv
+  set imageData to the clipboard as «class TIFF»
+  set outFile to open for access (POSIX file outPath) with write permission
+  try
+    set eof outFile to 0
+    write imageData to outFile
+    close access outFile
+  on error errMsg number errNum
+    try
+      close access outFile
+    end try
+    error errMsg number errNum
+  end try
+end run
+OSA
+    then
+        if [ -s "$tmp_tiff" ] && command -v sips >/dev/null 2>&1; then
+            sips -s format png "$tmp_tiff" --out "$out_png" >/dev/null 2>&1
+            [ -s "$out_png" ] && return 0
+        fi
+    fi
+
+    return 1
+}
+
+save_linux_clipboard_image() {
+    local out="$1"
+    local types=""
+
+    if command -v wl-paste >/dev/null 2>&1; then
+        types="$(wl-paste --list-types 2>/dev/null || true)"
+        if printf '%s\n' "$types" | grep -qx 'image/png'; then
+            wl-paste --type image/png > "$out"
+            [ -s "$out" ] && return 0
+        fi
+        if printf '%s\n' "$types" | grep -qx 'image/jpeg'; then
+            wl-paste --type image/jpeg > "$out"
+            [ -s "$out" ] && return 0
+        fi
+        if printf '%s\n' "$types" | grep -Eqx 'image/bmp|image/x-ms-bmp'; then
+            wl-paste --type image/bmp > "$out"
+            [ -s "$out" ] && return 0
+        fi
+    fi
+
+    if command -v xclip >/dev/null 2>&1; then
+        if xclip -selection clipboard -target image/png -out > "$out" 2>/dev/null && [ -s "$out" ]; then
+            return 0
+        fi
+        if xclip -selection clipboard -target image/jpeg -out > "$out" 2>/dev/null && [ -s "$out" ]; then
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
+capture_source="$tmp_dir/source"
+source_mime=""
+
+if [ -n "$source_file" ]; then
+    source_file="${source_file/#\~/$HOME}"
+    if [ ! -f "$source_file" ]; then
+        echo "pi-img: image file not found: $source_file" >&2
+        exit 1
+    fi
+    source_mime="$(validate_image "$source_file" || true)"
+    [ -n "$source_mime" ] || { echo "pi-img: not an image: $source_file" >&2; exit 1; }
+    cp "$source_file" "$capture_source"
+else
+    text_candidate="$(normalize_text_path "$(clipboard_text)")"
+    if [ -n "$text_candidate" ] && [ -f "$text_candidate" ]; then
+        source_mime="$(validate_image "$text_candidate" || true)"
+        if [ -n "$source_mime" ]; then
+            cp "$text_candidate" "$capture_source"
+        fi
+    fi
+
+    if [ ! -s "$capture_source" ]; then
+        if [ "$(uname -s)" = "Darwin" ]; then
+            if ! save_macos_clipboard_image "$capture_source"; then
+                echo "pi-img: no image found in macOS clipboard" >&2
+                exit 1
+            fi
+        else
+            if ! save_linux_clipboard_image "$capture_source"; then
+                echo "pi-img: no image found in clipboard; install wl-clipboard or xclip for Linux fallback" >&2
+                exit 1
+            fi
+        fi
+    fi
+
+    source_mime="$(validate_image "$capture_source" || true)"
+    [ -n "$source_mime" ] || { echo "pi-img: clipboard content is not a supported image" >&2; exit 1; }
+fi
+
+timestamp="$(date +%Y%m%d-%H%M%S)"
+suffix="${RANDOM}${RANDOM}"
+ext="$(extension_for_mime "$source_mime")"
+[ -n "$ext" ] || ext="img"
+final="$save_dir/pi-img-${timestamp}-${suffix}.${ext}"
+
+case "$source_mime" in
+    image/png|image/jpeg|image/gif|image/webp|image/svg+xml)
+        cp "$capture_source" "$final"
+        ;;
+    image/tiff|image/bmp|image/x-ms-bmp)
+        final="${final%.$ext}.png"
+        if command -v sips >/dev/null 2>&1; then
+            sips -s format png "$capture_source" --out "$final" >/dev/null 2>&1
+        elif command -v magick >/dev/null 2>&1; then
+            magick "$capture_source" "$final" >/dev/null 2>&1
+        else
+            echo "pi-img: image requires PNG conversion but neither sips nor magick is available" >&2
+            exit 1
+        fi
+        ;;
+esac
+
+final_mime="$(validate_image "$final" || true)"
+[ -n "$final_mime" ] || { echo "pi-img: failed to write a valid image" >&2; exit 1; }
+
+find "$save_dir" -type f -mtime +30 -delete 2>/dev/null || true
+if [ "$keep" -gt 0 ] 2>/dev/null; then
+    overflow="$(find "$save_dir" -type f | wc -l | tr -d ' ')"
+    if [ "$overflow" -gt "$keep" ]; then
+        find "$save_dir" -type f -print | xargs ls -t 2>/dev/null | tail -n +"$((keep + 1))" | xargs rm -f 2>/dev/null || true
+    fi
+fi
+
+at_path="@$final"
+if [ "$copy_to_clipboard" = true ]; then
+    copy_text_to_clipboard "$at_path" || true
+fi
+
+case "$mode" in
+    json)
+        if command -v jq >/dev/null 2>&1; then
+            jq -n \
+                --arg path "$final" \
+                --arg atPath "$at_path" \
+                --arg mime "$final_mime" \
+                --argjson bytes "$(wc -c < "$final" | tr -d ' ')" \
+                '{path: $path, atPath: $atPath, mime: $mime, bytes: $bytes}'
+        else
+            printf '{"path":"%s","atPath":"%s","mime":"%s","bytes":%s}\n' "$final" "$at_path" "$final_mime" "$(wc -c < "$final" | tr -d ' ')"
+        fi
+        ;;
+    path)
+        printf '%s\n' "$final"
+        ;;
+    at)
+        printf '%s\n' "$at_path"
+        ;;
+esac

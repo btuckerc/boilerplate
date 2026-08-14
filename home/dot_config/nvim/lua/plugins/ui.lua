@@ -7,10 +7,20 @@ return {
     dependencies = { "nvim-tree/nvim-web-devicons" },
     config = function()
       local function misery_task_count()
-        -- This function is to integrate your custom 'misery.scheduler'
-        local misery_ok, misery = pcall(require, "misery.scheduler")
-        if not misery_ok then
+        if vim.g.nvim_misery_scheduler_available == false then
           return ""
+        end
+
+        local misery = vim.g.nvim_misery_scheduler
+        if misery == nil then
+          local misery_ok, loaded_misery = pcall(require, "misery.scheduler")
+          if not misery_ok then
+            vim.g.nvim_misery_scheduler_available = false
+            return ""
+          end
+          vim.g.nvim_misery_scheduler_available = true
+          vim.g.nvim_misery_scheduler = loaded_misery
+          misery = loaded_misery
         end
 
         local task_count = #misery.tasks
@@ -85,10 +95,14 @@ return {
 
   -- Colorizer for CSS colors
   {
-    "norcalli/nvim-colorizer.lua",
-    ft = { "css", "scss", "html", "javascript", "typescript" },
+    "catgoose/nvim-colorizer.lua",
+    ft = { "css", "scss", "html", "javascript", "javascriptreact", "typescript", "typescriptreact" },
     config = function()
-      require("colorizer").setup()
+      require("colorizer").setup({
+        user_default_options = {
+          names = false,
+        },
+      })
     end,
   },
 }

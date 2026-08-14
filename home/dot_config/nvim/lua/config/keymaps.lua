@@ -6,10 +6,6 @@ local map = vim.keymap.set
 map("i", "jk", "<ESC>", { desc = "Exit insert mode with jk" })
 map("i", "kj", "<ESC>", { desc = "Exit insert mode with kj" })
 
--- Disable default Ctrl-Y behavior (copy char from line above)
--- Copilot will override this to accept suggestions
-map("i", "<C-y>", "<Nop>", { desc = "Disabled - used by Copilot" })
-
 -- Prevent space from moving cursor in normal/visual mode
 map({ "n", "v" }, "<Space>", "<Nop>", { desc = "Disable space movement" })
 
@@ -64,12 +60,6 @@ map("n", "<leader>wh", "<C-w>s", { desc = "Split window horizontally" })
 map("n", "<leader>w=", "<C-w>=", { desc = "Make splits equal size" })
 map("n", "<leader>wq", "<cmd>close<CR>", { desc = "Close current split" })
 
--- Window navigation
-map("n", "<C-h>", "<C-w>h", { desc = "Go to left window" })
-map("n", "<C-j>", "<C-w>j", { desc = "Go to lower window" })
-map("n", "<C-k>", "<C-w>k", { desc = "Go to upper window" })
-map("n", "<C-l>", "<C-w>l", { desc = "Go to right window" })
-
 -- Window resizing with arrow keys (restore original)
 map("n", "<Up>", ":resize -1<CR>", { desc = "Resize window up" })
 map("n", "<Down>", ":resize +1<CR>", { desc = "Resize window down" })
@@ -95,11 +85,18 @@ map("n", "<leader>bd", "<cmd>bdelete<CR>", { desc = "Delete buffer" })
 map("n", "<leader>w", "<cmd>w<cr>", { desc = "Save file" })
 
 -- Diagnostics (restore original + new)
-map("n", "[d", vim.diagnostic.goto_prev, { desc = "Go to previous diagnostic message" })
-map("n", "]d", vim.diagnostic.goto_next, { desc = "Go to next diagnostic message" })
-map("n", "<leader>dp", vim.diagnostic.goto_prev, { desc = "Previous diagnostic" })
-map("n", "<leader>dn", vim.diagnostic.goto_next, { desc = "Next diagnostic" })
-map("n", "<leader>e", vim.diagnostic.open_float, { desc = "Open floating diagnostic message" })
+local function diagnostic_jump(count)
+  return function()
+    vim.diagnostic.jump({ count = count, float = true })
+  end
+end
+
+map("n", "[d", diagnostic_jump(-1), { desc = "Go to previous diagnostic message" })
+map("n", "]d", diagnostic_jump(1), { desc = "Go to next diagnostic message" })
+map("n", "<leader>dp", diagnostic_jump(-1), { desc = "Previous diagnostic" })
+map("n", "<leader>dn", diagnostic_jump(1), { desc = "Next diagnostic" })
+map("n", "gl", vim.diagnostic.open_float, { desc = "Open line diagnostics" })
+map("n", "<leader>de", vim.diagnostic.open_float, { desc = "Open floating diagnostic message" })
 map("n", "<leader>dl", vim.diagnostic.setloclist, { desc = "Open diagnostics list" })
 
 -- Lua execution (restore original)

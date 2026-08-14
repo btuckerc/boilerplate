@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+    cat <<'USAGE'
+Usage: pi-img-ssh [--json] [--path] [--copy] [--cwd REMOTE_DIR] HOST
+
+Save the local clipboard image, upload it to HOST, normalize it with the
+remote pi-img helper, and print the remote Pi attachment path.
+
+Default output: @/remote/absolute/path/to/image.png
+USAGE
+}
+
+mode="at"
+copy_to_clipboard=false
+remote_cwd="$HOME"
+host=""
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --json)
+            mode="json"
+            ;;
+        --path)
+            mode="path"
+            ;;
+        --copy)
+            copy_to_clipboard=true
+            ;;
+        --cwd)
+            shift
+            [ "$#" -gt 0 ] || { echo "pi-img-ssh: --cwd requires a remote directory" >&2; exit 2; }
+            remote_cwd="$1"
+            ;;
+        --help|-h)
+            usage
+            exit 0
+            ;;
+        --*)
+            echo "pi-img-ssh: unknown option $1" >&2
+            usage >&2
+            exit 2
+            ;;
+        *)
+            if [ -n "$host" ]; then
+                echo "pi-img-ssh: only one HOST is supported" >&2
+                exit 2
+            fi
+            host="$1"
+            ;;
+    esac
+    shift
+done
+
+[ -n "$host" ] || { usage >&2; exit 2; }
+
+local_helper="${PI_IMAGE_PASTE_HELPER:-$HOME/.local/bin/pi-img}"
+[ -x "$local_helper" ] || { echo "pi-img-ssh: local helper not executable: $local_helper" >&2; exit 1; }
+
+copy_text_to_clipboard() {
+    if command -v pbcopy >/dev/null 2>&1; then
+        printf '%s' "$1" | pbcopy
+    elif command -v wl-copy >/dev/null 2>&1; then
+        printf '%s' "$1" | wl-copy
+    elif command -v xclip >/dev/null 2>&1; then
+        printf '%s' "$1" | xclip -selection clipboard
+    elif command -v xsel >/dev/null 2>&1; then
+        printf '%s' "$1" | xsel --clipboard --input
+    else
+        return 1
+    fi
+}
+
+json_value() {
+    local key="$1"
+    local json="$2"
+    if command -v jq >/dev/null 2>&1; then
+        printf '%s' "$json" | jq -r ".$key"
+    else
+        printf '%s' "$json" | sed -nE "s/.*\"$key\":\"([^\"]*)\".*/\\1/p"
+    fi
+}
+
+local_path="$("$local_helper" --path --cwd "$PWD")"
+ext="${local_path##*.}"
+[ "$ext" != "$local_path" ] || ext="png"
+
+remote_tmp="$(ssh "$host" 'mktemp -d "${TMPDIR:-/tmp}/pi-img-ssh.XXXXXX"')"
+remote_src="$remote_tmp/clipboard.$ext"
+cleanup() {
+    ssh "$host" rm -rf -- "$remote_tmp" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+
+scp -q "$local_path" "$host:$remote_src"
+
+remote_json="$(
+    ssh "$host" bash -s -- "$remote_src" "$remote_cwd" <<'REMOTE'
+set -euo pipefail
+remote_src="$1"
+remote_cwd="$2"
+helper="$HOME/.local/bin/pi-img"
+[ -x "$helper" ] || { echo "pi-img-ssh: remote helper not executable: $helper" >&2; exit 1; }
+"$helper" --json --cwd "$remote_cwd" "$remote_src"
+REMOTE
+)"
+
+at_path="$(json_value atPath "$remote_json")"
+path="$(json_value path "$remote_json")"
+[ -n "$at_path" ] && [ "$at_path" != "null" ] || { echo "pi-img-ssh: could not parse remote helper output" >&2; exit 1; }
+
+if [ "$copy_to_clipboard" = true ]; then
+    copy_text_to_clipboard "$at_path" || true
+fi
+
+case "$mode" in
+    json)
+        printf '%s\n' "$remote_json"
+        ;;
+    path)
+        printf '%s\n' "$path"
+        ;;
+    at)
+        printf '%s\n' "$at_path"
+        ;;
+esac

@@ -21,14 +21,14 @@ Use this when changing the shared Codex baseline managed with chezmoi.
 
 - Edit the source tree, not `{{ .decentangl.defaults.codex_home }}/` directly.
 - Keep auth, history, caches, sqlite files, logs, and project trust local.
-- Keep `config.toml` portable and minimal.
+- Keep `config.toml` portable and minimal; preserve Codex runtime-managed plugin, marketplace, notify, project trust, and local model preference entries rather than overwriting them during broad applies.
 - Put durable workflow rules in `AGENTS.md`.
 - Render platform or machine specifics with chezmoi templates instead of adding cross-platform prose.
-- Prefer Tailscale hostnames: `omarchy`, `macbook`, `macmini`.
+- Prefer Tailscale SSH targets: `omarchy`, `macbook`, `admin@macmini`.
 
 ## Workflow
 
 1. Edit `~/src/boilerplate/home/dot_codex/...`.
 2. Sync the same files into `{{ .decentangl.defaults.chezmoi_source }}/dot_codex/...` if the live source checkout is separate.
-3. Apply targeted files with `chezmoi apply`.
+3. Apply targeted files with `chezmoi apply`; avoid whole-tree applies unless the task explicitly needs them.
 4. Verify the rendered live files and `codex --version`.

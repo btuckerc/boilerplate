@@ -1,0 +1,23 @@
+# Pi Agent Baseline
+
+Pi is the lightweight terminal harness for fast local coding; Codex remains the primary shared baseline.
+
+- Safe default: `pi ...` uses Fireworks Fire Pass Kimi K2.5 Turbo with thinking off.
+- Fast Codex: `pf ...` or `/pf ...` uses `gpt-5.3-codex-spark` minimal, then falls back to `gpt-5.4-mini`.
+- Core Codex: `pc ...` or `/pc ...` uses `gpt-5.4` medium.
+- Deep Codex: `pd ...` or `/pd ...` uses `gpt-5.4` high. `pi-max ...` still exists for rare xhigh work.
+- Fireworks auth: `~/.local/bin/pi-fireworks-key` resolves the local-only Fire Pass key.
+- Thinking controls: `Shift+Tab` cycles thinking. `/thinking <level>` and `/think <level>` set it directly; quick commands include `/toff`, `/tmin`, `/tlow`, `/tmed`, `/thigh`, and `/txhigh`.
+- Statusline: the compact line below the editor replaces Pi's default footer and shows route/model, thinking, context, cwd, and git state. Use `/statusline full|minimal|off|on|refresh` per session.
+- Tool UI: tool output starts collapsed and core tools render compact summaries. Use `Ctrl+O` for detail or `/tool-ui compact|expanded|status` per session.
+- Diff approval: `pi-show-diffs` auto-approves file edits by default. Use `/diff-approval off` for manual review when you want it.
+- Compaction continuity: automatic compactions continue the latest request once, while manual `/compact` stays manual. `/compact-guard status|continue|notify|off|threshold <40-95>` tunes this per session. The guard proactively compacts at 78% before Pi reaches the hard wall.
+- Image input: native Pi supports `Ctrl+V` clipboard image paste and dragged image files. The shared Ghostty config forwards `Ctrl+V` to Pi; use `Cmd+V` or `Ctrl+Shift+V` for ordinary text paste. If native image paste still misses the image, use `Ctrl+Alt+V` or `/img` to save the clipboard image under `~/.pi/agent/image-paste/` and insert an `@file` attachment. `pi-img --copy` does the same from the shell. For SSH sessions where the remote Pi cannot read the local clipboard, use `pi-img-ssh --copy HOST --cwd /remote/project` and paste the copied `@remote-path`.
+- Model cycling: `Ctrl+P` rotates only Kimi K2.5 Turbo, Kimi K2.6, GPT-5.3 Codex Spark, and GPT-5.4 from `enabledModels`; `/model` remains unrestricted.
+- Resource management: `/resource` opens the package/extension browser.
+
+Shared config is managed in boilerplate under `home/dot_pi`. Keep `auth.json`, sessions, logs, package caches, and real API keys local.
+
+The statusline is local and intentionally avoids default network polling. Use Pi or Codex account/status commands when you need exact provider-limit accounting.
+
+Updates are intentionally pinned: bump `pi`, `rtk`, or `npm:<package>@version` in boilerplate, then apply chezmoi. `pi update` skips pinned packages by design.

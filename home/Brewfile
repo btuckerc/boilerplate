@@ -19,7 +19,6 @@ brew "lazygit"
 brew "luarocks"
 brew "mise"
 brew "tree-sitter"
-brew "neovim", args: ["HEAD"]
 brew "sqlite"
 brew "node"
 brew "pyenv"

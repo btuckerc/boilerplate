@@ -16,8 +16,8 @@ else
 fi
 
 # Define paths
-KITTY_THEME="$REPO_ROOT/config/kitty/current-theme.conf"
-NVIM_THEMES_DIR="$REPO_ROOT/config/nvim/lua/tucker/themes"
+KITTY_THEME="$REPO_ROOT/home/dot_config/kitty/current-theme.conf"
+NVIM_THEMES_DIR="$REPO_ROOT/home/dot_config/nvim/lua/themes"
 OUTPUT_THEME="$NVIM_THEMES_DIR/current-theme.lua"
 
 # Function to show usage

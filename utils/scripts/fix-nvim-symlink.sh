@@ -17,7 +17,7 @@ fi
 
 # Paths
 NVIM_CONFIG_DIR="$HOME/.config/nvim"
-REPO_NVIM_DIR="$REPO_ROOT/config/nvim"
+REPO_NVIM_DIR="$REPO_ROOT/home/dot_config/nvim"
 
 print_step "Fixing Neovim configuration symlink"
 

@@ -6,8 +6,8 @@ Shared Codex state is managed with chezmoi.
 - Keep `{{ .decentangl.defaults.codex_home }}/auth.json`, history, caches, sqlite files, and project trust local.
 - Use `mise` for `codex`, `bw`, `restic`, and `chezmoi`. Use the native package manager for OS packages.
 - On macOS with iCloud Desktop & Documents, keep active repos, build trees, virtualenvs, and Codex task workspaces under `~/src`, not `~/Documents`.
-- Prefer Tailscale hostnames for remote access: `omarchy`, `macbook`, `macmini`.
-- This setup is Codex-first. Legacy Claude/OpenCode material lives on `legacy/claude-opencode`; Claude Code and OpenCode are optional leftovers, not the active baseline.
+- Prefer Tailscale SSH targets for remote access: `omarchy`, `macbook`, `admin@macmini`.
+- This setup is Codex-first, with Pi + RTK supported as a lightweight terminal coding path. Legacy Claude/OpenCode material lives on `legacy/claude-opencode`; Claude Code and OpenCode are optional leftovers, not the active baseline.
 - For machine settings, native app preferences, or platform-specific operations, use the shared `platform-ops` skill.
 - Keep shared guidance short and durable. Let chezmoi render platform or machine specifics into the live files.
 

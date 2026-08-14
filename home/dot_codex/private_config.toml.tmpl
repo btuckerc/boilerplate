@@ -1,17 +1,27 @@
 # Managed by chezmoi. Edit the source tree, not ~/.codex directly.
 #
-# Keep this file portable. Host-local state such as auth and project trust
-# stays on the machine and is not part of the shared baseline.
-{{- $localTrust := (output "bash" "-lc" "config=\"$HOME/.codex/config.toml\"; if [ -f \"$config\" ]; then awk 'BEGIN { printing = 0 } /^\\[projects\\./ { printing = 1 } printing && /^\\[/ && $0 !~ /^\\[projects\\./ { printing = 0 } printing { print }' \"$config\"; fi") | trim }}
+# Keep this file portable. Codex runtime state such as auth, project trust,
+# plugin installs, marketplaces, and local model preferences stays on the
+# machine and is preserved across broad chezmoi applies.
+{{- $localCore := (output "sh" "-c" "config=\"$HOME/.codex/config.toml\"; if [ -f \"$config\" ]; then awk '/^(model|model_reasoning_effort|service_tier|commit_attribution|notify) =/ { print }' \"$config\"; else printf '%s\n' 'model = \"gpt-5.4\"' 'model_reasoning_effort = \"xhigh\"' 'service_tier = \"fast\"' 'commit_attribution = \"\"'; fi") | trim }}
+{{- $localTrust := (output "sh" "-c" "config=\"$HOME/.codex/config.toml\"; if [ -f \"$config\" ]; then awk 'BEGIN { printing = 0 } /^\\[projects\\./ { printing = 1 } printing && /^\\[/ && $0 !~ /^\\[projects\\./ { printing = 0 } printing { print }' \"$config\"; fi") | trim }}
+{{- $localPlugins := (output "sh" "-c" "config=\"$HOME/.codex/config.toml\"; if [ -f \"$config\" ]; then awk 'BEGIN { printing = 0 } /^\\[plugins\\./ { printing = 1 } printing && /^\\[/ && $0 !~ /^\\[plugins\\./ { printing = 0 } printing { print }' \"$config\"; fi") | trim }}
+{{- $localMarketplaces := (output "sh" "-c" "config=\"$HOME/.codex/config.toml\"; if [ -f \"$config\" ]; then awk 'BEGIN { printing = 0 } /^\\[marketplaces\\./ { printing = 1 } printing && /^\\[/ && $0 !~ /^\\[marketplaces\\./ { printing = 0 } printing { print }' \"$config\"; fi") | trim }}
 
-model = "gpt-5.4"
-model_reasoning_effort = "xhigh"
-service_tier = "fast"
-commit_attribution = ""
+{{ $localCore }}
+{{ if ne $localPlugins "" }}
+
+{{ $localPlugins }}
+{{ else }}
+
+[plugins."github@openai-curated"]
+enabled = true
+{{ end }}
 {{ if ne $localTrust "" }}
 
 {{ $localTrust }}
 {{ end }}
+{{ if ne $localMarketplaces "" }}
 
-[plugins."github@openai-curated"]
-enabled = true
+{{ $localMarketplaces }}
+{{ end }}

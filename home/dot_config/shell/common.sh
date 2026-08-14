@@ -9,10 +9,6 @@ export PROJECTS_ROOT="${PROJECTS_ROOT:-$HOME/src}"
 export DEV_DIR="${DEV_DIR:-$PROJECTS_ROOT}"
 export LOGFILE="${LOGFILE:-$HOME/.shellrc_log}"
 
-# Pi coding-agent: keep runtime local-first and avoid startup telemetry/update checks.
-export PI_TELEMETRY="${PI_TELEMETRY:-0}"
-export PI_SKIP_VERSION_CHECK="${PI_SKIP_VERSION_CHECK:-1}"
-
 # XDG Base Directory Specification
 # https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html
 export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"

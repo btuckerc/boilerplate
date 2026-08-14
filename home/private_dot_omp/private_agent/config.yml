@@ -1,0 +1,66 @@
+# Managed by chezmoi. Authentication remains in the machine-local agent.db.
+modelRoles:
+  default: xai-oauth/grok-4.6
+  smol: xai-oauth/grok-build
+  slow: xai-oauth/grok-4.6
+  vision: xai-oauth/grok-4.6
+  plan: xai-oauth/grok-4.6
+  commit: xai-oauth/grok-build
+  tiny: xai-oauth/grok-build
+  task: xai-oauth/grok-4.6
+
+modelProviderOrder:
+  - xai-oauth
+
+cycleOrder:
+  - smol
+  - default
+  - slow
+
+enabledModels:
+  - xai-oauth/grok-4.6
+  - xai-oauth/grok-build
+  - xai-oauth/grok-4.5
+
+# Do not import superseded harness-level settings, commands, or skills.
+disabledProviders:
+  - openai-codex
+  - openai-codex-device
+  - opencode-zen
+  - opencode-go
+
+defaultThinkingLevel: high
+hideThinkingBlock: true
+
+retry:
+  enabled: true
+  maxRetries: 3
+  baseDelayMs: 2000
+  maxDelayMs: 60000
+  modelFallback: true
+  fallbackChains:
+    xai-oauth/grok-4.6:
+      - xai-oauth/grok-4.5
+      - xai-oauth/grok-build
+    xai-oauth/grok-build:
+      - xai-oauth/grok-4.5
+
+task:
+  maxConcurrency: 3
+  maxRecursionDepth: 2
+
+tools:
+  approvalMode: yolo
+
+startup:
+  quiet: true
+  showSplash: false
+  setupWizard: false
+  checkUpdate: false
+  changelogMode: hidden
+
+marketplace:
+  autoUpdate: off
+
+memory:
+  backend: off

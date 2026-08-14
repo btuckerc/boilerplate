@@ -1,8 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-
-if [ -z "${FIREWORKS_API_KEY:-}" ]; then
-    export FIREWORKS_API_KEY="$("$HOME/.local/bin/pi-fireworks-key")"
-fi
-
-exec pi --model fireworks/accounts/fireworks/routers/kimi-k2p5-turbo --thinking off "$@"

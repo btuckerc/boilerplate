@@ -1,7 +1,0 @@
-interface:
-  display_name: "ADHD-Friendly Output"
-  short_description: "Action-first responses that are easy to scan"
-  default_prompt: "Use $adhd-friendly-output to respond in my preferred action-first style."
-
-policy:
-  allow_implicit_invocation: true

@@ -6,7 +6,7 @@ Modern, portable dotfiles managed with [chezmoi](https://chezmoi.io) and [mise](
 
 - **Cross-platform**: macOS (zsh) and Linux (bash) support with shared configuration
 - **Tool management**: mise installs and manages all required tools automatically
-- **Agentic coding**: Codex plus a lightweight Pi + RTK terminal path are pinned through mise
+- **Agentic coding**: Oh My Pi (OMP) is the pinned, primary terminal harness across platforms
 - **Automated setup**: One command to bootstrap everything
 - **Idempotent**: Safe to run repeatedly
 - **OS-aware templates**: Platform-specific configurations where needed
@@ -39,6 +39,18 @@ That's it. The bootstrap path will:
 
 It does not force a shell change.
 
+### SuperGrok Login
+
+OMP configuration is shared, but xAI OAuth credentials stay local to each machine. After bootstrap, authenticate the native SuperGrok provider once per workstation:
+
+```bash
+omp auth-broker login xai-oauth
+omp models refresh
+omp usage --provider xai-oauth --redact
+```
+
+The default, planning, vision, and task roles use `xai-oauth/grok-4.6`; lightweight and commit roles use `xai-oauth/grok-build`.
+
 ### Manual Setup
 
 ```bash
@@ -59,10 +71,10 @@ This repository includes comprehensive documentation:
 
 ### For AI Agents and Advanced Users
 
-The active baseline is Codex-first. The current shared skills live under `home/dot_codex/skills/`.
+The active terminal baseline is OMP-first. Its private native configuration and shared skills live under `home/private_dot_omp/private_agent/`.
 
-- **[Codex Config](./home/dot_codex/skills/codex-config/SKILL.md.tmpl)** - Update the shared Codex baseline managed by chezmoi
-- **[Platform Ops](./home/dot_codex/skills/platform-ops/SKILL.md.tmpl)** - Inspect or change platform-local settings on Omarchy/Linux or macOS
+- **[OMP Config](./home/private_dot_omp/private_agent/skills/omp-config/SKILL.md)** - Update the shared OMP baseline managed by chezmoi
+- **[Platform Ops](./home/private_dot_omp/private_agent/skills/platform-ops/SKILL.md.tmpl)** - Inspect or change platform-local settings on Omarchy/Linux or macOS
 
 ### For Users
 
@@ -73,14 +85,12 @@ The active baseline is Codex-first. The current shared skills live under `home/d
 
 - **[LICENSE](./LICENSE)** - MIT License
 
-For most users, this README covers what you need. Legacy Claude/OpenCode files were archived to the `legacy/claude-opencode` branch and are not part of the active baseline.
+For most users, this README covers what you need. Legacy Claude/OpenCode files were archived to the `legacy/claude-opencode` branch, and the pre-OMP Pi/Codex CLI baseline remains available in Git history.
 
 ### What Gets Installed Automatically
 
 mise will automatically install these essential tools:
-- **codex** - OpenAI Codex CLI
-- **pi** - Lightweight terminal coding harness
-- **rtk** - Token/output reduction proxy for coding agents
+- **omp** - Oh My Pi terminal coding harness
 - **chezmoi** - Dotfile manager
 - **starship** - Cross-shell prompt
 - **fzf** - Fuzzy finder
@@ -358,7 +368,7 @@ Full-featured Neovim setup with:
 - **Completion**: Native `vim.lsp.completion`
 - **Navigation**: Telescope + Oil
 - **Git**: gitsigns + LazyGit integration
-- **AI**: Codex-first workflow outside the editor; no Neovim AI plugin enabled by default
+- **AI**: OMP-first workflow outside the editor; no Neovim AI plugin enabled by default
 - **Theme**: Custom colorscheme synced with terminal
 
 Configuration location: `~/.config/nvim/`

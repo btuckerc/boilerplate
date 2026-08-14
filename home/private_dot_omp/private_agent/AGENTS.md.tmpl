@@ -1,0 +1,17 @@
+# Global Agent Instructions
+
+Shared OMP state is managed with chezmoi.
+
+- Edit shared OMP files in `~/src/boilerplate/home/private_dot_omp/` or `{{ .decentangl.defaults.chezmoi_source }}/private_dot_omp`, then apply with `chezmoi`.
+- Keep `~/.omp/agent/agent.db`, sessions, caches, logs, usage state, and provider credentials local.
+- Use `mise` for `omp`, `bw`, `restic`, and `chezmoi`. Use the native package manager for OS packages.
+- OMP is the primary coding harness across macOS and Omarchy/Linux. Its release is pinned in mise; update the shared pin deliberately instead of running `omp update`.
+- Use the native `xai-oauth` provider for SuperGrok. Authenticate once per machine with `omp auth-broker login xai-oauth`; never copy OAuth tokens into config files or Git.
+- Prefer OMP's built-in tools, LSP, diffs, compaction, image handling, approvals, and subagents before adding extensions.
+- On macOS with iCloud Desktop & Documents, keep active repos, build trees, virtualenvs, and agent workspaces under `~/src`, not `~/Documents`.
+- Prefer Tailscale SSH targets for remote access: `omarchy`, `macbook`, `admin@macmini`.
+- For machine settings, native app preferences, or platform-specific operations, use the shared `platform-ops` skill.
+- Keep shared guidance short and durable. Let chezmoi render platform or machine specifics into the live files.
+
+Current target:
+{{ template "codex/current-target.md.tmpl" . }}

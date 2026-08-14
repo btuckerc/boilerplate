@@ -34,8 +34,8 @@ PLAN.md
 
 .env
 
-# Pi runtime/auth state is per-machine and must not be committed.
-home/dot_pi/agent/auth.json
-home/dot_pi/agent/sessions/
-home/dot_pi/agent/pi-debug.log
-home/dot_pi/agent/image-paste/
+# OMP runtime/auth state is per-machine and must not be committed.
+home/private_dot_omp/private_agent/agent.db*
+home/private_dot_omp/private_agent/sessions/
+home/private_dot_omp/private_agent/logs/
+home/private_dot_omp/private_agent/*.log

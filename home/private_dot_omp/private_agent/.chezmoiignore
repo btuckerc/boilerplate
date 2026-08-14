@@ -1,0 +1,16 @@
+# OMP runtime files are owned by OMP and stay machine-local.
+agent.db
+agent.db-shm
+agent.db-wal
+sessions/
+sessions/**
+logs/
+logs/**
+*.log
+auth-broker.token
+auth-gateway.token
+models.db
+state/
+state/**
+managed-skills/
+managed-skills/**

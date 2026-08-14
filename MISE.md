@@ -118,9 +118,7 @@ node = "lts"
 go = "1.25"
 
 # CLI tools with backend prefixes
-"npm:@openai/codex" = "0.121.0"
-pi = "0.70.0"
-rtk = "0.37.2"
+"github:can1357/oh-my-pi" = "17.3.3"
 "ubi:starship/starship" = "latest"
 "aqua:neovim/neovim" = "latest"
 "npm:typescript-language-server" = "latest"

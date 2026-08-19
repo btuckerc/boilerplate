@@ -337,6 +337,10 @@ apply_local() {
   local paths=()
   while IFS=$'\t' read -r kind live_path repo_rel; do
     paths+=("$live_path")
+    case "$live_path" in
+      "$HOME/.omp/agent/"*) install -d -m 700 "$(dirname "$live_path")" ;;
+      *) mkdir -p "$(dirname "$live_path")" ;;
+    esac
   done < <(iter_manifest)
 
   install -d -m 700 "$HOME/.omp" "$HOME/.omp/agent"

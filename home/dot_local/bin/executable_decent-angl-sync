@@ -79,21 +79,13 @@ git_dirty() {
 }
 
 live_drift() {
-  local output meaningful
+  local output
   # Scheduled convergence deliberately excludes scripts, so unapplied
   # run_once/run_onchange state is not live-file drift.
-  if ! output="$(cm diff --exclude scripts 2>/dev/null)"; then
+  if ! output="$(cm diff --exclude scripts,dirs 2>/dev/null)"; then
     return 0
   fi
-  # OMP intentionally hardens some managed directories to 0700 even though
-  # chezmoi's directory target is 0755. Ignore only that more-restrictive
-  # directory-mode delta; content and every other mode change remain drift.
-  meaningful="$(printf '%s\n' "$output" | sed \
-    -e '/^diff --git /d' \
-    -e '/^old mode 40700$/d' \
-    -e '/^new mode 40755$/d' \
-    -e '/^[[:space:]]*$/d')"
-  [[ -n "$meaningful" ]]
+  [[ -n "$output" ]]
 }
 
 ahead_behind() {
@@ -163,7 +155,13 @@ adopt_source() {
 
 apply_tree() {
   local args=(apply --no-tty --refresh-externals=never)
-  if [[ "$WITH_SCRIPTS" != true ]]; then args+=(--exclude scripts); fi
+  # Directory entries are excluded because OMP intentionally hardens several
+  # managed directories to 0700. Managed file and symlink contents still apply.
+  if [[ "$WITH_SCRIPTS" != true ]]; then
+    args+=(--exclude scripts,dirs)
+  else
+    args+=(--exclude dirs)
+  fi
   cm "${args[@]}"
   if live_drift; then
     echo "Managed live files still differ after apply; preserving both sides." >&2

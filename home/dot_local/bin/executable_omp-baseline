@@ -222,7 +222,13 @@ check_tracking_and_secrets() {
 
 check_runtime_permissions() {
   local failures=0 file mode
-  for file in "$HOME/.omp/agent/.env" "$HOME/.omp/agent"/agent.db*; do
+  for file in \
+    "$HOME/.omp/agent/.env" \
+    "$HOME/.omp/agent"/agent.db* \
+    "$HOME/.omp/agent"/history.db* \
+    "$HOME/.omp/agent"/models.db* \
+    "$HOME/.omp/agent"/auth-*.token \
+    "$HOME/.omp/agent/secret-placeholder.key"; do
     [ -e "$file" ] || continue
     if [ "$(uname -s)" = Darwin ]; then
       mode="$(stat -f '%Lp' "$file")"
@@ -236,6 +242,21 @@ check_runtime_permissions() {
   done
   [ "$failures" -eq 0 ] && printf 'MODE    local credentials private\n'
   return "$failures"
+}
+
+harden_runtime_permissions() {
+  local file
+  install -d -m 700 "$HOME/.omp" "$HOME/.omp/agent"
+  for file in \
+    "$HOME/.omp/agent/.env" \
+    "$HOME/.omp/agent"/agent.db* \
+    "$HOME/.omp/agent"/history.db* \
+    "$HOME/.omp/agent"/models.db* \
+    "$HOME/.omp/agent"/auth-*.token \
+    "$HOME/.omp/agent/secret-placeholder.key"; do
+    [ -e "$file" ] || continue
+    chmod 600 "$file"
+  done
 }
 
 check_omp_config() {
@@ -323,8 +344,9 @@ validate() {
   check_manifest_status || failures=1
   check_source_coverage || failures=1
   check_tracking_and_secrets || failures=1
-  check_runtime_permissions || failures=1
   check_omp_config || failures=1
+  harden_runtime_permissions
+  check_runtime_permissions || failures=1
   if git -C "$REPO_ROOT" diff --check -- $(portable_paths | sort -u) >/dev/null; then
     printf 'FORMAT  clean\n'
   else

@@ -1,8 +1,3 @@
-# Managed by chezmoi. Edit the source tree, not ~/.codex directly.
-#
-# Keep this file portable. Codex runtime state such as auth, project trust,
-# plugin installs, marketplaces, and local model preferences stays on the
-# machine and is preserved across broad chezmoi applies.
 {{- $localConfig := (output "sh" "-c" "config=\"$HOME/.codex/config.toml\"; if [ -f \"$config\" ]; then awk 'BEGIN { skip = 0 } /^\\[tui(\\.|\\])/ { skip = 1; next } /^\\[/ { skip = 0 } !skip { print }' \"$config\"; else printf '%s\n' 'model = \"gpt-5.4\"' 'model_reasoning_effort = \"xhigh\"' 'service_tier = \"fast\"' 'commit_attribution = \"\"' '' '[plugins.\"github@openai-curated\"]' 'enabled = true'; fi") | trim }}
 
 {{ $localConfig }}

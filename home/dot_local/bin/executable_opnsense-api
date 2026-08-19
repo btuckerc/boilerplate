@@ -1,0 +1,384 @@
+#!/bin/sh
+set -eu
+
+# Talk to the LAN OPNsense REST API with HTTP Basic key/secret auth.
+# Never prints credentials. Secrets stay machine-local.
+
+find_bin() {
+    for candidate in "$@"; do
+        if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+normalize_fp() {
+    printf '%s' "$1" | tr '[:lower:]' '[:upper:]' | tr -d '[:space:]:'
+}
+
+load_config() {
+    CONFIG_FILE="${OPNSENSE_CONFIG_FILE:-$HOME/.config/decent-angl/opnsense.env}"
+    if [ -f "$CONFIG_FILE" ]; then
+        # shellcheck disable=SC1090
+        . "$CONFIG_FILE"
+    fi
+
+    OPNSENSE_HOST="${OPNSENSE_HOST:-https://10.77.77.1}"
+    OPNSENSE_HOSTNAME="${OPNSENSE_HOSTNAME:-OPNsense.internal}"
+    OPNSENSE_BW_ITEM="${OPNSENSE_BW_ITEM:-opnsense-api}"
+    OPNSENSE_TLS_FINGERPRINT_SHA256="${OPNSENSE_TLS_FINGERPRINT_SHA256:-20915FA97BB4B3E59F1B41563D7F13C07643BDFD55DFE85F8A703456BA13459E}"
+    OPNSENSE_TLS_PINNED_PUBKEY_SHA256="${OPNSENSE_TLS_PINNED_PUBKEY_SHA256:-5g/kVN6nFwMdNqW9pWiKmtV9syYtqmHBBW4HX7YlZqs=}"
+    OPNSENSE_SECRET_FILE="${OPNSENSE_SECRET_FILE:-$HOME/.local/share/decent-angl/secrets/opnsense-api.env}"
+    OPNSENSE_CONNECT_HOST="${OPNSENSE_HOST#https://}"
+    OPNSENSE_CONNECT_HOST="${OPNSENSE_CONNECT_HOST#http://}"
+    OPNSENSE_CONNECT_HOST="${OPNSENSE_CONNECT_HOST%%/*}"
+    case "$OPNSENSE_CONNECT_HOST" in
+        *:*)
+            OPNSENSE_CONNECT_PORT="${OPNSENSE_CONNECT_HOST##*:}"
+            OPNSENSE_CONNECT_HOST="${OPNSENSE_CONNECT_HOST%:*}"
+            ;;
+        *)
+            OPNSENSE_CONNECT_PORT="443"
+            ;;
+    esac
+}
+
+usage() {
+    cat <<'EOF'
+Usage: opnsense-api <command> [args]
+
+Commands:
+  status              Check TLS pin, credential file, and firmware/info
+  sync                Write key/secret from Bitwarden to the local secret file
+  get <path>          GET /api/<path>
+  post <path> [json]  POST /api/<path> (json file, JSON string, or stdin)
+  apply-filter        POST firewall/filter/apply
+  help                Show this help
+
+Paths may be "core/firmware/info" or "/api/core/firmware/info".
+Destructive firmware/system commands require --i-mean-it.
+
+Credentials: never printed. Local file is mode 0600.
+EOF
+}
+
+require_tools() {
+    if ! command -v curl >/dev/null 2>&1; then
+        echo "curl is required." >&2
+        exit 1
+    fi
+    if ! command -v openssl >/dev/null 2>&1; then
+        echo "openssl is required." >&2
+        exit 1
+    fi
+}
+
+peer_fingerprint() {
+    echo | openssl s_client \
+        -connect "${OPNSENSE_CONNECT_HOST}:${OPNSENSE_CONNECT_PORT}" \
+        -servername "${OPNSENSE_HOSTNAME}" \
+        2>/dev/null \
+        | openssl x509 -noout -fingerprint -sha256 \
+        | sed -n 's/.*=//p'
+}
+
+assert_tls_pin() {
+    actual="$(normalize_fp "$(peer_fingerprint)")"
+    expected="$(normalize_fp "$OPNSENSE_TLS_FINGERPRINT_SHA256")"
+    if [ -z "$actual" ]; then
+        echo "Unable to read the OPNsense TLS certificate." >&2
+        exit 1
+    fi
+    if [ "$actual" != "$expected" ]; then
+        echo "OPNsense TLS fingerprint mismatch." >&2
+        echo "expected=$expected" >&2
+        echo "actual=$actual" >&2
+        echo "Update decentangl.network.opnsense after confirming the new cert." >&2
+        exit 1
+    fi
+}
+
+load_secrets() {
+    OPNSENSE_API_KEY="${OPNSENSE_API_KEY:-}"
+    OPNSENSE_API_SECRET="${OPNSENSE_API_SECRET:-}"
+    if [ -z "$OPNSENSE_API_KEY" ] || [ -z "$OPNSENSE_API_SECRET" ]; then
+        if [ -f "$OPNSENSE_SECRET_FILE" ]; then
+            # shellcheck disable=SC1090
+            . "$OPNSENSE_SECRET_FILE"
+        fi
+    fi
+    if [ -z "${OPNSENSE_API_KEY:-}" ] || [ -z "${OPNSENSE_API_SECRET:-}" ]; then
+        echo "OPNsense API credentials are missing." >&2
+        echo "Create vault item '$OPNSENSE_BW_ITEM' (username=key, password=secret)," >&2
+        echo "unlock bw, then run: opnsense-api sync" >&2
+        exit 1
+    fi
+}
+
+api_path() {
+    path="${1:-}"
+    if [ -z "$path" ]; then
+        echo "API path is required." >&2
+        exit 1
+    fi
+    path="${path#/}"
+    case "$path" in
+        api/*) path="${path#api/}" ;;
+    esac
+    printf '%s\n' "$path"
+}
+
+is_destructive_path() {
+    path="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+    case "$path" in
+        core/firmware/reboot|core/firmware/poweroff|core/firmware/upgrade|core/firmware/update|core/system/reboot|core/system/halt|core/defaults/factory_defaults|core/defaults/reset)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+request() {
+    method="$1"
+    path="$(api_path "$2")"
+    body="${3-}"
+    force="${4:-}"
+
+    if is_destructive_path "$path" && [ "$force" != "--i-mean-it" ]; then
+        echo "Refusing destructive API path /$path without --i-mean-it." >&2
+        exit 1
+    fi
+
+    require_tools
+    assert_tls_pin
+    load_secrets
+
+    url="${OPNSENSE_HOST%/}/api/${path}"
+    tmp_body="$(mktemp)"
+    tmp_hdr="$(mktemp)"
+    cleanup() {
+        rm -f "$tmp_body" "$tmp_hdr"
+    }
+    trap cleanup EXIT INT TERM
+
+    set -- curl -sS -k -o "$tmp_body" -D "$tmp_hdr" \
+        --max-time 30 \
+        --pinnedpubkey "sha256//${OPNSENSE_TLS_PINNED_PUBKEY_SHA256}" \
+        -u "${OPNSENSE_API_KEY}:${OPNSENSE_API_SECRET}" \
+        -H "Accept: application/json" \
+        -X "$method"
+
+    if [ "$method" = "POST" ]; then
+        set -- "$@" -H "Content-Type: application/json"
+        if [ -n "$body" ]; then
+            set -- "$@" --data-binary "$body"
+        else
+            set -- "$@" --data-binary ""
+        fi
+    fi
+
+    if ! "$@" "$url"; then
+        echo "opnsense-api request failed: $method $url" >&2
+        exit 1
+    fi
+
+    http_code="$(sed -n 's/^HTTP\/[0-9.]* \([0-9][0-9][0-9]\).*/\1/p' "$tmp_hdr" | tail -n1)"
+    if [ -z "$http_code" ]; then
+        echo "OPNsense returned no HTTP status." >&2
+        exit 1
+    fi
+    if [ "$http_code" -lt 200 ] || [ "$http_code" -gt 299 ]; then
+        echo "OPNsense HTTP $http_code for $method /api/$path" >&2
+        if [ -s "$tmp_body" ]; then
+            sed -n '1,20p' "$tmp_body" >&2
+        fi
+        exit 1
+    fi
+
+    if command -v jq >/dev/null 2>&1 && [ -s "$tmp_body" ]; then
+        jq . "$tmp_body"
+    else
+        cat "$tmp_body"
+        [ -s "$tmp_body" ] || printf '\n'
+    fi
+}
+
+cmd_status() {
+    require_tools
+    secret_exists=false
+    secret_mode="-"
+    if [ -f "$OPNSENSE_SECRET_FILE" ]; then
+        secret_exists=true
+        if stat -c '%a' "$OPNSENSE_SECRET_FILE" >/dev/null 2>&1; then
+            secret_mode="$(stat -c '%a' "$OPNSENSE_SECRET_FILE")"
+        else
+            secret_mode="$(stat -f '%Lp' "$OPNSENSE_SECRET_FILE")"
+        fi
+    fi
+
+    printf 'host=%s\n' "$OPNSENSE_HOST"
+    printf 'connect=%s:%s\n' "$OPNSENSE_CONNECT_HOST" "$OPNSENSE_CONNECT_PORT"
+    printf 'vault_item=%s\n' "$OPNSENSE_BW_ITEM"
+    printf 'secret_file=%s\n' "$OPNSENSE_SECRET_FILE"
+    printf 'secret_exists=%s\n' "$secret_exists"
+    printf 'secret_mode=%s\n' "$secret_mode"
+
+    actual="$(normalize_fp "$(peer_fingerprint)")"
+    expected="$(normalize_fp "$OPNSENSE_TLS_FINGERPRINT_SHA256")"
+    printf 'tls_fingerprint=%s\n' "$actual"
+    if [ "$actual" = "$expected" ] && [ -n "$actual" ]; then
+        printf 'tls_pin=ok\n'
+    else
+        printf 'tls_pin=mismatch\n'
+        printf 'tls_expected=%s\n' "$expected"
+        return 1
+    fi
+
+    if [ "$secret_exists" != "true" ] && [ -z "${OPNSENSE_API_KEY:-}" ]; then
+        printf 'api=unconfigured\n'
+        return 0
+    fi
+
+    status_json="$(mktemp)"
+    status_cleanup() {
+        rm -f "$status_json"
+    }
+    trap status_cleanup EXIT INT TERM
+    if request GET core/firmware/info >"$status_json"; then
+        printf 'api=ok\n'
+        if command -v jq >/dev/null 2>&1; then
+            jq -r '
+                "product=" + ((.product.product_name // .product_name // "opnsense") | tostring),
+                "version=" + ((.product.product_version // .product_version // .version // "unknown") | tostring)
+            ' "$status_json"
+        fi
+    else
+        printf 'api=error\n'
+        return 1
+    fi
+}
+
+bw_bin() {
+    find_bin \
+        "${BW_BIN:-}" \
+        "$HOME/.local/share/mise/shims/bw" \
+        "$HOME/.local/bin/bw" \
+        "/opt/homebrew/bin/bw" \
+        "/usr/local/bin/bw" \
+        "$(command -v bw 2>/dev/null || true)"
+}
+
+cmd_sync() {
+    BW_BIN="$(bw_bin || true)"
+    if [ -z "${BW_BIN:-}" ]; then
+        echo "bw CLI not found." >&2
+        exit 1
+    fi
+
+    status="$("$BW_BIN" status 2>/dev/null | sed -n 's/.*"status":"\([^"]*\)".*/\1/p' | sed -n '1p')"
+    status="${status:-unknown}"
+    case "$status" in
+        unlocked) ;;
+        unauthenticated)
+            echo "bw is unauthenticated; run 'bw login' first." >&2
+            exit 1
+            ;;
+        locked)
+            echo "bw is locked; run 'export BW_SESSION=\$(bw unlock --raw)' first." >&2
+            exit 1
+            ;;
+        *)
+            echo "Unable to determine bw status." >&2
+            exit 1
+            ;;
+    esac
+
+    key="$("$BW_BIN" get username "$OPNSENSE_BW_ITEM" 2>/dev/null || true)"
+    secret="$("$BW_BIN" get password "$OPNSENSE_BW_ITEM" 2>/dev/null || true)"
+    if [ -z "$key" ] || [ -z "$secret" ]; then
+        echo "Vaultwarden item '$OPNSENSE_BW_ITEM' is missing or incomplete." >&2
+        echo "Create a login item named '$OPNSENSE_BW_ITEM' with username=API key and password=API secret." >&2
+        exit 1
+    fi
+
+    secret_dir="$(dirname "$OPNSENSE_SECRET_FILE")"
+    umask 077
+    mkdir -p "$secret_dir"
+    chmod 700 "$secret_dir"
+    tmp="$(mktemp "$secret_dir/opnsense-api.env.XXXXXX")"
+    cleanup_tmp() {
+        rm -f "$tmp"
+    }
+    trap cleanup_tmp EXIT INT TERM
+    printf 'OPNSENSE_API_KEY=%s\n' "$key" >"$tmp"
+    printf 'OPNSENSE_API_SECRET=%s\n' "$secret" >>"$tmp"
+    chmod 600 "$tmp"
+    mv "$tmp" "$OPNSENSE_SECRET_FILE"
+    trap - EXIT INT TERM
+    printf 'secret_file=%s\n' "$OPNSENSE_SECRET_FILE"
+    printf 'synced=true\n'
+}
+
+read_post_body() {
+    input="${1-}"
+    if [ -z "${input:-}" ]; then
+        printf ''
+    elif [ "$input" = "-" ]; then
+        cat
+    elif [ -f "$input" ]; then
+        cat "$input"
+    else
+        printf '%s' "$input"
+    fi
+}
+
+load_config
+
+command_name="${1:-status}"
+if [ "$#" -gt 0 ]; then
+    shift
+fi
+
+force=""
+arg1=""
+arg2=""
+for arg in "$@"; do
+    if [ "$arg" = "--i-mean-it" ]; then
+        force="--i-mean-it"
+    elif [ -z "$arg1" ]; then
+        arg1="$arg"
+    elif [ -z "$arg2" ]; then
+        arg2="$arg"
+    fi
+done
+
+case "$command_name" in
+    status)
+        cmd_status
+        ;;
+    sync)
+        cmd_sync
+        ;;
+    get)
+        request GET "$arg1" "" "$force"
+        ;;
+    post)
+        body="$(read_post_body "$arg2")"
+        request POST "$arg1" "$body" "$force"
+        ;;
+    apply-filter)
+        request POST firewall/filter/apply "{}" "$force"
+        ;;
+    -h|--help|help)
+        usage
+        ;;
+    *)
+        echo "Unknown subcommand: $command_name" >&2
+        usage >&2
+        exit 1
+        ;;
+esac

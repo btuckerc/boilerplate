@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+
+# Detect an Omarchy upgrade that has outgrown the portable desktop contract.
+# Omarchy's hook runner reports failures but intentionally continues updating,
+# so persist the result where it survives the terminal and the next reboot.
+
+set -uo pipefail
+
+state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/decent-angl"
+marker="$state_dir/omarchy-compatibility-blocked"
+validator="$HOME/.local/bin/omarchy-roaming-sync"
+
+mkdir -p "$state_dir"
+
+if [[ ! -x "$validator" ]]; then
+  output="Missing executable validator: $validator"
+  status=127
+elif output="$($validator validate 2>&1)"; then
+  rm -f "$marker"
+  logger -t decent-angl-omarchy "Post-update compatibility validation passed" >/dev/null 2>&1 || true
+  exit 0
+else
+  status=$?
+fi
+
+{
+  printf 'Omarchy compatibility validation failed after an update.\n'
+  printf 'Do not treat the portable desktop baseline as safe to reapply.\n'
+  printf 'Update the generation contract, then run: omarchy-roaming-sync validate --strict\n\n'
+  printf '%s\n' "$output"
+} >"$marker"
+
+printf '\n*** OMARCHY PORTABLE BASELINE NEEDS ATTENTION ***\n' >&2
+printf 'Compatibility validation failed; details are in %s\n' "$marker" >&2
+printf '%s\n\n' "$output" >&2
+logger -t decent-angl-omarchy -p user.err "Post-update compatibility validation failed; see $marker" >/dev/null 2>&1 || true
+
+if [[ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ]] && command -v notify-send >/dev/null 2>&1; then
+  notify-send --urgency=critical --app-name=Omarchy \
+    "Portable baseline needs attention" \
+    "Compatibility validation failed after the update. See $marker."
+fi
+
+exit "$status"

@@ -57,6 +57,12 @@ if command -v mise >/dev/null; then
     eval "$(mise activate bash)"
 fi
 
+# mise can restore a PATH captured before an Omarchy generation upgrade.
+if command -v remove_path_dir >/dev/null 2>&1; then
+    remove_path_dir "$HOME/.local/share/omarchy/bin"
+    unset -f remove_path_dir 2>/dev/null || true
+fi
+
 # Skip prompt/UI shell setup for non-interactive or TERM=dumb shells.
 # This keeps batch/login shells like `bash -lc` quiet for tools.
 case "$-" in

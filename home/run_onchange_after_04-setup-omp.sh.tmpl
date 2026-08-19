@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+OMP_VERSION="17.3.4"
+OMP_TOOL="github:can1357/oh-my-pi@${OMP_VERSION}"
+
+echo ""
+echo "========================================"
+echo "  Oh My Pi Setup"
+echo "========================================"
+echo ""
+
+if ! command -v mise >/dev/null 2>&1; then
+    echo "mise not found. Skipping OMP setup until prerequisites are installed."
+    exit 0
+fi
+
+echo "Installing OMP ${OMP_VERSION} through mise..."
+mise install "$OMP_TOOL"
+mise reshim
+
+install -d -m 700 "$HOME/.omp" "$HOME/.omp/agent"
+for runtime_file in "$HOME/.omp/agent"/agent.db*; do
+    [ -e "$runtime_file" ] || continue
+    chmod 600 "$runtime_file"
+done
+
+actual_version="$(mise x "$OMP_TOOL" -- omp --version)"
+if [ "$actual_version" != "omp/${OMP_VERSION}" ]; then
+    echo "Unexpected OMP version: $actual_version" >&2
+    exit 1
+fi
+
+provider_registry="$(mise x "$OMP_TOOL" -- omp auth-broker list --json)"
+case "$provider_registry" in
+    *'"id":"xai-oauth"'*) ;;
+    *)
+        echo "OMP ${OMP_VERSION} does not expose the xai-oauth provider." >&2
+        exit 1
+        ;;
+esac
+
+mise x "$OMP_TOOL" -- omp config get modelRoles --json >/dev/null
+mise x "$OMP_TOOL" -- omp setup python --check --json >/dev/null
+
+echo "OMP ${OMP_VERSION} is installed and the shared config is ready."
+echo "Machine-local SuperGrok login: omp auth-broker login xai-oauth"

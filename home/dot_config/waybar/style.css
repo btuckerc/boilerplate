@@ -1,5 +1,6 @@
 @import "../omarchy/current/theme/waybar.css";
 @import url("codex-workspace-attention.runtime.css");
+@import url("hyprland-workspace-compact.runtime.css");
 
 * {
   background-color: @background;
@@ -24,13 +25,26 @@
   all: initial;
   padding: 0 6px;
   margin: 0 1.5px;
-  min-width: 9px;
+  min-width: 16px;
   color: @foreground;
   opacity: 0.5;
+  transition: none;
+  font-feature-settings: "tnum";
 }
 
 #workspaces button.active {
   opacity: 1;
+}
+
+#workspaces button.empty {
+  opacity: 0;
+  color: transparent;
+  text-shadow: none;
+}
+
+#workspaces button.empty.active {
+  opacity: 1;
+  color: @foreground;
 }
 
 #custom-omarchy,

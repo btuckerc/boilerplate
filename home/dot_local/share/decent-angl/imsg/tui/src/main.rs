@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io::{self, Stdout};
 use std::process::Command;
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -116,6 +117,7 @@ struct ChatSummary {
     last_message_preview: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize, Default)]
 struct AttachmentRow {
     #[serde(default)]
@@ -136,6 +138,7 @@ struct AttachmentRow {
     path_exists: bool,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize, Default)]
 struct MessageRow {
     #[serde(default)]
@@ -166,6 +169,7 @@ struct MessageRow {
     attachments: Vec<AttachmentRow>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize, Default)]
 struct ShowResponse {
     chat: ChatSummary,
@@ -173,6 +177,7 @@ struct ShowResponse {
     messages: Vec<MessageRow>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize, Default)]
 struct SearchResultRow {
     #[serde(default)]
@@ -195,6 +200,7 @@ struct SearchResultRow {
     timestamp: Option<String>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize, Default)]
 struct SendJobRow {
     #[serde(default)]
@@ -219,6 +225,7 @@ struct SendJobRow {
     message_text: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize, Default)]
 struct SendResponse {
     #[serde(default, deserialize_with = "deserialize_boolish")]
@@ -235,6 +242,7 @@ struct SendResponse {
     destination_chat_rowid: Option<i64>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize, Default)]
 struct SyncSummary {
     #[serde(default)]
@@ -250,8 +258,15 @@ struct SyncSummary {
 #[derive(Debug, Clone)]
 struct QuoteContext {
     message_rowid: i64,
+    message_guid: String,
     actor: String,
     preview: String,
+}
+
+#[derive(Debug, Clone)]
+struct PendingSendDraft {
+    text: String,
+    quote_context: Option<QuoteContext>,
 }
 
 #[derive(Debug)]
@@ -326,6 +341,8 @@ struct App {
     last_sync_error: Option<String>,
     last_tick: Instant,
     search_dirty_at: Option<Instant>,
+    pending_echo_rowids: HashMap<u64, i64>,
+    pending_send_drafts: HashMap<u64, PendingSendDraft>,
 }
 
 impl App {
@@ -367,6 +384,8 @@ impl App {
             last_sync_error: None,
             last_tick: Instant::now(),
             search_dirty_at: None,
+            pending_echo_rowids: HashMap::new(),
+            pending_send_drafts: HashMap::new(),
         }
     }
 
@@ -419,6 +438,10 @@ impl App {
             Focus::Messages => Focus::Composer,
             Focus::Composer => Focus::Chats,
         };
+    }
+
+    fn show_chat_list(&self) -> bool {
+        self.focus == Focus::Chats || self.selected_chat_rowid().is_none()
     }
 
     fn refresh_chats(&mut self) {
@@ -629,24 +652,20 @@ impl App {
                                     self.messages = merged;
                                     self.messages_state
                                         .select(Some(loaded_count.saturating_sub(1)));
-                                    self.status =
-                                        format!("Loaded {} older messages", loaded_count);
+                                    self.status = format!("Loaded {} older messages", loaded_count);
                                 }
                             } else {
-                                let previous_message_rowid = self
-                                    .selected_message()
-                                    .map(|message| message.message_rowid);
+                                let previous_message_rowid =
+                                    self.selected_message().map(|message| message.message_rowid);
                                 self.messages = response.messages;
                                 if self.messages.is_empty() {
                                     self.messages_state.select(None);
                                 } else {
                                     let idx = previous_message_rowid
                                         .and_then(|message_rowid| {
-                                            self.messages
-                                                .iter()
-                                                .position(|message| {
-                                                    message.message_rowid == message_rowid
-                                                })
+                                            self.messages.iter().position(|message| {
+                                                message.message_rowid == message_rowid
+                                            })
                                         })
                                         .unwrap_or(self.messages.len().saturating_sub(1))
                                         .min(self.messages.len() - 1);
@@ -728,6 +747,12 @@ impl App {
                     self.send_inflight = false;
                     match result {
                         Ok(response) => {
+                            if !response.ok {
+                                self.remove_local_echo(request_id);
+                                self.restore_pending_draft(request_id);
+                            } else {
+                                self.pending_send_drafts.remove(&request_id);
+                            }
                             self.status = if response.ok {
                                 if response.recipient.trim().is_empty() {
                                     "Message sent".to_string()
@@ -746,7 +771,14 @@ impl App {
                             }
                         }
                         Err(error) => {
+                            self.remove_local_echo(request_id);
+                            self.restore_pending_draft(request_id);
                             self.status = error;
+                            self.refresh_outbox();
+                            self.refresh_chats();
+                            if self.selected_chat_rowid().is_some() {
+                                self.refresh_current_chat(false, None);
+                            }
                         }
                     }
                 }
@@ -793,6 +825,24 @@ impl App {
         move_list_state(&mut self.search_state, self.search_results.len(), delta);
     }
 
+    fn activate_selected_chat(&mut self) {
+        let Some(chat_rowid) = self.selected_chat_rowid() else {
+            self.status = "No chat selected".to_string();
+            return;
+        };
+        self.focus = Focus::Messages;
+        self.pending_chat_rowid = None;
+        if self.loaded_chat_rowid != Some(chat_rowid) {
+            self.refresh_current_chat(false, None);
+        }
+        self.status = format!(
+            "Opened {}",
+            self.selected_chat()
+                .map(chat_label)
+                .unwrap_or_else(|| format!("chat {}", chat_rowid))
+        );
+    }
+
     fn load_older_messages(&mut self) {
         let Some(oldest) = self.messages.first() else {
             self.refresh_current_chat(false, None);
@@ -827,6 +877,7 @@ impl App {
         };
         self.quote_context = Some(QuoteContext {
             message_rowid: message.message_rowid,
+            message_guid: message.guid.clone(),
             actor: message_actor_label(
                 message.is_from_me,
                 message.handle_display.as_deref(),
@@ -835,14 +886,93 @@ impl App {
             preview: compact_string(&message_body(message), 120),
         });
         self.focus = Focus::Composer;
-        self.status = "Pinned selected message for compose context".to_string();
+        self.status = "Reply target set from selected message".to_string();
     }
 
     fn clear_compose_context(&mut self) {
         self.quote_context = None;
     }
 
+    fn push_local_echo(&mut self, request_id: u64, text: &str) {
+        let Some(chat_rowid) = self.selected_chat_rowid() else {
+            return;
+        };
+        let preview = compact_string(text, 120);
+        let pending_rowid = -(request_id as i64);
+        self.messages.push(MessageRow {
+            message_rowid: pending_rowid,
+            date: i64::MAX - (request_id as i64),
+            guid: format!("pending:{request_id}"),
+            handle_id: None,
+            handle_display: Some("You".to_string()),
+            is_from_me: 1,
+            text: text.to_string(),
+            preview: preview.clone(),
+            kind: "pending".to_string(),
+            timestamp: Some("sending".to_string()),
+            reply_target_guid: self
+                .quote_context
+                .as_ref()
+                .map(|context| context.message_guid.clone()),
+            reply_target_preview: self
+                .quote_context
+                .as_ref()
+                .map(|context| context.preview.clone()),
+            attachments: Vec::new(),
+        });
+        self.messages_state
+            .select(Some(self.messages.len().saturating_sub(1)));
+        self.pending_echo_rowids.insert(request_id, pending_rowid);
+        if let Some(position) = self
+            .chats
+            .iter()
+            .position(|chat| chat.chat_rowid == chat_rowid)
+        {
+            if let Some(chat) = self.chats.get_mut(position) {
+                chat.last_message_preview = preview;
+            }
+        }
+    }
+
+    fn remove_local_echo(&mut self, request_id: u64) {
+        let Some(pending_rowid) = self.pending_echo_rowids.remove(&request_id) else {
+            return;
+        };
+        if let Some(index) = self
+            .messages
+            .iter()
+            .position(|message| message.message_rowid == pending_rowid)
+        {
+            self.messages.remove(index);
+            if self.messages.is_empty() {
+                self.messages_state.select(None);
+            } else {
+                let selected = self
+                    .messages_state
+                    .selected()
+                    .unwrap_or(self.messages.len().saturating_sub(1));
+                self.messages_state
+                    .select(Some(selected.min(self.messages.len().saturating_sub(1))));
+            }
+        }
+    }
+
+    fn restore_pending_draft(&mut self, request_id: u64) {
+        let Some(draft) = self.pending_send_drafts.remove(&request_id) else {
+            return;
+        };
+        let mut composer = new_textarea();
+        composer.insert_str(&draft.text);
+        self.composer = composer;
+        self.quote_context = draft.quote_context;
+        self.focus = Focus::Composer;
+    }
+
     fn send_composer(&mut self) {
+        if self.send_inflight {
+            self.status = "A send is already in progress".to_string();
+            return;
+        }
         let Some(chat_rowid) = self.selected_chat_rowid() else {
             self.status = "No chat selected".to_string();
             return;
@@ -855,10 +985,25 @@ impl App {
         let request_id = self.next_request();
         self.send_request_id = request_id;
         self.send_inflight = true;
-        spawn_send_request(self.events_tx.clone(), request_id, chat_rowid, text);
+        let pending_draft = PendingSendDraft {
+            text: text.clone(),
+            quote_context: self.quote_context.clone(),
+        };
+        let reply_message_rowid = pending_draft
+            .quote_context
+            .as_ref()
+            .map(|context| context.message_rowid);
+        self.pending_send_drafts.insert(request_id, pending_draft);
+        self.push_local_echo(request_id, &text);
+        spawn_send_request(
+            self.events_tx.clone(),
+            request_id,
+            chat_rowid,
+            text,
+            reply_message_rowid,
+        );
         self.composer = new_textarea();
         self.clear_compose_context();
-        self.focus = Focus::Messages;
         self.status = "Dispatching message…".to_string();
     }
 
@@ -885,11 +1030,7 @@ impl App {
                 .last_sync_finished_at
                 .map(|instant| format_duration(instant.elapsed()))
                 .unwrap_or_else(|| "unknown".to_string());
-            return format!(
-                "synced {} ago | {} rows",
-                age,
-                summary.messages_refreshed
-            );
+            return format!("synced {} ago | {} rows", age, summary.messages_refreshed);
         }
         "sync idle".to_string()
     }
@@ -988,22 +1129,43 @@ fn spawn_search_request(tx: Sender<BackendEvent>, request_id: u64, query: String
 
 fn spawn_sync_request(tx: Sender<BackendEvent>, request_id: u64) {
     thread::spawn(move || {
-        let args = vec!["sync".to_string(), "--quiet".to_string(), "--json".to_string()];
+        let args = vec![
+            "sync".to_string(),
+            "--quiet".to_string(),
+            "--json".to_string(),
+        ];
         let result = run_imsg_json::<SyncSummary>(&args);
         let _ = tx.send(BackendEvent::Sync { request_id, result });
     });
 }
 
-fn spawn_send_request(tx: Sender<BackendEvent>, request_id: u64, chat_rowid: i64, text: String) {
+fn spawn_send_request(
+    tx: Sender<BackendEvent>,
+    request_id: u64,
+    chat_rowid: i64,
+    text: String,
+    reply_message_rowid: Option<i64>,
+) {
     thread::spawn(move || {
-        let args = vec![
-            "send".to_string(),
-            "--chat".to_string(),
-            chat_rowid.to_string(),
-            "--text".to_string(),
-            text,
-            "--json".to_string(),
-        ];
+        let args = if let Some(message_rowid) = reply_message_rowid {
+            vec![
+                "reply".to_string(),
+                "--message".to_string(),
+                message_rowid.to_string(),
+                "--text".to_string(),
+                text,
+                "--json".to_string(),
+            ]
+        } else {
+            vec![
+                "send".to_string(),
+                "--chat".to_string(),
+                chat_rowid.to_string(),
+                "--text".to_string(),
+                text,
+                "--json".to_string(),
+            ]
+        };
         let result = run_imsg_json::<SendResponse>(&args);
         let _ = tx.send(BackendEvent::Send { request_id, result });
     });
@@ -1068,6 +1230,7 @@ fn message_body(message: &MessageRow) -> String {
 
 fn message_kind_label(kind: &str) -> Option<(&'static str, Color)> {
     match kind {
+        "pending" => Some(("sending", Color::Blue)),
         "reply" => Some(("reply", Color::Blue)),
         "reaction" => Some(("reaction", Color::Magenta)),
         "system" => Some(("system", Color::Cyan)),
@@ -1311,9 +1474,18 @@ fn handle_key(app: &mut App, key: KeyEvent) {
         return;
     }
 
+    if key.code == KeyCode::Tab {
+        app.focus_next();
+        return;
+    }
+
+    if app.focus == Focus::Composer {
+        handle_composer_key(app, key);
+        return;
+    }
+
     match key.code {
         KeyCode::Char('q') => app.quit = true,
-        KeyCode::Tab => app.focus_next(),
         KeyCode::Char('/') => app.open_search(),
         KeyCode::Char('o') => app.toggle_outbox(),
         KeyCode::Char('?') => app.toggle_help(),
@@ -1356,7 +1528,7 @@ fn handle_chats_key(app: &mut App, key: KeyEvent) {
                 app.queue_current_chat_refresh();
             }
         }
-        KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => app.focus = Focus::Messages,
+        KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => app.activate_selected_chat(),
         _ => {}
     }
 }
@@ -1409,20 +1581,41 @@ fn handle_composer_key(app: &mut App, key: KeyEvent) {
         app.status = "Cleared composer".to_string();
         return;
     }
-    app.composer.input(key);
+    if key.code == KeyCode::Enter {
+        if key.modifiers.contains(KeyModifiers::SHIFT) {
+            app.composer.input_without_shortcuts(key);
+        } else {
+            app.send_composer();
+        }
+        return;
+    }
+    match key.code {
+        KeyCode::Char(_) | KeyCode::Backspace | KeyCode::Delete => {
+            app.composer.input_without_shortcuts(key);
+        }
+        _ => {
+            app.composer.input(key);
+        }
+    }
 }
 
 fn handle_search_key(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Esc => app.close_modal(),
         KeyCode::Enter => app.jump_to_search_result(),
-        KeyCode::Down | KeyCode::Char('j') => app.move_search_selection(1),
-        KeyCode::Up | KeyCode::Char('k') => app.move_search_selection(-1),
+        KeyCode::Down => app.move_search_selection(1),
+        KeyCode::Up => app.move_search_selection(-1),
         KeyCode::PageDown => app.move_search_selection(8),
         KeyCode::PageUp => app.move_search_selection(-8),
-        KeyCode::Char('?') => {}
         _ => {
-            app.search_input.input(key);
+            match key.code {
+                KeyCode::Char(_) | KeyCode::Backspace | KeyCode::Delete => {
+                    app.search_input.input_without_shortcuts(key);
+                }
+                _ => {
+                    app.search_input.input(key);
+                }
+            }
             app.mark_search_dirty();
         }
     }
@@ -1509,7 +1702,11 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
             }
         })
         .unwrap_or_else(|| "no conversation loaded".to_string());
-    let unread = if app.unread_only { "unreads" } else { "all chats" };
+    let unread = if app.unread_only {
+        "unreads"
+    } else {
+        "all chats"
+    };
     let header = Paragraph::new(vec![
         Line::from(vec![
             Span::styled(
@@ -1522,7 +1719,9 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
             Span::raw(" "),
             Span::styled(
                 compact_string(&selected, 44),
-                Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::raw(" "),
             Span::styled(
@@ -1536,12 +1735,16 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 fn draw_body(frame: &mut Frame, area: Rect, app: &App) {
-    let columns = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(32), Constraint::Percentage(68)])
-        .split(area);
-    draw_chats(frame, columns[0], app);
-    draw_messages(frame, columns[1], app);
+    if app.show_chat_list() {
+        let columns = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(32), Constraint::Percentage(68)])
+            .split(area);
+        draw_chats(frame, columns[0], app);
+        draw_messages(frame, columns[1], app);
+    } else {
+        draw_messages(frame, area, app);
+    }
 }
 
 fn draw_chats(frame: &mut Frame, area: Rect, app: &App) {
@@ -1641,7 +1844,10 @@ fn draw_messages(frame: &mut Frame, area: Rect, app: &App) {
             }
             if let Some(reply_preview) = &message.reply_target_preview {
                 lines.push(Line::from(Span::styled(
-                    format!("in reply to {}", compact_string(reply_preview, preview_width)),
+                    format!(
+                        "in reply to {}",
+                        compact_string(reply_preview, preview_width)
+                    ),
                     Style::default().fg(Color::Blue),
                 )));
             }
@@ -1678,11 +1884,7 @@ fn draw_messages(frame: &mut Frame, area: Rect, app: &App) {
 fn draw_composer(frame: &mut Frame, area: Rect, app: &App) {
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(if app.focus == Focus::Composer {
-            "Compose [Ctrl+S send | Ctrl+X clear | Esc blur]"
-        } else {
-            "Compose"
-        })
+        .title("Compose")
         .border_style(if app.focus == Focus::Composer {
             Style::default().fg(Color::Yellow)
         } else {
@@ -1705,31 +1907,38 @@ fn draw_composer(frame: &mut Frame, area: Rect, app: &App) {
 
     if let Some(context) = &app.quote_context {
         let label = format!(
-            "Context {}: {}",
-            context.message_rowid,
+            "Reply to {}",
             compact_string(
                 &format!("{} | {}", context.actor, context.preview),
                 inner.width.saturating_sub(2) as usize
             )
         );
-        let paragraph =
-            Paragraph::new(Line::from(Span::styled(label, Style::default().fg(Color::Blue))));
+        let paragraph = Paragraph::new(Line::from(Span::styled(
+            label,
+            Style::default().fg(Color::Blue),
+        )));
         frame.render_widget(paragraph, sections[0]);
     }
 
     let editor_area = *sections.last().unwrap_or(&inner);
     frame.render_widget(&app.composer, editor_area);
     if app.focus == Focus::Composer {
-        let (cursor_x, cursor_y) = app.composer.cursor();
+        let (cursor_row, cursor_col) = app.composer.cursor();
         frame.set_cursor_position((
-            editor_area.x.saturating_add(cursor_x as u16),
-            editor_area.y.saturating_add(cursor_y as u16),
+            editor_area.x.saturating_add(cursor_col as u16),
+            editor_area.y.saturating_add(cursor_row as u16),
         ));
     }
 }
 
 fn draw_footer(frame: &mut Frame, area: Rect, app: &App) {
-    let hints = "Tab cycle | / search | o outbox | i inspect | u unread filter | r pin context | R sync | q quit";
+    let hints = if app.focus == Focus::Composer {
+        "Enter send | Shift+Enter newline | Esc transcript | Ctrl+X clear | Tab cycle"
+    } else if app.show_chat_list() {
+        "Enter open chat | Tab cycle | / search | o outbox | u unread filter | R sync | q quit"
+    } else {
+        "Esc chats | c compose | / search | o outbox | r reply | R sync | q quit"
+    };
     let footer = Paragraph::new(vec![
         Line::from(Span::raw(compact_string(
             &app.status,
@@ -1760,10 +1969,10 @@ fn draw_search_popup(frame: &mut Frame, app: &App) {
     let search_inner = search_block.inner(sections[0]);
     frame.render_widget(search_block, sections[0]);
     frame.render_widget(&app.search_input, search_inner);
-    let (cursor_x, cursor_y) = app.search_input.cursor();
+    let (cursor_row, cursor_col) = app.search_input.cursor();
     frame.set_cursor_position((
-        search_inner.x.saturating_add(cursor_x as u16),
-        search_inner.y.saturating_add(cursor_y as u16),
+        search_inner.x.saturating_add(cursor_col as u16),
+        search_inner.y.saturating_add(cursor_row as u16),
     ));
 
     let items: Vec<ListItem> = app
@@ -1778,7 +1987,9 @@ fn draw_search_popup(frame: &mut Frame, app: &App) {
             ListItem::new(vec![
                 Line::from(Span::styled(
                     compact_string(&row.chat_title, 60),
-                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
                 )),
                 Line::from(vec![
                     Span::styled(
@@ -1927,7 +2138,9 @@ fn draw_inspector_popup(frame: &mut Frame, app: &App) {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
             "In reply to",
-            Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Blue)
+                .add_modifier(Modifier::BOLD),
         )));
         lines.push(Line::from(reply_preview.to_string()));
     }
@@ -1964,10 +2177,12 @@ fn draw_help_popup(frame: &mut Frame, app: &App) {
     let area = centered_rect(frame.area(), 70, 54);
     frame.render_widget(Clear, area);
     let lines = vec![
-        Line::from("Chats and messages are always visible. Moving in the chat list reloads the transcript after a short debounce."),
+        Line::from("Selecting a chat opens it and hides the chat list until you return to it."),
+        Line::from("Moving in the chat list reloads the transcript after a short debounce."),
+        Line::from("Esc from the transcript returns to the chat list."),
         Line::from("Tab cycles chats, transcript, and composer."),
-        Line::from("The composer is multiline. Enter inserts a newline. Ctrl+S sends."),
-        Line::from("Press r to pin the selected message as compose context without pretending it is a native threaded reply."),
+        Line::from("Enter sends from the composer. Shift+Enter inserts a newline."),
+        Line::from("Press r to start a reply from the selected message."),
         Line::from("/ opens live search. Typing updates results. Enter opens the selected hit."),
         Line::from("o opens the outbox. Enter retries the selected job."),
         Line::from("u toggles unread-only chat filtering. R runs a fresh sync."),

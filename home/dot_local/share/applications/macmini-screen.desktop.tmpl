@@ -1,0 +1,14 @@
+{{- if eq .chezmoi.os "linux" -}}
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Mac Mini Screen
+Comment=Open the shared TigerVNC profile for macmini in a maximized window
+Exec={{ .chezmoi.homeDir }}/.local/bin/decent-angl-vnc macmini
+TryExec={{ .chezmoi.homeDir }}/.local/bin/decent-angl-vnc
+Icon=tigervnc
+Terminal=false
+Categories=Network;RemoteAccess;
+Keywords=VNC;TigerVNC;Tailscale;macmini;remote;
+StartupNotify=true
+{{- end -}}

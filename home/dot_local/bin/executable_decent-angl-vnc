@@ -1,0 +1,196 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PROFILE_DIR="${DECENT_ANGL_TIGERVNC_PROFILE_DIR:-$HOME/.config/tigervnc}"
+DEFAULT_PROFILE="${DECENT_ANGL_TIGERVNC_DEFAULT_PROFILE:-macmini}"
+VNCVIEWER_BIN="${VNCVIEWER_BIN:-$(command -v vncviewer 2>/dev/null || true)}"
+VNCPASSWD_BIN="${VNCPASSWD_BIN:-$(command -v vncpasswd 2>/dev/null || true)}"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  decent-angl-vnc                  Connect to the default profile.
+  decent-angl-vnc <profile>        Connect to the named profile.
+  decent-angl-vnc fullscreen [profile]
+                                   Connect fullscreen on the current monitor.
+  decent-angl-vnc list             List available profiles.
+  decent-angl-vnc show [profile]   Print the resolved profile path and server.
+  decent-angl-vnc remember-password [profile]
+                                   Save the VNC password locally for reuse.
+  decent-angl-vnc forget-password [profile]
+                                   Remove the saved local VNC password.
+  decent-angl-vnc install          Install TigerVNC on Omarchy/Linux.
+
+Profiles are read from ~/.config/tigervnc/*.tigervnc.
+EOF
+}
+
+profile_path_for() {
+  local profile="$1"
+  printf '%s/%s.tigervnc\n' "${PROFILE_DIR}" "${profile}"
+}
+
+require_vncviewer() {
+  if [[ -n "${VNCVIEWER_BIN}" ]]; then
+    return 0
+  fi
+
+  echo "vncviewer is not installed." >&2
+  echo "Run: decent-angl-vnc install" >&2
+  exit 1
+}
+
+password_file_for() {
+  local profile="$1"
+  printf '%s/%s.passwd\n' "${PROFILE_DIR}" "${profile}"
+}
+
+connect_profile() {
+  local fullscreen="${1:-0}"
+  local profile="${2:-${DEFAULT_PROFILE}}"
+  local profile_path
+  local password_file
+  local -a viewer_args
+
+  profile_path="$(profile_path_for "${profile}")"
+  if [[ ! -f "${profile_path}" ]]; then
+    echo "Profile not found: ${profile_path}" >&2
+    exit 1
+  fi
+
+  require_vncviewer
+  password_file="$(password_file_for "${profile}")"
+  viewer_args=()
+
+  if [[ "${fullscreen}" == "1" ]]; then
+    viewer_args+=("-FullScreen=1" "-FullScreenMode=Current")
+  fi
+
+  if [[ -f "${password_file}" ]]; then
+    viewer_args+=("-PasswordFile" "${password_file}")
+  fi
+
+  viewer_args+=("${profile_path}")
+  exec "${VNCVIEWER_BIN}" "${viewer_args[@]}"
+}
+
+list_profiles() {
+  local found=0
+  local profile_path
+
+  if [[ ! -d "${PROFILE_DIR}" ]]; then
+    echo "No profile directory found: ${PROFILE_DIR}" >&2
+    exit 1
+  fi
+
+  for profile_path in "${PROFILE_DIR}"/*.tigervnc; do
+    [[ -e "${profile_path}" ]] || continue
+    [[ "$(basename "${profile_path}")" == "default.tigervnc" ]] && continue
+    found=1
+    basename "${profile_path}" .tigervnc
+  done
+
+  if [[ "${found}" -eq 0 ]]; then
+    echo "No TigerVNC profiles found in ${PROFILE_DIR}" >&2
+    exit 1
+  fi
+}
+
+show_profile() {
+  local profile="${1:-${DEFAULT_PROFILE}}"
+  local profile_path
+  local password_file
+  local server_name
+
+  profile_path="$(profile_path_for "${profile}")"
+  if [[ ! -f "${profile_path}" ]]; then
+    echo "Profile not found: ${profile_path}" >&2
+    exit 1
+  fi
+
+  server_name="$(sed -n 's/^ServerName=//p' "${profile_path}" | head -n 1)"
+  password_file="$(password_file_for "${profile}")"
+  printf 'profile=%s\n' "${profile}"
+  printf 'path=%s\n' "${profile_path}"
+  printf 'server=%s\n' "${server_name:-unknown}"
+  if [[ -f "${password_file}" ]]; then
+    printf 'password_file=%s\n' "${password_file}"
+  else
+    printf 'password_file=unset\n'
+  fi
+}
+
+install_tigervnc() {
+  if command -v vncviewer >/dev/null 2>&1; then
+    echo "tigervnc is already installed."
+    return 0
+  fi
+
+  if command -v omarchy-pkg-add >/dev/null 2>&1; then
+    exec omarchy-pkg-add tigervnc
+  fi
+
+  echo "No supported installer was found for tigervnc on this machine." >&2
+  exit 1
+}
+
+remember_password() {
+  local profile="${1:-${DEFAULT_PROFILE}}"
+  local password_file
+
+  if [[ -z "${VNCPASSWD_BIN}" ]]; then
+    echo "vncpasswd is not installed." >&2
+    echo "Run: decent-angl-vnc install" >&2
+    exit 1
+  fi
+
+  mkdir -p "${PROFILE_DIR}"
+  password_file="$(password_file_for "${profile}")"
+  "${VNCPASSWD_BIN}" "${password_file}"
+  chmod 600 "${password_file}"
+  printf 'Saved password file: %s\n' "${password_file}"
+}
+
+forget_password() {
+  local profile="${1:-${DEFAULT_PROFILE}}"
+  local password_file
+
+  password_file="$(password_file_for "${profile}")"
+  if [[ -f "${password_file}" ]]; then
+    rm -f "${password_file}"
+    printf 'Removed password file: %s\n' "${password_file}"
+  else
+    printf 'No password file found for profile %s\n' "${profile}" >&2
+    exit 1
+  fi
+}
+
+case "${1:-}" in
+  "" )
+    connect_profile 0 "${DEFAULT_PROFILE}"
+    ;;
+  -h|--help|help)
+    usage
+    ;;
+  fullscreen)
+    connect_profile 1 "${2:-${DEFAULT_PROFILE}}"
+    ;;
+  list)
+    list_profiles
+    ;;
+  show)
+    show_profile "${2:-${DEFAULT_PROFILE}}"
+    ;;
+  remember-password)
+    remember_password "${2:-${DEFAULT_PROFILE}}"
+    ;;
+  forget-password)
+    forget_password "${2:-${DEFAULT_PROFILE}}"
+    ;;
+  install)
+    install_tigervnc
+    ;;
+  *)
+    connect_profile 0 "$1"
+    ;;
+esac

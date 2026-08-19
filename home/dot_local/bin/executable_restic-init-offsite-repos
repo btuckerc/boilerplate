@@ -99,7 +99,7 @@ export RESTIC_PASSWORD_COMMAND="$PASSWORD_COMMAND"
 eval "$("$BW_RESTIC_OFFSITE_ENV_BIN")"
 
 if [ "$#" -eq 0 ]; then
-    set -- omarchy macbook macmini
+    set -- omarchy btcaw macbook macmini
 fi
 
 for machine_id in "$@"; do

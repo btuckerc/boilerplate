@@ -1,0 +1,52 @@
+---
+name: platform-ops
+description: Inspect or change machine-local operating system, desktop, hardware, network-client, power, service, or native app settings on Omarchy/Linux or macOS. Use for requests like trackpad, keyboard, mouse, display, audio, battery, Tailscale, launch agents, or to decide whether a change belongs in shared chezmoi config or should stay local. Home OPNsense/router/firewall work belongs in the `opnsense` skill, not here.
+---
+
+# Platform Ops
+
+Use this when the user asks to inspect or change machine settings, desktop behavior, hardware preferences, native app settings, or OS services.
+
+## Current Target
+{{ template "codex/current-target.md.tmpl" . }}
+
+## Scope Decision
+
+- Shared and durable: edit `~/src/boilerplate/home/...`, sync the same files into `~/.local/share/chezmoi/home/...`, then apply with `chezmoi`.
+- Machine-local and OS-owned: change the live OS or app setting directly on the target host.
+- Home router/firewall/DHCP/DNS on `10.77.77.1`: use the `opnsense` skill and `opnsense-api`. Do not use computer-use or raw `curl -k`.
+
+## Shared vs Local
+
+- Shared: shell, tmux, OMP, Codex Desktop, Ghostty, Kitty, Hyprland, Waybar, Mako, Walker, and user services shipped in the boilerplate.
+- Machine-local: trackpad speed, keyboard repeat rate, display scaling, battery policy, Bluetooth pairings, and app login state.
+- If unclear, inspect where the current value lives before editing.
+
+## Omarchy And Linux
+
+- Package installs: `omarchy-pkg-add`.
+- Inspect `hyprctl devices`, relevant `hyprctl getoption` values, and systemd unit status before changing them.
+- Durable desktop config lives under `~/src/boilerplate/home/dot_config/`; the corresponding live files are under `~/.config/`.
+- Validate Hyprland changes with `hyprctl reload` and `hyprctl configerrors`.
+- Treat Omarchy desktop changes as shared only when they belong in the normal workstation baseline.
+
+## macOS
+
+- Shared CLI and dotfile behavior goes through `brew`, `mise`, and `chezmoi`.
+- Native preferences usually stay machine-local unless the user explicitly wants them standardized.
+- Inspect before writing with `defaults`, `pmset`, `scutil`, `networksetup`, `systemsetup`, or `launchctl` as appropriate.
+- Prefer CLI changes when they are clear and reversible. If a setting is UI-only, say so instead of guessing.
+- Avoid user-facing UI changes on `macmini` unless explicitly requested; treat it as server-first.
+
+## Reliability Rules
+
+- Inspect before writing and decide shared versus local first.
+- Keep machine-local state out of shared agent guidance unless it is durable and portable.
+- Re-read changed settings or files after writing.
+- For shared changes, verify the rendered live file after a targeted chezmoi apply.
+
+## Home Network
+
+- The LAN gateway is OPNsense at `https://10.77.77.1`.
+- Read `skill://opnsense` and use `opnsense-api` for appliance changes.
+- Client/host network settings (macOS `networksetup`, Tailscale, DNS on this machine) stay in this skill.

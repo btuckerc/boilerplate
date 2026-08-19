@@ -121,6 +121,8 @@ def machine_candidates_from_hostname(hostname: str) -> str | None:
     lowered = hostname.lower()
     if lowered in {"omarchy", "btct14"}:
         return "omarchy"
+    if lowered == "btcaw":
+        return "btcaw"
     if lowered.startswith("btc-mbp14") or lowered == "macbook":
         return "macbook"
     if lowered.startswith("webweaver") or lowered == "macmini":
@@ -217,7 +219,7 @@ def parse_args(argv: list[str]) -> tuple[str, argparse.Namespace]:
     )
     parser.add_argument(
         "--expected-machines",
-        default=os.environ.get("CODEX_METER_EXPECTED_MACHINES", "omarchy,macbook,macmini"),
+        default=os.environ.get("CODEX_METER_EXPECTED_MACHINES", "omarchy,btcaw,macbook,macmini"),
         help="Comma-separated machine ids for local refreshes.",
     )
     parser.add_argument(

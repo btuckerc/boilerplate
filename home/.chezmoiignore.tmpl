@@ -52,6 +52,27 @@ nvim.backup.*
 # Neovim lazy-lock.json (plugin lockfile)
 .config/nvim/lazy-lock.json
 
+{{- if eq .chezmoi.os "linux" }}
+# Retained pre-Quattro assets: source history only, never re-apply to the Lua /
+# Omarchy-shell desktop. Current portable overrides are manifest-managed.
+.config/hypr/autostart.conf
+.config/hypr/bindings.conf
+.config/hypr/hypridle.conf
+.config/hypr/hyprland.conf
+.config/hypr/hyprlock.conf
+.config/hypr/input.conf
+.config/hypr/looknfeel.conf
+.config/omarchy/current
+.config/omarchy/current/**
+.config/systemd/user/omarchy-battery-monitor.service
+.config/waybar
+.config/waybar/**
+.local/bin/codex-workspace-attentiond
+.local/bin/hyprland-workspace-compactd
+.local/bin/waybar-clock-calendar-popup
+.local/bin/waybar-clock-calendar-toggle
+{{- end }}
+
 {{- if ne .chezmoi.os "linux" }}
 # Linux / Omarchy-only desktop stack
 .config/decent-angl/omarchy-roaming-manifest.tsv
@@ -68,6 +89,7 @@ nvim.backup.*
 .local/bin/hyprland-workspace-compactd
 .local/bin/omarchy-install-terminal
 .local/bin/omarchy-roaming-sync
+.local/share/applications/macmini-screen.desktop
 .local/bin/waybar-clock-calendar-popup
 .local/bin/waybar-clock-calendar-toggle
 {{- end }}

@@ -48,7 +48,7 @@ check_machine() {
 }
 
 if [ "$#" -eq 0 ]; then
-    set -- omarchy macbook macmini
+    set -- omarchy btcaw macbook macmini
 fi
 
 for machine_id in "$@"; do

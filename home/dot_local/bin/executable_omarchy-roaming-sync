@@ -4,20 +4,26 @@ set -euo pipefail
 MANIFEST="${OMARCHY_ROAMING_MANIFEST:-$HOME/.config/decent-angl/omarchy-roaming-manifest.tsv}"
 REPO_ROOT="${OMARCHY_ROAMING_REPO_ROOT:-$HOME/src/boilerplate}"
 CHEZMOI_ROOT="${OMARCHY_ROAMING_CHEZMOI_ROOT:-$HOME/.local/share/chezmoi}"
+OMARCHY_ROOT="${OMARCHY_ROAMING_OMARCHY_ROOT:-/usr/share/omarchy}"
+SUPPORTED_GENERATION="quattro"
+SUPPORTED_OMARCHY_MAJOR="4"
+STRICT_TRACKING=false
 
 usage() {
   cat <<'EOF'
-Usage: omarchy-roaming-sync <status|sync|apply|list|validate> [--apply]
+Usage: omarchy-roaming-sync <status|sync|apply|list|preflight|validate> [--apply]
 
 Commands:
   status   Show whether the manifest-managed Omarchy files are present and in sync.
   sync     Copy live files into both the boilerplate repo and chezmoi source.
   apply    Apply the manifest-managed files from chezmoi to the live machine.
   list     Print the manifest entries.
-  validate Check live sync status, git tracking, script syntax, and Hyprland config health.
+  preflight Refuse unsupported Omarchy generations and unsafe ownership before writes.
+  validate Run preflight plus sync, syntax, environment, Hyprland, and shell checks.
 
 Options:
   --apply  After sync, run `chezmoi apply` for the manifest-managed live paths.
+  --strict Treat new, not-yet-Git-tracked source files as validation failures.
 EOF
 }
 
@@ -70,6 +76,162 @@ path_has_segment() {
   esac
 }
 
+manifest_generation() {
+  sed -n 's/^# omarchy-generation[[:space:]]*//p' "${MANIFEST}" | head -n 1
+}
+
+installed_omarchy_major() {
+  if [[ -n "${OMARCHY_ROAMING_OMARCHY_MAJOR:-}" ]]; then
+    printf '%s\n' "${OMARCHY_ROAMING_OMARCHY_MAJOR}"
+    return
+  fi
+  omarchy version 2>/dev/null | sed -n 's/^\([0-9][0-9]*\)\..*/\1/p' | head -n 1
+}
+
+compatibility_check() {
+  local failures=0
+  local generation major kind live_path repo_rel file
+  local -A seen_live=()
+  local -A seen_repo=()
+  local -A required=(
+    ["$HOME/.config/hypr/autostart.lua"]=0
+    ["$HOME/.config/hypr/bindings.lua"]=0
+    ["$HOME/.config/hypr/input.lua"]=0
+    ["$HOME/.config/hypr/looknfeel.lua"]=0
+    ["$HOME/.config/uwsm/env.d/99-decent-angl"]=0
+  )
+
+  if [[ ! -r "${MANIFEST}" ]]; then
+    printf 'COMPAT  missing manifest %s\n' "${MANIFEST}" >&2
+    return 1
+  fi
+
+  generation="$(manifest_generation)"
+  major="$(installed_omarchy_major)"
+
+  if [[ "${generation}" == "${SUPPORTED_GENERATION}" ]]; then
+    printf 'GEN     %s\n' "${generation}"
+  else
+    printf 'GEN     unsupported manifest generation %s (expected %s)\n' "${generation:-missing}" "${SUPPORTED_GENERATION}" >&2
+    failures=1
+  fi
+
+  if [[ "${major}" == "${SUPPORTED_OMARCHY_MAJOR}" ]]; then
+    printf 'VERSION Omarchy major %s\n' "${major}"
+  else
+    printf 'VERSION unsupported Omarchy major %s (contract supports %s)\n' "${major:-missing}" "${SUPPORTED_OMARCHY_MAJOR}" >&2
+    failures=1
+  fi
+
+  if [[ -r "${OMARCHY_ROOT}/default/hypr/bootstrap.lua" ]] \
+    && [[ -r "${OMARCHY_ROOT}/default/uwsm/env.d/10-omarchy" ]] \
+    && [[ -r "${OMARCHY_ROOT}/config/omarchy/shell.json" ]]; then
+    printf 'ROOT    %s\n' "${OMARCHY_ROOT}"
+  else
+    printf 'ROOT    incomplete Quattro package root %s\n' "${OMARCHY_ROOT}" >&2
+    failures=1
+  fi
+
+  while IFS=$'\t' read -r kind live_path repo_rel; do
+    if [[ -n "${seen_live[${live_path}]:-}" ]]; then
+      printf 'DUPLIVE %s\n' "${live_path}" >&2
+      failures=1
+    fi
+    if [[ -n "${seen_repo[${repo_rel}]:-}" ]]; then
+      printf 'DUPREPO %s\n' "${repo_rel}" >&2
+      failures=1
+    fi
+    seen_live["${live_path}"]=1
+    seen_repo["${repo_rel}"]=1
+    [[ -v "required[${live_path}]" ]] && required["${live_path}"]=1
+
+    case "${live_path}" in
+      "$HOME/.config/hypr/"*.conf)
+        case "${live_path##*/}" in
+          hyprsunset.conf | xdph.conf) ;;
+          *)
+            printf 'LEGACY  manifest owns deprecated Hyprland config %s\n' "${live_path}" >&2
+            failures=1
+            ;;
+        esac
+        ;;
+      "$HOME/.config/waybar/"* | "$HOME/.config/mako/"* | "$HOME/.config/walker/"* | \
+        "$HOME/.config/uwsm/env" | "$HOME/.config/omarchy/current/"* | \
+        "$HOME/.local/state/omarchy/current/"* | "$HOME/.config/systemd/user/omarchy-battery-monitor.service")
+        printf 'LEGACY  manifest owns package or pre-Quattro state %s\n' "${live_path}" >&2
+        failures=1
+        ;;
+    esac
+  done < <(iter_manifest)
+
+  for live_path in "${!required[@]}"; do
+    if [[ "${required[${live_path}]}" == 1 ]]; then
+      printf 'REQUIRE %s\n' "${live_path}"
+    else
+      printf 'REQUIRE missing %s\n' "${live_path}" >&2
+      failures=1
+    fi
+  done
+
+  for file in \
+    "${REPO_ROOT}/home/dot_zshenv" \
+    "${REPO_ROOT}/home/dot_config/shell/common.sh" \
+    "${REPO_ROOT}/home/dot_local/bin/env.fish"; do
+    [[ -f "${file}" ]] || continue
+    if grep -Fq 'prepend_path_dir "$HOME/.local/share/omarchy/bin"' "${file}"; then
+      printf 'LEGACY  shell path injection in %s\n' "${file}" >&2
+      failures=1
+    fi
+  done
+
+  for file in "$HOME/.config/uwsm/env" "$HOME/.config/uwsm/env-hyprland" "$HOME/.config/uwsm/env.d/"*; do
+    [[ -f "${file}" ]] || continue
+    if grep -Eq '^[[:space:]]*(export[[:space:]]+)?OMARCHY_PATH=' "${file}"; then
+      printf 'OWNER   user override of OMARCHY_PATH in %s\n' "${file}" >&2
+      failures=1
+    fi
+  done
+
+  if [[ -e "$HOME/.config/systemd/user/omarchy-battery-monitor.service" ]]; then
+    printf 'OWNER   obsolete battery monitor unit still exists\n' >&2
+    failures=1
+  fi
+
+  if [[ -e "$HOME/.config/omarchy/current" ]]; then
+    printf 'OWNER   generated Omarchy state recreated below ~/.config/omarchy/current\n' >&2
+    failures=1
+  fi
+
+  if [[ -L "$HOME/.local/share/omarchy" ]]; then
+    if [[ "$(readlink -f "$HOME/.local/share/omarchy")" == "${OMARCHY_ROOT}" ]]; then
+      printf 'LINK    legacy compatibility link is safe\n'
+    else
+      printf 'LINK    legacy compatibility link points outside %s\n' "${OMARCHY_ROOT}" >&2
+      failures=1
+    fi
+  elif [[ -e "$HOME/.local/share/omarchy" ]]; then
+    printf 'LINK    legacy Omarchy path is not a compatibility symlink\n' >&2
+    failures=1
+  fi
+
+  if [[ -r "$HOME/.config/hypr/hyprland.lua" ]] \
+    && grep -Fq '/usr/share/omarchy' "$HOME/.config/hypr/hyprland.lua" \
+    && ! grep -Fq '.local/share/omarchy' "$HOME/.config/hypr/hyprland.lua"; then
+    printf 'BOOT    Hyprland bootstrap ownership is safe\n'
+  else
+    printf 'BOOT    Hyprland bootstrap does not have a packaged fallback\n' >&2
+    failures=1
+  fi
+
+  if (( failures == 0 )); then
+    printf 'COMPAT  safe\n'
+  else
+    printf 'COMPAT  blocked\n' >&2
+  fi
+
+  return "${failures}"
+}
+
 syntax_check_exec() {
   local repo_path="$1"
   local shebang
@@ -84,6 +246,24 @@ syntax_check_exec() {
       ;;
     *)
       return 0
+      ;;
+  esac
+}
+
+syntax_check_file() {
+  local kind="$1"
+  local repo_path="$2"
+
+  case "${repo_path}" in
+    *.lua) luac -p "${repo_path}" ;;
+    *.json) jq -e . "${repo_path}" >/dev/null ;;
+    *.sh | */env.d/*) bash -n "${repo_path}" ;;
+    *)
+      if [[ "${kind}" == "exec" ]]; then
+        syntax_check_exec "${repo_path}"
+      else
+        return 2
+      fi
       ;;
   esac
 }
@@ -129,10 +309,13 @@ validate_manifest() {
   local failures=0
   local repo_path
   local output
-  local env_path
   local shell_path
   local systemd_path
+  local systemd_env
+  local hypr_instances
+  local layers
 
+  compatibility_check || failures=1
   status_manifest || failures=1
 
   while IFS=$'\t' read -r kind _live_path repo_rel; do
@@ -141,29 +324,24 @@ validate_manifest() {
     if repo_file_is_tracked "${repo_rel}"; then
       printf 'TRACKED %s\n' "${repo_rel}"
     else
-      printf 'UNTRACKD %s\n' "${repo_rel}"
-      failures=1
+      printf 'PENDING %s\n' "${repo_rel}"
+      [[ "${STRICT_TRACKING}" == true ]] && failures=1
     fi
 
-    if [[ "${kind}" == "exec" ]] && [[ -f "${repo_path}" ]]; then
-      if syntax_check_exec "${repo_path}"; then
+    if [[ -f "${repo_path}" ]]; then
+      if syntax_check_file "${kind}" "${repo_path}"; then
         printf 'SYNTAX  %s\n' "${repo_rel}"
       else
-        printf 'BROKEN  %s\n' "${repo_rel}"
-        failures=1
+        case "$?" in
+          2) printf 'DATA    %s\n' "${repo_rel}" ;;
+          *)
+            printf 'BROKEN  %s\n' "${repo_rel}"
+            failures=1
+            ;;
+        esac
       fi
     fi
   done < <(iter_manifest)
-
-  env_path="${REPO_ROOT}/home/dot_config/uwsm/env"
-  if [[ -f "${env_path}" ]]; then
-    if bash -n "${env_path}"; then
-      printf 'SYNTAX  %s\n' "home/dot_config/uwsm/env"
-    else
-      printf 'BROKEN  %s\n' "home/dot_config/uwsm/env"
-      failures=1
-    fi
-  fi
 
   output="$(env -0 2>/dev/null | tr '\0' '\n' | grep '^PATH=' || true)"
   if [[ -n "${output}" ]]; then
@@ -173,21 +351,32 @@ validate_manifest() {
     failures=1
   fi
 
+  if jq -e '.version == 1 and (.bar.layout | type == "object") and (.idle | type == "object")' \
+    "$HOME/.config/omarchy/shell.json" >/dev/null 2>&1; then
+    printf 'SHELLCFG ok\n'
+  else
+    printf 'SHELLCFG broken\n'
+    failures=1
+  fi
+
   shell_path="$(bash -lc 'printf "%s" "$PATH"' 2>/dev/null || true)"
   if [[ -n "${shell_path}" ]] \
     && path_has_segment "${shell_path}" "${HOME}/.local/bin" \
-    && path_has_segment "${shell_path}" "${HOME}/.local/share/omarchy/bin"; then
+    && ! path_has_segment "${shell_path}" "${HOME}/.local/share/omarchy/bin" \
+    && bash -lc 'command -v omarchy >/dev/null 2>&1'; then
     printf 'SHELL   ok\n'
   else
     printf 'SHELL   broken\n'
     failures=1
   fi
 
-  output="$(systemctl --user show-environment 2>/dev/null | grep '^PATH=' || true)"
+  systemd_env="$(systemctl --user show-environment 2>/dev/null || true)"
+  output="$(grep '^PATH=' <<<"${systemd_env}" || true)"
   if [[ -n "${output}" ]]; then
     systemd_path="${output#PATH=}"
     if path_has_segment "${systemd_path}" "${HOME}/.local/bin" \
-      && path_has_segment "${systemd_path}" "${HOME}/.local/share/omarchy/bin"; then
+      && ! path_has_segment "${systemd_path}" "${HOME}/.local/share/omarchy/bin" \
+      && grep -qx 'OMARCHY_PATH=/usr/share/omarchy' <<<"${systemd_env}"; then
       printf 'UWSM    ok\n'
     else
       printf 'UWSM    broken\n'
@@ -197,8 +386,30 @@ validate_manifest() {
     printf 'UWSM    skipped\n'
   fi
 
-  if [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]] && command -v hyprctl >/dev/null 2>&1; then
-    output="$(hyprctl configerrors 2>/dev/null || true)"
+  output="$(systemctl --user --failed --no-legend --plain 2>/dev/null || true)"
+  if [[ -z "${output}" ]]; then
+    printf 'USERUNIT clean\n'
+  else
+    printf 'USERUNIT failed\n%s\n' "${output}"
+    failures=1
+  fi
+
+  if pgrep -u "${USER}" -x waybar >/dev/null 2>&1; then
+    if pgrep -u "${USER}" -f 'hyprland-workspace-compactd' >/dev/null 2>&1; then
+      printf 'COMPACT ok\n'
+    else
+      printf 'COMPACT missing\n'
+      failures=1
+    fi
+  elif pgrep -u "${USER}" -x quickshell >/dev/null 2>&1; then
+    printf 'COMPACT n/a (Omarchy shell)\n'
+  else
+    printf 'COMPACT skipped (no bar process)\n'
+  fi
+
+  hypr_instances="$(hyprctl instances -j 2>/dev/null || true)"
+  if jq -e 'length > 0' <<<"${hypr_instances}" >/dev/null 2>&1; then
+    output="$(hyprctl -i 0 configerrors 2>/dev/null || true)"
     if [[ -z "${output}" ]]; then
       printf 'HYPR    clean\n'
     else
@@ -213,8 +424,18 @@ validate_manifest() {
           ;;
       esac
     fi
+
+    layers="$(hyprctl -i 0 layers -j 2>/dev/null || true)"
+    if jq -e '[.. | objects | .namespace? // empty] | index("omarchy-bar") != null' <<<"${layers}" >/dev/null 2>&1 \
+      && jq -e '[.. | objects | .namespace? // empty] | index("omarchy-background") != null' <<<"${layers}" >/dev/null 2>&1; then
+      printf 'SHELLUI ok\n'
+    else
+      printf 'SHELLUI missing Omarchy layers\n'
+      failures=1
+    fi
   else
     printf 'HYPR    skipped\n'
+    printf 'SHELLUI skipped\n'
   fi
 
   return "${failures}"
@@ -273,6 +494,9 @@ main() {
       --apply)
         apply_after_sync=true
         ;;
+      --strict)
+        STRICT_TRACKING=true
+        ;;
       -h | --help)
         usage
         exit 0
@@ -287,10 +511,20 @@ main() {
   done
 
   case "${command}" in
-    status) status_manifest ;;
-    sync) sync_manifest "${apply_after_sync}" ;;
-    apply) apply_manifest ;;
+    status)
+      compatibility_check
+      status_manifest
+      ;;
+    sync)
+      compatibility_check
+      sync_manifest "${apply_after_sync}"
+      ;;
+    apply)
+      compatibility_check
+      apply_manifest
+      ;;
     list) list_manifest ;;
+    preflight) compatibility_check ;;
     validate) validate_manifest ;;
     -h | --help)
       usage

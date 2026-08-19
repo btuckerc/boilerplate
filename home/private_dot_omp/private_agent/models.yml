@@ -1,0 +1,18 @@
+# Managed by chezmoi. Restores Grok 4.6 effort metadata missing from OMP 17.3.4.
+# Remove this override after a pin that lists thinking on xai-oauth/grok-4.6.
+providers:
+  xai-oauth:
+    modelOverrides:
+      grok-4.6:
+        reasoning: true
+        thinking:
+          mode: effort
+          defaultLevel: high
+          efforts:
+            - low
+            - medium
+            - high
+            - xhigh
+        compat:
+          supportsReasoningEffort: true
+          omitReasoningEffort: false

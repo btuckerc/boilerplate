@@ -49,6 +49,7 @@ Export a fresh snapshot and publish it to macmini's inbox.
 KNOWN_MACHINE_ALIASES = {
     "omarchy": "omarchy",
     "btct14": "omarchy",
+    "btcaw": "btcaw",
     "macbook": "macbook",
     "btc-mbp14": "macbook",
     "macmini": "macmini",

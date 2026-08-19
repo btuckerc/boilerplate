@@ -4,13 +4,16 @@ set -eu
 machine_id="${1:-}"
 
 if [ -z "$machine_id" ]; then
-    echo "usage: restic-home-repo <omarchy|macbook|macmini>" >&2
+    echo "usage: restic-home-repo <omarchy|btcaw|macbook|macmini>" >&2
     exit 1
 fi
 
 case "$machine_id" in
     omarchy)
         printf '%s\n' 'sftp:admin@macmini.tail4d5aec.ts.net:/Users/admin/srv/restic/omarchy'
+        ;;
+    btcaw)
+        printf '%s\n' 'sftp:admin@macmini.tail4d5aec.ts.net:/Users/admin/srv/restic/btcaw'
         ;;
     macbook)
         printf '%s\n' 'sftp:admin@macmini.tail4d5aec.ts.net:/Users/admin/srv/restic/macbook'

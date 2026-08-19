@@ -35,6 +35,15 @@ DEFAULT_SYNC_BUSY_TIMEOUT_MS = 5000
 DEFAULT_SEND_WAIT_SECONDS = 60
 DEFAULT_SEND_POLL_INTERVAL_SECONDS = 1.0
 SEND_WORKER_LABEL = "com.decentangl.imsg.send-worker"
+INTERACTIVE_SEND_ENV_KEYS = (
+    "SSH_CONNECTION",
+    "SSH_TTY",
+    "TERM_PROGRAM",
+    "TERM_SESSION_ID",
+    "LC_TERMINAL",
+    "KITTY_WINDOW_ID",
+    "WT_SESSION",
+)
 
 REACTION_LABELS = {
     2000: "Loved",
@@ -362,6 +371,8 @@ def extract_attributed_body_text(raw_value: Any) -> str | None:
         if re.match(r"^\+[0-9]{1,2}[A-Za-z]", stripped):
             stripped = re.sub(r"^\+[0-9]{1,2}", "", stripped, count=1)
         elif re.match(r"^\+[A-Z][A-Za-z]", stripped):
+            stripped = stripped[2:]
+        elif len(stripped) >= 3 and stripped[0] == "+" and not stripped[1].isalnum() and stripped[2].isalnum():
             stripped = stripped[2:]
         return stripped
 
@@ -2405,16 +2416,26 @@ def distinct_accounts(source: sqlite3.Connection) -> list[dict[str, Any]]:
 
 
 def probe_messages_automation() -> dict[str, Any]:
+    return request_messages_automation(timeout_seconds=5)
+
+
+def request_messages_automation(timeout_seconds: int = 45) -> dict[str, Any]:
     script = 'tell application "Messages" to get count of chats'
     try:
         result = subprocess.run(
             ["osascript", "-e", script],
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=max(5, int(timeout_seconds)),
         )
     except subprocess.TimeoutExpired:
-        return {"status": "timeout", "detail": "osascript timed out after 5 seconds"}
+        return {
+            "status": "timeout",
+            "detail": (
+                "osascript timed out while waiting for Messages automation. "
+                "Make sure the macmini GUI session is visible and accept any prompts."
+            ),
+        }
     except FileNotFoundError:
         return {"status": "unavailable", "detail": "osascript not found"}
     except Exception as exc:
@@ -2429,6 +2450,24 @@ def probe_messages_automation() -> dict[str, Any]:
         "detail": compact_text(result.stderr.strip() or result.stdout.strip(), 200),
         "returncode": result.returncode,
     }
+
+
+def active_send_session_hints() -> list[str]:
+    return [key for key in INTERACTIVE_SEND_ENV_KEYS if os.environ.get(key)]
+
+
+def current_send_mode(cfg: Config) -> str:
+    if os.environ.get("IMSG_SEND_WORKER") == "1":
+        return "worker-inline"
+    if cfg.machine_id != cfg.server_machine_id:
+        return "remote-forward"
+    if os.environ.get("IMSG_FORCE_QUEUE") == "1":
+        return "queued-worker"
+    if os.environ.get("IMSG_FORCE_INLINE_SEND") == "1":
+        return "inline"
+    if active_send_session_hints():
+        return "inline"
+    return "queued-worker"
 
 
 def run_send_applescript(recipient: str, message: str, service_type: str) -> dict[str, Any]:
@@ -2824,11 +2863,7 @@ def build_send_payload_from_job(row: sqlite3.Row) -> dict[str, Any]:
 
 
 def send_should_run_inline(cfg: Config) -> bool:
-    if os.environ.get("IMSG_SEND_WORKER") == "1":
-        return True
-    if cfg.machine_id != cfg.server_machine_id:
-        return False
-    return os.environ.get("TERM_PROGRAM") == "Apple_Terminal"
+    return current_send_mode(cfg) in {"worker-inline", "inline"}
 
 
 def fetch_send_job_row(con: sqlite3.Connection, job_rowid: int) -> sqlite3.Row | None:
@@ -3368,6 +3403,9 @@ def doctor_payload(cfg: Config) -> dict[str, Any]:
         "index_db_exists": cfg.index_db.exists(),
         "account_hint": cfg.account_hint,
         "phone_account_hint": cfg.phone_account_hint,
+        "provider_send_bin": str(cfg.provider_send_bin) if cfg.provider_send_bin else "",
+        "send_mode": current_send_mode(cfg),
+        "session_hints": active_send_session_hints(),
         "automation": probe_messages_automation() if cfg.machine_id == cfg.server_machine_id else {"status": "remote-only"},
         "send_worker": probe_send_worker(cfg),
     }
@@ -3385,6 +3423,25 @@ def doctor_payload(cfg: Config) -> dict[str, Any]:
             payload["indexed_chat_count"] = int(row["value"] or 0)
             row = index.execute("select count(*) as value from messages").fetchone()
             payload["indexed_message_count"] = int(row["value"] or 0)
+    return payload
+
+
+def authorize_payload(cfg: Config, *, timeout_seconds: int) -> dict[str, Any]:
+    if cfg.machine_id != cfg.server_machine_id:
+        return {
+            "status": "remote-only",
+            "detail": "Run authorize on the bridge host or forward the command through the normal imsg client.",
+        }
+    payload = {
+        "status": "ok",
+        "machine_id": cfg.machine_id,
+        "send_mode": current_send_mode(cfg),
+        "session_hints": active_send_session_hints(),
+        "provider_send_bin": str(cfg.provider_send_bin) if cfg.provider_send_bin else "",
+        "automation": request_messages_automation(timeout_seconds=timeout_seconds),
+    }
+    if payload["automation"].get("status") != "ok":
+        payload["status"] = "needs-attention"
     return payload
 
 
@@ -3513,7 +3570,12 @@ def render_doctor(payload: dict[str, Any]) -> str:
         f"attachments_root_exists={payload['attachments_root_exists']}",
         f"index_db={payload['index_db']}",
         f"index_db_exists={payload['index_db_exists']}",
+        f"provider_send_bin={payload.get('provider_send_bin', '')}",
+        f"send_mode={payload.get('send_mode', 'unknown')}",
     ]
+    session_hints = payload.get("session_hints", [])
+    if session_hints:
+        lines.append(f"session_hints={','.join(session_hints)}")
     if "source_latest_message_rowid" in payload:
         lines.append(f"source_latest_message_rowid={payload['source_latest_message_rowid']}")
         lines.append(f"source_latest_message_at={payload['source_latest_message_at']}")
@@ -3547,6 +3609,29 @@ def render_doctor(payload: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def render_authorize(payload: dict[str, Any]) -> str:
+    lines = [f"status={payload.get('status', 'unknown')}"]
+    detail = payload.get("detail")
+    if detail:
+        lines.append(f"detail={detail}")
+    if "machine_id" in payload:
+        lines.append(f"machine={payload['machine_id']}")
+    if "send_mode" in payload:
+        lines.append(f"send_mode={payload['send_mode']}")
+    if "provider_send_bin" in payload:
+        lines.append(f"provider_send_bin={payload['provider_send_bin']}")
+    session_hints = payload.get("session_hints", [])
+    if session_hints:
+        lines.append(f"session_hints={','.join(session_hints)}")
+    automation = payload.get("automation", {})
+    if automation:
+        lines.append(f"automation_status={automation.get('status', 'unknown')}")
+        automation_detail = automation.get("detail")
+        if automation_detail:
+            lines.append(f"automation_detail={automation_detail}")
+    return "\n".join(lines)
+
+
 def emit_payload(payload: Any, json_mode: bool, renderer) -> None:
     if json_mode:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
@@ -3576,6 +3661,18 @@ def run_server(argv: list[str]) -> int:
 
     doctor_parser = subparsers.add_parser("doctor", help="Inspect bridge health and local paths.")
     doctor_parser.add_argument("--json", action="store_true", help="Print JSON output.")
+
+    authorize_parser = subparsers.add_parser(
+        "authorize",
+        help="Trigger Messages automation permission checks on the bridge host.",
+    )
+    authorize_parser.add_argument(
+        "--timeout",
+        type=int,
+        default=45,
+        help="Seconds to wait for macOS permission prompts to be accepted.",
+    )
+    authorize_parser.add_argument("--json", action="store_true", help="Print JSON output.")
 
     contacts_parser = subparsers.add_parser("contacts", help="Search known handles and contacts in the index.")
     contacts_parser.add_argument("query", nargs="?", help="Optional search query.")
@@ -3691,6 +3788,11 @@ def run_server(argv: list[str]) -> int:
         payload = doctor_payload(cfg)
         emit_payload(payload, args.json, render_doctor)
         return 0
+
+    if args.command == "authorize":
+        payload = authorize_payload(cfg, timeout_seconds=args.timeout)
+        emit_payload(payload, args.json, render_authorize)
+        return 0 if payload.get("status") == "ok" else 1
 
     if args.command == "send-worker":
         return run_send_worker(

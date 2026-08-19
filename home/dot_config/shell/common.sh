@@ -37,12 +37,25 @@ prepend_path_dir() {
 	PATH="$path_new"
 }
 
+remove_path_dir() {
+	path_dir="$1"
+	path_new=""
+	path_old_ifs="$IFS"
+	IFS=:
+	for path_entry in ${PATH:-}; do
+		[ -n "$path_entry" ] || continue
+		[ "$path_entry" = "$path_dir" ] && continue
+		path_new="${path_new:+$path_new:}$path_entry"
+	done
+	IFS="$path_old_ifs"
+	PATH="$path_new"
+}
+
+remove_path_dir "$HOME/.local/share/omarchy/bin"
+
 for dir in "$HOME/.local/share/mise/shims" "$HOME/shims"; do
 	prepend_path_dir "$dir"
 done
-if [ "$(uname -s 2>/dev/null)" = "Linux" ]; then
-	prepend_path_dir "$HOME/.local/share/omarchy/bin"
-fi
 prepend_path_dir "$HOME/.local/bin"
 export PATH
 unset dir path_dir path_entry path_new path_old_ifs

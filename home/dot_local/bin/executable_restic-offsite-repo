@@ -10,7 +10,7 @@ fi
 machine_id="${1:-${RESTIC_MACHINE_ID:-}}"
 
 if [ -z "$machine_id" ]; then
-    echo "usage: restic-offsite-repo <omarchy|macbook|macmini>" >&2
+    echo "usage: restic-offsite-repo <omarchy|btcaw|macbook|macmini>" >&2
     exit 1
 fi
 

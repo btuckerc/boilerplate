@@ -67,6 +67,12 @@ if command -v mise >/dev/null; then
     eval "$(mise activate zsh)"
 fi
 
+# mise can restore a PATH captured before an Omarchy generation upgrade.
+if command -v remove_path_dir >/dev/null 2>&1; then
+    remove_path_dir "$HOME/.local/share/omarchy/bin"
+    unfunction remove_path_dir 2>/dev/null || true
+fi
+
 # === Zsh Modules ===
 zmodload zsh/complist
 autoload -U compinit && compinit

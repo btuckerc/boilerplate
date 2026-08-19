@@ -1,0 +1,190 @@
+# Managed by chezmoi. Authentication remains in the machine-local agent.db
+# and ~/.omp/agent/.env. OpenRouter is overflow only; SuperGrok stays default.
+modelRoles:
+  default: xai-oauth/grok-4.6
+  smol: xai-oauth/grok-4.6
+  slow: xai-oauth/grok-4.6
+  vision: xai-oauth/grok-4.6
+  plan: xai-oauth/grok-4.6
+  commit: xai-oauth/grok-4.6
+  tiny: xai-oauth/grok-4.6
+  task: xai-oauth/grok-4.6
+
+modelProviderOrder:
+  - xai-oauth
+  - openrouter
+
+cycleOrder:
+  - default
+
+enabledModels:
+  - xai-oauth/grok-4.6
+  - openrouter/x-ai/grok-4.6
+  - openrouter/x-ai/grok-4.6:nitro
+
+# Do not import superseded harness-level settings, commands, or skills.
+disabledProviders:
+  - codex
+  - opencode
+  - claude
+  - gemini
+  - github
+  - cursor
+  - agents
+
+# Keep the system-prompt prefix stable across role switches so Grok cache hits.
+includeModelInPrompt: false
+
+# Grok 4.6 always reasons; default effort stays high.
+defaultThinkingLevel: high
+hideThinkingBlock: true
+# Skip thinking-summary tokens on the wire when the provider supports it.
+omitThinking: true
+
+
+retry:
+  enabled: true
+  maxRetries: 3
+  baseDelayMs: 2000
+  maxDelayMs: 60000
+  modelFallback: true
+  fallbackChains:
+    default:
+      - openrouter/x-ai/grok-4.6
+    smol:
+      - openrouter/x-ai/grok-4.6
+
+task:
+  maxConcurrency: 3
+  maxRecursionDepth: 2
+  enableLsp: true
+  eager: preferred
+
+tools:
+  approvalMode: yolo
+  intentTracing: false
+  xdev: true
+  # Catalog lists xd:// devices; schemas load on demand (~3500 fewer prefix tokens).
+  xdevDocs: catalog
+
+github:
+  enabled: true
+
+astGrep:
+  enabled: true
+
+bash:
+  autoBackground:
+    enabled: true
+
+# SuperGrok cache is prefix-exact. Auto only covers DeepSeek/Xiaomi/Anthropic.
+provider:
+  appendOnlyContext: on
+
+# Compact before xAI's 200k long-context price/quota cliff (500k window).
+compaction:
+  enabled: true
+  strategy: snapcompact
+  thresholdTokens: 180000
+  midTurnEnabled: true
+  keepRecentTokens: 20000
+  autoContinue: true
+  dropUseless: true
+  supersedeReads: true
+  idleEnabled: true
+  idleThresholdTokens: 170000
+  idleTimeoutSeconds: 180
+
+theme:
+  dark: ghostty
+
+symbolPreset: nerd
+
+statusLine:
+  preset: custom
+  separator: powerline
+  compactThinkingLevel: true
+  leftSegments:
+    - hostname
+    - model
+    - path
+  rightSegments:
+    - token_in
+    - token_out
+    - cache_read
+    - token_rate
+  segmentOptions:
+    model:
+      showThinkingLevel: true
+    path:
+      abbreviate: true
+      maxLength: 60
+      stripWorkPrefix: true
+
+display:
+  showTokenUsage: false
+  cacheMissMarker: true
+  hideToolActivity: true
+  shimmer: disabled
+  # Tokens appear as they arrive; no client-side reveal delay.
+  smoothStreaming: false
+
+
+terminal:
+  showProgress: true
+
+power:
+  sleepPrevention: display
+
+features:
+  unexpectedStopDetection: true
+
+# Local ONNX models are downloaded per machine with `omp tiny-models`.
+providers:
+  # Default OpenRouter routing (price/uptime). :nitro is a manual enabledModels pick.
+  openrouterVariant: default
+  webSearchOrder:
+    - xai
+  imageOrder:
+    - xai
+  tinyModel: lfm2-350m
+  tinyModelDevice: auto
+  autoThinkingModel: lfm2-350m
+  unexpectedStopModel: lfm2-350m
+  autoThinkingMaxEffort: xhigh
+
+# enablePi* is the native ~/.omp/agent/skills and .omp/skills gate (legacy name).
+# Leave Codex/Claude/Agents off so foreign harness skills stay out.
+skills:
+  enableCodexUser: false
+  enableClaudeUser: false
+  enableClaudeProject: false
+  enablePiUser: true
+  enablePiProject: true
+  enableAgentsUser: false
+  enableAgentsProject: false
+
+commands:
+  enableClaudeUser: false
+  enableClaudeProject: false
+  enableOpencodeUser: false
+  enableOpencodeProject: false
+
+bashInterceptor:
+  enabled: true
+
+secrets:
+  enabled: true
+
+startup:
+  quiet: true
+  showSplash: false
+  setupWizard: false
+  checkUpdate: false
+  changelogMode: hidden
+
+marketplace:
+  autoUpdate: off
+
+memory:
+  backend: off

@@ -58,8 +58,10 @@ Standalone personal messaging bridge bundle for `decent-angl`.
   - `Esc` or `Left` return to the chat list
   - `Up` at the top of the transcript loads older history
   - `/` search
-  - `c` compose/send a plain message
-  - `r` attempt a native reply to the selected message
+  - `c` jump to compose
+  - `Enter` in the composer sends
+  - `Shift+Enter` in the composer inserts a newline
+  - `r` hold the selected message as reply context while composing
   - `o` show outbox
   - `?` help
 - The bundle is intentionally shippable on its own: one app directory, one config file, and thin wrappers around the same client surface.

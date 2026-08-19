@@ -23,9 +23,11 @@ Current shared skills:
 
 ## Fast Paths
 
-- Omarchy desktop and bar tweaks: start with `platform-ops`
-- Waybar workspace and top-bar changes: inspect `~/.config/waybar/config.jsonc` and `~/.config/waybar/style.css`, then apply with `omarchy-restart-waybar`
-- Omarchy roaming baseline: `omarchy-roaming-sync validate` checks sync, git tracking, and Hyprland health; `omarchy-roaming-sync sync --apply` captures live state into boilerplate and chezmoi; `omarchy-roaming-sync apply` replays that baseline on a new Omarchy machine
+- Omarchy desktop and shell/bar tweaks: start with `platform-ops`; Quattro uses Hyprland Lua plus `~/.config/omarchy/shell.json`
+- Omarchy roaming baseline: run `omarchy-roaming-sync preflight` before capture/apply and `omarchy-roaming-sync validate` afterward; both refuse an unsupported Omarchy generation
+- Before committing or publishing the baseline, use `omarchy-roaming-sync validate --strict` so pending new source files fail validation
+- `omarchy-roaming-sync sync --apply` captures only portable user overrides; package-owned bootstrap, shell state, monitor state, and generated theme state remain local
+- The managed `post-update.d/10-decent-angl-compat` hook validates that contract after `omarchy update` and leaves a durable marker under `~/.local/state/decent-angl/` if a future release is incompatible
 
 ## What Is Not Shared
 
@@ -40,5 +42,5 @@ Current shared skills:
 - Network identity: Tailscale
 - Dotfiles sync: `chezmoi`
 
-For this setup, the standard hosts are `omarchy`, `macbook`, and `macmini`, and the home Git mirror lives on `macmini`.
+For this setup, the standard hosts are `t14`, `btcaw`, `macbook`, and `macmini`, and the home Git mirror lives on `macmini`.
 Use chezmoi templating for platform or machine-specific Codex context. Do not teach Codex to infer host identity by shelling out in shared instructions.

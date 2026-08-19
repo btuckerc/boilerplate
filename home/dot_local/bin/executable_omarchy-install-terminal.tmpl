@@ -38,8 +38,18 @@ if ! omarchy-pkg-add "$package"; then
 fi
 
 if [[ "$copy_omarchy_desktop" == "1" ]]; then
+  omarchy_root="${OMARCHY_PATH:-/usr/share/omarchy}"
+  omarchy_desktop="$omarchy_root/applications/Alacritty.desktop"
+  if [[ ! -r "$omarchy_desktop" ]] && [[ -r /usr/share/omarchy/applications/Alacritty.desktop ]]; then
+    omarchy_root=/usr/share/omarchy
+    omarchy_desktop="$omarchy_root/applications/Alacritty.desktop"
+  fi
+  if [[ ! -r "$omarchy_desktop" ]]; then
+    echo "Omarchy desktop entry not found below $omarchy_root" >&2
+    exit 1
+  fi
   mkdir -p "$HOME/.local/share/applications"
-  cp "$OMARCHY_PATH/applications/Alacritty.desktop" "$HOME/.local/share/applications/"
+  cp "$omarchy_desktop" "$HOME/.local/share/applications/"
 fi
 
 mkdir -p "$HOME/.config"

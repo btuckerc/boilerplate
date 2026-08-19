@@ -14,7 +14,7 @@ Use this when the user asks to inspect or change machine settings, desktop behav
 
 - Shared and durable: edit `~/src/boilerplate/home/...`, sync the same files into `~/.local/share/chezmoi/home/...`, then apply with `chezmoi`.
 - Machine-local and OS-owned: change the live OS or app setting directly on the target host.
-- If the request targets another known host, prefer `ssh omarchy`, `ssh macbook`, or `ssh admin@macmini`.
+- If the request targets another known host, prefer `ssh t14`, `ssh btcaw`, `ssh macbook`, or `ssh macmini`.
 
 ## Shared vs Local
 
@@ -41,19 +41,21 @@ Use this when the user asks to inspect or change machine settings, desktop behav
 - Common durable config roots:
   - source: `~/src/boilerplate/home/dot_config/hypr/`
   - live: `~/.config/hypr/`
-  - related desktops/apps: `~/.config/omarchy/`, `~/.config/waybar/`, `~/.config/mako/`, `~/.config/walker/`, `~/.config/systemd/user/`
+  - related desktop state: `~/.config/omarchy/`, `~/.config/uwsm/env.d/`, `~/.config/systemd/user/`
 - Omarchy desktop fast path:
-  - top bar and workspace indicator changes usually start in `~/.config/waybar/config.jsonc` and `~/.config/waybar/style.css`
-  - Omarchy launches Waybar from `~/.local/share/omarchy/default/hypr/autostart.conf` with `uwsm-app -- waybar`
-  - `persistent-workspaces` keeps empty workspace buttons visible and `format-icons.active` overrides the active workspace label
-  - for custom Waybar popups, prefer the existing manifest-managed scripts in `~/.local/bin/`, especially `waybar-clock-calendar-toggle`, over rebuilding the pattern from scratch
-  - use `omarchy-roaming-sync validate` to check live sync, git tracking, and Hyprland config health; `omarchy-roaming-sync sync --apply` captures live Omarchy state into boilerplate and chezmoi; `omarchy-roaming-sync apply` replays that baseline on a new Omarchy machine
-  - `~/.config/hypr/monitors.conf`, `~/.config/omarchy/current/theme/*`, and `~/.config/omarchy/current/background` stay local by design
-  - Waybar config changes need `omarchy-restart-waybar`
+  - Quattro uses Hyprland Lua overrides in `~/.config/hypr/*.lua` and the Omarchy Quickshell configured by `~/.config/omarchy/shell.json`
+  - use `omarchy bar ...`, `omarchy plugin ...`, and `omarchy restart shell`; do not revive pre-Quattro Waybar/Mako/Walker configuration
+  - packaged Omarchy owns `/usr/share/omarchy`, `OMARCHY_PATH`, the Hyprland bootstrap, shell launch, idle/lock, battery service, and generated state below `~/.local/state/omarchy/`
+  - never export `OMARCHY_PATH` from chezmoi or prepend `~/.local/share/omarchy/bin`; stock login/UWSM bootstrap selects package or dev-link mode
+  - run `omarchy-roaming-sync preflight` before `sync` or `apply`; those commands abort when the installed major and manifest generation disagree
+  - run `omarchy-roaming-sync validate` afterward to check live/source/mirror sync, forbidden legacy ownership, syntax, UWSM state, Hyprland parser health, and shell layers from either a GUI terminal or TTY
+  - run `omarchy-roaming-sync validate --strict` before commit/publish so new source files cannot be omitted from Git
+  - keep the managed post-update compatibility hook enabled; it records a durable state marker when a future Omarchy release violates the supported generation contract
+  - `~/.config/hypr/hyprland.lua`, `~/.config/hypr/monitors.lua`, `~/.config/omarchy/shell.json`, and `~/.local/state/omarchy/current/*` stay outside the portable manifest unless intentionally promoted
 - Trackpad and input workflow:
-  1. Inspect `hyprctl devices` and the live `~/.config/hypr/input.conf`.
-  2. If the behavior should be part of the standard workstation setup, edit the source `home/dot_config/hypr/input.conf`.
-  3. Apply with `chezmoi apply ~/.config/hypr/input.conf`.
+  1. Inspect `hyprctl devices` and the live `~/.config/hypr/input.lua`.
+  2. If the behavior should be part of the standard workstation setup, edit the source `home/dot_config/hypr/input.lua`.
+  3. Apply with `chezmoi apply ~/.config/hypr/input.lua`.
   4. Reload with `hyprctl reload`.
 - Hyprland config verification:
   1. Reload with `hyprctl reload`.

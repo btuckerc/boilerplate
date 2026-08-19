@@ -1,5 +1,8 @@
+use std::collections::HashMap;
 use std::io::{self, Stdout};
-use std::process::{Command, Stdio};
+use std::process::Command;
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::thread;
 use std::time::{Duration, Instant};
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -11,13 +14,22 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::{Frame, Terminal};
 use serde::de::DeserializeOwned;
 use serde::de::Error as _;
 use serde::Deserialize;
+use tui_textarea::TextArea;
 
 type AppResult<T> = Result<T, String>;
+
+const CHAT_LIMIT: usize = 80;
+const MESSAGE_LIMIT: usize = 90;
+const OUTBOX_LIMIT: usize = 60;
+const SEARCH_LIMIT: usize = 60;
+const AUTO_SYNC_INTERVAL: Duration = Duration::from_secs(20);
+const CHAT_SELECTION_DELAY: Duration = Duration::from_millis(120);
+const SEARCH_DEBOUNCE: Duration = Duration::from_millis(180);
 
 fn deserialize_boolish<'de, D>(deserializer: D) -> Result<bool, D::Error>
 where
@@ -74,28 +86,20 @@ where
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Pane {
+enum Focus {
     Chats,
     Messages,
-    Lower,
+    Composer,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum InputMode {
-    Normal,
-    Search,
-    Compose,
-    Reply,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum LowerView {
+enum Modal {
     Search,
     Outbox,
+    Inspector,
     Help,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize, Default)]
 struct ChatSummary {
     chat_rowid: i64,
@@ -226,16 +230,77 @@ struct SendJobRow {
 struct SendResponse {
     #[serde(default, deserialize_with = "deserialize_boolish")]
     ok: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_stringish")]
     status: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_stringish")]
     detail: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_stringish")]
     blocked_reason: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_stringish")]
     recipient: String,
     #[serde(default)]
     destination_chat_rowid: Option<i64>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Deserialize, Default)]
+struct SyncSummary {
+    #[serde(default)]
+    source_latest_message_rowid: i64,
+    #[serde(default)]
+    source_latest_message_at: Option<String>,
+    #[serde(default)]
+    messages_refreshed: i64,
+    #[serde(default)]
+    attachments_refreshed: i64,
+}
+
+#[derive(Debug, Clone)]
+struct QuoteContext {
+    message_rowid: i64,
+    message_guid: String,
+    actor: String,
+    preview: String,
+}
+
+#[derive(Debug, Clone)]
+struct PendingSendDraft {
+    text: String,
+    quote_context: Option<QuoteContext>,
+}
+
+#[derive(Debug)]
+enum BackendEvent {
+    Chats {
+        request_id: u64,
+        result: AppResult<Vec<ChatSummary>>,
+    },
+    Messages {
+        request_id: u64,
+        chat_rowid: i64,
+        append: bool,
+        result: AppResult<ShowResponse>,
+    },
+    Outbox {
+        request_id: u64,
+        result: AppResult<Vec<SendJobRow>>,
+    },
+    Search {
+        request_id: u64,
+        result: AppResult<Vec<SearchResultRow>>,
+    },
+    Sync {
+        request_id: u64,
+        result: AppResult<SyncSummary>,
+    },
+    Send {
+        request_id: u64,
+        result: AppResult<SendResponse>,
+    },
+    Retry {
+        request_id: u64,
+        result: AppResult<SendResponse>,
+    },
 }
 
 #[derive(Debug)]
@@ -244,50 +309,96 @@ struct App {
     chats_state: ListState,
     messages: Vec<MessageRow>,
     messages_state: ListState,
-    attachments: Vec<AttachmentRow>,
-    search_results: Vec<SearchResultRow>,
-    lower_state: ListState,
     outbox: Vec<SendJobRow>,
-    pane: Pane,
-    input_mode: InputMode,
-    lower_view: Option<LowerView>,
-    input: String,
+    outbox_state: ListState,
+    search_results: Vec<SearchResultRow>,
+    search_state: ListState,
+    focus: Focus,
+    modal: Option<Modal>,
+    composer: TextArea<'static>,
+    search_input: TextArea<'static>,
+    quote_context: Option<QuoteContext>,
+    unread_only: bool,
     status: String,
-    unreads_only: bool,
     quit: bool,
+    events_tx: Sender<BackendEvent>,
+    events_rx: Receiver<BackendEvent>,
+    next_request_id: u64,
+    chats_request_id: u64,
+    messages_request_id: u64,
+    outbox_request_id: u64,
+    search_request_id: u64,
+    sync_request_id: u64,
+    send_request_id: u64,
+    retry_request_id: u64,
     loaded_chat_rowid: Option<i64>,
     pending_chat_rowid: Option<i64>,
     last_chat_selection_change: Instant,
+    sync_inflight: bool,
+    send_inflight: bool,
+    last_sync_finished_at: Option<Instant>,
+    last_sync_summary: Option<SyncSummary>,
+    last_sync_error: Option<String>,
     last_tick: Instant,
-    tick_rate: Duration,
-    chat_selection_delay: Duration,
+    search_dirty_at: Option<Instant>,
+    pending_echo_rowids: HashMap<u64, i64>,
+    pending_send_drafts: HashMap<u64, PendingSendDraft>,
 }
 
 impl App {
-    fn new() -> Self {
+    fn new(events_tx: Sender<BackendEvent>, events_rx: Receiver<BackendEvent>) -> Self {
         Self {
             chats: Vec::new(),
             chats_state: ListState::default(),
             messages: Vec::new(),
             messages_state: ListState::default(),
-            attachments: Vec::new(),
-            search_results: Vec::new(),
-            lower_state: ListState::default(),
             outbox: Vec::new(),
-            pane: Pane::Chats,
-            input_mode: InputMode::Normal,
-            lower_view: None,
-            input: String::new(),
-            status: "Loading imsg…".to_string(),
-            unreads_only: false,
+            outbox_state: ListState::default(),
+            search_results: Vec::new(),
+            search_state: ListState::default(),
+            focus: Focus::Chats,
+            modal: None,
+            composer: new_textarea(),
+            search_input: new_textarea(),
+            quote_context: None,
+            unread_only: false,
+            status: "Loading conversations…".to_string(),
             quit: false,
+            events_tx,
+            events_rx,
+            next_request_id: 1,
+            chats_request_id: 0,
+            messages_request_id: 0,
+            outbox_request_id: 0,
+            search_request_id: 0,
+            sync_request_id: 0,
+            send_request_id: 0,
+            retry_request_id: 0,
             loaded_chat_rowid: None,
             pending_chat_rowid: None,
             last_chat_selection_change: Instant::now(),
+            sync_inflight: false,
+            send_inflight: false,
+            last_sync_finished_at: None,
+            last_sync_summary: None,
+            last_sync_error: None,
             last_tick: Instant::now(),
-            tick_rate: Duration::from_secs(30),
-            chat_selection_delay: Duration::from_millis(160),
+            search_dirty_at: None,
+            pending_echo_rowids: HashMap::new(),
+            pending_send_drafts: HashMap::new(),
         }
+    }
+
+    fn bootstrap(&mut self) {
+        self.refresh_chats();
+        self.refresh_outbox();
+        self.sync_now(false);
+    }
+
+    fn next_request(&mut self) -> u64 {
+        let request_id = self.next_request_id;
+        self.next_request_id += 1;
+        request_id
     }
 
     fn selected_chat(&self) -> Option<&ChatSummary> {
@@ -296,132 +407,136 @@ impl App {
             .and_then(|idx| self.chats.get(idx))
     }
 
+    fn selected_chat_rowid(&self) -> Option<i64> {
+        self.selected_chat().map(|chat| chat.chat_rowid)
+    }
+
     fn selected_message(&self) -> Option<&MessageRow> {
         self.messages_state
             .selected()
             .and_then(|idx| self.messages.get(idx))
     }
 
-    fn selected_chat_rowid(&self) -> Option<i64> {
-        self.selected_chat().map(|chat| chat.chat_rowid)
-    }
-
-    fn selected_message_rowid(&self) -> Option<i64> {
-        self.selected_message().map(|message| message.message_rowid)
-    }
-
-    fn selected_search_result(&self) -> Option<&SearchResultRow> {
-        self.lower_state
-            .selected()
-            .and_then(|idx| self.search_results.get(idx))
-    }
-
     fn selected_outbox(&self) -> Option<&SendJobRow> {
-        self.lower_state
+        self.outbox_state
             .selected()
             .and_then(|idx| self.outbox.get(idx))
     }
 
-    fn refresh_all(&mut self) -> AppResult<()> {
-        self.refresh_chats()?;
-        self.refresh_current_chat()?;
-        self.refresh_outbox()?;
-        self.last_tick = Instant::now();
-        Ok(())
+    fn selected_search_result(&self) -> Option<&SearchResultRow> {
+        self.search_state
+            .selected()
+            .and_then(|idx| self.search_results.get(idx))
     }
 
-    fn refresh_chats(&mut self) -> AppResult<()> {
-        let selected_chat_rowid = self.selected_chat_rowid();
-        let args = if self.unreads_only {
-            vec![
-                "unreads".to_string(),
-                "--limit".to_string(),
-                "80".to_string(),
-                "--json".to_string(),
-            ]
-        } else {
-            vec![
-                "chats".to_string(),
-                "--limit".to_string(),
-                "80".to_string(),
-                "--json".to_string(),
-            ]
-        };
-        self.chats = run_imsg_json::<Vec<ChatSummary>>(&args)?;
-        if self.chats.is_empty() {
-            self.chats_state.select(None);
-        } else {
-            let idx = selected_chat_rowid
-                .and_then(|chat_rowid| {
-                    self.chats
-                        .iter()
-                        .position(|chat| chat.chat_rowid == chat_rowid)
-                })
-                .unwrap_or(0)
-                .min(self.chats.len() - 1);
-            self.chats_state.select(Some(idx));
+    fn focus_next(&mut self) {
+        if self.modal.is_some() {
+            return;
         }
-        Ok(())
+        self.focus = match self.focus {
+            Focus::Chats => Focus::Messages,
+            Focus::Messages => Focus::Composer,
+            Focus::Composer => Focus::Chats,
+        };
     }
 
-    fn refresh_current_chat(&mut self) -> AppResult<()> {
+    fn show_chat_list(&self) -> bool {
+        self.focus == Focus::Chats || self.selected_chat_rowid().is_none()
+    }
+
+    fn refresh_chats(&mut self) {
+        let request_id = self.next_request();
+        self.chats_request_id = request_id;
+        self.status = if self.unread_only {
+            "Refreshing unread conversations…".to_string()
+        } else {
+            "Refreshing conversations…".to_string()
+        };
+        spawn_chats_request(self.events_tx.clone(), request_id, self.unread_only);
+    }
+
+    fn refresh_outbox(&mut self) {
+        let request_id = self.next_request();
+        self.outbox_request_id = request_id;
+        spawn_outbox_request(self.events_tx.clone(), request_id);
+    }
+
+    fn refresh_current_chat(&mut self, append: bool, before: Option<(i64, i64)>) {
         let Some(chat_rowid) = self.selected_chat_rowid() else {
+            self.loaded_chat_rowid = None;
             self.messages.clear();
             self.messages_state.select(None);
-            self.attachments.clear();
-            self.loaded_chat_rowid = None;
-            self.pending_chat_rowid = None;
-            return Ok(());
+            return;
         };
-        let previous_message_rowid = if self.loaded_chat_rowid == Some(chat_rowid) {
-            self.selected_message_rowid()
-        } else {
-            None
-        };
-        let args = vec![
-            "show".to_string(),
-            chat_rowid.to_string(),
-            "--limit".to_string(),
-            "80".to_string(),
-            "--json".to_string(),
-        ];
-        let response = run_imsg_json::<ShowResponse>(&args)?;
-        self.messages = response.messages;
-        if self.messages.is_empty() {
-            self.messages_state.select(None);
-        } else {
-            let idx = previous_message_rowid
-                .and_then(|message_rowid| {
-                    self.messages
-                        .iter()
-                        .position(|message| message.message_rowid == message_rowid)
-                })
-                .unwrap_or(self.messages.len().saturating_sub(1))
-                .min(self.messages.len() - 1);
-            self.messages_state.select(Some(idx));
+        let request_id = self.next_request();
+        self.messages_request_id = request_id;
+        if !append {
+            self.status = format!("Loading {}", chat_label(self.selected_chat().unwrap()));
         }
-        self.loaded_chat_rowid = Some(chat_rowid);
-        self.pending_chat_rowid = None;
-        Ok(())
+        spawn_messages_request(
+            self.events_tx.clone(),
+            request_id,
+            chat_rowid,
+            append,
+            before,
+        );
     }
 
-    fn open_selected_chat(&mut self) -> AppResult<()> {
-        self.refresh_current_chat()?;
-        if !self.messages.is_empty() {
-            self.messages_state
-                .select(Some(self.messages.len().saturating_sub(1)));
+    fn sync_now(&mut self, manual: bool) {
+        if self.sync_inflight {
+            return;
         }
-        self.pane = Pane::Messages;
-        self.status = self
-            .selected_chat()
-            .map(|chat| format!("Opened {}", chat_label(chat)))
-            .unwrap_or_else(|| "No chat selected".to_string());
-        Ok(())
+        let request_id = self.next_request();
+        self.sync_request_id = request_id;
+        self.sync_inflight = true;
+        if manual {
+            self.status = "Syncing index…".to_string();
+        }
+        spawn_sync_request(self.events_tx.clone(), request_id);
     }
 
-    fn return_to_chats(&mut self) {
-        self.pane = Pane::Chats;
-        self.status = "Chat list".to_string();
+    fn mark_search_dirty(&mut self) {
+        self.search_dirty_at = Some(Instant::now());
+    }
+
+    fn open_search(&mut self) {
+        self.modal = Some(Modal::Search);
+        self.search_state.select(Some(0));
+        self.mark_search_dirty();
+        self.status = "Search conversations".to_string();
+    }
+
+    fn close_modal(&mut self) {
+        self.modal = None;
+        self.search_dirty_at = None;
+    }
+
+    fn toggle_help(&mut self) {
+        if self.modal == Some(Modal::Help) {
+            self.close_modal();
+        } else {
+            self.modal = Some(Modal::Help);
+        }
+    }
+
+    fn toggle_outbox(&mut self) {
+        if self.modal == Some(Modal::Outbox) {
+            self.close_modal();
+        } else {
+            self.modal = Some(Modal::Outbox);
+            self.refresh_outbox();
+            if !self.outbox.is_empty() {
+                self.outbox_state.select(Some(0));
+            }
+        }
+    }
+
+    fn toggle_inspector(&mut self) {
+        if self.modal == Some(Modal::Inspector) {
+            self.close_modal();
+        } else {
+            self.modal = Some(Modal::Inspector);
+        }
     }
 
     fn queue_current_chat_refresh(&mut self) {
@@ -429,200 +544,316 @@ impl App {
         self.last_chat_selection_change = Instant::now();
     }
 
-    fn maybe_refresh_pending_chat(&mut self) -> AppResult<()> {
+    fn maybe_request_pending_chat(&mut self) {
         let Some(chat_rowid) = self.pending_chat_rowid else {
-            return Ok(());
+            return;
         };
-        if self.last_chat_selection_change.elapsed() < self.chat_selection_delay {
-            return Ok(());
+        if self.last_chat_selection_change.elapsed() < CHAT_SELECTION_DELAY {
+            return;
         }
         if self.loaded_chat_rowid == Some(chat_rowid) {
             self.pending_chat_rowid = None;
-            return Ok(());
+            return;
         }
-        self.refresh_current_chat()
+        self.pending_chat_rowid = None;
+        self.refresh_current_chat(false, None);
     }
 
-    fn refresh_outbox(&mut self) -> AppResult<()> {
-        let args = vec![
-            "outbox".to_string(),
-            "--limit".to_string(),
-            "40".to_string(),
-            "--json".to_string(),
-        ];
-        self.outbox = run_imsg_json::<Vec<SendJobRow>>(&args)?;
-        if self.outbox.is_empty() {
-            self.lower_state.select(None);
-        } else if self.lower_view == Some(LowerView::Outbox) {
-            let idx = self
-                .lower_state
-                .selected()
-                .unwrap_or(0)
-                .min(self.outbox.len() - 1);
-            self.lower_state.select(Some(idx));
+    fn maybe_run_search(&mut self) {
+        if self.modal != Some(Modal::Search) {
+            return;
         }
-        Ok(())
-    }
-
-    fn refresh_attachments(&mut self) -> AppResult<()> {
-        let Some(chat) = self.selected_chat() else {
-            self.attachments.clear();
-            return Ok(());
+        let Some(started) = self.search_dirty_at else {
+            return;
         };
-        let args = vec![
-            "attachments".to_string(),
-            chat.chat_rowid.to_string(),
-            "--limit".to_string(),
-            "24".to_string(),
-            "--json".to_string(),
-        ];
-        #[derive(Debug, Deserialize)]
-        struct AttachmentResponse {
-            #[serde(default)]
-            attachments: Vec<AttachmentRow>,
+        if started.elapsed() < SEARCH_DEBOUNCE {
+            return;
         }
-        let response = run_imsg_json::<AttachmentResponse>(&args)?;
-        self.attachments = response.attachments;
-        Ok(())
-    }
-
-    fn load_older_messages(&mut self) -> AppResult<()> {
-        let Some(chat_rowid) = self.selected_chat_rowid() else {
-            self.status = "No chat selected".to_string();
-            return Ok(());
-        };
-        let Some(oldest_message) = self.messages.first() else {
-            self.refresh_current_chat()?;
-            return Ok(());
-        };
-        let args = vec![
-            "show".to_string(),
-            chat_rowid.to_string(),
-            "--limit".to_string(),
-            "80".to_string(),
-            "--before-date".to_string(),
-            oldest_message.date.to_string(),
-            "--before-rowid".to_string(),
-            oldest_message.message_rowid.to_string(),
-            "--json".to_string(),
-        ];
-        let response = run_imsg_json::<ShowResponse>(&args)?;
-        if response.messages.is_empty() {
-            self.status = "Start of conversation".to_string();
-            return Ok(());
-        }
-        let loaded_count = response.messages.len();
-        let mut merged_messages = response.messages;
-        merged_messages.extend(self.messages.drain(..));
-        self.messages = merged_messages;
-        self.messages_state
-            .select(Some(loaded_count.saturating_sub(1)));
-        self.status = format!("Loaded {} older messages", loaded_count);
-        Ok(())
-    }
-
-    fn run_search(&mut self) -> AppResult<()> {
-        let query = self.input.trim();
+        self.search_dirty_at = None;
+        let query = textarea_text(&self.search_input).trim().to_string();
         if query.is_empty() {
             self.search_results.clear();
-            self.lower_state.select(None);
-            self.lower_view = None;
-            self.status = "Search cleared".to_string();
-            return Ok(());
+            self.search_state.select(None);
+            return;
         }
-        let args = vec![
-            "search".to_string(),
-            query.to_string(),
-            "--limit".to_string(),
-            "40".to_string(),
-            "--json".to_string(),
-        ];
-        self.search_results = run_imsg_json::<Vec<SearchResultRow>>(&args)?;
-        self.lower_view = Some(LowerView::Search);
-        if self.search_results.is_empty() {
-            self.lower_state.select(None);
-            self.status = format!("No results for {}", query);
-        } else {
-            self.lower_state.select(Some(0));
-            self.pane = Pane::Lower;
-            self.status = format!("{} search results", self.search_results.len());
-        }
-        Ok(())
+        let request_id = self.next_request();
+        self.search_request_id = request_id;
+        self.status = format!("Searching for {}", query);
+        spawn_search_request(self.events_tx.clone(), request_id, query);
     }
 
-    fn send_input(&mut self, reply: bool) -> AppResult<()> {
-        let text = self.input.trim().to_string();
-        if text.is_empty() {
-            self.status = "Message cannot be empty".to_string();
-            return Ok(());
+    fn maybe_auto_sync(&mut self) {
+        if self.sync_inflight {
+            return;
         }
-        let queued_label = if reply {
-            let Some(message) = self.selected_message() else {
-                self.status = "No message selected to reply to".to_string();
-                return Ok(());
-            };
-            (
-                compact_string(&message_body(message), 48),
-                vec![
-                    "reply".to_string(),
-                    "--message".to_string(),
-                    message.message_rowid.to_string(),
-                    "--text".to_string(),
-                    text.clone(),
-                    "--json".to_string(),
-                ],
-            )
-        } else {
-            let Some(chat) = self.selected_chat() else {
-                self.status = "No chat selected".to_string();
-                return Ok(());
-            };
-            (
-                chat_label(chat),
-                vec![
-                    "send".to_string(),
-                    "--chat".to_string(),
-                    chat.chat_rowid.to_string(),
-                    "--text".to_string(),
-                    text.clone(),
-                    "--json".to_string(),
-                ],
-            )
-        };
-        spawn_imsg_background(&queued_label.1)?;
-        self.status = if reply {
-            format!("Reply queued against {}", queued_label.0)
-        } else {
-            format!("Send queued to {}", queued_label.0)
-        };
-        self.input.clear();
-        self.input_mode = InputMode::Normal;
-        self.last_tick = Instant::now() - self.tick_rate;
-        Ok(())
+        if let Some(last_sync) = self.last_sync_finished_at {
+            if last_sync.elapsed() < AUTO_SYNC_INTERVAL {
+                return;
+            }
+        }
+        self.sync_now(false);
     }
 
-    fn retry_selected_outbox(&mut self) -> AppResult<()> {
-        let Some(job) = self.selected_outbox() else {
-            self.status = "No outbox job selected".to_string();
-            return Ok(());
-        };
-        let mut args = vec![
-            "retry".to_string(),
-            job.job_rowid.to_string(),
-            "--json".to_string(),
-        ];
-        if job.status == "blocked" && job.blocked_reason == "duplicate-send-protection" {
-            args.insert(2, "--allow-duplicate".to_string());
+    fn process_events(&mut self) {
+        while let Ok(event) = self.events_rx.try_recv() {
+            match event {
+                BackendEvent::Chats { request_id, result } => {
+                    if request_id != self.chats_request_id {
+                        continue;
+                    }
+                    match result {
+                        Ok(chats) => {
+                            let previous_chat_rowid = self.selected_chat_rowid();
+                            self.chats = chats;
+                            if self.chats.is_empty() {
+                                self.chats_state.select(None);
+                                self.messages.clear();
+                                self.messages_state.select(None);
+                                self.loaded_chat_rowid = None;
+                            } else {
+                                let idx = previous_chat_rowid
+                                    .and_then(|chat_rowid| {
+                                        self.chats
+                                            .iter()
+                                            .position(|chat| chat.chat_rowid == chat_rowid)
+                                    })
+                                    .unwrap_or(0)
+                                    .min(self.chats.len() - 1);
+                                self.chats_state.select(Some(idx));
+                                if self.loaded_chat_rowid != self.selected_chat_rowid() {
+                                    self.refresh_current_chat(false, None);
+                                }
+                            }
+                        }
+                        Err(error) => self.status = error,
+                    }
+                }
+                BackendEvent::Messages {
+                    request_id,
+                    chat_rowid,
+                    append,
+                    result,
+                } => {
+                    if request_id != self.messages_request_id {
+                        continue;
+                    }
+                    match result {
+                        Ok(response) => {
+                            if self.selected_chat_rowid() != Some(chat_rowid) {
+                                continue;
+                            }
+                            if append {
+                                if response.messages.is_empty() {
+                                    self.status = "Start of conversation".to_string();
+                                } else {
+                                    let loaded_count = response.messages.len();
+                                    let mut merged = response.messages;
+                                    merged.extend(self.messages.drain(..));
+                                    self.messages = merged;
+                                    self.messages_state
+                                        .select(Some(loaded_count.saturating_sub(1)));
+                                    self.status = format!("Loaded {} older messages", loaded_count);
+                                }
+                            } else {
+                                let previous_message_rowid =
+                                    self.selected_message().map(|message| message.message_rowid);
+                                self.messages = response.messages;
+                                if self.messages.is_empty() {
+                                    self.messages_state.select(None);
+                                } else {
+                                    let idx = previous_message_rowid
+                                        .and_then(|message_rowid| {
+                                            self.messages.iter().position(|message| {
+                                                message.message_rowid == message_rowid
+                                            })
+                                        })
+                                        .unwrap_or(self.messages.len().saturating_sub(1))
+                                        .min(self.messages.len() - 1);
+                                    self.messages_state.select(Some(idx));
+                                }
+                            }
+                            self.loaded_chat_rowid = Some(chat_rowid);
+                        }
+                        Err(error) => self.status = error,
+                    }
+                }
+                BackendEvent::Outbox { request_id, result } => {
+                    if request_id != self.outbox_request_id {
+                        continue;
+                    }
+                    match result {
+                        Ok(rows) => {
+                            let previous_job = self.selected_outbox().map(|job| job.job_rowid);
+                            self.outbox = rows;
+                            if self.outbox.is_empty() {
+                                self.outbox_state.select(None);
+                            } else {
+                                let idx = previous_job
+                                    .and_then(|job_rowid| {
+                                        self.outbox
+                                            .iter()
+                                            .position(|job| job.job_rowid == job_rowid)
+                                    })
+                                    .unwrap_or(0)
+                                    .min(self.outbox.len() - 1);
+                                self.outbox_state.select(Some(idx));
+                            }
+                        }
+                        Err(error) => self.status = error,
+                    }
+                }
+                BackendEvent::Search { request_id, result } => {
+                    if request_id != self.search_request_id {
+                        continue;
+                    }
+                    match result {
+                        Ok(rows) => {
+                            self.search_results = rows;
+                            if self.search_results.is_empty() {
+                                self.search_state.select(None);
+                            } else {
+                                self.search_state.select(Some(0));
+                            }
+                        }
+                        Err(error) => self.status = error,
+                    }
+                }
+                BackendEvent::Sync { request_id, result } => {
+                    if request_id != self.sync_request_id {
+                        continue;
+                    }
+                    self.sync_inflight = false;
+                    self.last_sync_finished_at = Some(Instant::now());
+                    match result {
+                        Ok(summary) => {
+                            self.last_sync_error = None;
+                            self.last_sync_summary = Some(summary);
+                            self.refresh_chats();
+                            self.refresh_outbox();
+                            if self.selected_chat_rowid().is_some() {
+                                self.refresh_current_chat(false, None);
+                            }
+                        }
+                        Err(error) => {
+                            self.last_sync_error = Some(error.clone());
+                            self.status = error;
+                        }
+                    }
+                }
+                BackendEvent::Send { request_id, result } => {
+                    if request_id != self.send_request_id {
+                        continue;
+                    }
+                    self.send_inflight = false;
+                    match result {
+                        Ok(response) => {
+                            if !response.ok {
+                                self.remove_local_echo(request_id);
+                                self.restore_pending_draft(request_id);
+                            } else {
+                                self.pending_send_drafts.remove(&request_id);
+                            }
+                            self.status = if response.ok {
+                                if response.recipient.trim().is_empty() {
+                                    "Message sent".to_string()
+                                } else {
+                                    format!("Sent to {}", response.recipient)
+                                }
+                            } else if !response.detail.trim().is_empty() {
+                                response.detail
+                            } else {
+                                response.status
+                            };
+                            self.refresh_outbox();
+                            self.refresh_chats();
+                            if self.selected_chat_rowid().is_some() {
+                                self.refresh_current_chat(false, None);
+                            }
+                        }
+                        Err(error) => {
+                            self.remove_local_echo(request_id);
+                            self.restore_pending_draft(request_id);
+                            self.status = error;
+                            self.refresh_outbox();
+                            self.refresh_chats();
+                            if self.selected_chat_rowid().is_some() {
+                                self.refresh_current_chat(false, None);
+                            }
+                        }
+                    }
+                }
+                BackendEvent::Retry { request_id, result } => {
+                    if request_id != self.retry_request_id {
+                        continue;
+                    }
+                    match result {
+                        Ok(response) => {
+                            self.status = if response.ok {
+                                "Retry sent".to_string()
+                            } else if !response.detail.trim().is_empty() {
+                                response.detail
+                            } else {
+                                response.status
+                            };
+                            self.refresh_outbox();
+                            self.refresh_chats();
+                            if self.selected_chat_rowid().is_some() {
+                                self.refresh_current_chat(false, None);
+                            }
+                        }
+                        Err(error) => self.status = error,
+                    }
+                }
+            }
         }
-        spawn_imsg_background(&args)?;
-        self.status = format!("Retry queued for {}", compact_string(&job.message_text, 56));
-        self.last_tick = Instant::now() - self.tick_rate;
-        Ok(())
     }
 
-    fn activate_selected_search_result(&mut self) -> AppResult<()> {
+    fn move_chat_selection(&mut self, delta: isize) {
+        move_list_state(&mut self.chats_state, self.chats.len(), delta);
+        self.queue_current_chat_refresh();
+    }
+
+    fn move_message_selection(&mut self, delta: isize) {
+        move_list_state(&mut self.messages_state, self.messages.len(), delta);
+    }
+
+    fn move_outbox_selection(&mut self, delta: isize) {
+        move_list_state(&mut self.outbox_state, self.outbox.len(), delta);
+    }
+
+    fn move_search_selection(&mut self, delta: isize) {
+        move_list_state(&mut self.search_state, self.search_results.len(), delta);
+    }
+
+    fn activate_selected_chat(&mut self) {
+        let Some(chat_rowid) = self.selected_chat_rowid() else {
+            self.status = "No chat selected".to_string();
+            return;
+        };
+        self.focus = Focus::Messages;
+        self.pending_chat_rowid = None;
+        if self.loaded_chat_rowid != Some(chat_rowid) {
+            self.refresh_current_chat(false, None);
+        }
+        self.status = format!(
+            "Opened {}",
+            self.selected_chat()
+                .map(chat_label)
+                .unwrap_or_else(|| format!("chat {}", chat_rowid))
+        );
+    }
+
+    fn load_older_messages(&mut self) {
+        let Some(oldest) = self.messages.first() else {
+            self.refresh_current_chat(false, None);
+            return;
+        };
+        self.refresh_current_chat(true, Some((oldest.date, oldest.message_rowid)));
+    }
+
+    fn jump_to_search_result(&mut self) {
         let Some(result) = self.selected_search_result().cloned() else {
-            return Ok(());
+            return;
         };
         if let Some(position) = self
             .chats
@@ -630,82 +861,326 @@ impl App {
             .position(|chat| chat.chat_rowid == result.chat_rowid)
         {
             self.chats_state.select(Some(position));
+            self.focus = Focus::Messages;
+            self.close_modal();
+            self.refresh_current_chat(false, None);
+            self.status = format!("Opened {}", result.chat_title);
         } else {
             self.status = "Search hit points to a chat outside the current list".to_string();
-            return Ok(());
         }
-        self.pane = Pane::Messages;
-        self.refresh_current_chat()?;
+    }
+
+    fn pin_selected_message_for_context(&mut self) {
+        let Some(message) = self.selected_message() else {
+            self.status = "No message selected".to_string();
+            return;
+        };
+        self.quote_context = Some(QuoteContext {
+            message_rowid: message.message_rowid,
+            message_guid: message.guid.clone(),
+            actor: message_actor_label(
+                message.is_from_me,
+                message.handle_display.as_deref(),
+                message.handle_id.as_deref(),
+            ),
+            preview: compact_string(&message_body(message), 120),
+        });
+        self.focus = Focus::Composer;
+        self.status = "Reply target set from selected message".to_string();
+    }
+
+    fn clear_compose_context(&mut self) {
+        self.quote_context = None;
+    }
+
+    fn push_local_echo(&mut self, request_id: u64, text: &str) {
+        let Some(chat_rowid) = self.selected_chat_rowid() else {
+            return;
+        };
+        let preview = compact_string(text, 120);
+        let pending_rowid = -(request_id as i64);
+        self.messages.push(MessageRow {
+            message_rowid: pending_rowid,
+            date: i64::MAX - (request_id as i64),
+            guid: format!("pending:{request_id}"),
+            handle_id: None,
+            handle_display: Some("You".to_string()),
+            is_from_me: 1,
+            text: text.to_string(),
+            preview: preview.clone(),
+            kind: "pending".to_string(),
+            timestamp: Some("sending".to_string()),
+            reply_target_guid: self
+                .quote_context
+                .as_ref()
+                .map(|context| context.message_guid.clone()),
+            reply_target_preview: self
+                .quote_context
+                .as_ref()
+                .map(|context| context.preview.clone()),
+            attachments: Vec::new(),
+        });
+        self.messages_state
+            .select(Some(self.messages.len().saturating_sub(1)));
+        self.pending_echo_rowids.insert(request_id, pending_rowid);
         if let Some(position) = self
+            .chats
+            .iter()
+            .position(|chat| chat.chat_rowid == chat_rowid)
+        {
+            if let Some(chat) = self.chats.get_mut(position) {
+                chat.last_message_preview = preview;
+            }
+        }
+    }
+
+    fn remove_local_echo(&mut self, request_id: u64) {
+        let Some(pending_rowid) = self.pending_echo_rowids.remove(&request_id) else {
+            return;
+        };
+        if let Some(index) = self
             .messages
             .iter()
-            .position(|message| message.message_rowid == result.message_rowid)
+            .position(|message| message.message_rowid == pending_rowid)
         {
-            self.messages_state.select(Some(position));
+            self.messages.remove(index);
+            if self.messages.is_empty() {
+                self.messages_state.select(None);
+            } else {
+                let selected = self
+                    .messages_state
+                    .selected()
+                    .unwrap_or(self.messages.len().saturating_sub(1));
+                self.messages_state
+                    .select(Some(selected.min(self.messages.len().saturating_sub(1))));
+            }
         }
-        self.status = format!("Opened {}", result.chat_title);
-        Ok(())
     }
 
-    fn cycle_focus(&mut self) {
-        self.pane = match (self.pane, self.lower_view) {
-            (Pane::Chats, _) => Pane::Messages,
-            (Pane::Messages, Some(_)) => Pane::Lower,
-            (Pane::Messages, None) => Pane::Chats,
-            (Pane::Lower, _) => Pane::Messages,
+    fn restore_pending_draft(&mut self, request_id: u64) {
+        let Some(draft) = self.pending_send_drafts.remove(&request_id) else {
+            return;
         };
+        let mut composer = new_textarea();
+        composer.insert_str(&draft.text);
+        self.composer = composer;
+        self.quote_context = draft.quote_context;
+        self.focus = Focus::Composer;
     }
 
-    fn move_selection_down(&mut self) {
-        match self.pane {
-            Pane::Chats => move_list_state(&mut self.chats_state, self.chats.len(), 1),
-            Pane::Messages => move_list_state(&mut self.messages_state, self.messages.len(), 1),
-            Pane::Lower => {
-                let len = match self.lower_view {
-                    Some(LowerView::Search) => self.search_results.len(),
-                    Some(LowerView::Outbox) => self.outbox.len(),
-                    Some(LowerView::Help) | None => 0,
-                };
-                move_list_state(&mut self.lower_state, len, 1);
-            }
+    fn send_composer(&mut self) {
+        if self.send_inflight {
+            self.status = "A send is already in progress".to_string();
+            return;
         }
+        let Some(chat_rowid) = self.selected_chat_rowid() else {
+            self.status = "No chat selected".to_string();
+            return;
+        };
+        let text = textarea_text(&self.composer).trim().to_string();
+        if text.is_empty() {
+            self.status = "Message cannot be empty".to_string();
+            return;
+        }
+        let request_id = self.next_request();
+        self.send_request_id = request_id;
+        self.send_inflight = true;
+        let pending_draft = PendingSendDraft {
+            text: text.clone(),
+            quote_context: self.quote_context.clone(),
+        };
+        let reply_message_rowid = pending_draft
+            .quote_context
+            .as_ref()
+            .map(|context| context.message_rowid);
+        self.pending_send_drafts.insert(request_id, pending_draft);
+        self.push_local_echo(request_id, &text);
+        spawn_send_request(
+            self.events_tx.clone(),
+            request_id,
+            chat_rowid,
+            text,
+            reply_message_rowid,
+        );
+        self.composer = new_textarea();
+        self.clear_compose_context();
+        self.status = "Dispatching message…".to_string();
     }
 
-    fn move_selection_up(&mut self) {
-        match self.pane {
-            Pane::Chats => move_list_state(&mut self.chats_state, self.chats.len(), -1),
-            Pane::Messages => move_list_state(&mut self.messages_state, self.messages.len(), -1),
-            Pane::Lower => {
-                let len = match self.lower_view {
-                    Some(LowerView::Search) => self.search_results.len(),
-                    Some(LowerView::Outbox) => self.outbox.len(),
-                    Some(LowerView::Help) | None => 0,
-                };
-                move_list_state(&mut self.lower_state, len, -1);
-            }
-        }
+    fn retry_selected_outbox(&mut self) {
+        let Some(job_rowid) = self.selected_outbox().map(|job| job.job_rowid) else {
+            self.status = "No outbox job selected".to_string();
+            return;
+        };
+        let request_id = self.next_request();
+        self.retry_request_id = request_id;
+        spawn_retry_request(self.events_tx.clone(), request_id, job_rowid);
+        self.status = format!("Retrying job {}", job_rowid);
     }
 
-    fn on_tick(&mut self) -> AppResult<()> {
-        if self.last_tick.elapsed() >= self.tick_rate && self.input_mode == InputMode::Normal {
-            let current_chat_rowid = self.selected_chat_rowid();
-            self.refresh_chats()?;
-            if self.selected_chat_rowid().is_some() {
-                if self.selected_chat_rowid() != current_chat_rowid
-                    || self.loaded_chat_rowid != self.selected_chat_rowid()
-                {
-                    self.refresh_current_chat()?;
-                } else {
-                    self.refresh_current_chat()?;
-                }
-            }
-            if self.lower_view == Some(LowerView::Outbox) {
-                self.refresh_outbox()?;
-            }
-            self.last_tick = Instant::now();
+    fn sync_status_label(&self) -> String {
+        if self.sync_inflight {
+            return "syncing".to_string();
         }
-        Ok(())
+        if let Some(error) = &self.last_sync_error {
+            return format!("sync error: {}", compact_string(error, 48));
+        }
+        if let Some(summary) = &self.last_sync_summary {
+            let age = self
+                .last_sync_finished_at
+                .map(|instant| format_duration(instant.elapsed()))
+                .unwrap_or_else(|| "unknown".to_string());
+            return format!("synced {} ago | {} rows", age, summary.messages_refreshed);
+        }
+        "sync idle".to_string()
     }
+}
+
+fn new_textarea() -> TextArea<'static> {
+    let mut textarea = TextArea::default();
+    textarea.set_cursor_line_style(Style::default());
+    textarea
+}
+
+fn spawn_chats_request(tx: Sender<BackendEvent>, request_id: u64, unread_only: bool) {
+    thread::spawn(move || {
+        let args = if unread_only {
+            vec![
+                "unreads".to_string(),
+                "--limit".to_string(),
+                CHAT_LIMIT.to_string(),
+                "--no-sync".to_string(),
+                "--json".to_string(),
+            ]
+        } else {
+            vec![
+                "chats".to_string(),
+                "--limit".to_string(),
+                CHAT_LIMIT.to_string(),
+                "--no-sync".to_string(),
+                "--json".to_string(),
+            ]
+        };
+        let result = run_imsg_json::<Vec<ChatSummary>>(&args);
+        let _ = tx.send(BackendEvent::Chats { request_id, result });
+    });
+}
+
+fn spawn_messages_request(
+    tx: Sender<BackendEvent>,
+    request_id: u64,
+    chat_rowid: i64,
+    append: bool,
+    before: Option<(i64, i64)>,
+) {
+    thread::spawn(move || {
+        let mut args = vec![
+            "show".to_string(),
+            chat_rowid.to_string(),
+            "--limit".to_string(),
+            MESSAGE_LIMIT.to_string(),
+        ];
+        if let Some((before_date, before_rowid)) = before {
+            args.push("--before-date".to_string());
+            args.push(before_date.to_string());
+            args.push("--before-rowid".to_string());
+            args.push(before_rowid.to_string());
+        }
+        args.push("--no-sync".to_string());
+        args.push("--json".to_string());
+        let result = run_imsg_json::<ShowResponse>(&args);
+        let _ = tx.send(BackendEvent::Messages {
+            request_id,
+            chat_rowid,
+            append,
+            result,
+        });
+    });
+}
+
+fn spawn_outbox_request(tx: Sender<BackendEvent>, request_id: u64) {
+    thread::spawn(move || {
+        let args = vec![
+            "outbox".to_string(),
+            "--limit".to_string(),
+            OUTBOX_LIMIT.to_string(),
+            "--no-sync".to_string(),
+            "--json".to_string(),
+        ];
+        let result = run_imsg_json::<Vec<SendJobRow>>(&args);
+        let _ = tx.send(BackendEvent::Outbox { request_id, result });
+    });
+}
+
+fn spawn_search_request(tx: Sender<BackendEvent>, request_id: u64, query: String) {
+    thread::spawn(move || {
+        let args = vec![
+            "search".to_string(),
+            query,
+            "--limit".to_string(),
+            SEARCH_LIMIT.to_string(),
+            "--no-sync".to_string(),
+            "--json".to_string(),
+        ];
+        let result = run_imsg_json::<Vec<SearchResultRow>>(&args);
+        let _ = tx.send(BackendEvent::Search { request_id, result });
+    });
+}
+
+fn spawn_sync_request(tx: Sender<BackendEvent>, request_id: u64) {
+    thread::spawn(move || {
+        let args = vec![
+            "sync".to_string(),
+            "--quiet".to_string(),
+            "--json".to_string(),
+        ];
+        let result = run_imsg_json::<SyncSummary>(&args);
+        let _ = tx.send(BackendEvent::Sync { request_id, result });
+    });
+}
+
+fn spawn_send_request(
+    tx: Sender<BackendEvent>,
+    request_id: u64,
+    chat_rowid: i64,
+    text: String,
+    reply_message_rowid: Option<i64>,
+) {
+    thread::spawn(move || {
+        let args = if let Some(message_rowid) = reply_message_rowid {
+            vec![
+                "reply".to_string(),
+                "--message".to_string(),
+                message_rowid.to_string(),
+                "--text".to_string(),
+                text,
+                "--json".to_string(),
+            ]
+        } else {
+            vec![
+                "send".to_string(),
+                "--chat".to_string(),
+                chat_rowid.to_string(),
+                "--text".to_string(),
+                text,
+                "--json".to_string(),
+            ]
+        };
+        let result = run_imsg_json::<SendResponse>(&args);
+        let _ = tx.send(BackendEvent::Send { request_id, result });
+    });
+}
+
+fn spawn_retry_request(tx: Sender<BackendEvent>, request_id: u64, job_rowid: i64) {
+    thread::spawn(move || {
+        let args = vec![
+            "retry".to_string(),
+            job_rowid.to_string(),
+            "--json".to_string(),
+        ];
+        let result = run_imsg_json::<SendResponse>(&args);
+        let _ = tx.send(BackendEvent::Retry { request_id, result });
+    });
 }
 
 fn move_list_state(state: &mut ListState, len: usize, delta: isize) {
@@ -726,6 +1201,21 @@ fn compact_string(value: &str, limit: usize) -> String {
     format!("{}...", &collapsed[..limit.saturating_sub(3)])
 }
 
+fn textarea_text(textarea: &TextArea<'_>) -> String {
+    textarea.lines().join("\n")
+}
+
+fn format_duration(duration: Duration) -> String {
+    let seconds = duration.as_secs();
+    if seconds < 60 {
+        return format!("{}s", seconds);
+    }
+    if seconds < 3600 {
+        return format!("{}m", seconds / 60);
+    }
+    format!("{}h", seconds / 3600)
+}
+
 fn message_body(message: &MessageRow) -> String {
     let text = message.text.trim();
     if !text.is_empty() {
@@ -740,6 +1230,7 @@ fn message_body(message: &MessageRow) -> String {
 
 fn message_kind_label(kind: &str) -> Option<(&'static str, Color)> {
     match kind {
+        "pending" => Some(("sending", Color::Blue)),
         "reply" => Some(("reply", Color::Blue)),
         "reaction" => Some(("reaction", Color::Magenta)),
         "system" => Some(("system", Color::Cyan)),
@@ -824,7 +1315,7 @@ fn chat_label(chat: &ChatSummary) -> String {
 }
 
 fn chat_subtitle(chat: &ChatSummary) -> String {
-    let preview = compact_string(&chat.last_message_preview, 80);
+    let preview = compact_string(&chat.last_message_preview, 90);
     if !preview.is_empty() && preview != "[empty]" {
         return preview;
     }
@@ -833,6 +1324,68 @@ fn chat_subtitle(chat: &ChatSummary) -> String {
         return participants;
     }
     "No recent preview".to_string()
+}
+
+fn wrap_lines(value: &str, width: usize, max_lines: usize) -> Vec<String> {
+    if width == 0 {
+        return Vec::new();
+    }
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    for word in value.split_whitespace() {
+        let candidate = if current.is_empty() {
+            word.to_string()
+        } else {
+            format!("{} {}", current, word)
+        };
+        if visual_width(&candidate) > width && !current.is_empty() {
+            lines.push(current);
+            current = word.to_string();
+            if lines.len() >= max_lines {
+                break;
+            }
+        } else {
+            current = candidate;
+        }
+    }
+    if lines.len() < max_lines && !current.is_empty() {
+        lines.push(current);
+    }
+    if lines.len() > max_lines {
+        lines.truncate(max_lines);
+    }
+    if lines.len() == max_lines {
+        if let Some(last) = lines.last_mut() {
+            if visual_width(last) > width.saturating_sub(3) {
+                *last = compact_string(last, width);
+            }
+        }
+    }
+    lines
+}
+
+fn visual_width(value: &str) -> usize {
+    value.chars().count()
+}
+
+fn centered_rect(area: Rect, width_pct: u16, height_pct: u16) -> Rect {
+    let vertical = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - height_pct) / 2),
+            Constraint::Percentage(height_pct),
+            Constraint::Percentage((100 - height_pct) / 2),
+        ])
+        .split(area);
+    let horizontal = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - width_pct) / 2),
+            Constraint::Percentage(width_pct),
+            Constraint::Percentage((100 - width_pct) / 2),
+        ])
+        .split(vertical[1]);
+    horizontal[1]
 }
 
 fn run_imsg_json<T: DeserializeOwned>(args: &[String]) -> AppResult<T> {
@@ -854,35 +1407,6 @@ fn run_imsg_json<T: DeserializeOwned>(args: &[String]) -> AppResult<T> {
         .map_err(|error| format!("failed to decode imsg json: {error}"))
 }
 
-fn shell_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\"'\"'"))
-}
-
-fn spawn_imsg_background(args: &[String]) -> AppResult<()> {
-    let quoted_args = args
-        .iter()
-        .map(|value| shell_quote(value))
-        .collect::<Vec<_>>()
-        .join(" ");
-    let shell_command = format!("nohup imsg {} >/dev/null 2>&1 &", quoted_args);
-    let status = Command::new("sh")
-        .arg("-lc")
-        .arg(shell_command)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map_err(|error| format!("failed to start imsg: {error}"))?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!(
-            "failed to start imsg: shell exited with {}",
-            status
-        ))
-    }
-}
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -901,14 +1425,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn run_app(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> AppResult<()> {
-    let mut app = App::new();
-    if let Err(error) = app.refresh_all() {
-        app.status = error;
-    } else {
-        app.status = "imsg ready".to_string();
-    }
+    let (events_tx, events_rx) = mpsc::channel::<BackendEvent>();
+    let mut app = App::new(events_tx, events_rx);
+    app.bootstrap();
 
     loop {
+        app.process_events();
+        app.maybe_request_pending_chat();
+        app.maybe_run_search();
+        if app.last_tick.elapsed() >= Duration::from_millis(250) {
+            app.maybe_auto_sync();
+            app.last_tick = Instant::now();
+        }
+
         terminal
             .draw(|frame| draw(frame, &app))
             .map_err(|error| error.to_string())?;
@@ -917,285 +1446,240 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> AppResult<()> {
             break;
         }
 
-        if event::poll(Duration::from_millis(200)).map_err(|error| error.to_string())? {
+        if event::poll(Duration::from_millis(100)).map_err(|error| error.to_string())? {
             if let Event::Key(key) = event::read().map_err(|error| error.to_string())? {
                 if key.kind == KeyEventKind::Press {
-                    handle_key(&mut app, key)?;
+                    handle_key(&mut app, key);
                 }
             }
         }
-        app.maybe_refresh_pending_chat()?;
-        app.on_tick()?;
     }
 
     Ok(())
 }
 
-fn handle_key(app: &mut App, key: KeyEvent) -> AppResult<()> {
-    match app.input_mode {
-        InputMode::Normal => handle_normal_key(app, key),
-        InputMode::Search | InputMode::Compose | InputMode::Reply => handle_input_key(app, key),
-    }
-}
-
-fn handle_normal_key(app: &mut App, key: KeyEvent) -> AppResult<()> {
+fn handle_key(app: &mut App, key: KeyEvent) {
     if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
         app.quit = true;
-        return Ok(());
+        return;
     }
+
+    if let Some(modal) = app.modal {
+        match modal {
+            Modal::Search => handle_search_key(app, key),
+            Modal::Outbox => handle_outbox_key(app, key),
+            Modal::Inspector => handle_inspector_key(app, key),
+            Modal::Help => handle_help_key(app, key),
+        }
+        return;
+    }
+
+    if key.code == KeyCode::Tab {
+        app.focus_next();
+        return;
+    }
+
+    if app.focus == Focus::Composer {
+        handle_composer_key(app, key);
+        return;
+    }
+
     match key.code {
         KeyCode::Char('q') => app.quit = true,
-        KeyCode::Tab => app.cycle_focus(),
-        KeyCode::Char('l') | KeyCode::Right => {
-            if app.pane == Pane::Chats {
-                app.open_selected_chat()?;
-            }
-        }
-        KeyCode::Char('h') | KeyCode::Left | KeyCode::Esc => {
-            if app.pane == Pane::Lower {
-                app.lower_view = None;
-                app.pane = Pane::Messages;
-                app.status = "Closed panel".to_string();
-            } else if app.pane == Pane::Messages {
-                app.return_to_chats();
-            }
-        }
-        KeyCode::Down | KeyCode::Char('j') => match app.pane {
-            Pane::Chats => {
-                app.move_selection_down();
-                app.queue_current_chat_refresh();
-            }
-            Pane::Messages => {
-                app.move_selection_down();
-            }
-            Pane::Lower => app.move_selection_down(),
-        },
-        KeyCode::Up | KeyCode::Char('k') => match app.pane {
-            Pane::Chats => {
-                app.move_selection_up();
-                app.queue_current_chat_refresh();
-            }
-            Pane::Messages => {
-                if app.messages_state.selected().unwrap_or(0) == 0 {
-                    app.load_older_messages()?;
-                } else {
-                    app.move_selection_up();
-                }
-            }
-            Pane::Lower => app.move_selection_up(),
-        },
-        KeyCode::PageDown => match app.pane {
-            Pane::Chats => {
-                move_list_state(&mut app.chats_state, app.chats.len(), 8);
-                app.queue_current_chat_refresh();
-            }
-            Pane::Messages => move_list_state(&mut app.messages_state, app.messages.len(), 8),
-            Pane::Lower => {
-                let len = match app.lower_view {
-                    Some(LowerView::Search) => app.search_results.len(),
-                    Some(LowerView::Outbox) => app.outbox.len(),
-                    Some(LowerView::Help) | None => 0,
-                };
-                move_list_state(&mut app.lower_state, len, 8);
-            }
-        },
-        KeyCode::PageUp => match app.pane {
-            Pane::Chats => {
-                move_list_state(&mut app.chats_state, app.chats.len(), -8);
-                app.queue_current_chat_refresh();
-            }
-            Pane::Messages => {
-                if app.messages_state.selected().unwrap_or(0) <= 7 {
-                    app.load_older_messages()?;
-                } else {
-                    move_list_state(&mut app.messages_state, app.messages.len(), -8);
-                }
-            }
-            Pane::Lower => {
-                let len = match app.lower_view {
-                    Some(LowerView::Search) => app.search_results.len(),
-                    Some(LowerView::Outbox) => app.outbox.len(),
-                    Some(LowerView::Help) | None => 0,
-                };
-                move_list_state(&mut app.lower_state, len, -8);
-            }
-        },
-        KeyCode::Home | KeyCode::Char('g') => match app.pane {
-            Pane::Chats => {
-                if !app.chats.is_empty() {
-                    app.chats_state.select(Some(0));
-                    app.queue_current_chat_refresh();
-                }
-            }
-            Pane::Messages => {
-                if !app.messages.is_empty() {
-                    app.messages_state.select(Some(0));
-                }
-            }
-            Pane::Lower => {
-                let has_rows = match app.lower_view {
-                    Some(LowerView::Search) => !app.search_results.is_empty(),
-                    Some(LowerView::Outbox) => !app.outbox.is_empty(),
-                    Some(LowerView::Help) | None => false,
-                };
-                if has_rows {
-                    app.lower_state.select(Some(0));
-                }
-            }
-        },
-        KeyCode::End | KeyCode::Char('G') => match app.pane {
-            Pane::Chats => {
-                if !app.chats.is_empty() {
-                    app.chats_state.select(Some(app.chats.len() - 1));
-                    app.queue_current_chat_refresh();
-                }
-            }
-            Pane::Messages => {
-                if !app.messages.is_empty() {
-                    app.messages_state.select(Some(app.messages.len() - 1));
-                }
-            }
-            Pane::Lower => match app.lower_view {
-                Some(LowerView::Search) if !app.search_results.is_empty() => {
-                    app.lower_state.select(Some(app.search_results.len() - 1));
-                }
-                Some(LowerView::Outbox) if !app.outbox.is_empty() => {
-                    app.lower_state.select(Some(app.outbox.len() - 1));
-                }
-                _ => {}
-            },
-        },
-        KeyCode::Enter => match app.pane {
-            Pane::Chats => {
-                app.open_selected_chat()?;
-            }
-            Pane::Lower if app.lower_view == Some(LowerView::Search) => {
-                app.activate_selected_search_result()?;
-            }
-            Pane::Lower if app.lower_view == Some(LowerView::Outbox) => {
-                app.retry_selected_outbox()?;
-            }
-            _ => {}
-        },
-        KeyCode::Char('/') => {
-            app.input_mode = InputMode::Search;
-            app.input.clear();
-            app.status = "Search mode".to_string();
-        }
-        KeyCode::Char('c') => {
-            app.input_mode = InputMode::Compose;
-            app.input.clear();
-            app.status = "Send to current chat".to_string();
-        }
-        KeyCode::Char('r') => {
-            app.input_mode = InputMode::Reply;
-            app.input.clear();
-            app.status = "Reply to selected message".to_string();
-        }
-        KeyCode::Char('o') => {
-            if app.lower_view == Some(LowerView::Outbox) {
-                app.lower_view = None;
-                app.pane = if app.selected_chat().is_some() {
-                    Pane::Messages
-                } else {
-                    Pane::Chats
-                };
-                app.status = "Closed outbox".to_string();
-            } else {
-                app.refresh_outbox()?;
-                app.lower_view = Some(LowerView::Outbox);
-                if !app.outbox.is_empty() {
-                    app.lower_state.select(Some(0));
-                }
-                app.pane = Pane::Lower;
-            }
-        }
+        KeyCode::Char('/') => app.open_search(),
+        KeyCode::Char('o') => app.toggle_outbox(),
+        KeyCode::Char('?') => app.toggle_help(),
+        KeyCode::Char('i') => app.toggle_inspector(),
         KeyCode::Char('u') => {
-            app.unreads_only = !app.unreads_only;
-            app.refresh_chats()?;
-            app.refresh_current_chat()?;
-            app.status = if app.unreads_only {
+            app.unread_only = !app.unread_only;
+            app.refresh_chats();
+            app.status = if app.unread_only {
                 "Unread filter enabled".to_string()
             } else {
                 "Unread filter disabled".to_string()
             };
         }
-        KeyCode::Char('a') => {
-            app.refresh_attachments()?;
-            if app.attachments.is_empty() {
-                app.status = "No attachments in current chat".to_string();
-            } else {
-                app.lower_view = Some(LowerView::Help);
-                app.status = format!("{} attachments in current chat", app.attachments.len());
-            }
-        }
-        KeyCode::Char('R') => {
-            app.refresh_all()?;
-            app.status = "Refreshed".to_string();
-        }
-        KeyCode::Char('?') => {
-            app.lower_view = if app.lower_view == Some(LowerView::Help) {
-                None
-            } else {
-                Some(LowerView::Help)
-            };
-            if app.lower_view == Some(LowerView::Help) {
-                app.pane = Pane::Lower;
-            } else {
-                app.pane = if app.selected_chat().is_some() {
-                    Pane::Messages
-                } else {
-                    Pane::Chats
-                };
-            }
-        }
-        _ => {}
+        KeyCode::Char('R') => app.sync_now(true),
+        KeyCode::Char('c') => app.focus = Focus::Composer,
+        KeyCode::Char('r') => app.pin_selected_message_for_context(),
+        _ => match app.focus {
+            Focus::Chats => handle_chats_key(app, key),
+            Focus::Messages => handle_messages_key(app, key),
+            Focus::Composer => handle_composer_key(app, key),
+        },
     }
-    Ok(())
 }
 
-fn handle_input_key(app: &mut App, key: KeyEvent) -> AppResult<()> {
+fn handle_chats_key(app: &mut App, key: KeyEvent) {
     match key.code {
-        KeyCode::Esc => {
-            app.input_mode = InputMode::Normal;
-            app.input.clear();
-            app.status = "Canceled".to_string();
-        }
-        KeyCode::Enter => match app.input_mode {
-            InputMode::Search => {
-                app.run_search()?;
-                app.input_mode = InputMode::Normal;
+        KeyCode::Down | KeyCode::Char('j') => app.move_chat_selection(1),
+        KeyCode::Up | KeyCode::Char('k') => app.move_chat_selection(-1),
+        KeyCode::PageDown => app.move_chat_selection(10),
+        KeyCode::PageUp => app.move_chat_selection(-10),
+        KeyCode::Home | KeyCode::Char('g') => {
+            if !app.chats.is_empty() {
+                app.chats_state.select(Some(0));
+                app.queue_current_chat_refresh();
             }
-            InputMode::Compose => app.send_input(false)?,
-            InputMode::Reply => app.send_input(true)?,
-            InputMode::Normal => {}
-        },
-        KeyCode::Backspace => {
-            app.input.pop();
         }
-        KeyCode::Char(character) => {
-            if !key.modifiers.contains(KeyModifiers::CONTROL) {
-                app.input.push(character);
+        KeyCode::End | KeyCode::Char('G') => {
+            if !app.chats.is_empty() {
+                app.chats_state.select(Some(app.chats.len() - 1));
+                app.queue_current_chat_refresh();
+            }
+        }
+        KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => app.activate_selected_chat(),
+        _ => {}
+    }
+}
+
+fn handle_messages_key(app: &mut App, key: KeyEvent) {
+    match key.code {
+        KeyCode::Down | KeyCode::Char('j') => app.move_message_selection(1),
+        KeyCode::Up | KeyCode::Char('k') => {
+            if app.messages_state.selected().unwrap_or(0) == 0 {
+                app.load_older_messages();
+            } else {
+                app.move_message_selection(-1);
+            }
+        }
+        KeyCode::PageDown => app.move_message_selection(8),
+        KeyCode::PageUp => {
+            if app.messages_state.selected().unwrap_or(0) <= 7 {
+                app.load_older_messages();
+            } else {
+                app.move_message_selection(-8);
+            }
+        }
+        KeyCode::Home | KeyCode::Char('g') => {
+            if !app.messages.is_empty() {
+                app.messages_state.select(Some(0));
+            }
+        }
+        KeyCode::End | KeyCode::Char('G') => {
+            if !app.messages.is_empty() {
+                app.messages_state.select(Some(app.messages.len() - 1));
+            }
+        }
+        KeyCode::Left | KeyCode::Char('h') | KeyCode::Esc => app.focus = Focus::Chats,
+        _ => {}
+    }
+}
+
+fn handle_composer_key(app: &mut App, key: KeyEvent) {
+    if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('s') {
+        app.send_composer();
+        return;
+    }
+    if key.code == KeyCode::Esc {
+        app.focus = Focus::Messages;
+        return;
+    }
+    if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('x') {
+        app.composer = new_textarea();
+        app.clear_compose_context();
+        app.status = "Cleared composer".to_string();
+        return;
+    }
+    if key.code == KeyCode::Enter {
+        if key.modifiers.contains(KeyModifiers::SHIFT) {
+            app.composer.input_without_shortcuts(key);
+        } else {
+            app.send_composer();
+        }
+        return;
+    }
+    match key.code {
+        KeyCode::Char(_) | KeyCode::Backspace | KeyCode::Delete => {
+            app.composer.input_without_shortcuts(key);
+        }
+        _ => {
+            app.composer.input(key);
+        }
+    }
+}
+
+fn handle_search_key(app: &mut App, key: KeyEvent) {
+    match key.code {
+        KeyCode::Esc => app.close_modal(),
+        KeyCode::Enter => app.jump_to_search_result(),
+        KeyCode::Down => app.move_search_selection(1),
+        KeyCode::Up => app.move_search_selection(-1),
+        KeyCode::PageDown => app.move_search_selection(8),
+        KeyCode::PageUp => app.move_search_selection(-8),
+        _ => {
+            match key.code {
+                KeyCode::Char(_) | KeyCode::Backspace | KeyCode::Delete => {
+                    app.search_input.input_without_shortcuts(key);
+                }
+                _ => {
+                    app.search_input.input(key);
+                }
+            }
+            app.mark_search_dirty();
+        }
+    }
+}
+
+fn handle_outbox_key(app: &mut App, key: KeyEvent) {
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('o') => app.close_modal(),
+        KeyCode::Enter | KeyCode::Char('r') => app.retry_selected_outbox(),
+        KeyCode::Down | KeyCode::Char('j') => app.move_outbox_selection(1),
+        KeyCode::Up | KeyCode::Char('k') => app.move_outbox_selection(-1),
+        KeyCode::PageDown => app.move_outbox_selection(8),
+        KeyCode::PageUp => app.move_outbox_selection(-8),
+        KeyCode::Home | KeyCode::Char('g') => {
+            if !app.outbox.is_empty() {
+                app.outbox_state.select(Some(0));
+            }
+        }
+        KeyCode::End | KeyCode::Char('G') => {
+            if !app.outbox.is_empty() {
+                app.outbox_state.select(Some(app.outbox.len() - 1));
             }
         }
         _ => {}
     }
-    Ok(())
+}
+
+fn handle_inspector_key(app: &mut App, key: KeyEvent) {
+    if matches!(key.code, KeyCode::Esc | KeyCode::Char('i')) {
+        app.close_modal();
+    }
+}
+
+fn handle_help_key(app: &mut App, key: KeyEvent) {
+    if matches!(key.code, KeyCode::Esc | KeyCode::Char('?')) {
+        app.close_modal();
+    }
 }
 
 fn draw(frame: &mut Frame, app: &App) {
+    let compose_lines = textarea_text(&app.composer).lines().count().max(1);
+    let compose_height = (compose_lines as u16).clamp(3, 5) + 2;
     let layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(2),
-            Constraint::Min(10),
-            Constraint::Length(3),
+            Constraint::Min(8),
+            Constraint::Length(compose_height),
+            Constraint::Length(2),
         ])
         .split(frame.area());
 
     draw_header(frame, layout[0], app);
     draw_body(frame, layout[1], app);
-    draw_footer(frame, layout[2], app);
+    draw_composer(frame, layout[2], app);
+    draw_footer(frame, layout[3], app);
+
+    match app.modal {
+        Some(Modal::Search) => draw_search_popup(frame, app),
+        Some(Modal::Outbox) => draw_outbox_popup(frame, app),
+        Some(Modal::Inspector) => draw_inspector_popup(frame, app),
+        Some(Modal::Help) => draw_help_popup(frame, app),
+        None => {}
+    }
 }
 
 fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
@@ -1203,7 +1687,7 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
         .selected_chat()
         .map(chat_label)
         .unwrap_or_else(|| "no chat selected".to_string());
-    let selected_meta = app
+    let meta = app
         .selected_chat()
         .map(|chat| {
             let participants = summarize_participants(&chat.participants, 4);
@@ -1218,16 +1702,15 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
             }
         })
         .unwrap_or_else(|| "no conversation loaded".to_string());
-    let mode = match app.input_mode {
-        InputMode::Normal => "normal",
-        InputMode::Search => "search",
-        InputMode::Compose => "compose",
-        InputMode::Reply => "reply",
+    let unread = if app.unread_only {
+        "unreads"
+    } else {
+        "all chats"
     };
     let header = Paragraph::new(vec![
         Line::from(vec![
             Span::styled(
-                " imsg tui ",
+                " imsg ",
                 Style::default()
                     .fg(Color::Black)
                     .bg(Color::Cyan)
@@ -1235,46 +1718,32 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
             ),
             Span::raw(" "),
             Span::styled(
-                format!("conversation: {}", selected),
-                Style::default().fg(Color::White),
+                compact_string(&selected, 44),
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::raw(" "),
             Span::styled(
-                format!("mode: {}", mode),
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
+                format!("| {} | {}", unread, app.sync_status_label()),
+                Style::default().fg(Color::DarkGray),
             ),
         ]),
-        Line::from(Span::styled(
-            selected_meta,
-            Style::default().fg(Color::DarkGray),
-        )),
+        Line::from(Span::styled(meta, Style::default().fg(Color::DarkGray))),
     ]);
     frame.render_widget(header, area);
 }
 
 fn draw_body(frame: &mut Frame, area: Rect, app: &App) {
-    let content_area = if app.pane == Pane::Chats {
-        let horizontal = Layout::default()
+    if app.show_chat_list() {
+        let columns = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
+            .constraints([Constraint::Percentage(32), Constraint::Percentage(68)])
             .split(area);
-        draw_chats(frame, horizontal[0], app);
-        horizontal[1]
+        draw_chats(frame, columns[0], app);
+        draw_messages(frame, columns[1], app);
     } else {
-        area
-    };
-
-    let right = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(64), Constraint::Percentage(36)])
-        .split(content_area);
-    draw_messages(frame, right[0], app);
-    if let Some(lower_view) = app.lower_view {
-        draw_lower(frame, right[1], app, lower_view);
-    } else {
-        draw_selected_message(frame, right[1], app);
+        draw_messages(frame, area, app);
     }
 }
 
@@ -1284,7 +1753,7 @@ fn draw_chats(frame: &mut Frame, area: Rect, app: &App) {
         .iter()
         .map(|chat| {
             let title = if chat.unread_count > 0 {
-                format!("{}  [{} unread]", chat_label(chat), chat.unread_count)
+                format!("{}  [{}]", chat_label(chat), chat.unread_count)
             } else {
                 chat_label(chat)
             };
@@ -1300,7 +1769,7 @@ fn draw_chats(frame: &mut Frame, area: Rect, app: &App) {
                     Style::default().add_modifier(Modifier::BOLD),
                 )),
                 Line::from(Span::styled(
-                    compact_string(&subtitle, 56),
+                    compact_string(&subtitle, 58),
                     Style::default().fg(Color::White),
                 )),
                 Line::from(Span::styled(meta, Style::default().fg(Color::DarkGray))),
@@ -1311,12 +1780,8 @@ fn draw_chats(frame: &mut Frame, area: Rect, app: &App) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(if app.pane == Pane::Chats {
-                    "Chats [Select]"
-                } else {
-                    "Chats"
-                })
-                .border_style(if app.pane == Pane::Chats {
+                .title("Chats")
+                .border_style(if app.focus == Focus::Chats {
                     Style::default().fg(Color::Cyan)
                 } else {
                     Style::default().fg(Color::DarkGray)
@@ -1335,58 +1800,64 @@ fn draw_chats(frame: &mut Frame, area: Rect, app: &App) {
 fn draw_messages(frame: &mut Frame, area: Rect, app: &App) {
     let title = app
         .selected_chat()
-        .map(|chat| {
-            if app.pane == Pane::Messages {
-                format!("Messages [Open]: {}", compact_string(&chat_label(chat), 28))
-            } else {
-                format!("Preview: {}", compact_string(&chat_label(chat), 34))
-            }
-        })
+        .map(|chat| format!("Messages: {}", compact_string(&chat_label(chat), 40)))
         .unwrap_or_else(|| "Messages".to_string());
-    let content_width = area.width.saturating_sub(4) as usize;
+    let inner_width = area.width.saturating_sub(4) as usize;
+    let preview_width = inner_width.saturating_sub(2);
     let items: Vec<ListItem> = app
         .messages
         .iter()
         .map(|message| {
-            let from_me = message.is_from_me != 0;
             let actor = message_actor_label(
                 message.is_from_me,
                 message.handle_display.as_deref(),
                 message.handle_id.as_deref(),
             );
-            let stamp = friendly_timestamp(message.timestamp.as_deref());
-            let mut header = if from_me {
-                format!("You  {}", stamp)
-            } else {
-                format!("{}  {}", stamp, actor)
-            };
-            if let Some((label, _)) = message_kind_label(&message.kind) {
-                header.push_str(&format!("  [{}]", label));
-            } else if message.reply_target_preview.is_some() {
-                header.push_str("  [reply]");
+            let mut header_spans = vec![
+                Span::styled(
+                    friendly_timestamp(message.timestamp.as_deref()),
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::raw(" "),
+                Span::styled(
+                    actor,
+                    Style::default()
+                        .fg(if message.is_from_me != 0 {
+                            Color::Green
+                        } else {
+                            Color::Yellow
+                        })
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ];
+            if let Some((label, color)) = message_kind_label(&message.kind) {
+                header_spans.push(Span::raw(" "));
+                header_spans.push(Span::styled(
+                    format!("[{}]", label),
+                    Style::default().fg(color).add_modifier(Modifier::BOLD),
+                ));
             }
-            let mut summary = message_body(message).replace('\n', " ");
-            if message.reply_target_preview.is_some() {
-                summary = format!("Replying: {}", summary);
+
+            let mut lines = vec![Line::from(header_spans)];
+            for line in wrap_lines(&message_body(message), preview_width, 3) {
+                lines.push(Line::from(Span::raw(line)));
+            }
+            if let Some(reply_preview) = &message.reply_target_preview {
+                lines.push(Line::from(Span::styled(
+                    format!(
+                        "in reply to {}",
+                        compact_string(reply_preview, preview_width)
+                    ),
+                    Style::default().fg(Color::Blue),
+                )));
             }
             if !message.attachments.is_empty() {
-                summary.push_str(&format!("  [{} att]", message.attachments.len()));
+                lines.push(Line::from(Span::styled(
+                    format!("{} attachment(s)", message.attachments.len()),
+                    Style::default().fg(Color::Magenta),
+                )));
             }
-            let header_line = aligned_line(
-                &header,
-                content_width,
-                from_me,
-                Style::default()
-                    .fg(if from_me { Color::Green } else { Color::Yellow })
-                    .add_modifier(Modifier::BOLD),
-            );
-            let body_line = aligned_line(
-                &summary,
-                content_width,
-                from_me,
-                Style::default().fg(Color::White),
-            );
-            ListItem::new(vec![header_line, body_line])
+            ListItem::new(lines)
         })
         .collect();
     let list = List::new(items)
@@ -1394,7 +1865,7 @@ fn draw_messages(frame: &mut Frame, area: Rect, app: &App) {
             Block::default()
                 .borders(Borders::ALL)
                 .title(title)
-                .border_style(if app.pane == Pane::Messages {
+                .border_style(if app.focus == Focus::Messages {
                     Style::default().fg(Color::Green)
                 } else {
                     Style::default().fg(Color::DarkGray)
@@ -1410,42 +1881,224 @@ fn draw_messages(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_stateful_widget(list, area, &mut state);
 }
 
-fn aligned_line(text: &str, width: usize, align_right: bool, style: Style) -> Line<'static> {
-    let compacted = compact_string(text, width.max(1));
-    let padding = if align_right {
-        width.saturating_sub(visual_width(&compacted))
+fn draw_composer(frame: &mut Frame, area: Rect, app: &App) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title("Compose")
+        .border_style(if app.focus == Focus::Composer {
+            Style::default().fg(Color::Yellow)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        });
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let sections = if app.quote_context.is_some() {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(1), Constraint::Min(1)])
+            .split(inner)
     } else {
-        0
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(1)])
+            .split(inner)
     };
-    let rendered = if padding > 0 {
-        format!("{}{}", " ".repeat(padding), compacted)
-    } else {
-        compacted
-    };
-    Line::from(Span::styled(rendered, style))
+
+    if let Some(context) = &app.quote_context {
+        let label = format!(
+            "Reply to {}",
+            compact_string(
+                &format!("{} | {}", context.actor, context.preview),
+                inner.width.saturating_sub(2) as usize
+            )
+        );
+        let paragraph = Paragraph::new(Line::from(Span::styled(
+            label,
+            Style::default().fg(Color::Blue),
+        )));
+        frame.render_widget(paragraph, sections[0]);
+    }
+
+    let editor_area = *sections.last().unwrap_or(&inner);
+    frame.render_widget(&app.composer, editor_area);
+    if app.focus == Focus::Composer {
+        let (cursor_row, cursor_col) = app.composer.cursor();
+        frame.set_cursor_position((
+            editor_area.x.saturating_add(cursor_col as u16),
+            editor_area.y.saturating_add(cursor_row as u16),
+        ));
+    }
 }
 
-fn visual_width(value: &str) -> usize {
-    value.chars().count()
+fn draw_footer(frame: &mut Frame, area: Rect, app: &App) {
+    let hints = if app.focus == Focus::Composer {
+        "Enter send | Shift+Enter newline | Esc transcript | Ctrl+X clear | Tab cycle"
+    } else if app.show_chat_list() {
+        "Enter open chat | Tab cycle | / search | o outbox | u unread filter | R sync | q quit"
+    } else {
+        "Esc chats | c compose | / search | o outbox | r reply | R sync | q quit"
+    };
+    let footer = Paragraph::new(vec![
+        Line::from(Span::raw(compact_string(
+            &app.status,
+            area.width.saturating_sub(2) as usize,
+        ))),
+        Line::from(Span::styled(
+            compact_string(hints, area.width.saturating_sub(2) as usize),
+            Style::default().fg(Color::DarkGray),
+        )),
+    ])
+    .alignment(Alignment::Left)
+    .wrap(Wrap { trim: true });
+    frame.render_widget(footer, area);
 }
 
-fn draw_selected_message(frame: &mut Frame, area: Rect, app: &App) {
-    let border_style = if app.pane == Pane::Messages {
-        Style::default().fg(Color::Green)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
+fn draw_search_popup(frame: &mut Frame, app: &App) {
+    let area = centered_rect(frame.area(), 76, 68);
+    frame.render_widget(Clear, area);
+    let sections = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(6)])
+        .split(area);
+
+    let search_block = Block::default()
+        .borders(Borders::ALL)
+        .title("Search")
+        .border_style(Style::default().fg(Color::Yellow));
+    let search_inner = search_block.inner(sections[0]);
+    frame.render_widget(search_block, sections[0]);
+    frame.render_widget(&app.search_input, search_inner);
+    let (cursor_row, cursor_col) = app.search_input.cursor();
+    frame.set_cursor_position((
+        search_inner.x.saturating_add(cursor_col as u16),
+        search_inner.y.saturating_add(cursor_row as u16),
+    ));
+
+    let items: Vec<ListItem> = app
+        .search_results
+        .iter()
+        .map(|row| {
+            let actor = message_actor_label(
+                row.is_from_me,
+                row.handle_display.as_deref(),
+                row.handle_id.as_deref(),
+            );
+            ListItem::new(vec![
+                Line::from(Span::styled(
+                    compact_string(&row.chat_title, 60),
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                )),
+                Line::from(vec![
+                    Span::styled(
+                        friendly_timestamp(row.timestamp.as_deref()),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                    Span::raw(" "),
+                    Span::raw(actor),
+                    Span::raw(" "),
+                    Span::raw(compact_string(&row.preview, 120)),
+                ]),
+            ])
+        })
+        .collect();
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Results [Enter opens]")
+                .border_style(Style::default().fg(Color::DarkGray)),
+        )
+        .highlight_style(
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        );
+    let mut state = app.search_state.clone();
+    frame.render_stateful_widget(list, sections[1], &mut state);
+}
+
+fn draw_outbox_popup(frame: &mut Frame, app: &App) {
+    let area = centered_rect(frame.area(), 72, 62);
+    frame.render_widget(Clear, area);
+    let items: Vec<ListItem> = app
+        .outbox
+        .iter()
+        .map(|row| {
+            let target = if !row.resolved_recipient.is_empty() {
+                row.resolved_recipient.clone()
+            } else {
+                row.recipient_input.clone().unwrap_or_default()
+            };
+            let detail = if !row.blocked_reason.is_empty() {
+                format!("blocked: {}", row.blocked_reason)
+            } else {
+                compact_string(&row.provider_detail, 120)
+            };
+            ListItem::new(vec![
+                Line::from(vec![
+                    Span::styled(
+                        compact_string(&row.status, 12),
+                        Style::default()
+                            .fg(match row.status.as_str() {
+                                "sent" => Color::Green,
+                                "blocked" => Color::Red,
+                                "failed" => Color::Red,
+                                "dry-run" => Color::Blue,
+                                "queued" => Color::Yellow,
+                                "sending" => Color::Yellow,
+                                _ => Color::White,
+                            })
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw(" "),
+                    Span::raw(compact_string(&target, 42)),
+                    Span::raw(" "),
+                    Span::styled(
+                        friendly_timestamp(row.created_at.as_deref()),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                ]),
+                Line::from(Span::styled(
+                    compact_string(&detail, 120),
+                    Style::default().fg(Color::DarkGray),
+                )),
+                Line::from(Span::raw(compact_string(&row.message_text, 120))),
+            ])
+        })
+        .collect();
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Outbox [Enter retries]")
+                .border_style(Style::default().fg(Color::Magenta)),
+        )
+        .highlight_style(
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Magenta)
+                .add_modifier(Modifier::BOLD),
+        );
+    let mut state = app.outbox_state.clone();
+    frame.render_stateful_widget(list, area, &mut state);
+}
+
+fn draw_inspector_popup(frame: &mut Frame, app: &App) {
+    let area = centered_rect(frame.area(), 70, 60);
+    frame.render_widget(Clear, area);
     let Some(message) = app.selected_message() else {
-        let placeholder =
-            Paragraph::new("Open a chat, then move up and down to inspect message history.")
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title("Message Detail")
-                        .border_style(border_style),
-                )
-                .wrap(Wrap { trim: true });
-        frame.render_widget(placeholder, area);
+        let paragraph = Paragraph::new("No message selected")
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Message Inspector"),
+            )
+            .wrap(Wrap { trim: true });
+        frame.render_widget(paragraph, area);
         return;
     };
     let actor = message_actor_label(
@@ -1481,7 +2134,7 @@ fn draw_selected_message(frame: &mut Frame, area: Rect, app: &App) {
     for body_line in message_body(message).lines() {
         lines.push(Line::from(body_line.to_string()));
     }
-    if let Some(parent) = &message.reply_target_preview {
+    if let Some(reply_preview) = &message.reply_target_preview {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
             "In reply to",
@@ -1489,10 +2142,7 @@ fn draw_selected_message(frame: &mut Frame, area: Rect, app: &App) {
                 .fg(Color::Blue)
                 .add_modifier(Modifier::BOLD),
         )));
-        lines.push(Line::from(Span::styled(
-            compact_string(parent, 240),
-            Style::default().fg(Color::White),
-        )));
+        lines.push(Line::from(reply_preview.to_string()));
     }
     if !message.attachments.is_empty() {
         lines.push(Line::from(""));
@@ -1502,7 +2152,7 @@ fn draw_selected_message(frame: &mut Frame, area: Rect, app: &App) {
                 .fg(Color::Magenta)
                 .add_modifier(Modifier::BOLD),
         )));
-        for attachment in message.attachments.iter().take(4) {
+        for attachment in &message.attachments {
             let attachment_name = if !attachment.transfer_name.trim().is_empty() {
                 attachment.transfer_name.trim().to_string()
             } else if !attachment.filename.trim().is_empty() {
@@ -1510,178 +2160,41 @@ fn draw_selected_message(frame: &mut Frame, area: Rect, app: &App) {
             } else {
                 format!("attachment {}", attachment.attachment_rowid)
             };
-            lines.push(Line::from(compact_string(&attachment_name, 200)));
-        }
-    }
-    let detail = Paragraph::new(lines)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Message Detail")
-                .border_style(border_style),
-        )
-        .wrap(Wrap { trim: true });
-    frame.render_widget(detail, area);
-}
-
-fn draw_lower(frame: &mut Frame, area: Rect, app: &App, lower_view: LowerView) {
-    match lower_view {
-        LowerView::Search => draw_search_results(frame, area, app),
-        LowerView::Outbox => draw_outbox(frame, area, app),
-        LowerView::Help => draw_help(frame, area, app),
-    }
-}
-
-fn draw_search_results(frame: &mut Frame, area: Rect, app: &App) {
-    let items: Vec<ListItem> = app
-        .search_results
-        .iter()
-        .map(|row| {
-            let actor = message_actor_label(
-                row.is_from_me,
-                row.handle_display.as_deref(),
-                row.handle_id.as_deref(),
-            );
-            ListItem::new(vec![
-                Line::from(Span::styled(
-                    compact_string(&row.chat_title, 50),
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                )),
-                Line::from(vec![
-                    Span::styled(
-                        friendly_timestamp(row.timestamp.as_deref()),
-                        Style::default().fg(Color::DarkGray),
-                    ),
-                    Span::raw(" "),
-                    Span::raw(actor),
-                    Span::raw(" "),
-                    Span::raw(compact_string(&row.preview, 100)),
-                ]),
-            ])
-        })
-        .collect();
-    let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title("Search"))
-        .highlight_style(
-            Style::default()
-                .fg(Color::Black)
-                .bg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        );
-    let mut state = app.lower_state.clone();
-    frame.render_stateful_widget(list, area, &mut state);
-}
-
-fn draw_outbox(frame: &mut Frame, area: Rect, app: &App) {
-    let items: Vec<ListItem> = app
-        .outbox
-        .iter()
-        .map(|row| {
-            let target = if !row.resolved_recipient.is_empty() {
-                row.resolved_recipient.clone()
-            } else {
-                row.recipient_input.clone().unwrap_or_default()
-            };
-            let detail = if !row.blocked_reason.is_empty() {
-                format!("blocked: {}", row.blocked_reason)
-            } else {
-                compact_string(&row.provider_detail, 100)
-            };
-            ListItem::new(vec![
-                Line::from(vec![
-                    Span::styled(
-                        compact_string(&row.status, 12),
-                        Style::default()
-                            .fg(match row.status.as_str() {
-                                "sent" => Color::Green,
-                                "blocked" => Color::Red,
-                                "failed" => Color::Red,
-                                "dry-run" => Color::Blue,
-                                _ => Color::Yellow,
-                            })
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::raw(" "),
-                    Span::raw(compact_string(&target, 36)),
-                ]),
-                Line::from(Span::styled(
-                    compact_string(&detail, 110),
-                    Style::default().fg(Color::DarkGray),
-                )),
-            ])
-        })
-        .collect();
-    let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title("Outbox"))
-        .highlight_style(
-            Style::default()
-                .fg(Color::Black)
-                .bg(Color::Magenta)
-                .add_modifier(Modifier::BOLD),
-        );
-    let mut state = app.lower_state.clone();
-    frame.render_stateful_widget(list, area, &mut state);
-}
-
-fn draw_help(frame: &mut Frame, area: Rect, app: &App) {
-    let mut lines = vec![
-        Line::from("q quit | Enter open chat | Esc/Left back | Tab switch visible pane"),
-        Line::from("R refresh | / search | c send in background | r reply | o outbox | ? help"),
-        Line::from(
-            "arrows/jk move | Up at top loads older history | PgUp/PgDn jump | g/G start/end",
-        ),
-    ];
-    if !app.attachments.is_empty() {
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            "Recent attachments",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        )));
-        for attachment in app.attachments.iter().take(4) {
-            let name = if !attachment.transfer_name.is_empty() {
-                attachment.transfer_name.clone()
-            } else if !attachment.filename.is_empty() {
-                attachment.filename.clone()
-            } else {
-                attachment.attachment_rowid.to_string()
-            };
-            lines.push(Line::from(compact_string(&name, 100)));
+            lines.push(Line::from(compact_string(&attachment_name, 180)));
         }
     }
     let paragraph = Paragraph::new(lines)
-        .block(Block::default().borders(Borders::ALL).title("Help"))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Message Inspector"),
+        )
         .wrap(Wrap { trim: true });
     frame.render_widget(paragraph, area);
 }
 
-fn draw_footer(frame: &mut Frame, area: Rect, app: &App) {
-    let prompt = match app.input_mode {
-        InputMode::Normal => "status",
-        InputMode::Search => "search",
-        InputMode::Compose => "compose",
-        InputMode::Reply => "reply",
-    };
-    let footer_text = if app.input_mode == InputMode::Normal {
-        app.status.clone()
-    } else {
-        app.input.clone()
-    };
-    let footer = Paragraph::new(footer_text)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title_alignment(Alignment::Left)
-                .title(prompt),
-        )
-        .wrap(Wrap { trim: false });
-    frame.render_widget(footer, area);
-    if app.input_mode != InputMode::Normal {
-        let x = area.x.saturating_add(1 + app.input.len() as u16);
-        let y = area.y.saturating_add(1);
-        frame.set_cursor_position((x, y));
-    }
+fn draw_help_popup(frame: &mut Frame, app: &App) {
+    let area = centered_rect(frame.area(), 70, 54);
+    frame.render_widget(Clear, area);
+    let lines = vec![
+        Line::from("Selecting a chat opens it and hides the chat list until you return to it."),
+        Line::from("Moving in the chat list reloads the transcript after a short debounce."),
+        Line::from("Esc from the transcript returns to the chat list."),
+        Line::from("Tab cycles chats, transcript, and composer."),
+        Line::from("Enter sends from the composer. Shift+Enter inserts a newline."),
+        Line::from("Press r to start a reply from the selected message."),
+        Line::from("/ opens live search. Typing updates results. Enter opens the selected hit."),
+        Line::from("o opens the outbox. Enter retries the selected job."),
+        Line::from("u toggles unread-only chat filtering. R runs a fresh sync."),
+        Line::from("i shows the full selected message. q exits."),
+        Line::from(""),
+        Line::from(Span::styled(
+            format!("Current sync: {}", app.sync_status_label()),
+            Style::default().fg(Color::DarkGray),
+        )),
+    ];
+    let paragraph = Paragraph::new(lines)
+        .block(Block::default().borders(Borders::ALL).title("Help"))
+        .wrap(Wrap { trim: true });
+    frame.render_widget(paragraph, area);
 }

@@ -1,6 +1,55 @@
 #!/bin/sh
 set -eu
 
+force_local=0
+if [ "${1-}" = "--local" ]; then
+    force_local=1
+    shift
+fi
+if [ "${IMSG_TUI_FORCE_LOCAL-}" = "1" ]; then
+    force_local=1
+fi
+
+config_file="${HOME}/.config/decent-angl/imsg.env"
+if [ -f "$config_file" ]; then
+    # shellcheck disable=SC1090
+    . "$config_file"
+fi
+
+shell_quote() {
+    printf "'%s'" "$(printf "%s" "$1" | sed "s/'/'\\\\''/g")"
+}
+
+machine_id="${IMSG_MACHINE_ID:-}"
+server_machine_id="${IMSG_SERVER_MACHINE_ID:-}"
+server_ssh_dest="${IMSG_SERVER_SSH_DEST:-admin@macmini}"
+server_ssh_identity_file="${IMSG_SERVER_SSH_IDENTITY_FILE:-}"
+
+if [ "$force_local" -ne 1 ] && [ -n "$machine_id" ] && [ -n "$server_machine_id" ] && [ "$machine_id" != "$server_machine_id" ]; then
+    remote_command="IMSG_TUI_FORCE_LOCAL=1 \$HOME/.local/bin/imsg-tui --local"
+    for arg in "$@"; do
+        remote_command="${remote_command} $(shell_quote "$arg")"
+    done
+
+    set -- \
+        ssh \
+        -t \
+        -o BatchMode=yes \
+        -o PubkeyAuthentication=yes \
+        -o PasswordAuthentication=no \
+        -o KbdInteractiveAuthentication=no \
+        -o PreferredAuthentications=publickey \
+        -o StrictHostKeyChecking=yes \
+        -o IdentitiesOnly=yes \
+        -o ForwardAgent=no \
+        -o ClearAllForwardings=yes
+    if [ -n "$server_ssh_identity_file" ] && [ -f "$server_ssh_identity_file" ]; then
+        set -- "$@" -i "$server_ssh_identity_file"
+    fi
+    set -- "$@" "$server_ssh_dest" "$remote_command"
+    exec "$@"
+fi
+
 app_root="${HOME}/.local/share/decent-angl/imsg/tui"
 manifest="${app_root}/Cargo.toml"
 target_dir="${app_root}/target"

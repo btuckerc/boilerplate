@@ -1,0 +1,334 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+readonly SHARE_DIR="${PORTABLE_LAPTOP_POWER_SHARE_DIR:-$HOME/.local/share/portable-laptop-power/root}"
+readonly CONFIG_SOURCE_PATH="${SHARE_DIR}/portable-laptop-power.conf"
+readonly POLICY_SOURCE_PATH="${SHARE_DIR}/thinkpad-power-source-policy"
+readonly SERVICE_SOURCE_PATH="${SHARE_DIR}/thinkpad-power-source-policy.service"
+readonly UDEV_RULE_SOURCE_PATH="${SHARE_DIR}/99-thinkpad-power-source-policy.rules"
+readonly LOGIND_DROPIN_SOURCE_PATH="${SHARE_DIR}/50-portable-laptop-logind.conf"
+readonly SLEEP_DROPIN_SOURCE_PATH="${SHARE_DIR}/50-portable-laptop-sleep.conf"
+
+readonly CONFIG_PATH="/etc/portable-laptop-power.conf"
+readonly POLICY_PATH="/usr/local/libexec/thinkpad-power-source-policy"
+readonly SERVICE_PATH="/etc/systemd/system/thinkpad-power-source-policy.service"
+readonly UDEV_RULE_PATH="/etc/udev/rules.d/99-thinkpad-power-source-policy.rules"
+readonly LOGIND_DROPIN_PATH="/etc/systemd/logind.conf.d/50-portable-laptop.conf"
+readonly SLEEP_DROPIN_PATH="/etc/systemd/sleep.conf.d/50-portable-laptop.conf"
+readonly SERVICE_NAME="thinkpad-power-source-policy.service"
+
+ROOT_CMD=()
+
+usage() {
+    cat <<'EOF'
+Usage:
+  portable-laptop-power apply
+  portable-laptop-power status
+  portable-laptop-power mode desk|travel
+  portable-laptop-power travel on|off|status
+
+apply   Install or refresh the machine-local power policy stack.
+status  Show the current config, battery health, and active power state.
+mode    Switch the charging mode stored in /etc/portable-laptop-power.conf.
+travel  Convenience alias for mode travel / mode desk.
+EOF
+}
+
+require_root_runner() {
+    if [ "${#ROOT_CMD[@]}" -gt 0 ]; then
+        return 0
+    fi
+
+    if [ "$(id -u)" -eq 0 ]; then
+        ROOT_CMD=()
+        return 0
+    fi
+
+    if command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
+        ROOT_CMD=(sudo -n)
+        return 0
+    fi
+
+    echo "Root access is required. Re-run with sudo or configure passwordless sudo." >&2
+    exit 1
+}
+
+run_root() {
+    if [ "${#ROOT_CMD[@]}" -gt 0 ]; then
+        "${ROOT_CMD[@]}" "$@"
+    else
+        "$@"
+    fi
+}
+
+ensure_share_path() {
+    local path="$1"
+
+    if [ ! -f "$path" ]; then
+        echo "Missing shared file: $path" >&2
+        echo "Run 'chezmoi apply ~/.local/bin/portable-laptop-power ~/.local/share/portable-laptop-power' first." >&2
+        exit 1
+    fi
+}
+
+read_path() {
+    local path="$1"
+
+    if [ -r "$path" ]; then
+        cat "$path"
+    fi
+}
+
+read_config_value() {
+    local key="$1"
+
+    if [ ! -r "$CONFIG_PATH" ]; then
+        return 1
+    fi
+
+    awk -F= -v key="$key" '
+        $1 == key {
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2)
+            gsub(/^"/, "", $2)
+            gsub(/"$/, "", $2)
+            print $2
+            exit 0
+        }
+    ' "$CONFIG_PATH"
+}
+
+install_managed_file() {
+    local mode="$1"
+    local source_path="$2"
+    local target_path="$3"
+
+    ensure_share_path "$source_path"
+    run_root install -D -m "$mode" "$source_path" "$target_path"
+}
+
+ensure_config_file() {
+    if run_root test -f "$CONFIG_PATH"; then
+        return 0
+    fi
+
+    install_managed_file 0644 "$CONFIG_SOURCE_PATH" "$CONFIG_PATH"
+}
+
+set_config_value() {
+    local key="$1"
+    local value="$2"
+    local temp_source
+    local temp_target
+
+    ensure_config_file
+
+    temp_source="$(mktemp)"
+    temp_target="$(mktemp)"
+
+    run_root cat "$CONFIG_PATH" >"$temp_source"
+
+    awk -F= -v key="$key" -v value="$value" '
+        BEGIN {
+            done = 0
+        }
+        $1 == key {
+            print key "=\"" value "\""
+            done = 1
+            next
+        }
+        {
+            print $0
+        }
+        END {
+            if (!done) {
+                print key "=\"" value "\""
+            }
+        }
+    ' "$temp_source" >"$temp_target"
+
+    run_root install -m 0644 "$temp_target" "$CONFIG_PATH"
+    rm -f "$temp_source" "$temp_target"
+}
+
+restart_policy_service() {
+    require_root_runner
+    run_root systemctl daemon-reload
+    run_root udevadm control --reload
+    run_root systemctl enable "$SERVICE_NAME" >/dev/null
+    run_root systemctl start "$SERVICE_NAME"
+}
+
+apply_stack() {
+    require_root_runner
+
+    install_managed_file 0755 "$POLICY_SOURCE_PATH" "$POLICY_PATH"
+    install_managed_file 0644 "$SERVICE_SOURCE_PATH" "$SERVICE_PATH"
+    install_managed_file 0644 "$UDEV_RULE_SOURCE_PATH" "$UDEV_RULE_PATH"
+    install_managed_file 0644 "$LOGIND_DROPIN_SOURCE_PATH" "$LOGIND_DROPIN_PATH"
+    install_managed_file 0644 "$SLEEP_DROPIN_SOURCE_PATH" "$SLEEP_DROPIN_PATH"
+    ensure_config_file
+    restart_policy_service
+}
+
+print_status() {
+    local charge_mode
+    local battery_status
+    local battery_capacity
+    local battery_power_now
+    local battery_energy_full
+    local battery_energy_full_design
+    local battery_health
+    local ac_online
+    local power_profile
+    local platform_profile
+    local wifi_power_save
+    local start_threshold
+    local end_threshold
+    local desired_start_threshold
+    local desired_end_threshold
+
+    charge_mode="$(read_config_value CHARGE_MODE 2>/dev/null || printf 'unknown')"
+    battery_status="$(read_path /sys/class/power_supply/BAT0/status)"
+    battery_capacity="$(read_path /sys/class/power_supply/BAT0/capacity)"
+    battery_power_now="$(read_path /sys/class/power_supply/BAT0/power_now)"
+    battery_energy_full="$(read_path /sys/class/power_supply/BAT0/energy_full)"
+    battery_energy_full_design="$(read_path /sys/class/power_supply/BAT0/energy_full_design)"
+    ac_online="$(read_path /sys/class/power_supply/AC/online)"
+    platform_profile="$(read_path /sys/firmware/acpi/platform_profile)"
+    start_threshold="$(read_path /sys/class/power_supply/BAT0/charge_control_start_threshold)"
+    end_threshold="$(read_path /sys/class/power_supply/BAT0/charge_control_end_threshold)"
+
+    if command -v powerprofilesctl >/dev/null 2>&1; then
+        power_profile="$(powerprofilesctl get 2>/dev/null || true)"
+    fi
+
+    if command -v iw >/dev/null 2>&1; then
+        wifi_power_save="$(
+            { iw dev wlan0 get power_save 2>/dev/null || true; } |
+                awk '/Power save:/ { print tolower($3) }'
+        )"
+    fi
+
+    if [ -n "${battery_energy_full:-}" ] && [ -n "${battery_energy_full_design:-}" ]; then
+        battery_health="$(
+            awk -v full="$battery_energy_full" -v design="$battery_energy_full_design" '
+                BEGIN {
+                    if (design > 0) {
+                        printf "%.1f", (full / design) * 100
+                    }
+                }
+            '
+        )"
+    fi
+
+    case "$charge_mode" in
+        desk)
+            desired_start_threshold="$(read_config_value DESK_START_THRESHOLD 2>/dev/null || printf '80')"
+            desired_end_threshold="$(read_config_value DESK_STOP_THRESHOLD 2>/dev/null || printf '85')"
+            ;;
+        travel)
+            desired_start_threshold="$(read_config_value TRAVEL_START_THRESHOLD 2>/dev/null || printf '95')"
+            desired_end_threshold="$(read_config_value TRAVEL_STOP_THRESHOLD 2>/dev/null || printf '100')"
+            ;;
+        *)
+            desired_start_threshold="unknown"
+            desired_end_threshold="unknown"
+            ;;
+    esac
+
+    printf 'charge_mode=%s\n' "${charge_mode:-unknown}"
+    printf 'ac_online=%s\n' "${ac_online:-unknown}"
+    printf 'battery_status=%s\n' "${battery_status:-unknown}"
+    printf 'battery_capacity=%s\n' "${battery_capacity:-unknown}"
+    if [ -n "${battery_power_now:-}" ]; then
+        printf 'battery_power_now_w=%.2f\n' "$(
+            awk -v microwatts="$battery_power_now" 'BEGIN { printf microwatts / 1000000 }'
+        )"
+    fi
+    if [ -n "${battery_health:-}" ]; then
+        printf 'battery_health_percent=%s\n' "$battery_health"
+    fi
+    printf 'desired_charge_start_threshold=%s\n' "${desired_start_threshold:-unknown}"
+    printf 'desired_charge_end_threshold=%s\n' "${desired_end_threshold:-unknown}"
+    printf 'charge_start_threshold=%s\n' "${start_threshold:-unknown}"
+    printf 'charge_end_threshold=%s\n' "${end_threshold:-unknown}"
+    printf 'power_profile=%s\n' "${power_profile:-unknown}"
+    printf 'platform_profile=%s\n' "${platform_profile:-unknown}"
+    printf 'wifi_power_save=%s\n' "${wifi_power_save:-unknown}"
+}
+
+set_mode() {
+    local mode="$1"
+
+    case "$mode" in
+        desk|travel)
+            ;;
+        *)
+            echo "Unsupported mode: $mode" >&2
+            exit 1
+            ;;
+    esac
+
+    require_root_runner
+    set_config_value CHARGE_MODE "$mode"
+    restart_policy_service
+    print_status
+}
+
+travel_command() {
+    local action="${1:-status}"
+
+    case "$action" in
+        on)
+            set_mode travel
+            ;;
+        off)
+            set_mode desk
+            ;;
+        status)
+            if [ "$(read_config_value CHARGE_MODE 2>/dev/null || printf 'desk')" = "travel" ]; then
+                printf 'travel_mode=on\n'
+            else
+                printf 'travel_mode=off\n'
+            fi
+            ;;
+        *)
+            echo "Unsupported travel action: $action" >&2
+            exit 1
+            ;;
+    esac
+}
+
+command_name="${1:-status}"
+case "$command_name" in
+    apply)
+        shift
+        apply_stack
+        print_status
+        ;;
+    status)
+        shift
+        print_status
+        ;;
+    mode)
+        shift
+        if [ "$#" -ne 1 ]; then
+            usage >&2
+            exit 1
+        fi
+        set_mode "$1"
+        ;;
+    travel)
+        shift
+        travel_command "${1:-status}"
+        ;;
+    help|-h|--help)
+        usage
+        ;;
+    *)
+        echo "Unknown command: $command_name" >&2
+        usage >&2
+        exit 1
+        ;;
+esac

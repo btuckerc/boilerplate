@@ -1,0 +1,682 @@
+#!/usr/bin/env python3
+
+import argparse
+import atexit
+import fcntl
+import json
+import os
+import signal
+import socket
+import subprocess
+import sys
+import time
+from dataclasses import asdict, dataclass
+from pathlib import Path
+
+
+ATTENTION_DOT_ASSET = "codex-workspace-attention-dot.svg"
+ATTENTION_DOT_DIAMETER_PX = 4
+DEFAULT_ROLLOUT_POLL_SECONDS = 0.75
+DEFAULT_DISCOVERY_SECONDS = 2.0
+STATE_CHECKPOINT_SECONDS = 15.0
+REFRESH_EVENTS = {
+    "activewindow",
+    "activewindowv2",
+    "closewindow",
+    "createworkspace",
+    "createworkspacev2",
+    "destroyworkspace",
+    "destroyworkspacev2",
+    "focusedmon",
+    "focusedmonv2",
+    "movewindow",
+    "movewindowv2",
+    "openwindow",
+    "workspace",
+    "workspacev2",
+}
+ROLLOUT_SUFFIX = ".jsonl"
+STATE_VERSION = 1
+
+
+@dataclass
+class SessionState:
+    rollout_path: str
+    pid: int = 0
+    window_pid: int = 0
+    workspace_id: int = 0
+    output: str = ""
+    offset: int = 0
+    partial: str = ""
+    unread: bool = False
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, object]) -> "SessionState":
+        return cls(
+            rollout_path=str(payload.get("rollout_path", "")),
+            pid=int(payload.get("pid", 0) or 0),
+            window_pid=int(payload.get("window_pid", 0) or 0),
+            workspace_id=int(payload.get("workspace_id", 0) or 0),
+            output=str(payload.get("output", "")),
+            offset=int(payload.get("offset", 0) or 0),
+            partial=str(payload.get("partial", "")),
+            unread=bool(payload.get("unread", False)),
+        )
+
+
+def session_semantic_snapshot(sessions: dict[str, SessionState]) -> dict[str, tuple[int, int, int, str, bool]]:
+    return {
+        rollout_path: (
+            session.pid,
+            session.window_pid,
+            session.workspace_id,
+            session.output,
+            session.unread,
+        )
+        for rollout_path, session in sorted(sessions.items())
+    }
+
+
+def eprint(*parts: object) -> None:
+    print(*parts, file=sys.stderr)
+
+
+def read_text(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return ""
+
+
+def atomic_write_text(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f"{path.name}.tmp")
+    tmp_path.write_text(content, encoding="utf-8")
+    os.replace(tmp_path, path)
+
+
+def run_hyprctl(*args: str, json_output: bool = False) -> object:
+    cmd = ["hyprctl"]
+    if json_output:
+        cmd.append("-j")
+    cmd.extend(args)
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or result.stdout.strip() or f"hyprctl failed: {' '.join(cmd)}")
+    if json_output:
+        return json.loads(result.stdout)
+    return result.stdout.strip()
+
+
+def resolve_instance_signature() -> str:
+    env_sig = os.environ.get("HYPRLAND_INSTANCE_SIGNATURE")
+    if env_sig:
+        return env_sig
+
+    instances = str(run_hyprctl("instances"))
+    for line in instances.splitlines():
+        line = line.strip()
+        if line.startswith("instance ") and line.endswith(":"):
+            return line[len("instance ") : -1]
+
+    raise RuntimeError("could not resolve HYPRLAND_INSTANCE_SIGNATURE")
+
+
+def socket2_path() -> Path:
+    runtime_dir = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
+    return runtime_dir / "hypr" / resolve_instance_signature() / ".socket2.sock"
+
+
+def acquire_lock(lock_path: Path) -> object:
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_file = open(lock_path, "w", encoding="utf-8")
+    try:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        sys.exit(0)
+    lock_file.write(f"{os.getpid()}\n")
+    lock_file.flush()
+    return lock_file
+
+
+def css_escape_ident(value: str) -> str:
+    escaped: list[str] = []
+    for index, ch in enumerate(value):
+        if ch == "\0":
+            escaped.append("\\fffd ")
+            continue
+        if ch.isalnum() or ch in {"-", "_"}:
+            if index == 0 and ch.isdigit():
+                escaped.append(f"\\{ord(ch):x} ")
+            else:
+                escaped.append(ch)
+            continue
+        escaped.append(f"\\{ord(ch):x} ")
+    return "".join(escaped)
+
+
+def is_special_workspace(workspace: dict[str, object]) -> bool:
+    wid = workspace.get("id")
+    name = str(workspace.get("name", ""))
+    return not isinstance(wid, int) or wid <= 0 or name.startswith("special:")
+
+
+def current_state_paths() -> tuple[Path, Path, Path]:
+    home = Path.home()
+    runtime_dir = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
+    state_root = home / ".local" / "state" / "codex-workspace-attention"
+    return (
+        state_root / "state.json",
+        home / ".config" / "waybar" / "codex-workspace-attention.runtime.css",
+        runtime_dir / "codex-workspace-attentiond.lock",
+    )
+
+
+def render_css(sessions: dict[str, SessionState], workspaces: list[dict[str, object]]) -> str:
+    attention_by_output: dict[str, set[int]] = {}
+    for session in sessions.values():
+        if not session.unread or session.workspace_id <= 0 or not session.output:
+            continue
+        attention_by_output.setdefault(session.output, set()).add(session.workspace_id)
+
+    workspace_order: dict[str, list[int]] = {}
+    for workspace in workspaces:
+        if is_special_workspace(workspace):
+            continue
+        output = str(workspace.get("monitor", ""))
+        wid = workspace.get("id")
+        if not output or not isinstance(wid, int):
+            continue
+        workspace_order.setdefault(output, []).append(wid)
+
+    lines = ["/* Managed at runtime by codex-workspace-attentiond. */"]
+    single_output = len(workspace_order) == 1
+    for output in sorted(workspace_order):
+        positions = {
+            wid: index
+            for index, wid in enumerate(sorted(set(workspace_order[output])), start=1)
+        }
+        if not positions:
+            continue
+
+        selectors: list[tuple[int, list[str]]] = []
+        output_selector = f"window#waybar.{css_escape_ident(output)} #workspaces button:nth-child"
+        for wid in sorted(attention_by_output.get(output, set())):
+            position = positions.get(wid)
+            if position is None:
+                continue
+            selector_list = [f"{output_selector}({position})"]
+            if single_output:
+                selector_list.append(f"#workspaces button:nth-child({position})")
+            selectors.append((wid, selector_list))
+
+        if not selectors:
+            continue
+
+        lines.append("")
+        lines.append(f"/* {output}: {', '.join(str(wid) for wid, _ in selectors)} */")
+        for _, selector_list in selectors:
+            lines.append(f"{', '.join(selector_list)} {{")
+            lines.append(f"  background-image: url(\"{ATTENTION_DOT_ASSET}\");")
+            lines.append("  background-position: center bottom;")
+            lines.append(f"  background-size: {ATTENTION_DOT_DIAMETER_PX}px {ATTENTION_DOT_DIAMETER_PX}px;")
+            lines.append("  background-repeat: no-repeat;")
+            lines.append("}")
+
+    return "\n".join(lines) + "\n"
+
+
+def load_state(path: Path) -> dict[str, SessionState]:
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if payload.get("version") != STATE_VERSION:
+        return {}
+
+    sessions: dict[str, SessionState] = {}
+    raw_sessions = payload.get("sessions", {})
+    if not isinstance(raw_sessions, dict):
+        return {}
+    for rollout_path, raw_session in raw_sessions.items():
+        if not isinstance(raw_session, dict):
+            continue
+        session = SessionState.from_dict(raw_session)
+        if session.rollout_path:
+            sessions[str(rollout_path)] = session
+    return sessions
+
+
+def parse_ppid_by_pid() -> dict[int, int]:
+    ppid_by_pid: dict[int, int] = {}
+    for proc_path in Path("/proc").iterdir():
+        if not proc_path.name.isdigit():
+            continue
+        try:
+            raw = (proc_path / "stat").read_text(encoding="utf-8")
+        except OSError:
+            continue
+        rparen = raw.rfind(")")
+        if rparen == -1:
+            continue
+        fields = raw[rparen + 2 :].split()
+        if len(fields) < 2:
+            continue
+        try:
+            pid = int(proc_path.name)
+            ppid = int(fields[1])
+        except ValueError:
+            continue
+        ppid_by_pid[pid] = ppid
+    return ppid_by_pid
+
+
+def rollout_path_for_pid(pid: int) -> str | None:
+    fd_dir = Path("/proc") / str(pid) / "fd"
+    try:
+        fd_entries = list(fd_dir.iterdir())
+    except OSError:
+        return None
+
+    for fd_entry in fd_entries:
+        try:
+            target = os.readlink(fd_entry)
+        except OSError:
+            continue
+        if not target.endswith(ROLLOUT_SUFFIX):
+            continue
+        if "/.codex/sessions/" not in target:
+            continue
+        return target
+    return None
+
+
+def discover_codex_rollouts() -> dict[str, int]:
+    rollouts: dict[str, int] = {}
+    for proc_path in Path("/proc").iterdir():
+        if not proc_path.name.isdigit():
+            continue
+        pid = int(proc_path.name)
+        try:
+            comm = (proc_path / "comm").read_text(encoding="utf-8").strip()
+        except OSError:
+            continue
+        if comm != "codex":
+            continue
+        rollout_path = rollout_path_for_pid(pid)
+        if rollout_path:
+            rollouts[rollout_path] = pid
+    return rollouts
+
+
+def find_client_ancestor(pid: int, client_pids: set[int], ppid_by_pid: dict[int, int]) -> int | None:
+    current = pid
+    seen: set[int] = set()
+    while current > 1 and current not in seen:
+        if current in client_pids:
+            return current
+        seen.add(current)
+        current = ppid_by_pid.get(current, 0)
+    return None
+
+
+def initialize_session(rollout_path: str) -> SessionState:
+    offset = 0
+    try:
+        offset = Path(rollout_path).stat().st_size
+    except OSError:
+        pass
+    return SessionState(rollout_path=rollout_path, offset=offset)
+
+
+def tail_session(session: SessionState, verbose: bool = False) -> None:
+    rollout_path = Path(session.rollout_path)
+    try:
+        file_size = rollout_path.stat().st_size
+    except OSError:
+        return
+
+    if session.offset > file_size:
+        session.offset = file_size
+        session.partial = ""
+        return
+
+    if session.offset == file_size and not session.partial:
+        return
+
+    try:
+        with rollout_path.open("r", encoding="utf-8", errors="replace") as handle:
+            handle.seek(session.offset)
+            chunk = handle.read()
+            session.offset = handle.tell()
+    except OSError:
+        return
+
+    if not chunk and not session.partial:
+        return
+
+    combined = session.partial + chunk
+    if combined and not combined.endswith("\n"):
+        if "\n" in combined:
+            combined, session.partial = combined.rsplit("\n", 1)
+        else:
+            session.partial = combined
+            return
+    else:
+        session.partial = ""
+
+    for raw_line in combined.splitlines():
+        if not raw_line:
+            continue
+        try:
+            entry = json.loads(raw_line)
+        except json.JSONDecodeError:
+            if verbose:
+                eprint(f"codex-workspace-attentiond: failed to parse rollout line in {session.rollout_path}")
+            continue
+        if entry.get("type") != "event_msg":
+            continue
+        payload = entry.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        if payload.get("type") == "task_complete":
+            session.unread = True
+
+
+class AttentionDaemon:
+    def __init__(
+        self,
+        state_path: Path,
+        css_path: Path,
+        rollout_poll_seconds: float,
+        discovery_seconds: float,
+        verbose: bool = False,
+    ) -> None:
+        self.state_path = state_path
+        self.css_path = css_path
+        self.rollout_poll_seconds = rollout_poll_seconds
+        self.discovery_seconds = discovery_seconds
+        self.verbose = verbose
+        self.sessions = load_state(state_path)
+        self.workspaces: list[dict[str, object]] = []
+        self.client_by_pid: dict[int, dict[str, object]] = {}
+        self.active_window_pid = 0
+        self.hypr_dirty = True
+        self.hypr_ready = False
+        self.next_discovery_at = 0.0
+        self.next_rollout_poll_at = 0.0
+        self.next_state_checkpoint_at = 0.0
+        self.last_css = read_text(css_path)
+        self.last_state_json = read_text(state_path)
+        self._exit_requested = False
+
+    def request_exit(self, *_: object) -> None:
+        self._exit_requested = True
+
+    def clear_css(self) -> None:
+        content = "/* Managed at runtime by codex-workspace-attentiond. */\n"
+        if self.last_css != content:
+            atomic_write_text(self.css_path, content)
+            self.last_css = content
+
+    def refresh_hypr_state(self) -> None:
+        clients = run_hyprctl("clients", json_output=True)
+        self.workspaces = run_hyprctl("workspaces", json_output=True)
+        active_window = run_hyprctl("activewindow", json_output=True)
+        self.client_by_pid = {
+            int(client["pid"]): client
+            for client in clients
+            if isinstance(client.get("pid"), int)
+        }
+        self.active_window_pid = active_window.get("pid") if isinstance(active_window, dict) else 0
+        if not isinstance(self.active_window_pid, int):
+            self.active_window_pid = 0
+        self.hypr_dirty = False
+        self.hypr_ready = True
+
+    def persist(self, force_state_write: bool = False) -> None:
+        css = render_css(self.sessions, self.workspaces)
+        if css != self.last_css:
+            atomic_write_text(self.css_path, css)
+            self.last_css = css
+
+        if not force_state_write:
+            return
+
+        payload = {
+            "version": STATE_VERSION,
+            "sessions": {rollout_path: asdict(session) for rollout_path, session in sorted(self.sessions.items())},
+        }
+        state_json = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+        if state_json != self.last_state_json:
+            atomic_write_text(self.state_path, state_json)
+            self.last_state_json = state_json
+
+    def remap_sessions_from_hypr(self) -> bool:
+        if not self.hypr_ready or self.hypr_dirty:
+            self.refresh_hypr_state()
+
+        before = session_semantic_snapshot(self.sessions)
+        workspace_output = {
+            int(workspace["id"]): str(workspace.get("monitor", ""))
+            for workspace in self.workspaces
+            if isinstance(workspace.get("id"), int) and not is_special_workspace(workspace)
+        }
+
+        next_sessions: dict[str, SessionState] = {}
+        for rollout_path, session in self.sessions.items():
+            client = self.client_by_pid.get(session.window_pid)
+            if not isinstance(client, dict) or not client.get("mapped", False):
+                continue
+
+            workspace = client.get("workspace") or {}
+            workspace_id = workspace.get("id")
+            if not isinstance(workspace_id, int) or workspace_id <= 0:
+                continue
+
+            session.workspace_id = workspace_id
+            session.output = workspace_output.get(workspace_id, "")
+            next_sessions[rollout_path] = session
+
+        self.sessions = next_sessions
+        return session_semantic_snapshot(self.sessions) != before
+
+    def discover_sessions(self) -> bool:
+        if not self.hypr_ready or self.hypr_dirty:
+            self.refresh_hypr_state()
+
+        before = session_semantic_snapshot(self.sessions)
+        ppid_by_pid = parse_ppid_by_pid()
+        rollout_pids = discover_codex_rollouts()
+        client_pids = set(self.client_by_pid)
+        workspace_output = {
+            int(workspace["id"]): str(workspace.get("monitor", ""))
+            for workspace in self.workspaces
+            if isinstance(workspace.get("id"), int) and not is_special_workspace(workspace)
+        }
+
+        next_sessions: dict[str, SessionState] = {}
+        for rollout_path, pid in rollout_pids.items():
+            session = self.sessions.get(rollout_path, initialize_session(rollout_path))
+            client_pid = session.window_pid if session.window_pid in self.client_by_pid else find_client_ancestor(pid, client_pids, ppid_by_pid)
+            if client_pid is None:
+                continue
+
+            client = self.client_by_pid.get(client_pid)
+            if not isinstance(client, dict) or not client.get("mapped", False):
+                continue
+
+            workspace = client.get("workspace") or {}
+            workspace_id = workspace.get("id")
+            if not isinstance(workspace_id, int) or workspace_id <= 0:
+                continue
+
+            session.pid = pid
+            session.window_pid = client_pid
+            session.workspace_id = workspace_id
+            session.output = workspace_output.get(workspace_id, "")
+            next_sessions[rollout_path] = session
+
+        self.sessions = next_sessions
+        return session_semantic_snapshot(self.sessions) != before
+
+    def tail_sessions(self) -> tuple[bool, bool]:
+        unread_changed = False
+        offset_changed = False
+        for session in self.sessions.values():
+            unread_before = session.unread
+            offset_before = session.offset
+            partial_before = session.partial
+            tail_session(session, verbose=self.verbose)
+            if session.unread != unread_before:
+                unread_changed = True
+            if session.offset != offset_before or session.partial != partial_before:
+                offset_changed = True
+        return unread_changed, offset_changed
+
+    def clear_read_on_focus(self) -> bool:
+        if not self.sessions:
+            return False
+        if not self.hypr_ready or self.hypr_dirty:
+            self.refresh_hypr_state()
+
+        changed = False
+        if self.active_window_pid > 0:
+            for session in self.sessions.values():
+                if session.window_pid == self.active_window_pid and session.unread:
+                    session.unread = False
+                    changed = True
+        return changed
+
+    def process_updates(self, force_discovery: bool = False) -> None:
+        now = time.monotonic()
+        force_state_write = False
+        checkpoint_due = now >= self.next_state_checkpoint_at
+
+        if force_discovery or now >= self.next_discovery_at:
+            if self.discover_sessions():
+                force_state_write = True
+            self.next_discovery_at = now + self.discovery_seconds
+
+        if self.sessions and self.hypr_dirty:
+            if self.remap_sessions_from_hypr():
+                force_state_write = True
+
+        if self.clear_read_on_focus():
+            force_state_write = True
+
+        if self.sessions and now >= self.next_rollout_poll_at:
+            unread_changed, offset_changed = self.tail_sessions()
+            if unread_changed:
+                force_state_write = True
+            checkpoint_due = checkpoint_due or offset_changed
+            self.next_rollout_poll_at = now + self.rollout_poll_seconds
+
+        if force_state_write:
+            self.next_state_checkpoint_at = now + STATE_CHECKPOINT_SECONDS
+            self.persist(force_state_write=True)
+            return
+
+        if checkpoint_due:
+            self.next_state_checkpoint_at = now + STATE_CHECKPOINT_SECONDS
+            self.persist(force_state_write=True)
+            return
+
+        self.persist(force_state_write=False)
+
+    def next_timeout(self) -> float:
+        now = time.monotonic()
+        timeouts = [max(self.next_discovery_at - now, 0.1)]
+        if self.sessions:
+            timeouts.append(max(self.next_rollout_poll_at - now, 0.1))
+        return min(timeouts)
+
+    def event_loop(self) -> None:
+        selector = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        selector.connect(str(socket2_path()))
+        stream = selector.makefile("r", encoding="utf-8", errors="replace")
+
+        try:
+            self.process_updates(force_discovery=True)
+            while not self._exit_requested:
+                ready, _, _ = select_with_timeout(selector, self.next_timeout())
+                if ready:
+                    line = stream.readline()
+                    if not line:
+                        raise RuntimeError("Hyprland event socket closed")
+                    event_name = line.split(">>", 1)[0].strip()
+                    if event_name in REFRESH_EVENTS:
+                        self.hypr_dirty = True
+                        self.process_updates()
+                else:
+                    self.process_updates()
+        finally:
+            try:
+                stream.close()
+            finally:
+                selector.close()
+
+
+def select_with_timeout(sock: socket.socket, timeout: float) -> tuple[bool, object, object]:
+    import select
+
+    ready, writable, exceptional = select.select([sock], [], [], timeout)
+    return (bool(ready), writable, exceptional)
+
+
+def install_signal_handlers(daemon: AttentionDaemon) -> None:
+    for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        signal.signal(sig, daemon.request_exit)
+    atexit.register(daemon.clear_css)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Underline Hyprland workspaces that have unread Codex completions.")
+    parser.add_argument("--once", action="store_true", help="Refresh state once and exit.")
+    parser.add_argument(
+        "--poll-seconds",
+        type=float,
+        default=DEFAULT_ROLLOUT_POLL_SECONDS,
+        help="Periodic rollout polling interval.",
+    )
+    parser.add_argument(
+        "--discovery-seconds",
+        type=float,
+        default=DEFAULT_DISCOVERY_SECONDS,
+        help="Periodic Codex process discovery interval.",
+    )
+    parser.add_argument("--verbose", action="store_true", help="Log reconnects and parse errors to stderr.")
+    args = parser.parse_args()
+
+    state_path, css_path, lock_path = current_state_paths()
+    acquire_lock(lock_path)
+    daemon = AttentionDaemon(
+        state_path=state_path,
+        css_path=css_path,
+        rollout_poll_seconds=max(args.poll_seconds, 0.1),
+        discovery_seconds=max(args.discovery_seconds, 0.5),
+        verbose=args.verbose,
+    )
+    install_signal_handlers(daemon)
+    daemon.clear_css()
+
+    if args.once:
+        daemon.process_updates(force_discovery=True)
+        return 0
+
+    while not daemon._exit_requested:
+        try:
+            daemon.event_loop()
+        except KeyboardInterrupt:
+            daemon.request_exit()
+        except Exception as exc:
+            if daemon.verbose:
+                eprint(f"codex-workspace-attentiond: {exc}")
+            time.sleep(1.0)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -18,7 +18,7 @@ fi
 # === Zsh-Specific Configuration ===
 
 # Load Starship prompt early for proper initialization
-if command -v starship >/dev/null; then
+if [ "${TERM:-}" != "dumb" ] && command -v starship >/dev/null; then
     export STARSHIP_SHELL="zsh"
     export STARSHIP_CONFIG="$HOME/.config/starship/starship.toml"
     eval "$(starship init zsh)"
@@ -72,6 +72,12 @@ fi
 # === Mise activation ===
 if command -v mise >/dev/null; then
     eval "$(mise activate zsh)"
+fi
+
+# mise can restore a PATH captured before an Omarchy generation upgrade.
+if command -v remove_path_dir >/dev/null 2>&1; then
+    remove_path_dir "$HOME/.local/share/omarchy/bin"
+    unfunction remove_path_dir 2>/dev/null || true
 fi
 
 # === Zsh Modules ===

@@ -1,0 +1,9 @@
+TigerVNC Configuration file Version 1.0
+AlertOnFatalError=1
+AutoSelect=1
+CursorType=System
+FullColor=1
+Maximize=1
+ReconnectOnError=0
+RemoteResize=0
+Shared=1

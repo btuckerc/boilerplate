@@ -4,6 +4,7 @@ import argparse
 import fcntl
 import json
 import os
+import select
 import socket
 import subprocess
 import sys
@@ -11,12 +12,31 @@ import time
 from pathlib import Path
 
 
-DEBOUNCE_SECONDS = 0.15
+DEBOUNCE_SECONDS = 0.08
 IGNORE_SECONDS = 0.75
+ANIMATION_SECONDS = 1.8
+ANIMATION_CLEAR_BUFFER_SECONDS = 0.35
+STYLE_PRIME_SECONDS = 0.05
+RUNTIME_CSS_NAME = "hyprland-workspace-compact.runtime.css"
+_INSTANCE_SIGNATURE_CACHE: str | None = None
 
 
 def eprint(*parts: object) -> None:
     print(*parts, file=sys.stderr)
+
+
+def atomic_write_text(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f"{path.name}.tmp")
+    tmp_path.write_text(content, encoding="utf-8")
+    os.replace(tmp_path, path)
+
+
+def hyprctl_env(*, for_instances: bool = False) -> dict[str, str]:
+    env = os.environ.copy()
+    if not for_instances and not env.get("HYPRLAND_INSTANCE_SIGNATURE"):
+        env["HYPRLAND_INSTANCE_SIGNATURE"] = resolve_instance_signature()
+    return env
 
 
 def run_hyprctl(*args: str, json_output: bool = False) -> object:
@@ -24,7 +44,12 @@ def run_hyprctl(*args: str, json_output: bool = False) -> object:
     if json_output:
         cmd.append("-j")
     cmd.extend(args)
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        env=hyprctl_env(for_instances=(len(args) == 1 and args[0] == "instances")),
+    )
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or result.stdout.strip() or f"hyprctl failed: {' '.join(cmd)}")
     if json_output:
@@ -36,21 +61,33 @@ def run_hyprctl_batch(commands: list[str]) -> None:
     if not commands:
         return
     batch = " ; ".join(commands)
-    result = subprocess.run(["hyprctl", "--batch", batch], capture_output=True, text=True)
+    result = subprocess.run(
+        ["hyprctl", "--batch", batch],
+        capture_output=True,
+        text=True,
+        env=hyprctl_env(),
+    )
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "hyprctl --batch failed")
 
 
 def resolve_instance_signature() -> str:
+    global _INSTANCE_SIGNATURE_CACHE
+
+    if _INSTANCE_SIGNATURE_CACHE:
+        return _INSTANCE_SIGNATURE_CACHE
+
     env_sig = os.environ.get("HYPRLAND_INSTANCE_SIGNATURE")
     if env_sig:
+        _INSTANCE_SIGNATURE_CACHE = env_sig
         return env_sig
 
     instances = run_hyprctl("instances")
     for line in str(instances).splitlines():
         line = line.strip()
         if line.startswith("instance ") and line.endswith(":"):
-            return line[len("instance ") : -1]
+            _INSTANCE_SIGNATURE_CACHE = line[len("instance ") : -1]
+            return _INSTANCE_SIGNATURE_CACHE
 
     raise RuntimeError("could not resolve HYPRLAND_INSTANCE_SIGNATURE")
 
@@ -58,6 +95,10 @@ def resolve_instance_signature() -> str:
 def socket2_path() -> Path:
     runtime_dir = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
     return Path(runtime_dir) / "hypr" / resolve_instance_signature() / ".socket2.sock"
+
+
+def runtime_css_path() -> Path:
+    return Path.home() / ".config" / "waybar" / RUNTIME_CSS_NAME
 
 
 def numeric_workspace_ids(workspaces: list[dict]) -> list[int]:
@@ -73,6 +114,27 @@ def numeric_workspace_ids(workspaces: list[dict]) -> list[int]:
     return sorted(set(ids))
 
 
+def workspace_ids_by_output(workspaces: list[dict]) -> dict[str, list[int]]:
+    ids_by_output: dict[str, list[int]] = {}
+    for workspace in workspaces:
+        wid = workspace.get("id")
+        name = workspace.get("name")
+        output = str(workspace.get("monitor", ""))
+        if not isinstance(wid, int) or wid <= 0:
+            continue
+        if str(wid) != str(name):
+            continue
+        if not output:
+            continue
+        ids_by_output.setdefault(output, []).append(wid)
+
+    return {
+        output: sorted(set(ids))
+        for output, ids in ids_by_output.items()
+        if ids
+    }
+
+
 def build_shift_map(workspaces: list[dict]) -> dict[int, int]:
     shift_map: dict[int, int] = {}
     for expected, wid in enumerate(numeric_workspace_ids(workspaces), start=1):
@@ -81,8 +143,7 @@ def build_shift_map(workspaces: list[dict]) -> dict[int, int]:
     return shift_map
 
 
-def build_compaction_commands() -> tuple[list[str], dict[int, int]]:
-    workspaces = run_hyprctl("workspaces", json_output=True)
+def build_compaction_commands(workspaces: list[dict]) -> tuple[list[str], dict[int, int]]:
     shift_map = build_shift_map(workspaces)
     if not shift_map:
         return [], {}
@@ -137,17 +198,214 @@ def build_compaction_commands() -> tuple[list[str], dict[int, int]]:
     return commands, shift_map
 
 
-def compact_workspaces(verbose: bool = False) -> bool:
-    commands, shift_map = build_compaction_commands()
+def css_escape_ident(value: str) -> str:
+    escaped: list[str] = []
+    for index, ch in enumerate(value):
+        if ch == "\0":
+            escaped.append("\\fffd ")
+            continue
+        if ch.isalnum() or ch in {"-", "_"}:
+            if index == 0 and ch.isdigit():
+                escaped.append(f"\\{ord(ch):x} ")
+            else:
+                escaped.append(ch)
+            continue
+        escaped.append(f"\\{ord(ch):x} ")
+    return "".join(escaped)
+
+
+def clear_runtime_css(css_path: Path) -> None:
+    atomic_write_text(css_path, "/* Managed at runtime by hyprland-workspace-compactd. */\n")
+
+
+def append_button_selectors(
+    selectors: list[str],
+    output: str,
+    position: int,
+    single_output: bool,
+) -> None:
+    selectors.append(f"window#waybar.{css_escape_ident(output)} #workspaces button:nth-child({position})")
+    if single_output:
+        selectors.append(f"#workspaces button:nth-child({position})")
+
+
+def collect_compaction_selector_groups(
+    workspaces: list[dict],
+    shift_map: dict[int, int],
+    final_active_by_output: dict[str, int],
+) -> list[tuple[str, list[str], list[str], list[str]]]:
+    ids_by_output = workspace_ids_by_output(workspaces)
+    single_output = len(ids_by_output) == 1
+    selector_groups: list[tuple[str, list[str], list[str], list[str]]] = []
+
+    for output in sorted(ids_by_output):
+        pre_ids = ids_by_output[output]
+        shifted_pairs = [(wid, shift_map[wid]) for wid in pre_ids if wid in shift_map]
+        if not shifted_pairs:
+            continue
+
+        pre_positions = {wid: index for index, wid in enumerate(pre_ids, start=1)}
+        post_ids = sorted(set(shift_map.get(wid, wid) for wid in pre_ids))
+        post_positions = {wid: index for index, wid in enumerate(post_ids, start=1)}
+
+        source_selectors: list[str] = []
+        inactive_target_selectors: list[str] = []
+        active_target_selectors: list[str] = []
+        for source_id, target_id in shifted_pairs:
+            source_position = pre_positions.get(source_id)
+            if source_position is not None:
+                append_button_selectors(source_selectors, output, source_position, single_output)
+
+            target_position = post_positions.get(target_id)
+            if target_position is not None:
+                if final_active_by_output.get(output) == target_id:
+                    append_button_selectors(active_target_selectors, output, target_position, single_output)
+                else:
+                    append_button_selectors(inactive_target_selectors, output, target_position, single_output)
+
+        if not source_selectors or (not inactive_target_selectors and not active_target_selectors):
+            continue
+
+        summary = ", ".join(f"{source_id}->{target_id}" for source_id, target_id in shifted_pairs)
+        selector_groups.append(
+            (
+                f"{output}: {summary}",
+                source_selectors,
+                inactive_target_selectors,
+                active_target_selectors,
+            )
+        )
+
+    return selector_groups
+
+
+def render_pre_compaction_css(selector_groups: list[tuple[str, list[str], list[str], list[str]]]) -> str:
+    lines = ["/* Managed at runtime by hyprland-workspace-compactd. */"]
+    if not selector_groups:
+        return lines[0] + "\n"
+
+    for summary, selectors, _, _ in selector_groups:
+        lines.extend(
+            [
+                "",
+                f"/* pre: {summary} */",
+                f"{', '.join(selectors)} {{",
+                "  opacity: 0.22;",
+                "  color: alpha(@foreground, 0.18);",
+                "  text-shadow: 0 0 10px alpha(@foreground, 0.92), 0 0 4px alpha(@foreground, 0.82);",
+                "}",
+            ]
+        )
+
+    return "\n".join(lines) + "\n"
+
+
+def render_post_compaction_css(selector_groups: list[tuple[str, list[str], list[str], list[str]]], token: int) -> str:
+    lines = ["/* Managed at runtime by hyprland-workspace-compactd. */"]
+
+    if not selector_groups:
+        return lines[0] + "\n"
+
+    inactive_animation_name = f"workspace-renumber-blend-inactive-{token}"
+    active_animation_name = f"workspace-renumber-blend-active-{token}"
+    lines.extend(
+        [
+            "",
+            f"@keyframes {inactive_animation_name} {{",
+            "  0% {",
+            "    opacity: 0.22;",
+            "    color: alpha(@foreground, 0.18);",
+            "    text-shadow: 0 0 10px alpha(@foreground, 0.92), 0 0 4px alpha(@foreground, 0.82);",
+            "  }",
+            "  38% {",
+            "    opacity: 0.6;",
+            "    color: alpha(@foreground, 0.56);",
+            "    text-shadow: 0 0 5px alpha(@foreground, 0.62), 0 0 2px alpha(@foreground, 0.52);",
+            "  }",
+            "  100% {",
+            "    opacity: 0.5;",
+            "    color: @foreground;",
+            "    text-shadow: none;",
+            "  }",
+            "}",
+            "",
+            f"@keyframes {active_animation_name} {{",
+            "  0% {",
+            "    opacity: 0.22;",
+            "    color: alpha(@foreground, 0.18);",
+            "    text-shadow: 0 0 10px alpha(@foreground, 0.92), 0 0 4px alpha(@foreground, 0.82);",
+            "  }",
+            "  38% {",
+            "    opacity: 0.6;",
+            "    color: alpha(@foreground, 0.56);",
+            "    text-shadow: 0 0 5px alpha(@foreground, 0.62), 0 0 2px alpha(@foreground, 0.52);",
+            "  }",
+            "  100% {",
+            "    opacity: 1;",
+            "    color: @foreground;",
+            "    text-shadow: none;",
+            "  }",
+            "}",
+        ]
+    )
+
+    for summary, _, inactive_selectors, active_selectors in selector_groups:
+        if inactive_selectors:
+            lines.extend(
+                [
+                    "",
+                    f"/* post inactive: {summary} */",
+                    f"{', '.join(inactive_selectors)} {{",
+                    f"  animation: {inactive_animation_name} {ANIMATION_SECONDS:.1f}s cubic-bezier(0.16, 0.85, 0.22, 1) 1;",
+                    "  animation-fill-mode: both;",
+                    "}",
+                ]
+            )
+
+        if active_selectors:
+            lines.extend(
+                [
+                    "",
+                    f"/* post active: {summary} */",
+                    f"{', '.join(active_selectors)} {{",
+                    f"  animation: {active_animation_name} {ANIMATION_SECONDS:.1f}s cubic-bezier(0.16, 0.85, 0.22, 1) 1;",
+                    "  animation-fill-mode: both;",
+                    "}",
+                ]
+            )
+
+    return "\n".join(lines) + "\n"
+
+
+def compact_workspaces(css_path: Path, verbose: bool = False) -> float | None:
+    workspaces = run_hyprctl("workspaces", json_output=True)
+    monitors = run_hyprctl("monitors", json_output=True)
+    commands, shift_map = build_compaction_commands(workspaces)
     if not commands:
         if verbose:
             eprint("hyprland-workspace-compactd: no compaction needed")
-        return False
+        return None
+
+    final_active_by_output = {
+        str(monitor.get("name", "")): shift_map.get(active_id, active_id)
+        for monitor in monitors
+        for active_id in [(monitor.get("activeWorkspace") or {}).get("id")]
+        if isinstance(active_id, int) and active_id > 0
+    }
+
+    selector_groups = collect_compaction_selector_groups(workspaces, shift_map, final_active_by_output)
+    if not selector_groups:
+        if verbose:
+            eprint("hyprland-workspace-compactd: no selector groups for compaction", shift_map)
+        return None
 
     if verbose:
         eprint("hyprland-workspace-compactd: compacting", shift_map)
+    atomic_write_text(css_path, render_pre_compaction_css(selector_groups))
+    time.sleep(STYLE_PRIME_SECONDS)
     run_hyprctl_batch(commands)
-    return True
+    atomic_write_text(css_path, render_post_compaction_css(selector_groups, time.monotonic_ns()))
+    return time.monotonic() + ANIMATION_SECONDS + ANIMATION_CLEAR_BUFFER_SECONDS
 
 
 def acquire_lock() -> object:
@@ -165,7 +423,10 @@ def acquire_lock() -> object:
 
 def daemon_loop(verbose: bool = False) -> None:
     acquire_lock()
+    css_path = runtime_css_path()
+    clear_runtime_css(css_path)
     ignore_until = 0.0
+    clear_css_at = 0.0
 
     while True:
         try:
@@ -173,20 +434,40 @@ def daemon_loop(verbose: bool = False) -> None:
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
                 sock.connect(str(path))
                 stream = sock.makefile("r", encoding="utf-8", errors="replace")
-                for raw_line in stream:
-                    line = raw_line.strip()
-                    if not line or not line.startswith("destroyworkspacev2>>"):
-                        continue
-                    now = time.monotonic()
-                    if now < ignore_until:
+                while True:
+                    timeout = None
+                    if clear_css_at > 0.0:
+                        timeout = max(clear_css_at - time.monotonic(), 0.0)
+
+                    ready, _, _ = select.select([sock], [], [], timeout)
+                    if ready:
+                        raw_line = stream.readline()
+                        if not raw_line:
+                            raise RuntimeError("Hyprland event socket closed")
+
+                        line = raw_line.strip()
+                        if not line or not line.startswith("destroyworkspacev2>>"):
+                            continue
+
+                        now = time.monotonic()
+                        if now < ignore_until:
+                            continue
+
+                        time.sleep(DEBOUNCE_SECONDS)
+                        next_clear_css_at = compact_workspaces(css_path, verbose=verbose)
+                        if next_clear_css_at is not None:
+                            ignore_until = time.monotonic() + IGNORE_SECONDS
+                            clear_css_at = next_clear_css_at
                         continue
 
-                    time.sleep(DEBOUNCE_SECONDS)
-                    if compact_workspaces(verbose=verbose):
-                        ignore_until = time.monotonic() + IGNORE_SECONDS
+                    if clear_css_at > 0.0 and time.monotonic() >= clear_css_at:
+                        clear_runtime_css(css_path)
+                        clear_css_at = 0.0
         except KeyboardInterrupt:
+            clear_runtime_css(css_path)
             return
         except Exception as exc:
+            clear_runtime_css(css_path)
             if verbose:
                 eprint(f"hyprland-workspace-compactd: {exc}")
             time.sleep(1.0)
@@ -199,7 +480,12 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.compact_now:
-        compact_workspaces(verbose=args.verbose)
+        css_path = runtime_css_path()
+        clear_runtime_css(css_path)
+        clear_at = compact_workspaces(css_path, verbose=args.verbose)
+        if clear_at is not None:
+            time.sleep(max(clear_at - time.monotonic(), 0.0))
+        clear_runtime_css(css_path)
         return 0
 
     daemon_loop(verbose=args.verbose)

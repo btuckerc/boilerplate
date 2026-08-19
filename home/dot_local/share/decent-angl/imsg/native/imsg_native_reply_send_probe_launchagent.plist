@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.decentangl.imsg.native-reply-send-probe</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/tmp/imsg_native_reply_send_probe</string>
+    <string>--chat-guid</string>
+    <string>any;-;btuckercraig@gmail.com</string>
+    <string>--identifier</string>
+    <string>btuckercraig@gmail.com</string>
+    <string>--reply-guid</string>
+    <string>0C8A316A-CF0E-4FF3-A35E-A8BD7841E429</string>
+    <string>--capabilities</string>
+    <string>4485895</string>
+    <string>--output</string>
+    <string>/Users/admin/.local/share/decent-angl/imsg/native-reply-send-probe.json</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/Users/admin/.local/share/decent-angl/imsg/native-reply-send-probe.stdout.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/admin/.local/share/decent-angl/imsg/native-reply-send-probe.stderr.log</string>
+</dict>
+</plist>

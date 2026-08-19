@@ -39,3 +39,6 @@ home/private_dot_omp/private_agent/agent.db*
 home/private_dot_omp/private_agent/sessions/
 home/private_dot_omp/private_agent/logs/
 home/private_dot_omp/private_agent/*.log
+
+# Generated Rust build output for the shared iMessage TUI.
+home/dot_local/share/decent-angl/imsg/tui/target/

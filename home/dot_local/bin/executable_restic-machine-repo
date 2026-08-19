@@ -14,6 +14,7 @@ fi
 if [ -z "$machine_id" ]; then
     case "$(hostname 2>/dev/null || true)" in
         btct14|omarchy) machine_id="omarchy" ;;
+        btcaw) machine_id="btcaw" ;;
         BTC-MBP14*|macbook) machine_id="macbook" ;;
         webweaver*|macmini) machine_id="macmini" ;;
     esac
@@ -22,6 +23,9 @@ fi
 case "$machine_id" in
     omarchy)
         printf '%s\n' 'sftp:admin@macmini.tail4d5aec.ts.net:/Users/admin/srv/restic/omarchy'
+        ;;
+    btcaw)
+        printf '%s\n' 'sftp:admin@macmini.tail4d5aec.ts.net:/Users/admin/srv/restic/btcaw'
         ;;
     macbook)
         printf '%s\n' 'sftp:admin@macmini.tail4d5aec.ts.net:/Users/admin/srv/restic/macbook'

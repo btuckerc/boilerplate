@@ -3,7 +3,7 @@
 {{- if eq .chezmoi.os "darwin" -}}
 {{-   $hostKey = (output "scutil" "--get" "ComputerName" | trim | lower) -}}
 {{- end -}}
-{{- if and (eq $machineID "") (or (eq $hostKey "btct14") (eq $hostKey "omarchy")) -}}
+{{- if and (eq $machineID "") (or (eq $hostKey "btct14") (eq $hostKey "t14") (eq $hostKey "omarchy")) -}}
 {{-   $machineID = "omarchy" -}}
 {{- else if and (eq $machineID "") (or (eq $hostKey "btc-mbp14") (eq $hostKey "macbook")) -}}
 {{-   $machineID = "macbook" -}}
@@ -11,11 +11,18 @@
 {{-   $machineID = "macmini" -}}
 {{- end -}}
 {{- if eq $machineID "omarchy" }}
-- Machine: `omarchy`
+- Machine: `T14`
+- Environment: `Omarchy`
 - Role: `{{ .decentangl.machines.omarchy.role }}`
 - OS packages: `{{ .decentangl.machines.omarchy.package_manager }}`
 - Repo root: `{{ .decentangl.defaults.repo_root }}`
 - Notes: `{{ .decentangl.defaults.notes_path }}`
+{{- else if eq $machineID "btcaw" }}
+- Machine: `btcaw`
+- Role: `{{ .decentangl.machines.btcaw.role }}`
+- OS packages: `{{ .decentangl.machines.btcaw.package_manager }}`
+- Tailscale: `{{ .decentangl.machines.btcaw.tailscale_variant }}`
+
 {{- else if eq $machineID "macbook" }}
 - Machine: `macbook`
 - Role: `{{ .decentangl.machines.macbook.role }}`

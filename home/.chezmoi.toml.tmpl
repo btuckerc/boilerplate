@@ -20,7 +20,7 @@
 {{- if eq .chezmoi.os "darwin" -}}
 {{-   $hostKey = (output "scutil" "--get" "ComputerName" | trim | lower) -}}
 {{- end -}}
-{{- if and (eq $machineID "") (or (eq $hostKey "btct14") (eq $hostKey "omarchy")) -}}
+{{- if and (eq $machineID "") (or (eq $hostKey "btct14") (eq $hostKey "t14") (eq $hostKey "omarchy")) -}}
 {{-   $machineID = "omarchy" -}}
 {{- else if and (eq $machineID "") (or (eq $hostKey "btc-mbp14") (eq $hostKey "macbook")) -}}
 {{-   $machineID = "macbook" -}}

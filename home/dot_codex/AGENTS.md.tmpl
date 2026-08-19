@@ -4,11 +4,12 @@ Shared Codex state is managed with chezmoi.
 
 - Edit shared Codex files in `~/src/boilerplate/home/dot_codex/` or `{{ .decentangl.defaults.codex_source }}`, then apply with `chezmoi`.
 - Keep `{{ .decentangl.defaults.codex_home }}/auth.json`, history, caches, sqlite files, and project trust local.
-- Use `mise` for `omp`, `bw`, `restic`, and `chezmoi`. Use the native package manager for OS packages.
+- Use `mise` for `codex`, `omp`, `bw`, `restic`, and `chezmoi`. Use the native package manager for OS packages.
 - On macOS with iCloud Desktop & Documents, keep active repos, build trees, virtualenvs, and Codex task workspaces under `~/src`, not `~/Documents`.
-- Prefer Tailscale SSH targets for remote access: `omarchy`, `macbook`, `admin@macmini`.
-- OMP is the primary cross-platform terminal harness. Codex Desktop remains usable as a local app, but the Codex CLI, vanilla Pi, RTK, and OpenCode are not part of the active shared baseline.
+- Prefer Tailscale hostnames for remote access: `t14`, `btcaw`, `macbook`, `macmini`.
+- This setup is Codex-first, with OMP as the pinned cross-platform terminal harness. Legacy Claude/OpenCode material lives on `legacy/claude-opencode`.
 - For machine settings, native app preferences, or platform-specific operations, use the shared `platform-ops` skill.
+- On packaged Omarchy, let `/usr/share/omarchy` and the stock UWSM environment own `OMARCHY_PATH`; never persist or prepend the legacy `~/.local/share/omarchy` path.
 - Keep shared guidance short and durable. Let chezmoi render platform or machine specifics into the live files.
 
 Current target:

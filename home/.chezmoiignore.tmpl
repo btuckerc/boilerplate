@@ -1,0 +1,95 @@
+# Managed by chezmoi - files to ignore when applying to $HOME
+# https://chezmoi.io/reference/special-files/chezmoiignore/
+
+# Documentation and non-dotfile content
+README.md
+LICENSE
+*.md
+
+# Binary and media files
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.gif
+
+# Backup files
+*.bak
+*backup*
+*.backup.*
+
+# macOS system files
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Backup directories from nvim
+nvim.backup.*
+
+# Temporary files
+*.tmp
+*.temp
+*~
+
+# Local mise configuration (machine-specific)
+.config/mise/mise.local.toml
+
+# Legacy assistant configs are preserved in source but not deployed by default.
+.claude
+.claude/**
+.config/nvim/.claude
+.config/nvim/.claude/**
+
+# OpenCode runtime files
+.config/opencode
+.config/opencode/**
+.config/opencode/.opencode-speckit/
+.config/opencode/.opencode-speckit/**
+.config/opencode/node_modules/
+.config/opencode/node_modules/**
+.config/opencode/bun.lock
+
+# Neovim lazy-lock.json (plugin lockfile)
+.config/nvim/lazy-lock.json
+
+{{- if eq .chezmoi.os "linux" }}
+# Retained pre-Quattro assets: source history only, never re-apply to the Lua /
+# Omarchy-shell desktop. Current portable overrides are manifest-managed.
+.config/hypr/autostart.conf
+.config/hypr/bindings.conf
+.config/hypr/hypridle.conf
+.config/hypr/hyprland.conf
+.config/hypr/hyprlock.conf
+.config/hypr/input.conf
+.config/hypr/looknfeel.conf
+.config/omarchy/current
+.config/omarchy/current/**
+.config/systemd/user/omarchy-battery-monitor.service
+.config/waybar
+.config/waybar/**
+.local/bin/codex-workspace-attentiond
+.local/bin/hyprland-workspace-compactd
+.local/bin/waybar-clock-calendar-popup
+.local/bin/waybar-clock-calendar-toggle
+{{- end }}
+
+{{- if ne .chezmoi.os "linux" }}
+# Linux / Omarchy-only desktop stack
+.config/decent-angl/omarchy-roaming-manifest.tsv
+.config/hypr
+.config/hypr/**
+.config/omarchy
+.config/omarchy/**
+.config/systemd/user/omarchy-battery-monitor.service
+.config/uwsm
+.config/uwsm/**
+.config/waybar
+.config/waybar/**
+.config/xdg-terminals.list
+.local/bin/hyprland-workspace-compactd
+.local/bin/omarchy-install-terminal
+.local/bin/omarchy-roaming-sync
+.local/share/applications/macmini-screen.desktop
+.local/bin/waybar-clock-calendar-popup
+.local/bin/waybar-clock-calendar-toggle
+{{- end }}

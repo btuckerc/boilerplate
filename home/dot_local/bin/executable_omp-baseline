@@ -339,6 +339,7 @@ apply_local() {
     paths+=("$live_path")
   done < <(iter_manifest)
 
+  install -d -m 700 "$HOME/.omp" "$HOME/.omp/agent"
   cm apply "${paths[@]}"
   quarantine_legacy_wrapper
   pin="$(expected_version)"

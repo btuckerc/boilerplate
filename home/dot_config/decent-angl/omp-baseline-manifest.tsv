@@ -3,6 +3,7 @@
 # canonical-machine	macbook
 # Credentials, databases, sessions, caches, logs, and tiny-model weights are
 # deliberately absent. They remain machine-local under ~/.omp/agent.
+file	~/.config/mise/config.toml	home/dot_config/mise/config.toml
 file	~/.omp/agent/AGENTS.md	home/private_dot_omp/private_agent/AGENTS.md.tmpl
 file	~/.omp/agent/RULES.md	home/private_dot_omp/private_agent/RULES.md
 file	~/.omp/agent/config.yml	home/private_dot_omp/private_agent/config.yml

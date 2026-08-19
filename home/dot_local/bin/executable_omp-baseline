@@ -1,16 +1,13 @@
 #!/usr/bin/env bash
 
-# Keep the portable OMP baseline identical across the fleet. MacBook authors
-# and publishes it; every other machine consumes the published master branch.
+# Keep the portable OMP baseline identical across the fleet. Published Git
+# history is authoritative and any machine may author reviewed commits.
 
 set -euo pipefail
 
 REPO_ROOT="${OMP_BASELINE_REPO_ROOT:-$HOME/src/boilerplate}"
 CHEZMOI_ROOT="${OMP_BASELINE_CHEZMOI_ROOT:-$HOME/.local/share/chezmoi}"
 MANIFEST="${OMP_BASELINE_MANIFEST:-$HOME/.config/decent-angl/omp-baseline-manifest.tsv}"
-CANONICAL_MACHINE="macbook"
-CANONICAL_URL="${OMP_BASELINE_CANONICAL_URL:-https://github.com/btuckerc/boilerplate.git}"
-CANONICAL_REF="refs/remotes/omp-baseline/master"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/decent-angl"
 MARKER="$STATE_DIR/omp-baseline-drift"
 LOG_FILE="$STATE_DIR/omp-baseline.log"
@@ -23,9 +20,9 @@ Usage: omp-baseline <status|validate|apply|pull|guard|install-guard> [--strict]
 
   status        Compare repo, chezmoi source, rendered live files, and version.
   validate      Run status plus coverage, secret-boundary, and OMP parser checks.
-  apply         Apply the local canonical source, install its exact pin, validate.
-  pull          On consumers, fetch MacBook's published master and reconcile OMP.
-  guard         Validate MacBook; automatically pull and repair consumer machines.
+  apply         Apply the local published source, install its exact pin, validate.
+  pull          Reconcile the complete published baseline, then validate OMP.
+  guard         Validate local OMP state without overwriting source.
   install-guard Install the hourly launchd/systemd user guard.
   --strict      Also require every portable source file to be tracked by Git.
 EOF
@@ -415,65 +412,14 @@ apply_local() {
   validate
 }
 
-sync_from_canonical_ref() {
-  local tmp_dir backup_dir repo_rel source_file destination
-  tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/omp-baseline-pull.XXXXXX")"
-  backup_dir="$STATE_DIR/backups/$(date -u +%Y%m%dT%H%M%SZ)"
-  mkdir -p "$STATE_DIR" "$backup_dir"
-  trap 'rm -rf "$tmp_dir"' RETURN
-
-  git -C "$REPO_ROOT" archive "$CANONICAL_REF" \
-    home/private_dot_omp \
-    home/.chezmoidata/decentangl.yaml \
-    home/dot_config/decent-angl/omp-baseline-manifest.tsv \
-    home/dot_config/decent-angl/opnsense.env.tmpl \
-    home/dot_config/mise/config.toml \
-    home/dot_local/bin/executable_omp-baseline \
-    home/dot_local/bin/executable_omp-openrouter-env \
-    home/dot_local/bin/executable_opnsense-api \
-    home/dot_local/bin/executable_opnsense-store-secret \
-    home/run_onchange_after_04-setup-omp.sh.tmpl \
-    home/run_onchange_after_05-apply-omp-baseline.sh.tmpl | tar -xf - -C "$tmp_dir"
-
-  if [ -d "$REPO_ROOT/home/private_dot_omp" ] \
-    && [ -n "$(rsync -ani --delete "$tmp_dir/home/private_dot_omp/" "$REPO_ROOT/home/private_dot_omp/")" ]; then
-    cp -R "$REPO_ROOT/home/private_dot_omp" "$backup_dir/"
+pull_published() {
+  local fleet_sync="$HOME/.local/bin/decent-angl-sync"
+  if [ ! -x "$fleet_sync" ]; then
+    printf 'decent-angl-sync is unavailable; apply the complete shared baseline first.\n' >&2
+    return 127
   fi
-  rsync -a --delete "$tmp_dir/home/private_dot_omp/" "$REPO_ROOT/home/private_dot_omp/"
-  mkdir -p "$CHEZMOI_ROOT/home/private_dot_omp"
-  rsync -a --delete "$tmp_dir/home/private_dot_omp/" "$CHEZMOI_ROOT/home/private_dot_omp/"
-
-  portable_support_paths | while IFS= read -r repo_rel; do
-    source_file="$tmp_dir/$repo_rel"
-    [ -f "$source_file" ] || continue
-    for destination in "$REPO_ROOT/$repo_rel" "$CHEZMOI_ROOT/$repo_rel"; do
-      mkdir -p "$(dirname "$destination")"
-      install -m 644 "$source_file" "$destination"
-    done
-  done
-
-  git -C "$REPO_ROOT" rev-parse "$CANONICAL_REF" >"$STATE_DIR/omp-baseline.commit"
-  trap - RETURN
-  rm -rf "$tmp_dir"
-}
-
-pull_canonical() {
-  local current_machine canonical_commit recorded_commit
-  current_machine="$(machine_id)"
-  if [ "$current_machine" = "$CANONICAL_MACHINE" ]; then
-    printf 'Refusing pull on canonical machine %s; edit and publish from its source tree.\n' "$current_machine" >&2
-    return 1
-  fi
-  git -C "$REPO_ROOT" fetch "$CANONICAL_URL" "+refs/heads/master:$CANONICAL_REF"
-  canonical_commit="$(git -C "$REPO_ROOT" rev-parse "$CANONICAL_REF")"
-  recorded_commit="$(cat "$STATE_DIR/omp-baseline.commit" 2>/dev/null || true)"
-  if [ "$recorded_commit" = "$canonical_commit" ] && validate >/dev/null 2>&1; then
-    printf 'PULL    already converged at %s\n' "$canonical_commit"
-    return 0
-  fi
-  sync_from_canonical_ref
-  cm apply --force "$HOME/.config/decent-angl/omp-baseline-manifest.tsv" "$HOME/.local/bin/omp-baseline"
-  exec "$HOME/.local/bin/omp-baseline" apply
+  "$fleet_sync" reconcile --with-scripts
+  validate
 }
 
 install_guard() {
@@ -547,11 +493,7 @@ guard() {
   trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
   current_machine="$(machine_id)"
 
-  if [ "$current_machine" = "$CANONICAL_MACHINE" ]; then
-    if output="$(validate 2>&1)"; then status=0; else status=$?; fi
-  else
-    if output="$(OMP_BASELINE_IN_GUARD=1 pull_canonical 2>&1)"; then status=0; else status=$?; fi
-  fi
+  if output="$(validate 2>&1)"; then status=0; else status=$?; fi
 
   printf '%s %s\n%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$current_machine" "$output" >>"$LOG_FILE"
   if [ "$status" -eq 0 ]; then
@@ -580,7 +522,7 @@ main() {
     status) check_manifest_status ;;
     validate) validate ;;
     apply) apply_local ;;
-    pull) pull_canonical ;;
+    pull) pull_published ;;
     guard) guard ;;
     install-guard) install_guard ;;
     -h|--help) usage ;;

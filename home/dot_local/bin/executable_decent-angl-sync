@@ -1,0 +1,335 @@
+#!/usr/bin/env bash
+
+# Bidirectional, conflict-safe convergence for the complete decent-angl
+# baseline. Published Git history is authoritative; every machine may author.
+
+set -euo pipefail
+
+REPO_ROOT="${DECENT_ANGL_REPO_ROOT:-$HOME/src/boilerplate}"
+SOURCE_LINK="${DECENT_ANGL_SOURCE_LINK:-$HOME/.local/share/chezmoi}"
+REMOTE="${DECENT_ANGL_REMOTE:-origin}"
+BRANCH="${DECENT_ANGL_BRANCH:-master}"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/decent-angl"
+MARKER="$STATE_DIR/config-drift"
+LOG_FILE="$STATE_DIR/config-sync.log"
+LOCK_DIR="$STATE_DIR/config-sync.lock"
+WITH_SCRIPTS=false
+
+usage() {
+  cat <<'EOF'
+Usage: decent-angl-sync <status|adopt-source|reconcile|guard|capture|install-guard> [options]
+
+  status                 Report Git, source-link, live, and guard state.
+  adopt-source           Preserve the old chezmoi clone and link it to the repo.
+  reconcile              Fetch, fast-forward/apply, or publish clean local commits.
+  guard                  Run conflict-safe reconciliation for the scheduled job.
+  capture TARGET...      Explicitly add live targets to the canonical source.
+  install-guard          Install the 15-minute launchd/systemd user guard.
+  --with-scripts         Allow chezmoi scripts during a manual reconcile.
+
+Dirty, diverged, or locally modified state is never overwritten or auto-merged.
+EOF
+}
+
+cm() {
+  local candidate mise_bin chezmoi_bin
+  mise_bin=""
+  for candidate in \
+    "$(command -v mise 2>/dev/null || true)" \
+    "$HOME/.local/bin/mise" \
+    "$HOME/.local/share/mise/bin/mise" \
+    /opt/homebrew/bin/mise /usr/local/bin/mise /usr/bin/mise; do
+    if [[ -n "$candidate" && -x "$candidate" ]]; then mise_bin="$candidate"; break; fi
+  done
+  if [[ -n "$mise_bin" ]]; then
+    "$mise_bin" exec -- chezmoi "$@"
+    return
+  fi
+  chezmoi_bin=""
+  for candidate in \
+    "$(command -v chezmoi 2>/dev/null || true)" \
+    "$HOME/.local/share/mise/shims/chezmoi" \
+    "$HOME/.local/bin/chezmoi" \
+    /opt/homebrew/bin/chezmoi /usr/local/bin/chezmoi /usr/bin/chezmoi; do
+    if [[ -n "$candidate" && -x "$candidate" ]]; then chezmoi_bin="$candidate"; break; fi
+  done
+  [[ -n "$chezmoi_bin" ]] || { echo "chezmoi is unavailable." >&2; return 127; }
+  "$chezmoi_bin" "$@"
+}
+
+real_dir() {
+  [[ -d "$1" ]] || return 1
+  (cd -P "$1" && pwd)
+}
+
+source_is_canonical() {
+  local actual expected
+  actual="$(real_dir "$SOURCE_LINK" 2>/dev/null || true)"
+  expected="$(real_dir "$REPO_ROOT" 2>/dev/null || true)"
+  [[ -n "$actual" && "$actual" == "$expected" ]]
+}
+
+require_repo() {
+  [[ -d "$REPO_ROOT/.git" ]] || { echo "Missing Git checkout: $REPO_ROOT" >&2; return 1; }
+  [[ -d "$REPO_ROOT/home" ]] || { echo "Missing chezmoi tree: $REPO_ROOT/home" >&2; return 1; }
+}
+
+git_dirty() {
+  [[ -n "$(git -C "$REPO_ROOT" status --porcelain=v1 --untracked-files=all)" ]]
+}
+
+live_drift() {
+  local output
+  if ! output="$(cm diff 2>/dev/null)"; then
+    return 0
+  fi
+  [[ -n "$output" ]]
+}
+
+ahead_behind() {
+  git -C "$REPO_ROOT" rev-list --left-right --count "HEAD...$REMOTE/$BRANCH"
+}
+
+secret_boundary() {
+  local forbidden token_hits
+  forbidden="$(git -C "$REPO_ROOT" ls-files | rg '(^|/)(auth\.json|auth-broker\.token|auth-gateway\.token|agent\.db(-shm|-wal)?|history\.db(-shm|-wal)?|models\.db(-shm|-wal)?|\.env)($|/)|(^|/)(sessions|logs)/' || true)"
+  if [[ -n "$forbidden" ]]; then
+    printf 'Refusing to publish machine-local paths:\n%s\n' "$forbidden" >&2
+    return 1
+  fi
+  token_hits="$(git -C "$REPO_ROOT" grep -I -n -E '(BEGIN (RSA |OPENSSH )?PRIVATE KEY|ghp_[A-Za-z0-9]{30,}|sk-or-v1-[A-Za-z0-9_-]{30,}|xox[baprs]-[A-Za-z0-9-]{20,})' HEAD -- . ':(exclude)*.lock' 2>/dev/null || true)"
+  if [[ -n "$token_hits" ]]; then
+    echo "Refusing to publish content matching a credential signature." >&2
+    return 1
+  fi
+}
+
+write_marker() {
+  mkdir -p "$STATE_DIR"
+  printf '%s\n' "$1" >"$MARKER"
+}
+
+clear_marker() {
+  rm -f "$MARKER"
+}
+
+status() {
+  local branch dirty source_state drift counts ahead behind marker_state
+  require_repo
+  branch="$(git -C "$REPO_ROOT" branch --show-current)"
+  if git_dirty; then dirty=yes; else dirty=no; fi
+  if source_is_canonical; then source_state=canonical; else source_state=split; fi
+  if live_drift; then drift=yes; else drift=no; fi
+  if git -C "$REPO_ROOT" rev-parse --verify "$REMOTE/$BRANCH" >/dev/null 2>&1; then
+    counts="$(ahead_behind)"
+    ahead="$(awk '{print $1}' <<<"$counts")"
+    behind="$(awk '{print $2}' <<<"$counts")"
+  else
+    ahead=unknown; behind=unknown
+  fi
+  if [[ -s "$MARKER" ]]; then marker_state=present; else marker_state=clear; fi
+  printf 'repo=%s\nbranch=%s\ndirty=%s\nsource=%s\nlive_drift=%s\nahead=%s\nbehind=%s\nmarker=%s\n' \
+    "$REPO_ROOT" "$branch" "$dirty" "$source_state" "$drift" "$ahead" "$behind" "$marker_state"
+}
+
+adopt_source() {
+  local backup stamp
+  require_repo
+  mkdir -p "$(dirname "$SOURCE_LINK")" "$STATE_DIR/source-backups"
+  if source_is_canonical; then
+    printf 'SOURCE  canonical %s -> %s\n' "$SOURCE_LINK" "$REPO_ROOT"
+    return
+  fi
+  if [[ -e "$SOURCE_LINK" || -L "$SOURCE_LINK" ]]; then
+    stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+    backup="$STATE_DIR/source-backups/chezmoi-$stamp"
+    mv "$SOURCE_LINK" "$backup"
+    printf 'SOURCE  preserved %s\n' "$backup"
+  fi
+  ln -s "$REPO_ROOT" "$SOURCE_LINK"
+  source_is_canonical || { echo "Failed to canonicalize chezmoi source." >&2; return 1; }
+  printf 'SOURCE  canonical %s -> %s\n' "$SOURCE_LINK" "$REPO_ROOT"
+}
+
+apply_tree() {
+  local args=(apply --no-tty --refresh-externals=never)
+  if [[ "$WITH_SCRIPTS" != true ]]; then args+=(--exclude scripts); fi
+  cm "${args[@]}"
+  if live_drift; then
+    echo "Managed live files still differ after apply; preserving both sides." >&2
+    return 1
+  fi
+}
+
+reconcile() {
+  local branch counts ahead behind
+  require_repo
+  mkdir -p "$STATE_DIR"
+  source_is_canonical || {
+    echo "Split chezmoi source detected; run 'decent-angl-sync adopt-source'." >&2
+    return 1
+  }
+  branch="$(git -C "$REPO_ROOT" branch --show-current)"
+  [[ "$branch" == "$BRANCH" ]] || {
+    echo "Refusing automatic reconciliation from branch '$branch'; expected '$BRANCH'." >&2
+    return 1
+  }
+  if git_dirty; then
+    echo "Working tree is dirty; commit, stash, or discard intentionally before reconciliation." >&2
+    return 1
+  fi
+
+  git -C "$REPO_ROOT" fetch "$REMOTE" "$BRANCH"
+  counts="$(ahead_behind)"
+  ahead="$(awk '{print $1}' <<<"$counts")"
+  behind="$(awk '{print $2}' <<<"$counts")"
+  if (( ahead > 0 && behind > 0 )); then
+    echo "Local and remote histories diverged; no automatic merge was attempted." >&2
+    return 1
+  fi
+  if (( behind > 0 )); then
+    git -C "$REPO_ROOT" merge --ff-only "$REMOTE/$BRANCH"
+    printf 'GIT     fast-forwarded %s commit(s)\n' "$behind"
+  fi
+
+  secret_boundary
+  git -C "$REPO_ROOT" diff --check "$REMOTE/$BRANCH..HEAD"
+  apply_tree
+
+  counts="$(ahead_behind)"
+  ahead="$(awk '{print $1}' <<<"$counts")"
+  if (( ahead > 0 )); then
+    git -C "$REPO_ROOT" push "$REMOTE" "HEAD:$BRANCH"
+    printf 'GIT     published %s commit(s)\n' "$ahead"
+  fi
+  git -C "$REPO_ROOT" rev-parse HEAD >"$STATE_DIR/config-applied-commit"
+  clear_marker
+  printf 'CONFIG  converged %s\n' "$(git -C "$REPO_ROOT" rev-parse --short HEAD)"
+}
+
+capture() {
+  local target
+  shift || true
+  [[ "$#" -gt 0 ]] || { echo "capture requires at least one explicit target." >&2; return 2; }
+  require_repo
+  source_is_canonical || { echo "Run 'decent-angl-sync adopt-source' first." >&2; return 1; }
+  for target in "$@"; do
+    case "$target" in
+      "$HOME/.codex/auth.json"|"$HOME/.omp/agent/.env"|"$HOME/.omp/agent/"*db*|"$HOME/.omp/agent/sessions/"*|"$HOME/.ssh/"*|"$HOME/.config/Bitwarden/"*)
+        echo "Refusing known machine-local or credential target: $target" >&2
+        return 1
+        ;;
+    esac
+  done
+  cm add -- "$@"
+  secret_boundary
+  git -C "$REPO_ROOT" diff --check
+  echo "Captured into the canonical source. Review, test, commit, then run reconcile."
+}
+
+guard() {
+  local output status
+  mkdir -p "$STATE_DIR"
+  if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+    echo "GUARD   another run is active"
+    return 0
+  fi
+  trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
+  if output="$(reconcile 2>&1)"; then status=0; else status=$?; fi
+  printf '%s\n%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$output" >>"$LOG_FILE"
+  if (( status == 0 )); then
+    clear_marker
+    logger -t decent-angl-sync "fleet config converged" >/dev/null 2>&1 || true
+  else
+    write_marker "$output"
+    logger -t decent-angl-sync -p user.err "fleet config needs attention; see $MARKER" >/dev/null 2>&1 || true
+  fi
+  printf '%s\n' "$output"
+  return "$status"
+}
+
+install_guard() {
+  local os uid plist unit_dir
+  os="$(uname -s)"
+  mkdir -p "$STATE_DIR"
+  case "$os" in
+    Darwin)
+      uid="$(id -u)"
+      plist="$HOME/Library/LaunchAgents/gg.angl.decent-angl-sync.plist"
+      mkdir -p "$(dirname "$plist")"
+      cat >"$plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>gg.angl.decent-angl-sync</string>
+  <key>ProgramArguments</key><array><string>$HOME/.local/bin/decent-angl-sync</string><string>guard</string></array>
+  <key>EnvironmentVariables</key><dict>
+    <key>HOME</key><string>$HOME</string>
+    <key>PATH</key><string>$HOME/.local/bin:$HOME/.local/share/mise/shims:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>StartInterval</key><integer>900</integer>
+  <key>StandardOutPath</key><string>$LOG_FILE</string>
+  <key>StandardErrorPath</key><string>$LOG_FILE</string>
+</dict></plist>
+EOF
+      chmod 600 "$plist"
+      launchctl bootout "gui/$uid/gg.angl.decent-angl-sync" >/dev/null 2>&1 || true
+      launchctl bootstrap "gui/$uid" "$plist" >/dev/null 2>&1 || echo "GUARD   launchd will load at next login"
+      ;;
+    Linux)
+      unit_dir="$HOME/.config/systemd/user"
+      mkdir -p "$unit_dir"
+      cat >"$unit_dir/decent-angl-sync.service" <<'EOF'
+[Unit]
+Description=Reconcile the complete decent-angl configuration baseline
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/decent-angl-sync guard
+EOF
+      cat >"$unit_dir/decent-angl-sync.timer" <<'EOF'
+[Unit]
+Description=Frequent decent-angl configuration drift guard
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=15min
+RandomizedDelaySec=2min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+      systemctl --user daemon-reload
+      systemctl --user enable --now decent-angl-sync.timer >/dev/null
+      ;;
+    *) echo "Unsupported operating system: $os" >&2; return 1 ;;
+  esac
+  printf 'GUARD   installed for %s\n' "$os"
+}
+
+main() {
+  local command="${1:-status}"
+  [[ "$#" -gt 0 ]] && shift || true
+  while [[ "$#" -gt 0 && "$1" == --* ]]; do
+    case "$1" in
+      --with-scripts) WITH_SCRIPTS=true; shift ;;
+      -h|--help) usage; return ;;
+      *) break ;;
+    esac
+  done
+  case "$command" in
+    status) status ;;
+    adopt-source) adopt_source ;;
+    reconcile) reconcile ;;
+    guard) guard ;;
+    capture) capture capture "$@" ;;
+    install-guard) install_guard ;;
+    -h|--help|help) usage ;;
+    *) echo "Unknown command: $command" >&2; usage >&2; return 2 ;;
+  esac
+}
+
+main "$@"

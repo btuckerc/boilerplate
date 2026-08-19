@@ -71,11 +71,20 @@ This repository includes comprehensive documentation:
 
 ### For AI Agents and Advanced Users
 
-The active terminal baseline is OMP-first. Its private native configuration and shared skills live under `home/private_dot_omp/private_agent/`.
+The active terminal baseline is Codex-first, with OMP available as the shared
+terminal harness. Cross-machine configuration is maintained through one
+bidirectional Git/chezmoi baseline.
 
+- **[Decent Angl Config](./home/dot_codex/skills/decent-angl-config/SKILL.md)** - Reconcile the full baseline safely from any fleet machine
+- **[Bitwarden Secrets](./home/dot_codex/skills/bitwarden-secrets/SKILL.md)** - Consume machine-local vault secrets without putting values in Git or logs
 - **[OMP Config](./home/private_dot_omp/private_agent/skills/omp-config/SKILL.md)** - Update the shared OMP baseline managed by chezmoi
 - **[Platform Ops](./home/private_dot_omp/private_agent/skills/platform-ops/SKILL.md.tmpl)** - Inspect or change platform-local settings on Omarchy/Linux or macOS
 - **[OPNsense](./home/private_dot_omp/private_agent/skills/opnsense/SKILL.md)** - Manage the home OPNsense router over its REST API
+
+Run `decent-angl-sync adopt-source` once on an existing machine. It preserves
+the old chezmoi clone and makes `~/.local/share/chezmoi` a symlink to
+`~/src/boilerplate`, eliminating the duplicate editable source tree. Then use
+`decent-angl-sync reconcile` and install its guard.
 
 ### For Users
 

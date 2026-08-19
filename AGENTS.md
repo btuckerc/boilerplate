@@ -15,8 +15,9 @@ chezmoi + mise dotfiles. Source root is `home/` (via `.chezmoiroot`).
 - Edit the source under `home/`, then `chezmoi apply`. Do not treat live home files as the source of truth.
 - Keep credentials, `~/.omp/agent/agent.db`, OAuth tokens, sessions, caches, and machine-local state out of Git.
 - Preserve unrelated dirty worktree changes.
-- OMP is the primary terminal harness. Shared OMP changes go through the `omp-config` skill; platform/OS settings through `platform-ops`; the home OPNsense router through `opnsense`.
-- MacBook is the only OMP authoring source. Run `omp-baseline validate --strict` there before publishing; consumers use `omp-baseline pull` and the hourly guard repairs drift from published `master`.
+- Codex is primary, with OMP as the pinned cross-platform terminal harness. Shared config goes through `decent-angl-config`, OMP changes through `omp-config`, platform/OS settings through `platform-ops`, and the home router through `opnsense`.
+- Published `master` is authoritative. MacBook, Mac Mini, and T14 may author reviewed commits; use `decent-angl-sync` so dirty or diverged state is preserved instead of overwritten.
+- Keep `~/.local/share/chezmoi` linked to `~/src/boilerplate`; the two historical source paths must resolve to the same checkout.
 - On macOS with iCloud Desktop & Documents, keep active repos and build trees under `~/src`, not `~/Documents`.
 
 ## Commands

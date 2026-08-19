@@ -25,6 +25,24 @@ chezmoi manages dotfiles by maintaining a source directory (version-controlled t
 4. Writes final files to target locations
 5. Tracks state to avoid redundant operations
 
+### Fleet Authority and Drift Prevention
+
+Published `master` history is authoritative across MacBook, Mac Mini, and T14;
+any machine may author reviewed commits. There is deliberately no permanent
+machine-level source of truth.
+
+`~/src/boilerplate` is the sole editable checkout.
+`~/.local/share/chezmoi` is a compatibility symlink to that checkout, so the
+working repo and chezmoi source cannot become independent copies. On an older
+installation, `decent-angl-sync adopt-source` moves the existing clone into a
+timestamped state backup before creating the link.
+
+`decent-angl-sync reconcile` only fast-forwards. It blocks and preserves dirty,
+diverged, secret-bearing, or locally modified state. Clean local commits are
+applied and pushed; clean remote commits are fast-forwarded and applied. The
+scheduled guard excludes chezmoi scripts, while a reviewed manual rollout can
+use `decent-angl-sync reconcile --with-scripts`.
+
 ### Source Directory Structure
 
 ```
@@ -78,9 +96,10 @@ chezmoi uses a naming convention to map source files to targets:
 
 ### State Management
 
-chezmoi tracks state in `~/.local/share/chezmoi/`:
+chezmoi tracks target state internally and reads source through
+`~/.local/share/chezmoi/`, which is linked to `~/src/boilerplate`:
 
-- **Source state**: The actual files in this repository
+- **Source state**: The actual files in `~/src/boilerplate`
 - **Target state**: What's currently in your home directory
 - **Actual state**: What chezmoi thinks is applied (tracked via hashes)
 

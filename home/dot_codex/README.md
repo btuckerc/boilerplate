@@ -5,7 +5,7 @@ This directory is the shared Codex baseline managed by chezmoi.
 ## Canonical Paths
 
 - Working repo: `~/src/boilerplate/home/dot_codex/`
-- Applied source: `~/.local/share/chezmoi/home/dot_codex/`
+- Applied source: `~/.local/share/chezmoi/home/dot_codex/` (the same tree via symlink)
 - Live config: `~/.codex/`
 
 Edit the source tree, then apply targeted files with `chezmoi`.
@@ -18,6 +18,8 @@ Edit the source tree, then apply targeted files with `chezmoi`.
 
 Current shared skills:
 
+- `decent-angl-config`: reconcile and publish the complete cross-machine baseline
+- `bitwarden-secrets`: provision and consume vault-backed machine-local secrets safely
 - `codex-config`: maintain the shared Codex baseline itself
 - `platform-ops`: handle Omarchy/Linux and macOS system settings, hardware preferences, and shared-vs-local config decisions
 

@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# sync={{ include "dot_local/bin/executable_decent-angl-sync" | sha256sum }}
+# instructions={{ include "dot_codex/skills/decent-angl-config/SKILL.md" | sha256sum }}
+
+repo="$HOME/src/boilerplate"
+source_root="$HOME/.local/share/chezmoi"
+state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/decent-angl"
+marker="$state_dir/config-source-split"
+mkdir -p "$state_dir"
+
+repo_real="$(cd -P "$repo" 2>/dev/null && pwd || true)"
+source_real="$(cd -P "$source_root" 2>/dev/null && pwd || true)"
+if [[ -n "$repo_real" && "$repo_real" == "$source_real" ]]; then
+  rm -f "$marker"
+  "$HOME/.local/bin/decent-angl-sync" install-guard
+else
+  printf '%s\n' "Run 'decent-angl-sync adopt-source', then 'decent-angl-sync install-guard'." >"$marker"
+  printf 'CONFIG source split detected; preserved for explicit adoption\n' >&2
+fi

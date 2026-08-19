@@ -12,8 +12,8 @@ file	~/.omp/agent/prompts/update.md	home/private_dot_omp/private_agent/prompts/u
 file	~/.omp/agent/skills/omp-config/SKILL.md	home/private_dot_omp/private_agent/skills/omp-config/SKILL.md
 file	~/.omp/agent/skills/opnsense/SKILL.md	home/private_dot_omp/private_agent/skills/opnsense/SKILL.md
 file	~/.omp/agent/skills/platform-ops/SKILL.md	home/private_dot_omp/private_agent/skills/platform-ops/SKILL.md.tmpl
-file	~/.omp/agent/skills/bitwarden-secrets/SKILL.md	home/private_dot_omp/private_agent/skills/symlink_bitwarden-secrets.tmpl
-file	~/.omp/agent/skills/decent-angl-config/SKILL.md	home/private_dot_omp/private_agent/skills/symlink_decent-angl-config.tmpl
+link	~/.omp/agent/skills/bitwarden-secrets	home/private_dot_omp/private_agent/skills/symlink_bitwarden-secrets.tmpl
+link	~/.omp/agent/skills/decent-angl-config	home/private_dot_omp/private_agent/skills/symlink_decent-angl-config.tmpl
 file	~/.omp/agent/themes/ghostty.json	home/private_dot_omp/private_agent/themes/ghostty.json
 exec	~/.local/bin/bw-secret	home/dot_local/bin/executable_bw-secret
 exec	~/.local/bin/omp-openrouter-env	home/dot_local/bin/executable_omp-openrouter-env

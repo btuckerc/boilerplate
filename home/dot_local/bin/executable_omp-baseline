@@ -166,11 +166,22 @@ check_manifest_status() {
       failures=1
       continue
     fi
-    if [ ! -f "$live_path" ]; then
-      printf 'LIVE    missing %s\n' "$live_path" >&2
-      failures=1
-      continue
-    fi
+    case "$kind" in
+      link)
+        if [ ! -L "$live_path" ]; then
+          printf 'LIVE    missing symlink %s\n' "$live_path" >&2
+          failures=1
+          continue
+        fi
+        ;;
+      *)
+        if [ ! -f "$live_path" ]; then
+          printf 'LIVE    missing %s\n' "$live_path" >&2
+          failures=1
+          continue
+        fi
+        ;;
+    esac
 
     diff_output="$(cm diff "$live_path" 2>/dev/null || true)"
     if [ -n "$diff_output" ]; then

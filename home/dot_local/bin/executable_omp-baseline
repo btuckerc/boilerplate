@@ -455,6 +455,10 @@ install_guard() {
 <plist version="1.0"><dict>
   <key>Label</key><string>gg.angl.omp-baseline</string>
   <key>ProgramArguments</key><array><string>$HOME/.local/bin/omp-baseline</string><string>guard</string></array>
+  <key>EnvironmentVariables</key><dict>
+    <key>HOME</key><string>$HOME</string>
+    <key>PATH</key><string>$HOME/.local/bin:$HOME/.local/share/mise/shims:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
   <key>RunAtLoad</key><true/>
   <key>StartInterval</key><integer>3600</integer>
   <key>StandardOutPath</key><string>$LOG_FILE</string>

@@ -17,9 +17,12 @@ description: Update the shared Oh My Pi (OMP) baseline managed by chezmoi, inclu
 - Edit the working repo first, then sync the same files to the applied source.
 - Keep `agent.db`, OAuth tokens, sessions, caches, logs, usage state, and installation identifiers machine-local.
 - Pin `github:can1357/oh-my-pi` to an exact reviewed release. Do not combine a pinned baseline with `omp update`.
-- Prefer native OMP features and config over compatibility extensions from Pi, Codex, Claude, or OpenCode.
+- Prefer native OMP features and config over compatibility extensions from Pi, Codex, Claude, or OpenCode. Native skills live in `~/.omp/agent/skills/<name>/SKILL.md` and are gated by `skills.enablePiUser` / `skills.enablePiProject` (legacy names). Do not set those false. `disabledProviders: agents` only blocks `.agent[s]/skills`, not native OMP skills.
 - Authenticate SuperGrok per machine with `omp auth-broker login xai-oauth`; never export or print the resulting token.
+- OpenRouter is overflow only. Default roles stay `xai-oauth/grok-4.6`. Fallback is `openrouter/x-ai/grok-4.6` (not `:nitro`). Keep `providers.openrouterVariant: default`. `openrouter/x-ai/grok-4.6:nitro` is a manual model-picker option only. After unlocking Bitwarden, run `omp-openrouter-env` once per machine to write `OPENROUTER_API_KEY` into `~/.omp/agent/.env` (mode 0600) from vault item `omp-openrouter`. Never print the key, never put it in `models.yml`/`config.yml`/Git. Re-run after rotating the vault item.
 - Treat OMP model discovery as authoritative for newly released xAI model IDs before changing shared model roles.
+- Keep `models.yml` as an override-only catalog file. Use it to restore missing xAI metadata, not to invent extra providers. 17.3.4 still needs the Grok 4.6 thinking override.
+- Keep the custom `ghostty` theme in source. Tiny-model weights stay machine-local under `~/.omp/agent/cache/`.
 
 ## Workflow
 
@@ -29,7 +32,15 @@ description: Update the shared Oh My Pi (OMP) baseline managed by chezmoi, inclu
 4. Sync only changed source files into `~/.local/share/chezmoi/home/...`.
 5. Run targeted `mise x -- chezmoi apply` commands; avoid whole-tree applies when unnecessary.
 6. Run `mise install`, `mise reshim`, and verify `omp --version`.
-7. Validate config parsing, `omp auth-broker list --json`, `omp models xai-oauth --json`, and `omp setup python --check --json`.
+7. Validate config parsing, `omp auth-broker list --json`, `omp models xai-oauth --json` (confirm `grok-4.6` thinking efforts), `omp setup python --check --json`, and `omp tiny-models list --json`. Confirm `skills.enablePiUser` is true. `omp read skill://<name>` is not a valid check: that CLI path does not load session skills. Verify in a new session that the system prompt `<skills>` list includes `platform-ops`, `omp-config`, and `opnsense`.
 8. Confirm live files match the rendered source and credentials remain local.
+
+## Fleet Convergence
+
+- MacBook is the canonical author. Run `omp-baseline validate --strict` before committing and pushing its reviewed baseline.
+- Mac Mini and T14 are consumers. Run `omp-baseline pull`; never capture their live OMP files back into source.
+- `omp-baseline apply` installs the exact pin, applies only manifest-owned files, validates the runtime boundary, and installs the hourly guard.
+- The guard validates MacBook without overwriting it. On consumers it fetches published `master` over HTTPS and reconciles only the OMP subtree, leaving all unrelated worktree files untouched.
+- A failed guard persists `~/.local/state/decent-angl/omp-baseline-drift`; inspect it before treating a machine as converged.
 
 Use Tailscale SSH targets `omarchy`, `macbook`, and `admin@macmini` when inspecting or rolling out another machine.

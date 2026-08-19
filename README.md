@@ -49,7 +49,7 @@ omp models refresh
 omp usage --provider xai-oauth --redact
 ```
 
-The default, planning, vision, and task roles use `xai-oauth/grok-4.6`; lightweight and commit roles use `xai-oauth/grok-build`.
+The default model roles use `xai-oauth/grok-4.6`.
 
 ### Manual Setup
 
@@ -75,6 +75,7 @@ The active terminal baseline is OMP-first. Its private native configuration and 
 
 - **[OMP Config](./home/private_dot_omp/private_agent/skills/omp-config/SKILL.md)** - Update the shared OMP baseline managed by chezmoi
 - **[Platform Ops](./home/private_dot_omp/private_agent/skills/platform-ops/SKILL.md.tmpl)** - Inspect or change platform-local settings on Omarchy/Linux or macOS
+- **[OPNsense](./home/private_dot_omp/private_agent/skills/opnsense/SKILL.md)** - Manage the home OPNsense router over its REST API
 
 ### For Users
 

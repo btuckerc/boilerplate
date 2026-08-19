@@ -1331,11 +1331,7 @@ chezmoi execute-template < test-template.sh
 
 ## Cross-References
 
-- **AGENTS.md** - Operational procedures for AI agents
-  - Apply skill: Initial setup and re-applying
-  - Modify skill: Editing existing files
-  - Extend skill: Adding new files and tools
-  - Debug skill: Troubleshooting issues
+- **AGENTS.md** - Short durable repo rules for coding agents
 
 - **MISE.md** - mise tool manager reference
   - Tool installation patterns

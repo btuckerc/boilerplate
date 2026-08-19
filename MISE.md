@@ -118,7 +118,7 @@ node = "lts"
 go = "1.25"
 
 # CLI tools with backend prefixes
-"github:can1357/oh-my-pi" = "17.3.3"
+"github:can1357/oh-my-pi" = "17.3.4"
 "ubi:starship/starship" = "latest"
 "aqua:neovim/neovim" = "latest"
 "npm:typescript-language-server" = "latest"
@@ -1636,10 +1636,7 @@ mise doctor
 
 ## Cross-References
 
-- **AGENTS.md** - Operational procedures for AI agents
-  - Adding tools (SKILL: Extend)
-  - Troubleshooting (SKILL: Debug)
-  - Updating (SKILL: Maintain)
+- **AGENTS.md** - Short durable repo rules for coding agents
 
 - **CHEZMOI.md** - Dotfile management
   - How config files are applied

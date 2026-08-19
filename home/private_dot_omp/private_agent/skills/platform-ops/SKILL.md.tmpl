@@ -1,6 +1,6 @@
 ---
 name: platform-ops
-description: Inspect or change machine-local operating system, desktop, hardware, network, power, service, or native app settings on Omarchy/Linux or macOS. Use for requests like trackpad, keyboard, mouse, display, audio, battery, Tailscale, launch agents, or to decide whether a change belongs in shared chezmoi config or should stay local.
+description: Inspect or change machine-local operating system, desktop, hardware, network-client, power, service, or native app settings on Omarchy/Linux or macOS. Use for requests like trackpad, keyboard, mouse, display, audio, battery, Tailscale, launch agents, or to decide whether a change belongs in shared chezmoi config or should stay local. Home OPNsense/router/firewall work belongs in the `opnsense` skill, not here.
 ---
 
 # Platform Ops
@@ -14,7 +14,7 @@ Use this when the user asks to inspect or change machine settings, desktop behav
 
 - Shared and durable: edit `~/src/boilerplate/home/...`, sync the same files into `~/.local/share/chezmoi/home/...`, then apply with `chezmoi`.
 - Machine-local and OS-owned: change the live OS or app setting directly on the target host.
-- If the request targets another known host, prefer `ssh omarchy`, `ssh macbook`, or `ssh admin@macmini`.
+- Home router/firewall/DHCP/DNS on `10.77.77.1`: use the `opnsense` skill and `opnsense-api`. Do not use computer-use or raw `curl -k`.
 
 ## Shared vs Local
 
@@ -44,3 +44,9 @@ Use this when the user asks to inspect or change machine settings, desktop behav
 - Keep machine-local state out of shared agent guidance unless it is durable and portable.
 - Re-read changed settings or files after writing.
 - For shared changes, verify the rendered live file after a targeted chezmoi apply.
+
+## Home Network
+
+- The LAN gateway is OPNsense at `https://10.77.77.1`.
+- Read `skill://opnsense` and use `opnsense-api` for appliance changes.
+- Client/host network settings (macOS `networksetup`, Tailscale, DNS on this machine) stay in this skill.

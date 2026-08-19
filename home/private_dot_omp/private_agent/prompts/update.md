@@ -11,5 +11,5 @@ Update OMP for this workstation baseline. Use `$1` when provided; otherwise disc
 - Update every intentional OMP version pin in `~/src/boilerplate`.
 - Sync the changed files to the active chezmoi source and apply only the affected targets.
 - Install through mise; do not use OMP's self-updater for this pinned setup.
-- Verify the version, configuration parse, provider registry, and Python dependency check.
+- Verify the version, configuration parse, provider registry, Python dependency check, and that `omp models xai-oauth --json` still lists Grok 4.6 thinking efforts. Download `lfm2-350m` on the machine if session titles need a local model.
 - Never copy `~/.omp/agent/agent.db`, tokens, sessions, caches, or logs into Git.

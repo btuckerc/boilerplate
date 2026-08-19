@@ -1699,7 +1699,7 @@ If everything breaks:
 
 ## Cross-References
 
-- **AGENTS.md** - Detailed maintain skill procedures
+- **AGENTS.md** - Short durable repo rules for coding agents
 - **CHEZMOI.md** - Complete chezmoi reference guide
 - **MISE.md** - Comprehensive mise documentation
 - **TROUBLESHOOTING.md** - Problem-solving and recovery

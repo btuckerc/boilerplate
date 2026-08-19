@@ -1,0 +1,497 @@
+#!/usr/bin/env bash
+
+# Keep the portable OMP baseline identical across the fleet. MacBook authors
+# and publishes it; every other machine consumes the published master branch.
+
+set -euo pipefail
+
+REPO_ROOT="${OMP_BASELINE_REPO_ROOT:-$HOME/src/boilerplate}"
+CHEZMOI_ROOT="${OMP_BASELINE_CHEZMOI_ROOT:-$HOME/.local/share/chezmoi}"
+MANIFEST="${OMP_BASELINE_MANIFEST:-$HOME/.config/decent-angl/omp-baseline-manifest.tsv}"
+CANONICAL_MACHINE="macbook"
+CANONICAL_URL="${OMP_BASELINE_CANONICAL_URL:-https://github.com/btuckerc/boilerplate.git}"
+CANONICAL_REF="refs/remotes/omp-baseline/master"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/decent-angl"
+MARKER="$STATE_DIR/omp-baseline-drift"
+LOG_FILE="$STATE_DIR/omp-baseline.log"
+LOCK_DIR="$STATE_DIR/omp-baseline.lock"
+STRICT=false
+
+usage() {
+  cat <<'EOF'
+Usage: omp-baseline <status|validate|apply|pull|guard|install-guard> [--strict]
+
+  status        Compare repo, chezmoi source, rendered live files, and version.
+  validate      Run status plus coverage, secret-boundary, and OMP parser checks.
+  apply         Apply the local canonical source, install its exact pin, validate.
+  pull          On consumers, fetch MacBook's published master and reconcile OMP.
+  guard         Validate MacBook; automatically pull and repair consumer machines.
+  install-guard Install the hourly launchd/systemd user guard.
+  --strict      Also require every portable source file to be tracked by Git.
+EOF
+}
+
+cm() {
+  if command -v mise >/dev/null 2>&1; then
+    mise exec -- chezmoi "$@"
+  else
+    chezmoi "$@"
+  fi
+}
+
+expand_home() {
+  case "$1" in
+    "~") printf '%s\n' "$HOME" ;;
+    "~/"*) printf '%s/%s\n' "$HOME" "${1#\~/}" ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
+
+iter_manifest() {
+  local kind live_path repo_rel
+  while IFS=$'\t' read -r kind live_path repo_rel; do
+    [ -n "${kind:-}" ] || continue
+    case "$kind" in \#*) continue ;; esac
+    printf '%s\t%s\t%s\n' "$kind" "$(expand_home "$live_path")" "$repo_rel"
+  done <"$MANIFEST"
+}
+
+manifest_value() {
+  sed -n "s/^# $1[[:space:]]*//p" "$MANIFEST" | head -n 1
+}
+
+machine_id() {
+  local value
+  value="$(cm data --format json 2>/dev/null | jq -r '.decentangl.machine_id // empty' 2>/dev/null || true)"
+  [ -n "$value" ] && printf '%s\n' "$value" || hostname -s
+}
+
+expected_version() {
+  manifest_value omp-version
+}
+
+portable_support_paths() {
+  cat <<'EOF'
+home/dot_config/decent-angl/omp-baseline-manifest.tsv
+home/.chezmoidata/decentangl.yaml
+home/dot_config/decent-angl/opnsense.env.tmpl
+home/dot_config/mise/config.toml
+home/dot_local/bin/executable_omp-baseline
+home/dot_local/bin/executable_omp-openrouter-env
+home/dot_local/bin/executable_opnsense-api
+home/dot_local/bin/executable_opnsense-store-secret
+home/run_onchange_after_04-setup-omp.sh.tmpl
+home/run_onchange_after_05-apply-omp-baseline.sh.tmpl
+EOF
+}
+
+portable_paths() {
+  iter_manifest | while IFS=$'\t' read -r _kind _live repo_rel; do
+    printf '%s\n' "$repo_rel"
+  done
+  printf '%s\n' home/private_dot_omp/private_agent/.chezmoiignore
+  portable_support_paths
+}
+
+git_tracked() {
+  git -C "$REPO_ROOT" ls-files --error-unmatch "$1" >/dev/null 2>&1
+}
+
+check_manifest_status() {
+  local failures=0 kind live_path repo_rel repo_path mirror_path diff_output pin actual
+
+  if [ ! -r "$MANIFEST" ]; then
+    printf 'MANIFEST missing %s\n' "$MANIFEST" >&2
+    return 1
+  fi
+
+  pin="$(expected_version)"
+  actual="$(omp --version 2>/dev/null || true)"
+  if [ "$actual" = "omp/$pin" ]; then
+    printf 'VERSION %s\n' "$actual"
+  else
+    printf 'VERSION expected omp/%s, found %s\n' "$pin" "${actual:-missing}" >&2
+    failures=1
+  fi
+
+  while IFS=$'\t' read -r kind live_path repo_rel; do
+    repo_path="$REPO_ROOT/$repo_rel"
+    mirror_path="$CHEZMOI_ROOT/$repo_rel"
+
+    if [ ! -f "$repo_path" ]; then
+      printf 'REPO    missing %s\n' "$repo_rel" >&2
+      failures=1
+      continue
+    fi
+    if [ ! -f "$mirror_path" ]; then
+      printf 'SOURCE  missing %s\n' "$repo_rel" >&2
+      failures=1
+      continue
+    fi
+    if ! cmp -s "$repo_path" "$mirror_path"; then
+      printf 'SOURCE  drift %s\n' "$repo_rel" >&2
+      failures=1
+      continue
+    fi
+    if [ ! -f "$live_path" ]; then
+      printf 'LIVE    missing %s\n' "$live_path" >&2
+      failures=1
+      continue
+    fi
+
+    diff_output="$(cm diff "$live_path" 2>/dev/null || true)"
+    if [ -n "$diff_output" ]; then
+      printf 'LIVE    drift %s\n' "$live_path" >&2
+      failures=1
+    else
+      printf 'OK      %s\n' "$live_path"
+    fi
+
+    if [ "$kind" = exec ] && [ ! -x "$live_path" ]; then
+      printf 'MODE    not executable %s\n' "$live_path" >&2
+      failures=1
+    fi
+  done < <(iter_manifest)
+
+  return "$failures"
+}
+
+check_source_coverage() {
+  local failures=0 tmp_dir expected actual file rel
+  tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/omp-baseline-coverage.XXXXXX")"
+  expected="$tmp_dir/expected"
+  actual="$tmp_dir/actual"
+  trap 'rm -rf "$tmp_dir"' RETURN
+
+  iter_manifest | while IFS=$'\t' read -r _kind _live repo_rel; do
+    case "$repo_rel" in home/private_dot_omp/private_agent/*) printf '%s\n' "$repo_rel" ;; esac
+  done | sort >"$expected"
+
+  find "$REPO_ROOT/home/private_dot_omp/private_agent" -type f ! -name .chezmoiignore -print 2>/dev/null |
+    while IFS= read -r file; do
+      rel="${file#"$REPO_ROOT/"}"
+      printf '%s\n' "$rel"
+    done | sort >"$actual"
+
+  if ! diff -u "$expected" "$actual"; then
+    printf 'COVERAGE portable OMP source and manifest disagree\n' >&2
+    failures=1
+  else
+    printf 'COVERAGE complete\n'
+  fi
+
+  trap - RETURN
+  rm -rf "$tmp_dir"
+  return "$failures"
+}
+
+check_tracking_and_secrets() {
+  local failures=0 repo_rel tracked runtime_managed
+
+  while IFS= read -r repo_rel; do
+    [ -n "$repo_rel" ] || continue
+    if git_tracked "$repo_rel"; then
+      printf 'TRACKED %s\n' "$repo_rel"
+    elif [ "$STRICT" = true ]; then
+      printf 'PENDING %s\n' "$repo_rel" >&2
+      failures=1
+    else
+      printf 'PENDING %s\n' "$repo_rel"
+    fi
+  done < <(portable_paths | sort -u)
+
+  tracked="$(git -C "$REPO_ROOT" ls-files home/private_dot_omp/private_agent 2>/dev/null || true)"
+  if printf '%s\n' "$tracked" | grep -Eq '(^|/)(agent\.db|history\.db|models\.db|auth-.*\.token|secret-placeholder\.key|\.env)(-|$|\.)|/(sessions|cache|logs|state|terminal-sessions|managed-skills)/'; then
+    printf 'SECRET  runtime or credential path is tracked\n' >&2
+    printf '%s\n' "$tracked" | grep -E '(^|/)(agent\.db|history\.db|models\.db|auth-.*\.token|secret-placeholder\.key|\.env)(-|$|\.)|/(sessions|cache|logs|state|terminal-sessions|managed-skills)/' >&2
+    failures=1
+  else
+    printf 'SECRET  Git boundary clean\n'
+  fi
+
+  runtime_managed="$(cm managed 2>/dev/null | grep -E '^\.omp/agent/(agent\.db|history\.db|models\.db|auth-|secret-placeholder\.key|\.env|sessions/|cache/|logs/|state/|terminal-sessions/|managed-skills/)' || true)"
+  if [ -n "$runtime_managed" ]; then
+    printf 'SECRET  chezmoi owns runtime paths\n%s\n' "$runtime_managed" >&2
+    failures=1
+  else
+    printf 'SECRET  chezmoi boundary clean\n'
+  fi
+
+  return "$failures"
+}
+
+check_runtime_permissions() {
+  local failures=0 file mode
+  for file in "$HOME/.omp/agent/.env" "$HOME/.omp/agent"/agent.db*; do
+    [ -e "$file" ] || continue
+    if [ "$(uname -s)" = Darwin ]; then
+      mode="$(stat -f '%Lp' "$file")"
+    else
+      mode="$(stat -c '%a' "$file")"
+    fi
+    case "$mode" in
+      600) ;;
+      *) printf 'MODE    expected 600 on %s, found %s\n' "$file" "$mode" >&2; failures=1 ;;
+    esac
+  done
+  [ "$failures" -eq 0 ] && printf 'MODE    local credentials private\n'
+  return "$failures"
+}
+
+check_omp_config() {
+  local failures=0 pin source_pin setup_pin output
+  pin="$(expected_version)"
+  source_pin="$(sed -n 's/^"github:can1357\/oh-my-pi"[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$REPO_ROOT/home/dot_config/mise/config.toml" | head -n 1)"
+  setup_pin="$(sed -n 's/^OMP_VERSION="\([^"]*\)".*/\1/p' "$REPO_ROOT/home/run_onchange_after_04-setup-omp.sh.tmpl" | head -n 1)"
+  if [ "$pin" = "$source_pin" ] && [ "$pin" = "$setup_pin" ]; then
+    printf 'PIN     %s everywhere\n' "$pin"
+  else
+    printf 'PIN     manifest=%s mise=%s setup=%s\n' "$pin" "$source_pin" "$setup_pin" >&2
+    failures=1
+  fi
+
+  if output="$(omp config get modelRoles --json 2>/dev/null)" \
+    && printf '%s' "$output" | jq -e '.value.default == "xai-oauth/grok-4.6" and .value.task == "xai-oauth/grok-4.6"' >/dev/null; then
+    printf 'CONFIG  model roles parse\n'
+  else
+    printf 'CONFIG  model roles invalid\n' >&2
+    failures=1
+  fi
+
+  if output="$(omp config get skills.enablePiUser --json 2>/dev/null)" \
+    && printf '%s' "$output" | jq -e '.value == true' >/dev/null \
+    && output="$(omp config get skills.enablePiProject --json 2>/dev/null)" \
+    && printf '%s' "$output" | jq -e '.value == true' >/dev/null; then
+    printf 'CONFIG  native skills enabled\n'
+  else
+    printf 'CONFIG  native skills gate invalid\n' >&2
+    failures=1
+  fi
+
+  if omp auth-broker list --json 2>/dev/null | grep -q '"id":"xai-oauth"'; then
+    printf 'PROVIDER xai-oauth available\n'
+  else
+    printf 'PROVIDER xai-oauth missing\n' >&2
+    failures=1
+  fi
+
+  if omp models xai-oauth --json 2>/dev/null | grep -q 'grok-4.6'; then
+    printf 'MODEL   grok-4.6 discoverable\n'
+  else
+    printf 'MODEL   grok-4.6 missing\n' >&2
+    failures=1
+  fi
+
+  if omp setup python --check --json >/dev/null 2>&1; then
+    printf 'PYTHON  available\n'
+  else
+    printf 'PYTHON  unavailable\n' >&2
+    failures=1
+  fi
+
+  return "$failures"
+}
+
+validate() {
+  local failures=0
+  check_manifest_status || failures=1
+  check_source_coverage || failures=1
+  check_tracking_and_secrets || failures=1
+  check_runtime_permissions || failures=1
+  check_omp_config || failures=1
+  if git -C "$REPO_ROOT" diff --check -- $(portable_paths | sort -u) >/dev/null; then
+    printf 'FORMAT  clean\n'
+  else
+    printf 'FORMAT  whitespace errors\n' >&2
+    failures=1
+  fi
+  return "$failures"
+}
+
+apply_local() {
+  local pin kind live_path repo_rel
+  local paths=()
+  while IFS=$'\t' read -r kind live_path repo_rel; do
+    paths+=("$live_path")
+  done < <(iter_manifest)
+
+  cm apply "${paths[@]}"
+  pin="$(expected_version)"
+  mise install "github:can1357/oh-my-pi@$pin"
+  mise reshim
+  if [ "${OMP_BASELINE_IN_GUARD:-0}" != 1 ]; then
+    install_guard
+  fi
+  validate
+}
+
+sync_from_canonical_ref() {
+  local tmp_dir backup_dir repo_rel source_file destination
+  tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/omp-baseline-pull.XXXXXX")"
+  backup_dir="$STATE_DIR/backups/$(date -u +%Y%m%dT%H%M%SZ)"
+  mkdir -p "$STATE_DIR" "$backup_dir"
+  trap 'rm -rf "$tmp_dir"' RETURN
+
+  git -C "$REPO_ROOT" archive "$CANONICAL_REF" \
+    home/private_dot_omp \
+    home/.chezmoidata/decentangl.yaml \
+    home/dot_config/decent-angl/omp-baseline-manifest.tsv \
+    home/dot_config/decent-angl/opnsense.env.tmpl \
+    home/dot_config/mise/config.toml \
+    home/dot_local/bin/executable_omp-baseline \
+    home/dot_local/bin/executable_omp-openrouter-env \
+    home/dot_local/bin/executable_opnsense-api \
+    home/dot_local/bin/executable_opnsense-store-secret \
+    home/run_onchange_after_04-setup-omp.sh.tmpl \
+    home/run_onchange_after_05-apply-omp-baseline.sh.tmpl | tar -xf - -C "$tmp_dir"
+
+  if [ -d "$REPO_ROOT/home/private_dot_omp" ] \
+    && [ -n "$(rsync -ani --delete "$tmp_dir/home/private_dot_omp/" "$REPO_ROOT/home/private_dot_omp/")" ]; then
+    cp -R "$REPO_ROOT/home/private_dot_omp" "$backup_dir/"
+  fi
+  rsync -a --delete "$tmp_dir/home/private_dot_omp/" "$REPO_ROOT/home/private_dot_omp/"
+  mkdir -p "$CHEZMOI_ROOT/home/private_dot_omp"
+  rsync -a --delete "$tmp_dir/home/private_dot_omp/" "$CHEZMOI_ROOT/home/private_dot_omp/"
+
+  portable_support_paths | while IFS= read -r repo_rel; do
+    source_file="$tmp_dir/$repo_rel"
+    [ -f "$source_file" ] || continue
+    for destination in "$REPO_ROOT/$repo_rel" "$CHEZMOI_ROOT/$repo_rel"; do
+      mkdir -p "$(dirname "$destination")"
+      install -m 644 "$source_file" "$destination"
+    done
+  done
+
+  git -C "$REPO_ROOT" rev-parse "$CANONICAL_REF" >"$STATE_DIR/omp-baseline.commit"
+  trap - RETURN
+  rm -rf "$tmp_dir"
+}
+
+pull_canonical() {
+  local current_machine canonical_commit recorded_commit
+  current_machine="$(machine_id)"
+  if [ "$current_machine" = "$CANONICAL_MACHINE" ]; then
+    printf 'Refusing pull on canonical machine %s; edit and publish from its source tree.\n' "$current_machine" >&2
+    return 1
+  fi
+  git -C "$REPO_ROOT" fetch "$CANONICAL_URL" "+refs/heads/master:$CANONICAL_REF"
+  canonical_commit="$(git -C "$REPO_ROOT" rev-parse "$CANONICAL_REF")"
+  recorded_commit="$(cat "$STATE_DIR/omp-baseline.commit" 2>/dev/null || true)"
+  if [ "$recorded_commit" = "$canonical_commit" ] && validate >/dev/null 2>&1; then
+    printf 'PULL    already converged at %s\n' "$canonical_commit"
+    return 0
+  fi
+  sync_from_canonical_ref
+  cm apply "$HOME/.config/decent-angl/omp-baseline-manifest.tsv" "$HOME/.local/bin/omp-baseline"
+  exec "$HOME/.local/bin/omp-baseline" apply
+}
+
+install_guard() {
+  local os uid plist unit_dir
+  os="$(uname -s)"
+  mkdir -p "$STATE_DIR"
+  case "$os" in
+    Darwin)
+      uid="$(id -u)"
+      plist="$HOME/Library/LaunchAgents/gg.angl.omp-baseline.plist"
+      mkdir -p "$(dirname "$plist")"
+      cat >"$plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>gg.angl.omp-baseline</string>
+  <key>ProgramArguments</key><array><string>$HOME/.local/bin/omp-baseline</string><string>guard</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>StartInterval</key><integer>3600</integer>
+  <key>StandardOutPath</key><string>$LOG_FILE</string>
+  <key>StandardErrorPath</key><string>$LOG_FILE</string>
+</dict></plist>
+EOF
+      chmod 600 "$plist"
+      launchctl bootout "gui/$uid/gg.angl.omp-baseline" >/dev/null 2>&1 || true
+      launchctl bootstrap "gui/$uid" "$plist" >/dev/null 2>&1 || \
+        printf 'GUARD   launchd will load at the next login\n'
+      ;;
+    Linux)
+      unit_dir="$HOME/.config/systemd/user"
+      mkdir -p "$unit_dir"
+      cat >"$unit_dir/omp-baseline-guard.service" <<'EOF'
+[Unit]
+Description=Validate and reconcile the shared OMP baseline
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/omp-baseline guard
+EOF
+      cat >"$unit_dir/omp-baseline-guard.timer" <<'EOF'
+[Unit]
+Description=Hourly OMP baseline drift guard
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+      systemctl --user daemon-reload
+      systemctl --user enable --now omp-baseline-guard.timer >/dev/null
+      ;;
+  esac
+  printf 'GUARD   installed for %s\n' "$os"
+}
+
+guard() {
+  local current_machine status output
+  mkdir -p "$STATE_DIR"
+  if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+    printf 'GUARD   another run is active\n'
+    return 0
+  fi
+  trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
+  current_machine="$(machine_id)"
+
+  if [ "$current_machine" = "$CANONICAL_MACHINE" ]; then
+    if output="$(validate 2>&1)"; then status=0; else status=$?; fi
+  else
+    if output="$(OMP_BASELINE_IN_GUARD=1 pull_canonical 2>&1)"; then status=0; else status=$?; fi
+  fi
+
+  printf '%s %s\n%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$current_machine" "$output" >>"$LOG_FILE"
+  if [ "$status" -eq 0 ]; then
+    rm -f "$MARKER"
+    logger -t omp-baseline "OMP baseline guard passed on $current_machine" >/dev/null 2>&1 || true
+  else
+    printf '%s\n' "$output" >"$MARKER"
+    logger -t omp-baseline -p user.err "OMP baseline drift on $current_machine; see $MARKER" >/dev/null 2>&1 || true
+  fi
+  return "$status"
+}
+
+main() {
+  local command="${1:-status}"
+  [ "$#" -gt 0 ] && shift
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --strict) STRICT=true ;;
+      -h|--help) usage; return 0 ;;
+      *) printf 'Unknown option: %s\n' "$1" >&2; usage >&2; return 1 ;;
+    esac
+    shift
+  done
+
+  case "$command" in
+    status) check_manifest_status ;;
+    validate) validate ;;
+    apply) apply_local ;;
+    pull) pull_canonical ;;
+    guard) guard ;;
+    install-guard) install_guard ;;
+    -h|--help) usage ;;
+    *) printf 'Unknown command: %s\n' "$command" >&2; usage >&2; return 1 ;;
+  esac
+}
+
+main "$@"

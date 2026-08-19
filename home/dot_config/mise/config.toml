@@ -7,7 +7,7 @@ node = "24.14.1"
 go = "1.25.9"
 
 # Pin the primary cross-platform coding harness so every machine stays aligned.
-"github:can1357/oh-my-pi" = "17.3.3"
+"github:can1357/oh-my-pi" = "17.3.4"
 
 # CLI tools (fast binary downloads)
 "ubi:twpayne/chezmoi" = "2.66.0"

@@ -79,13 +79,21 @@ git_dirty() {
 }
 
 live_drift() {
-  local output
+  local output meaningful
   # Scheduled convergence deliberately excludes scripts, so unapplied
   # run_once/run_onchange state is not live-file drift.
   if ! output="$(cm diff --exclude scripts 2>/dev/null)"; then
     return 0
   fi
-  [[ -n "$output" ]]
+  # OMP intentionally hardens some managed directories to 0700 even though
+  # chezmoi's directory target is 0755. Ignore only that more-restrictive
+  # directory-mode delta; content and every other mode change remain drift.
+  meaningful="$(printf '%s\n' "$output" | sed \
+    -e '/^diff --git /d' \
+    -e '/^old mode 40700$/d' \
+    -e '/^new mode 40755$/d' \
+    -e '/^[[:space:]]*$/d')"
+  [[ -n "$meaningful" ]]
 }
 
 ahead_behind() {

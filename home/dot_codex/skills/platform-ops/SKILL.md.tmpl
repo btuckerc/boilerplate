@@ -49,6 +49,7 @@ Use this when the user asks to inspect or change machine settings, desktop behav
   - never export `OMARCHY_PATH` from chezmoi or prepend `~/.local/share/omarchy/bin`; stock login/UWSM bootstrap selects package or dev-link mode
   - run `omarchy-roaming-sync preflight` before `sync` or `apply`; those commands abort when the installed major and manifest generation disagree
   - run `omarchy-roaming-sync validate` afterward to check live/source/mirror sync, forbidden legacy ownership, syntax, UWSM state, Hyprland parser health, and shell layers from either a GUI terminal or TTY
+  - validation also rejects unsafe ownership or writable modes under `/etc/ssh/ssh_config*`; use `omarchy-roaming-sync repair-ssh` for the exact passwordless-sudo repair after a package transition
   - run `omarchy-roaming-sync validate --strict` before commit/publish so new source files cannot be omitted from Git
   - keep the managed post-update compatibility hook enabled; it records a durable state marker when a future Omarchy release violates the supported generation contract
   - `~/.config/hypr/hyprland.lua`, `~/.config/hypr/monitors.lua`, `~/.config/omarchy/shell.json`, and `~/.local/state/omarchy/current/*` stay outside the portable manifest unless intentionally promoted

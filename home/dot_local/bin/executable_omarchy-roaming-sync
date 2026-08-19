@@ -11,7 +11,7 @@ STRICT_TRACKING=false
 
 usage() {
   cat <<'EOF'
-Usage: omarchy-roaming-sync <status|sync|apply|list|preflight|validate> [--apply]
+Usage: omarchy-roaming-sync <status|sync|apply|list|preflight|validate|repair-ssh> [--apply]
 
 Commands:
   status   Show whether the manifest-managed Omarchy files are present and in sync.
@@ -20,6 +20,7 @@ Commands:
   list     Print the manifest entries.
   preflight Refuse unsupported Omarchy generations and unsafe ownership before writes.
   validate Run preflight plus sync, syntax, environment, Hyprland, and shell checks.
+  repair-ssh Restore secure root ownership/modes on OpenSSH client config.
 
 Options:
   --apply  After sync, run `chezmoi apply` for the manifest-managed live paths.
@@ -232,6 +233,47 @@ compatibility_check() {
   return "${failures}"
 }
 
+ssh_client_config_paths() {
+  printf '%s\n' /etc/ssh /etc/ssh/ssh_config /etc/ssh/ssh_config.d
+  find /etc/ssh/ssh_config.d -maxdepth 1 -type f -print 2>/dev/null | sort
+}
+
+ssh_client_config_check() {
+  local failures=0 path uid mode
+  if [[ "$(uname -s)" != Linux ]]; then
+    printf 'SSHCFG  skipped\n'
+    return 0
+  fi
+  while IFS= read -r path; do
+    [[ -e "$path" ]] || continue
+    uid="$(stat -c '%u' "$path" 2>/dev/null || printf unknown)"
+    mode="$(stat -c '%a' "$path" 2>/dev/null || printf 777)"
+    if [[ "$uid" != 0 ]] || (( (8#${mode} & 8#022) != 0 )); then
+      printf 'SSHCFG  unsafe owner/mode %s:%s %s\n' "$uid" "$mode" "$path" >&2
+      failures=1
+    fi
+  done < <(ssh_client_config_paths)
+  if (( failures == 0 )); then
+    printf 'SSHCFG  secure\n'
+  else
+    printf 'SSHCFG  run: omarchy-roaming-sync repair-ssh\n' >&2
+  fi
+  return "$failures"
+}
+
+repair_ssh_client_config() {
+  local -a paths=()
+  local path
+  [[ "$(uname -s)" == Linux ]] || { printf 'SSHCFG  skipped\n'; return 0; }
+  while IFS= read -r path; do
+    [[ -e "$path" ]] && paths+=("$path")
+  done < <(ssh_client_config_paths)
+  ((${#paths[@]} > 0)) || { echo "OpenSSH client config is missing." >&2; return 1; }
+  sudo -n chown root:root "${paths[@]}"
+  sudo -n chmod go-w "${paths[@]}"
+  ssh_client_config_check
+}
+
 syntax_check_exec() {
   local repo_path="$1"
   local shebang
@@ -316,6 +358,7 @@ validate_manifest() {
   local layers
 
   compatibility_check || failures=1
+  ssh_client_config_check || failures=1
   status_manifest || failures=1
 
   while IFS=$'\t' read -r kind _live_path repo_rel; do
@@ -526,6 +569,7 @@ main() {
     list) list_manifest ;;
     preflight) compatibility_check ;;
     validate) validate_manifest ;;
+    repair-ssh) repair_ssh_client_config ;;
     -h | --help)
       usage
       ;;

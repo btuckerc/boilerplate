@@ -15,11 +15,17 @@ mkdir -p "$state_dir"
 if [[ ! -x "$validator" ]]; then
   output="Missing executable validator: $validator"
   status=127
-elif output="$($validator validate 2>&1)"; then
+else
+  # Omarchy/package transitions must not leave OpenSSH rejecting its global
+  # client config. This is idempotent and requires configured passwordless sudo.
+  "$validator" repair-ssh >/dev/null 2>&1 || true
+fi
+
+if [[ -x "$validator" ]] && output="$($validator validate 2>&1)"; then
   rm -f "$marker"
   logger -t decent-angl-omarchy "Post-update compatibility validation passed" >/dev/null 2>&1 || true
   exit 0
-else
+elif [[ -x "$validator" ]]; then
   status=$?
 fi
 

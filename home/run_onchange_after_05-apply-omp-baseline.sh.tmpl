@@ -11,5 +11,5 @@ set -euo pipefail
 # skills={{ include "dot_local/bin/executable_decent-angl-skills" | sha256sum }}
 
 if [ -x "$HOME/.local/bin/omp-baseline" ]; then
-  "$HOME/.local/bin/omp-baseline" apply
+  OMP_BASELINE_IN_CHEZMOI=1 "$HOME/.local/bin/omp-baseline" apply
 fi

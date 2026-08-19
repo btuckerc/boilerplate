@@ -420,14 +420,18 @@ apply_local() {
   done < <(iter_manifest)
 
   install -d -m 700 "$HOME/.omp" "$HOME/.omp/agent"
-  cm apply --force "${paths[@]}"
+  if [ "${OMP_BASELINE_IN_CHEZMOI:-0}" != 1 ]; then
+    cm apply --force "${paths[@]}"
+  fi
   skill_manager="$HOME/.local/bin/decent-angl-skills"
   [ -x "$skill_manager" ] || skill_manager="$REPO_ROOT/home/dot_local/bin/executable_decent-angl-skills"
   DECENT_ANGL_REPO_ROOT="$REPO_ROOT" bash "$skill_manager" sync
   quarantine_legacy_wrapper
   pin="$(expected_version)"
-  mise install "github:can1357/oh-my-pi@$pin"
-  mise reshim
+  if [ "$(omp --version 2>/dev/null || true)" != "omp/$pin" ]; then
+    mise install "github:can1357/oh-my-pi@$pin"
+    mise reshim
+  fi
   if [ "${OMP_BASELINE_IN_GUARD:-0}" != 1 ]; then
     install_guard
   fi

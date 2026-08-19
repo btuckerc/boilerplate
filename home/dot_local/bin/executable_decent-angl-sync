@@ -17,9 +17,10 @@ WITH_SCRIPTS=false
 
 usage() {
   cat <<'EOF'
-Usage: decent-angl-sync <status|adopt-source|reconcile|guard|capture|install-guard> [options]
+Usage: decent-angl-sync <status|validate|adopt-source|reconcile|guard|capture|install-guard> [options]
 
   status                 Report Git, source-link, live, and guard state.
+  validate               Check secret and shared-skill source boundaries.
   adopt-source           Preserve the old chezmoi clone and link it to the repo.
   reconcile              Fetch, fast-forward/apply, or publish clean local commits.
   guard                  Run conflict-safe reconciliation for the scheduled job.
@@ -94,16 +95,22 @@ ahead_behind() {
 
 secret_boundary() {
   local forbidden token_hits
-  forbidden="$(git -C "$REPO_ROOT" ls-files | rg '(^|/)(auth\.json|auth-broker\.token|auth-gateway\.token|agent\.db(-shm|-wal)?|history\.db(-shm|-wal)?|models\.db(-shm|-wal)?|\.env)($|/)|(^|/)(sessions|logs)/' || true)"
+  forbidden="$(git -C "$REPO_ROOT" ls-files --cached --others --exclude-standard | rg '(^|/)(auth\.json|auth-broker\.token|auth-gateway\.token|agent\.db(-shm|-wal)?|history\.db(-shm|-wal)?|models\.db(-shm|-wal)?|\.env)($|/)|(^|/)(sessions|logs)/' || true)"
   if [[ -n "$forbidden" ]]; then
     printf 'Refusing to publish machine-local paths:\n%s\n' "$forbidden" >&2
     return 1
   fi
-  token_hits="$(git -C "$REPO_ROOT" grep -I -n -E '(BEGIN (RSA |OPENSSH )?PRIVATE KEY|ghp_[A-Za-z0-9]{30,}|sk-or-v1-[A-Za-z0-9_-]{30,}|xox[baprs]-[A-Za-z0-9-]{20,})' HEAD -- . ':(exclude)*.lock' 2>/dev/null || true)"
+  token_hits="$(git -C "$REPO_ROOT" grep --untracked -I -n -E '(BEGIN (RSA |OPENSSH )?PRIVATE KEY|ghp_[A-Za-z0-9]{30,}|sk-or-v1-[A-Za-z0-9_-]{30,}|xox[baprs]-[A-Za-z0-9-]{20,})' -- . ':(exclude)*.lock' 2>/dev/null || true)"
   if [[ -n "$token_hits" ]]; then
     echo "Refusing to publish content matching a credential signature." >&2
     return 1
   fi
+}
+
+skill_audit() {
+  local audit="$REPO_ROOT/home/dot_local/bin/executable_decent-angl-skill-audit"
+  [[ -f "$audit" ]] || { echo "Missing shared skill audit: $audit" >&2; return 1; }
+  DECENT_ANGL_REPO_ROOT="$REPO_ROOT" bash "$audit"
 }
 
 write_marker() {
@@ -116,7 +123,7 @@ clear_marker() {
 }
 
 status() {
-  local branch dirty source_state drift counts ahead behind marker_state
+  local branch dirty source_state drift counts ahead behind marker_state skill_state
   require_repo
   branch="$(git -C "$REPO_ROOT" branch --show-current)"
   if git_dirty; then dirty=yes; else dirty=no; fi
@@ -130,8 +137,17 @@ status() {
     ahead=unknown; behind=unknown
   fi
   if [[ -s "$MARKER" ]]; then marker_state=present; else marker_state=clear; fi
-  printf 'repo=%s\nbranch=%s\ndirty=%s\nsource=%s\nlive_drift=%s\nahead=%s\nbehind=%s\nmarker=%s\n' \
-    "$REPO_ROOT" "$branch" "$dirty" "$source_state" "$drift" "$ahead" "$behind" "$marker_state"
+  if skill_audit >/dev/null 2>&1; then skill_state=ok; else skill_state=invalid; fi
+  printf 'repo=%s\nbranch=%s\ndirty=%s\nsource=%s\nlive_drift=%s\nahead=%s\nbehind=%s\nmarker=%s\nskills=%s\n' \
+    "$REPO_ROOT" "$branch" "$dirty" "$source_state" "$drift" "$ahead" "$behind" "$marker_state" "$skill_state"
+}
+
+validate() {
+  require_repo
+  secret_boundary
+  skill_audit
+  git -C "$REPO_ROOT" diff --check
+  printf 'CONFIG  source boundaries valid\n'
 }
 
 adopt_source() {
@@ -201,6 +217,7 @@ reconcile() {
   fi
 
   secret_boundary
+  skill_audit
   git -C "$REPO_ROOT" diff --check "$REMOTE/$BRANCH..HEAD"
   apply_tree
 
@@ -330,6 +347,7 @@ main() {
   done
   case "$command" in
     status) status ;;
+    validate) validate ;;
     adopt-source) adopt_source ;;
     reconcile) reconcile ;;
     guard) guard ;;

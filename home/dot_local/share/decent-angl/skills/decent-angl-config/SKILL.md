@@ -1,0 +1,46 @@
+---
+name: decent-angl-config
+description: Reconcile the shared chezmoi baseline across MacBook, Mac Mini, and T14. Use for config drift, publishing from any machine, capturing live changes, fleet rollout, or convergence checks.
+---
+
+# Decent Angl config
+
+Published `master` is authoritative. Any fleet machine may author a reviewed
+commit; no mutable live filesystem silently wins.
+
+## Invariants
+
+- The only editable checkout is `~/src/boilerplate`.
+- `~/.local/share/chezmoi` resolves to that checkout. `adopt-source` preserves
+  and replaces an old independent source tree.
+- Dirty state and diverged history block reconciliation. Never auto-commit,
+  reset, or overwrite either side.
+- Clean commits flow both ways: remote commits fast-forward and apply; local
+  commits apply and publish.
+- Scheduled applies exclude scripts. Use `reconcile --with-scripts` only for a
+  reviewed change that needs script effects.
+- Secrets and runtime state stay outside Git. Use `bitwarden-secrets`.
+
+## Workflow
+
+Start with `decent-angl-sync status`. If `source=split`, run `adopt-source`. If
+`dirty=yes`, identify the owner of every change before altering it.
+
+Capture an intentional live-file change with:
+
+```sh
+decent-angl-sync capture ~/.config/example/file
+```
+
+Review the source diff and platform scope, validate, commit intentionally, then
+run `decent-angl-sync reconcile`. Never capture secrets or runtime state.
+
+For source edits, change `~/src/boilerplate`, validate every affected platform,
+commit, and reconcile. Reconciliation fails closed on unsafe Git, secret, skill,
+or live-file state.
+
+Omarchy changes must pass `omarchy-roaming-sync validate --strict`; OMP changes
+must pass `omp-baseline validate --strict`.
+
+Install the scheduled guard with `decent-angl-sync install-guard`. A
+`~/.local/state/decent-angl/config-drift` marker requires review.

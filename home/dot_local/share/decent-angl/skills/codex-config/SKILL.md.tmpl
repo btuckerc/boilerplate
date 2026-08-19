@@ -1,0 +1,32 @@
+---
+name: codex-config
+description: Maintain the shared Codex baseline in chezmoi. Use when changing Codex configuration, AGENTS.md, skills, bootstrap rules, or cross-machine Codex behavior.
+---
+
+# Codex config
+
+## Canonical layout
+
+- Source: `~/src/boilerplate/home/`
+- Live files: `{{ .decentangl.defaults.codex_home }}/`
+
+## Current target
+
+{{ template "codex/current-target.md.tmpl" . }}
+
+## Invariants
+
+- Edit the canonical checkout, not `{{ .decentangl.defaults.codex_home }}/`.
+- Keep auth, history, caches, sqlite files, logs, and project trust local.
+- Keep `config.toml` portable. Preserve runtime-managed plugins, marketplaces,
+  notifications, project trust, and local model preferences.
+- Put durable workflow rules in `AGENTS.md`.
+- Render platform or host differences with templates. Move repeated mechanics
+  into manifest-driven scripts and leave command pointers in agent guidance.
+
+## Workflow
+
+1. Run `decent-angl-sync status`, then edit `~/src/boilerplate/home/...`.
+2. Apply targeted files with `chezmoi apply`.
+3. Verify rendered files and `codex --version`, then publish through
+   `decent-angl-sync reconcile`.

@@ -1,8 +1,9 @@
 # Global Agent Instructions
 
-Shared OMP state is managed with chezmoi.
+Shared agent state is managed with chezmoi.
 
-- Edit shared OMP files in `~/src/boilerplate/home/private_dot_omp/` or `{{ .decentangl.defaults.chezmoi_source }}/private_dot_omp`, then apply with `chezmoi`.
+- Edit shared config in `~/src/boilerplate/home/`, then apply with `chezmoi`.
+- Shared skills live in `home/dot_local/share/decent-angl/skills/`; OMP and Codex link to that same tree.
 - Keep `~/.omp/agent/agent.db`, sessions, caches, logs, usage state, and provider credentials local.
 - Use `mise` for `omp`, `bw`, `restic`, and `chezmoi`. Use the native package manager for OS packages.
 - OMP is the primary coding harness across macOS and Omarchy/Linux. Its release is pinned in mise; update the shared pin deliberately instead of running `omp update`.
@@ -10,7 +11,7 @@ Shared OMP state is managed with chezmoi.
 - OpenRouter is SuperGrok overflow only. Inject `OPENROUTER_API_KEY` locally with `omp-openrouter-env` after unlocking Bitwarden (`omp-openrouter`); never put the key in Git or chezmoi.
 - Prefer OMP's built-in tools, LSP, diffs, compaction, image handling, approvals, and subagents before adding extensions.
 - On macOS with iCloud Desktop & Documents, keep active repos, build trees, virtualenvs, and agent workspaces under `~/src`, not `~/Documents`.
-- Prefer Tailscale SSH targets for remote access: `omarchy`, `macbook`, and `admin@macmini`.
+- Prefer Tailscale hostnames for remote access: `t14`, `btcaw`, `macbook`, `macmini`.
 - For machine settings, native app preferences, or platform-specific operations, use the shared `platform-ops` skill.
 - For the home OPNsense router at `10.77.77.1`, use the `opnsense` skill and `opnsense-api`. Keep API secrets in Bitwarden item `opnsense-api`; never Git or chezmoi.
 - Do not add marketplace plugins, extra MCP servers, or foreign-harness skills unless a task needs them.

@@ -1,0 +1,3 @@
+interface:
+  display_name: "OPNsense"
+  short_description: "Manage the home router through its REST API"

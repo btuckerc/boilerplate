@@ -1,0 +1,30 @@
+---
+name: platform-ops
+description: Inspect or change machine-local OS, desktop, hardware, network, power, service, or native app settings. Use for Linux/macOS operations or deciding whether state belongs in shared chezmoi config.
+---
+
+# Platform ops
+
+## Current target
+
+{{ template "codex/current-target.md.tmpl" . }}
+
+## Ownership
+
+- Shared and durable: edit `~/src/boilerplate/home/...`, apply, and reconcile.
+- Machine-local or OS-owned: change the live setting on the target host.
+- Home router, firewall, DHCP, or DNS appliance state: use `opnsense`.
+- Inspect where a value lives before deciding ownership.
+
+Common shared state includes shells, agent harnesses, terminals, Omarchy desktop
+overrides, and shipped user services. Input speed, display scaling, battery
+policy, Bluetooth pairing, and app login state are normally machine-local.
+
+For Omarchy/Linux work, read [references/omarchy.md](references/omarchy.md).
+For macOS work, read [references/macos.md](references/macos.md).
+
+## Completion
+
+Re-read each changed setting or file. For shared changes, verify rendered live
+output after a targeted apply. Report any required logout, reconnect, reload,
+or restart.

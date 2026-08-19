@@ -344,7 +344,7 @@ apply_local() {
   done < <(iter_manifest)
 
   install -d -m 700 "$HOME/.omp" "$HOME/.omp/agent"
-  cm apply "${paths[@]}"
+  cm apply --force "${paths[@]}"
   quarantine_legacy_wrapper
   pin="$(expected_version)"
   mise install "github:can1357/oh-my-pi@$pin"
@@ -412,7 +412,7 @@ pull_canonical() {
     return 0
   fi
   sync_from_canonical_ref
-  cm apply "$HOME/.config/decent-angl/omp-baseline-manifest.tsv" "$HOME/.local/bin/omp-baseline"
+  cm apply --force "$HOME/.config/decent-angl/omp-baseline-manifest.tsv" "$HOME/.local/bin/omp-baseline"
   exec "$HOME/.local/bin/omp-baseline" apply
 }
 

@@ -288,8 +288,10 @@ check_omp_config() {
 
   if omp models xai-oauth --json 2>/dev/null | grep -q 'grok-4.6'; then
     printf 'MODEL   grok-4.6 discoverable\n'
+  elif grep -q 'grok-4.6' "$HOME/.omp/agent/models.yml" 2>/dev/null; then
+    printf 'MODEL   grok-4.6 configured; discovery awaits machine-local OAuth\n'
   else
-    printf 'MODEL   grok-4.6 missing\n' >&2
+    printf 'MODEL   grok-4.6 absent from discovery and portable catalog\n' >&2
     failures=1
   fi
 

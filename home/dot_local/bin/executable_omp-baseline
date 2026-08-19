@@ -239,7 +239,7 @@ check_runtime_permissions() {
 }
 
 check_omp_config() {
-  local failures=0 pin source_pin setup_pin output
+  local failures=0 pin source_pin setup_pin output omp_path
   pin="$(expected_version)"
   source_pin="$(sed -n 's/^"github:can1357\/oh-my-pi"[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$REPO_ROOT/home/dot_config/mise/config.toml" | head -n 1)"
   setup_pin="$(sed -n 's/^OMP_VERSION="\([^"]*\)".*/\1/p' "$REPO_ROOT/home/run_onchange_after_04-setup-omp.sh.tmpl" | head -n 1)"
@@ -249,6 +249,17 @@ check_omp_config() {
     printf 'PIN     manifest=%s mise=%s setup=%s\n' "$pin" "$source_pin" "$setup_pin" >&2
     failures=1
   fi
+
+  omp_path="$(command -v omp 2>/dev/null || true)"
+  case "$omp_path" in
+    "$HOME/.local/share/mise/shims/omp"|"$HOME/.local/share/mise/installs/"*/omp)
+      printf 'BINARY  mise-managed %s\n' "$omp_path"
+      ;;
+    *)
+      printf 'BINARY  unmanaged or shadowed %s\n' "${omp_path:-missing}" >&2
+      failures=1
+      ;;
+  esac
 
   if output="$(omp config get modelRoles --json 2>/dev/null)" \
     && printf '%s' "$output" | jq -e '.value.default == "xai-oauth/grok-4.6" and .value.task == "xai-oauth/grok-4.6"' >/dev/null; then
@@ -292,6 +303,19 @@ check_omp_config() {
   return "$failures"
 }
 
+quarantine_legacy_wrapper() {
+  local wrapper backup
+  wrapper="$HOME/.local/bin/omp"
+  [ -f "$wrapper" ] || return 0
+  if grep -Fq 'mise use -g' "$wrapper" && grep -Fq 'oh-my-pi' "$wrapper"; then
+    mkdir -p "$STATE_DIR/backups"
+    backup="$STATE_DIR/backups/omp-legacy-wrapper.$(date -u +%Y%m%dT%H%M%SZ)"
+    mv "$wrapper" "$backup"
+    printf 'BINARY  quarantined mutable wrapper at %s\n' "$backup"
+    hash -r
+  fi
+}
+
 validate() {
   local failures=0
   check_manifest_status || failures=1
@@ -316,6 +340,7 @@ apply_local() {
   done < <(iter_manifest)
 
   cm apply "${paths[@]}"
+  quarantine_legacy_wrapper
   pin="$(expected_version)"
   mise install "github:can1357/oh-my-pi@$pin"
   mise reshim

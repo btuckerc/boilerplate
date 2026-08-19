@@ -3,7 +3,7 @@
 Shared agent state is managed with chezmoi.
 
 - Edit shared config in `~/src/boilerplate/home/`, then apply with `chezmoi`.
-- Shared skills live in `home/dot_local/share/decent-angl/skills/`; OMP and Codex link to that same tree.
+- Shared skills are OMP-native in `home/dot_local/share/decent-angl/skills/`; `decent-angl-skills` generates other harness projections.
 - Keep `~/.omp/agent/agent.db`, sessions, caches, logs, usage state, and provider credentials local.
 - Use `mise` for `omp`, `bw`, `restic`, and `chezmoi`. Use the native package manager for OS packages.
 - OMP is the primary coding harness across macOS and Omarchy/Linux. Its release is pinned in mise; update the shared pin deliberately instead of running `omp update`.

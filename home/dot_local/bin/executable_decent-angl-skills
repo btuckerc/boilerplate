@@ -1,0 +1,424 @@
+#!/usr/bin/env bash
+
+# Discover OMP-native shared skills and project them safely into each harness.
+
+set -euo pipefail
+
+REPO_ROOT="${DECENT_ANGL_REPO_ROOT:-$HOME/src/boilerplate}"
+SOURCE_ROOT="${DECENT_ANGL_SKILL_SOURCE_ROOT:-$REPO_ROOT/home/dot_local/share/decent-angl/skills}"
+CANONICAL_ROOT="${DECENT_ANGL_SKILL_ROOT:-$HOME/.local/share/decent-angl/skills}"
+RENDER_ROOT="${DECENT_ANGL_SKILL_RENDER_ROOT:-$HOME/.local/share/decent-angl/rendered-skills}"
+CODEX_ROOT="${DECENT_ANGL_CODEX_SKILL_ROOT:-$HOME/.codex/skills}"
+OMP_ROOT="${DECENT_ANGL_OMP_SKILL_ROOT:-$HOME/.omp/agent/skills}"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/decent-angl"
+STATE_FILE="$STATE_DIR/shared-skills.tsv"
+failures=0
+
+usage() {
+  cat <<'EOF'
+Usage: decent-angl-skills <audit-source|sync|validate|list|add|update> [arguments]
+
+  audit-source       Validate every canonical source directory and provenance.
+  sync               Render harness adapters and converge owned discovery links.
+  validate           Audit source plus live projections without changing them.
+  list               Show discovered skills and invocation policy.
+  add DIR [UPSTREAM] Import one staged skill; review and commit the resulting diff.
+  update DIR UPSTREAM Replace a vendored skill with validation and rollback.
+
+Canonical skills use OMP/Claude frontmatter. Codex projections are generated.
+Never edit rendered-skills or harness discovery links directly.
+EOF
+}
+
+checksum() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  else
+    shasum -a 256 "$1" | awk '{print $1}'
+  fi
+}
+
+fail() {
+  printf 'SKILL  error %s\n' "$*" >&2
+  failures=$((failures + 1))
+}
+
+skill_file() {
+  local directory="$1"
+  if [ -f "$directory/SKILL.md" ] && [ ! -f "$directory/SKILL.md.tmpl" ]; then
+    printf '%s\n' "$directory/SKILL.md"
+  elif [ -f "$directory/SKILL.md.tmpl" ] && [ ! -f "$directory/SKILL.md" ]; then
+    printf '%s\n' "$directory/SKILL.md.tmpl"
+  else
+    return 1
+  fi
+}
+
+frontmatter_value() {
+  local file="$1" key="$2"
+  awk -v key="$key" '
+    NR == 1 && $0 == "---" { in_yaml=1; next }
+    in_yaml && $0 == "---" { exit }
+    in_yaml && index($0, key ":") == 1 {
+      sub("^[^:]+:[[:space:]]*", ""); print; exit
+    }
+  ' "$file"
+}
+
+is_explicit() {
+  [ "$(frontmatter_value "$1" disable-model-invocation)" = true ]
+}
+
+validate_skill() {
+  local directory="$1" expected_name file name description closed keys key count reference relative
+  expected_name="$(basename "$directory")"
+  if ! file="$(skill_file "$directory")"; then
+    fail "$expected_name: require exactly one SKILL.md or SKILL.md.tmpl"
+    return
+  fi
+  [ "$(sed -n '1p' "$file")" = --- ] || fail "$expected_name: frontmatter must start on line 1"
+  closed="$(awk 'NR > 1 && $0 == "---" { print NR; exit }' "$file")"
+  [ -n "$closed" ] || { fail "$expected_name: frontmatter is not closed"; return; }
+
+  name="$(frontmatter_value "$file" name)"
+  description="$(frontmatter_value "$file" description)"
+  [ "$name" = "$expected_name" ] || fail "$expected_name: folder and frontmatter name differ"
+  printf '%s' "$name" | grep -Eq '^[a-z0-9]+(-[a-z0-9]+)*$' || fail "$expected_name: name must be lowercase hyphen-case"
+  [ "${#name}" -le 64 ] || fail "$expected_name: name exceeds 64 characters"
+  [ -n "$description" ] || fail "$expected_name: description must be one non-empty line"
+  [ "${#description}" -le 1024 ] || fail "$expected_name: description exceeds 1024 characters"
+
+  keys="$(awk 'NR == 1 { next } $0 == "---" { exit } /^[A-Za-z0-9-]+:/ { sub(/:.*/, ""); print }' "$file")"
+  while IFS= read -r key; do
+    case "$key" in
+      name|description|argument-hint|disable-model-invocation|'') ;;
+      *) fail "$expected_name: unsupported canonical frontmatter key '$key'" ;;
+    esac
+  done <<EOF
+$keys
+EOF
+  for key in name description; do
+    count="$(printf '%s\n' "$keys" | grep -cx "$key" || true)"
+    [ "$count" -eq 1 ] || fail "$expected_name: $key must appear once"
+  done
+  count="$(printf '%s\n' "$keys" | grep -cx disable-model-invocation || true)"
+  if [ "$count" -gt 0 ] && ! is_explicit "$file"; then
+    fail "$expected_name: disable-model-invocation only supports true"
+  fi
+  [ "$count" -le 1 ] || fail "$expected_name: disable-model-invocation appears more than once"
+
+  if [ -d "$directory/agents" ]; then
+    fail "$expected_name: canonical source contains harness-specific agents/ metadata"
+  fi
+  if [ -d "$directory/references" ]; then
+    while IFS= read -r reference; do
+      relative="${reference#"$directory/"}"
+      grep -Fq "($relative)" "$file" || fail "$expected_name: undisclosed reference '$relative'"
+    done < <(find "$directory/references" -type f | sort)
+  fi
+  validate_provenance "$directory" "$file"
+}
+
+validate_provenance() {
+  local directory="$1" file="$2" metadata expected actual license expected_license
+  metadata="$directory/provenance.tsv"
+  [ -f "$metadata" ] || return 0
+  expected="$(awk -F '\t' '$1 == "skill-sha256" { print $2 }' "$metadata")"
+  [ -n "$(awk -F '\t' '$1 == "upstream" { print $2 }' "$metadata")" ] || fail "$(basename "$directory"): provenance lacks upstream"
+  [ -n "$expected" ] || { fail "$(basename "$directory"): provenance lacks skill-sha256"; return; }
+  actual="$(checksum "$file")"
+  [ "$actual" = "$expected" ] || fail "$(basename "$directory"): vendored skill differs from pinned upstream"
+  license="$directory/LICENSE"
+  expected_license="$(awk -F '\t' '$1 == "license-sha256" { print $2 }' "$metadata")"
+  if [ -f "$license" ]; then
+    [ -n "$expected_license" ] && [ "$(checksum "$license")" = "$expected_license" ] || fail "$(basename "$directory"): license provenance mismatch"
+  elif [ -n "$expected_license" ]; then
+    fail "$(basename "$directory"): pinned license is missing"
+  fi
+}
+
+discover() {
+  local root="$1" directory
+  [ -d "$root" ] || return 0
+  for directory in "$root"/*; do
+    [ -d "$directory" ] || continue
+    basename "$directory"
+  done | sort
+}
+
+require_safe_roots() {
+  local root
+  for root in "$CANONICAL_ROOT" "$RENDER_ROOT" "$CODEX_ROOT" "$OMP_ROOT" "$STATE_DIR"; do
+    case "$root" in
+      ''|/|"$HOME"|"$HOME/") printf 'Refusing unsafe managed root: %s\n' "$root" >&2; return 1 ;;
+      "$HOME"/*|/tmp/*) ;;
+      *) printf 'Managed root must be below HOME or /tmp: %s\n' "$root" >&2; return 1 ;;
+    esac
+  done
+}
+
+audit_source() {
+  local name count=0
+  failures=0
+  [ -d "$SOURCE_ROOT" ] || { printf 'Missing shared skill source: %s\n' "$SOURCE_ROOT" >&2; return 1; }
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    count=$((count + 1))
+    validate_skill "$SOURCE_ROOT/$name"
+  done < <(discover "$SOURCE_ROOT")
+  [ "$count" -gt 0 ] || fail "source contains no skills"
+  if [ "$failures" -gt 0 ]; then
+    printf 'SKILL  failed %s source issue(s)\n' "$failures" >&2
+    return 1
+  fi
+  printf 'SKILL  source ok %s discovered skill(s)\n' "$count"
+}
+
+render_codex() {
+  local source="$1" destination="$2" input="$source/SKILL.md"
+  mkdir -p "$destination"
+  (cd "$source" && find . -type f ! -path './agents/*' ! -name provenance.tsv ! -name SKILL.md -print) |
+    while IFS= read -r relative; do
+      mkdir -p "$destination/$(dirname "$relative")"
+      cp "$source/$relative" "$destination/$relative"
+    done
+  awk '
+    NR == 1 && $0 == "---" { in_yaml=1; print; next }
+    in_yaml && $0 == "---" { in_yaml=0; print; next }
+    in_yaml && ($0 ~ /^argument-hint:/ || $0 ~ /^disable-model-invocation:/) { next }
+    { print }
+  ' "$input" >"$destination/SKILL.md"
+  if is_explicit "$input"; then
+    mkdir -p "$destination/agents"
+    printf 'policy:\n  allow_implicit_invocation: false\n' >"$destination/agents/openai.yaml"
+  fi
+}
+
+safe_link() {
+  local link="$1" target="$2" legacy="${3:-}" current
+  mkdir -p "$(dirname "$link")"
+  if [ -L "$link" ]; then
+    current="$(readlink "$link")"
+    if [ "$current" != "$target" ] && [ -n "$legacy" ] && [ "$current" != "$legacy" ]; then
+      case "$current" in "$CANONICAL_ROOT"/*|"$RENDER_ROOT"/*) ;; *) printf 'SKILL  collision %s -> %s\n' "$link" "$current" >&2; return 1 ;; esac
+    fi
+    [ "$current" = "$target" ] || { rm "$link"; ln -s "$target" "$link"; }
+  elif [ -e "$link" ]; then
+    printf 'SKILL  collision unmanaged path %s\n' "$link" >&2
+    return 1
+  else
+    ln -s "$target" "$link"
+  fi
+}
+
+preflight_links() {
+  local name link target current
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    for link in "$OMP_ROOT/$name" "$CODEX_ROOT/$name"; do
+      [ ! -e "$link" ] && [ ! -L "$link" ] && continue
+      [ -L "$link" ] || { printf 'SKILL  collision unmanaged path %s\n' "$link" >&2; return 1; }
+      current="$(readlink "$link")"
+      case "$current" in "$CANONICAL_ROOT"/*|"$RENDER_ROOT"/*) ;; *) printf 'SKILL  collision %s -> %s\n' "$link" "$current" >&2; return 1 ;; esac
+    done
+  done < <(discover "$SOURCE_ROOT")
+}
+
+migrate_legacy_adapters() {
+  local name source_agents live_agents entries
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    source_agents="$SOURCE_ROOT/$name/agents"
+    live_agents="$CANONICAL_ROOT/$name/agents"
+    [ ! -e "$source_agents" ] || continue
+    [ -d "$live_agents" ] || continue
+    entries="$(find "$live_agents" -type f -print | sort)"
+    if [ "$entries" = "$live_agents/openai.yaml" ]; then
+      rm "$live_agents/openai.yaml"
+      rmdir "$live_agents"
+      printf 'SKILL  migrated legacy adapter %s\n' "$name"
+    else
+      printf 'SKILL  collision unexpected canonical agents metadata: %s\n' "$name" >&2
+      return 1
+    fi
+  done < <(discover "$SOURCE_ROOT")
+}
+
+remove_owned_stale() {
+  local current_names="$1" old_name harness link target
+  [ -f "$STATE_FILE" ] || return 0
+  while IFS=$'\t' read -r old_name harness; do
+    [ -n "$old_name" ] || continue
+    grep -Fqx "$old_name" "$current_names" && continue
+    case "$harness" in codex) link="$CODEX_ROOT/$old_name" ;; omp) link="$OMP_ROOT/$old_name" ;; *) continue ;; esac
+    if [ -L "$link" ]; then
+      target="$(readlink "$link")"
+      case "$target" in "$CANONICAL_ROOT"/*|"$RENDER_ROOT"/*) rm "$link" ;; esac
+    fi
+    if [ "$harness" = codex ] && [ -d "$RENDER_ROOT/codex/$old_name" ]; then
+      rm -rf "$RENDER_ROOT/codex/$old_name"
+    fi
+    if [ -d "$CANONICAL_ROOT/$old_name" ]; then
+      rm -rf "$CANONICAL_ROOT/$old_name"
+    fi
+  done <"$STATE_FILE"
+}
+
+sync_skills() {
+  local name source target tmp backup names next_state file
+  require_safe_roots
+  audit_source
+  migrate_legacy_adapters
+  failures=0
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    validate_skill "$CANONICAL_ROOT/$name"
+  done < <(discover "$SOURCE_ROOT")
+  [ "$failures" -eq 0 ] || return 1
+  preflight_links
+  mkdir -p "$RENDER_ROOT/codex" "$STATE_DIR"
+  names="$(mktemp "${TMPDIR:-/tmp}/decent-angl-skill-names.XXXXXX")"
+  next_state="$(mktemp "${TMPDIR:-/tmp}/decent-angl-skill-state.XXXXXX")"
+  trap 'rm -f "$names" "$next_state"' RETURN
+  discover "$SOURCE_ROOT" >"$names"
+  remove_owned_stale "$names"
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    source="$CANONICAL_ROOT/$name"
+    target="$RENDER_ROOT/codex/$name"
+    tmp="$RENDER_ROOT/codex/.${name}.tmp.$$"
+    backup="$RENDER_ROOT/codex/.${name}.old.$$"
+    rm -rf "$tmp"
+    render_codex "$source" "$tmp"
+    rm -rf "$backup"
+    [ ! -e "$target" ] || mv "$target" "$backup"
+    if ! mv "$tmp" "$target"; then
+      [ ! -e "$backup" ] || mv "$backup" "$target"
+      return 1
+    fi
+    rm -rf "$backup"
+    safe_link "$OMP_ROOT/$name" "$source"
+    safe_link "$CODEX_ROOT/$name" "$target" "$source"
+    printf '%s\tomp\n%s\tcodex\n' "$name" "$name" >>"$next_state"
+  done <"$names"
+  sort "$next_state" >"$STATE_FILE"
+  trap - RETURN
+  rm -f "$names" "$next_state"
+  validate_live
+}
+
+validate_live() {
+  local failures_live=0 name source target expected explicit count=0 state_names expected_names
+  expected_names="$(mktemp "${TMPDIR:-/tmp}/decent-angl-skill-expected.XXXXXX")"
+  state_names="$(mktemp "${TMPDIR:-/tmp}/decent-angl-skill-actual.XXXXXX")"
+  trap 'rm -rf "$expected_names" "$state_names" "${expected:-}"' RETURN
+  discover "$SOURCE_ROOT" >"$expected_names"
+  if ! diff -q "$expected_names" <(discover "$CANONICAL_ROOT") >/dev/null 2>&1; then
+    printf 'SKILL  canonical live inventory drift\n' >&2
+    failures_live=1
+  fi
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    count=$((count + 1))
+    source="$CANONICAL_ROOT/$name"
+    target="$RENDER_ROOT/codex/$name"
+    [ -L "$OMP_ROOT/$name" ] && [ "$(readlink "$OMP_ROOT/$name")" = "$source" ] || { printf 'SKILL  live OMP link drift: %s\n' "$name" >&2; failures_live=1; }
+    [ -L "$CODEX_ROOT/$name" ] && [ "$(readlink "$CODEX_ROOT/$name")" = "$target" ] || { printf 'SKILL  live Codex link drift: %s\n' "$name" >&2; failures_live=1; }
+    expected="$(mktemp -d "${TMPDIR:-/tmp}/decent-angl-codex-render.XXXXXX")"
+    render_codex "$source" "$expected"
+    diff -qr "$expected" "$target" >/dev/null 2>&1 || { printf 'SKILL  Codex projection drift: %s\n' "$name" >&2; failures_live=1; }
+    rm -rf "$expected"
+    expected=""
+  done <"$expected_names"
+  if [ -f "$STATE_FILE" ]; then awk -F '\t' '{print $1}' "$STATE_FILE" | sort -u >"$state_names"; else : >"$state_names"; fi
+  diff -q "$expected_names" "$state_names" >/dev/null 2>&1 || { printf 'SKILL  ownership state drift\n' >&2; failures_live=1; }
+  trap - RETURN
+  rm -f "$expected_names" "$state_names"
+  [ "$failures_live" -eq 0 ] || return 1
+  printf 'SKILL  live ok %s skill(s), OMP native and Codex projected\n' "$count"
+}
+
+validate_all() {
+  local name
+  require_safe_roots
+  audit_source
+  failures=0
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    validate_skill "$CANONICAL_ROOT/$name"
+  done < <(discover "$SOURCE_ROOT")
+  [ "$failures" -eq 0 ] || return 1
+  validate_live
+}
+
+list_skills() {
+  local name file invocation
+  printf 'NAME\tINVOCATION\tSOURCE\n'
+  while IFS= read -r name; do
+    file="$(skill_file "$SOURCE_ROOT/$name")"
+    if is_explicit "$file"; then invocation=explicit; else invocation=model; fi
+    printf '%s\t%s\t%s\n' "$name" "$invocation" "$SOURCE_ROOT/$name"
+  done < <(discover "$SOURCE_ROOT")
+}
+
+import_skill() {
+  local mode="$1" staged="${2:-}" upstream="${3:-}" file name destination candidate import_root backup skill_sha license_sha
+  [ -d "$staged" ] || { printf '%s requires a staged skill directory\n' "$mode" >&2; return 2; }
+  case "$SOURCE_ROOT" in "$REPO_ROOT"/*|/tmp/*) ;; *) printf 'Refusing unsafe source root: %s\n' "$SOURCE_ROOT" >&2; return 1 ;; esac
+  [ -f "$staged/SKILL.md" ] && [ ! -f "$staged/SKILL.md.tmpl" ] || { printf 'staged directory requires one rendered SKILL.md\n' >&2; return 1; }
+  file="$staged/SKILL.md"
+  name="$(frontmatter_value "$file" name)"
+  destination="$SOURCE_ROOT/$name"
+  [ -n "$name" ] || { printf 'staged skill lacks a name\n' >&2; return 1; }
+  case "$mode" in
+    add) [ ! -e "$destination" ] || { printf 'shared skill already exists: %s\n' "$name" >&2; return 1; } ;;
+    update)
+      [ -d "$destination" ] || { printf 'shared skill does not exist: %s\n' "$name" >&2; return 1; }
+      [ -n "$upstream" ] || { printf 'update requires the reviewed upstream URL\n' >&2; return 2; }
+      ;;
+  esac
+  mkdir -p "$SOURCE_ROOT"
+  import_root="$SOURCE_ROOT/.import.$$"
+  candidate="$import_root/$name"
+  backup="$SOURCE_ROOT/.${name}.old.$$"
+  rm -rf "$import_root" "$backup"
+  mkdir -p "$import_root"
+  cp -R "$staged" "$candidate"
+  rm -rf "$candidate/agents"
+  if [ -n "$upstream" ]; then
+    skill_sha="$(checksum "$candidate/SKILL.md")"
+    license_sha=""
+    [ ! -f "$candidate/LICENSE" ] || license_sha="$(checksum "$candidate/LICENSE")"
+    printf 'upstream\t%s\nskill-sha256\t%s\n' "$upstream" "$skill_sha" >"$candidate/provenance.tsv"
+    [ -z "$license_sha" ] || printf 'license-sha256\t%s\n' "$license_sha" >>"$candidate/provenance.tsv"
+  fi
+  failures=0
+  validate_skill "$candidate"
+  if [ "$failures" -gt 0 ]; then
+    rm -rf "$import_root"
+    printf 'Import rejected before source replacement.\n' >&2
+    return 1
+  fi
+  [ ! -e "$destination" ] || mv "$destination" "$backup"
+  mv "$candidate" "$destination"
+  rmdir "$import_root"
+  if ! audit_source; then
+    rm -rf "$destination"
+    [ ! -e "$backup" ] || mv "$backup" "$destination"
+    printf 'Import rejected; source tree restored.\n' >&2
+    return 1
+  fi
+  rm -rf "$backup"
+  printf 'SKILL  %s %s; review, commit, then run decent-angl-sync reconcile\n' "$mode" "$name"
+}
+
+case "${1:-validate}" in
+  audit-source) audit_source ;;
+  sync) sync_skills ;;
+  validate) validate_all ;;
+  list) list_skills ;;
+  add) shift; import_skill add "$@" ;;
+  update) shift; import_skill update "$@" ;;
+  -h|--help|help) usage ;;
+  *) usage >&2; exit 2 ;;
+esac

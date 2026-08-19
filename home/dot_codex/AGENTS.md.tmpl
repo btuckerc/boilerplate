@@ -3,7 +3,7 @@
 Shared agent state is managed with chezmoi.
 
 - Edit shared config in `~/src/boilerplate/home/`, then apply with `chezmoi`.
-- Shared skills live in `home/dot_local/share/decent-angl/skills/`; Codex and OMP link to that same tree.
+- Shared skills are OMP-native in `home/dot_local/share/decent-angl/skills/`; `decent-angl-skills` generates Codex-compatible projections.
 - Keep `{{ .decentangl.defaults.codex_home }}/auth.json`, history, caches, sqlite files, and project trust local.
 - Use `mise` for `codex`, `omp`, `bw`, `restic`, and `chezmoi`. Use the native package manager for OS packages.
 - On macOS with iCloud Desktop & Documents, keep active repos, build trees, virtualenvs, and Codex task workspaces under `~/src`, not `~/Documents`.

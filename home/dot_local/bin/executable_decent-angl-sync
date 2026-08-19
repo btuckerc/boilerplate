@@ -107,10 +107,14 @@ secret_boundary() {
   fi
 }
 
+skill_tool() {
+  local tool="$REPO_ROOT/home/dot_local/bin/executable_decent-angl-skills"
+  [[ -f "$tool" ]] || { echo "Missing shared skill manager: $tool" >&2; return 1; }
+  DECENT_ANGL_REPO_ROOT="$REPO_ROOT" bash "$tool" "$@"
+}
+
 skill_audit() {
-  local audit="$REPO_ROOT/home/dot_local/bin/executable_decent-angl-skill-audit"
-  [[ -f "$audit" ]] || { echo "Missing shared skill audit: $audit" >&2; return 1; }
-  DECENT_ANGL_REPO_ROOT="$REPO_ROOT" bash "$audit"
+  skill_tool audit-source
 }
 
 write_marker() {
@@ -137,7 +141,7 @@ status() {
     ahead=unknown; behind=unknown
   fi
   if [[ -s "$MARKER" ]]; then marker_state=present; else marker_state=clear; fi
-  if skill_audit >/dev/null 2>&1; then skill_state=ok; else skill_state=invalid; fi
+  if skill_tool validate >/dev/null 2>&1; then skill_state=ok; else skill_state=invalid; fi
   printf 'repo=%s\nbranch=%s\ndirty=%s\nsource=%s\nlive_drift=%s\nahead=%s\nbehind=%s\nmarker=%s\nskills=%s\n' \
     "$REPO_ROOT" "$branch" "$dirty" "$source_state" "$drift" "$ahead" "$behind" "$marker_state" "$skill_state"
 }
@@ -145,7 +149,7 @@ status() {
 validate() {
   require_repo
   secret_boundary
-  skill_audit
+  skill_tool validate
   git -C "$REPO_ROOT" diff --check
   printf 'CONFIG  source boundaries valid\n'
 }
@@ -179,6 +183,7 @@ apply_tree() {
     args+=(--exclude dirs)
   fi
   cm "${args[@]}"
+  "$HOME/.local/bin/decent-angl-skills" sync
   if live_drift; then
     echo "Managed live files still differ after apply; preserving both sides." >&2
     return 1

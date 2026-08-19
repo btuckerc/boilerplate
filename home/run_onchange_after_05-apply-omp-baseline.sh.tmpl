@@ -8,6 +8,7 @@ set -euo pipefail
 # agents={{ include "private_dot_omp/private_agent/AGENTS.md.tmpl" | sha256sum }}
 # rules={{ include "private_dot_omp/private_agent/RULES.md" | sha256sum }}
 # manifest={{ include "dot_config/decent-angl/omp-baseline-manifest.tsv" | sha256sum }}
+# skills={{ include "dot_local/bin/executable_decent-angl-skills" | sha256sum }}
 
 if [ -x "$HOME/.local/bin/omp-baseline" ]; then
   "$HOME/.local/bin/omp-baseline" apply

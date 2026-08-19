@@ -1,3 +1,0 @@
-interface:
-  display_name: "Bitwarden Secrets"
-  short_description: "Keep shared workflows outside secret values"

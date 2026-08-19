@@ -1,0 +1,3 @@
+upstream	https://github.com/cursor/plugins/tree/60c641e4fad674784b30abcf9f8915dea39df38d/pstack/skills/unslop
+skill-sha256	181883e539caec8258ec9129e3ba5f133409144a2cbf2aa361158ab94cfc3441
+license-sha256	bc957ca6bee02792566a1a028d105e02e247c6e77cf057061674273da77b200e

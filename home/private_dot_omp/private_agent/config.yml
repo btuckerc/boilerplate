@@ -31,12 +31,16 @@ disabledProviders:
   - github
   - cursor
   - agents
+  # No local inference servers run on the fleet. Skip dead-port discovery.
+  - llama.cpp
+  - lm-studio
+  - ollama
 
 # Keep the system-prompt prefix stable across role switches so Grok cache hits.
 includeModelInPrompt: false
 
-# Grok 4.6 always reasons; default effort stays high.
-defaultThinkingLevel: high
+# Keep every new session at medium unless it is explicitly overridden.
+defaultThinkingLevel: medium
 hideThinkingBlock: true
 # Skip thinking-summary tokens on the wire when the provider supports it.
 omitThinking: true
@@ -44,14 +48,14 @@ omitThinking: true
 
 retry:
   enabled: true
-  maxRetries: 3
+  # A detected reasoning loop must not replay the same xAI OAuth stream.
+  # Exhaust its retry budget immediately so OpenRouter continues the turn.
+  maxRetries: 0
   baseDelayMs: 2000
   maxDelayMs: 60000
   modelFallback: true
   fallbackChains:
-    default:
-      - openrouter/x-ai/grok-4.6
-    smol:
+    xai-oauth/grok-4.6:
       - openrouter/x-ai/grok-4.6
 
 task:
@@ -136,10 +140,14 @@ terminal:
 power:
   sleepPrevention: display
 
-features:
-  unexpectedStopDetection: true
+advisor:
+  enabled: false
 
-# Local ONNX models are downloaded per machine with `omp tiny-models`.
+features:
+  # OMP already detects repeated streams. Do not let a local classifier
+  # independently resume a stopped turn and recreate the same work.
+  unexpectedStopDetection: false
+
 providers:
   # Default OpenRouter routing (price/uptime). :nitro is a manual enabledModels pick.
   openrouterVariant: default
@@ -147,11 +155,13 @@ providers:
     - xai
   imageOrder:
     - xai
-  tinyModel: lfm2-350m
-  tinyModelDevice: auto
-  autoThinkingModel: lfm2-350m
-  unexpectedStopModel: lfm2-350m
-  autoThinkingMaxEffort: xhigh
+  # Keep titles and classifiers on the configured online tiny role, which is
+  # Grok 4.6. Never start an embedded ONNX model worker.
+  tinyModel: online
+  memoryModel: online
+  autoThinkingModel: online
+  unexpectedStopModel: online
+  autoThinkingMaxEffort: medium
 
 # enablePi* is the native ~/.omp/agent/skills and .omp/skills gate (legacy name).
 # Leave Codex/Claude/Agents off so foreign harness skills stay out.

@@ -476,6 +476,28 @@ validate_manifest() {
       printf 'SHELLUI missing Omarchy layers\n'
       failures=1
     fi
+
+    qs_nnp=""
+    qs_bwrap=0
+    for qs_pid in $(pgrep -u "${USER}" -x quickshell || true); do
+      qs_nnp="$(awk '/^NoNewPrivs:/ { print $2 }' "/proc/${qs_pid}/status" 2>/dev/null || true)"
+      qs_ppid="${qs_pid}"
+      while [[ -n ${qs_ppid} && ${qs_ppid} != 1 ]]; do
+        qs_comm="$(awk '/^Name:/ { print $2 }' "/proc/${qs_ppid}/status" 2>/dev/null || true)"
+        [[ ${qs_comm} == bwrap ]] && qs_bwrap=1
+        qs_ppid="$(awk '/^PPid:/ { print $2 }' "/proc/${qs_ppid}/status" 2>/dev/null || true)"
+      done
+    done
+    if [[ -n ${qs_nnp} ]]; then
+      if [[ ${qs_nnp} == 0 && ${qs_bwrap} -eq 0 ]]; then
+        printf 'SHELLNNP ok\n'
+      else
+        printf 'SHELLNNP sandboxed (nnp=%s bwrap=%s)\n' "${qs_nnp}" "${qs_bwrap}"
+        failures=1
+      fi
+    else
+      printf 'SHELLNNP skipped\n'
+    fi
   else
     printf 'HYPR    skipped\n'
     printf 'SHELLUI skipped\n'

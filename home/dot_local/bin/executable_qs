@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Rewrite Omarchy's packaged shell path to the overlay runtime tree.
+# Without this, qs ipc / quickshell kill miss the unsandboxed overlay instance.
+
+REAL=/usr/bin/quickshell
+STAMP="${XDG_STATE_HOME:-$HOME/.local/state}/decent-angl/omarchy-shell-runtime.path"
+PACKAGED_SHELL="${OMARCHY_PATH:-/usr/share/omarchy}/shell"
+
+runtime=""
+if [[ -f ${STAMP} ]]; then
+  runtime=$(<"${STAMP}")
+  runtime=${runtime%$'\n'}
+fi
+
+args=()
+for arg in "$@"; do
+  if [[ -n ${runtime} && -d ${runtime} && ${arg} == "${PACKAGED_SHELL}" ]]; then
+    args+=("${runtime}")
+  else
+    args+=("${arg}")
+  fi
+done
+
+exec "${REAL}" "${args[@]}"

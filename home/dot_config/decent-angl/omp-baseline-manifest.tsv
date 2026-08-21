@@ -12,6 +12,7 @@ file	~/.omp/agent/prompts/update.md	home/private_dot_omp/private_agent/prompts/u
 file	~/.omp/agent/themes/ghostty.json	home/private_dot_omp/private_agent/themes/ghostty.json
 exec	~/.local/bin/bw-secret	home/dot_local/bin/executable_bw-secret
 exec	~/.local/bin/omp-openrouter-env	home/dot_local/bin/executable_omp-openrouter-env
+exec	~/.local/bin/omp-chromium	home/dot_local/bin/executable_omp-chromium
 file	~/.config/decent-angl/opnsense.env	home/dot_config/decent-angl/opnsense.env.tmpl
 exec	~/.local/bin/opnsense-api	home/dot_local/bin/executable_opnsense-api
 exec	~/.local/bin/opnsense-store-secret	home/dot_local/bin/executable_opnsense-store-secret

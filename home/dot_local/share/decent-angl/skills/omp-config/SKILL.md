@@ -23,6 +23,10 @@ description: Maintain the shared Oh My Pi baseline in chezmoi. Use for OMP upgra
   keep the value out of config, Git, commands, and output.
 - Treat OMP model discovery as authoritative before changing shared model IDs.
 - Keep `models.yml` override-only and retain the custom `ghostty` theme.
+- On Linux, OMP headless Chromium must launch through `~/.local/bin/omp-chromium`
+  (`PUPPETEER_EXECUTABLE_PATH`). Do not point that variable at `/usr/bin/chromium`
+  (Omarchy `--load-extension`) or the raw `/usr/lib/chromium/chromium` binary
+  (OMP strips `--disable-extensions`; dirty profiles then abort in SafeBuiltins).
 
 ## Workflow
 

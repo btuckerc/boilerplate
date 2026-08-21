@@ -20,6 +20,18 @@ mise install "$OMP_TOOL"
 mise reshim
 
 install -d -m 700 "$HOME/.omp" "$HOME/.omp/agent"
+if [ "$(uname -s)" = Linux ] && [ -x "$HOME/.local/bin/omp-chromium" ]; then
+    env_file="$HOME/.omp/agent/.env"
+    umask 077
+    tmp_file="$(mktemp "$env_file.XXXXXX")"
+    if [ -f "$env_file" ]; then
+        awk -F= -v key="PUPPETEER_EXECUTABLE_PATH" '$1 != key { print }' "$env_file" >"$tmp_file"
+    fi
+    printf 'PUPPETEER_EXECUTABLE_PATH=%s\n' "$HOME/.local/bin/omp-chromium" >>"$tmp_file"
+    chmod 600 "$tmp_file"
+    mv "$tmp_file" "$env_file"
+fi
+
 for runtime_file in "$HOME/.omp/agent"/agent.db*; do
     [ -e "$runtime_file" ] || continue
     chmod 600 "$runtime_file"

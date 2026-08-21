@@ -1,7 +1,6 @@
 [Unit]
 Description=Apply laptop power policy for the current AC state
-After=power-profiles-daemon.service iwd.service
-Wants=power-profiles-daemon.service
+After=sysinit.target systemd-modules-load.service NetworkManager.service power-profiles-daemon.service
 ConditionPathExists=/sys/class/power_supply/AC/online
 
 [Service]

@@ -17,6 +17,16 @@ AC_PLATFORM_PROFILE="performance"
 BAT_PLATFORM_PROFILE="low-power"
 AC_WIFI_POWER_SAVE="off"
 BAT_WIFI_POWER_SAVE="on"
+AC_RYZENADJ_CO_ALL="-30"
+BAT_RYZENADJ_CO_ALL="-15"
+RYZENADJ="/usr/local/bin/ryzenadj"
+AC_GPU_DPM_STATE="performance"
+BAT_GPU_DPM_STATE="battery"
+AC_PCIE_ASPM="default"
+BAT_PCIE_ASPM="powersave"
+BAT_DOWN_UNLINKED_ETHERNET="on"
+AC_RYZENADJ_MODE="max-performance"
+BAT_RYZENADJ_MODE="power-saving"
 
 log_warn() {
     printf 'thinkpad-power-source-policy: %s\n' "$*" >&2
@@ -41,9 +51,19 @@ write_value_if_needed() {
     fi
 
     if [[ "$current" != "$target" ]]; then
-        if ! printf '%s' "$target" | tee "$path" >/dev/null 2>&1; then
-            log_warn "unable to write $target to $path"
-        fi
+        force_write_value "$path" "$target"
+    fi
+}
+
+force_write_value() {
+    local path="$1"
+    local target="$2"
+
+    [[ -e "$path" ]] || return 0
+    [[ -w "$path" ]] || return 0
+
+    if ! printf '%s' "$target" | tee "$path" >/dev/null 2>&1; then
+        log_warn "unable to write $target to $path"
     fi
 }
 
@@ -86,17 +106,16 @@ set_power_profile() {
 
     if command -v powerprofilesctl >/dev/null 2>&1; then
         current_profile="$(powerprofilesctl get 2>/dev/null || true)"
-        if [[ -n "$current_profile" ]]; then
-            if [[ "$current_profile" != "$target_profile" ]]; then
-                if ! powerprofilesctl set "$target_profile" >/dev/null 2>&1; then
-                    log_warn "unable to set power profile to $target_profile"
-                fi
+        if [[ -n "$current_profile" && "$current_profile" != "$target_profile" ]]; then
+            if ! powerprofilesctl set "$target_profile" >/dev/null 2>&1; then
+                log_warn "unable to set power profile to $target_profile"
             fi
-            return 0
         fi
     fi
 
-    write_value_if_needed "$PLATFORM_PROFILE_PATH" "$target_platform_profile"
+    # Always poke ACPI. Sysfs can already say "performance" while the EC
+    # is still on the 11 W table after an AC plug-in.
+    force_write_value "$PLATFORM_PROFILE_PATH" "$target_platform_profile"
 }
 
 set_wifi_power_save() {
@@ -142,6 +161,152 @@ stop_idle_socket_activated_services_on_battery() {
     fi
 }
 
+set_gpu_dpm_state() {
+    local target="$1"
+    local path="/sys/class/drm/card1/device/power_dpm_state"
+
+    [[ -n "$target" ]] || return 0
+    write_value_if_needed "$path" "$target"
+}
+
+set_pcie_aspm() {
+    local target="$1"
+    local path="/sys/module/pcie_aspm/parameters/policy"
+
+    [[ -n "$target" ]] || return 0
+    [[ -e "$path" ]] || return 0
+
+    # Runtime writes are rejected unless the kernel was booted with
+    # pcie_aspm=force. Do not spam the journal every 5 minutes.
+    if [[ -w "$path" ]]; then
+        if ! printf '%s' "$target" | tee "$path" >/dev/null 2>&1; then
+            return 0
+        fi
+    fi
+}
+
+set_runtime_pm_auto() {
+    local device_path="$1"
+    local control="$device_path/power/control"
+
+    [[ -e "$control" ]] || return 0
+    write_value_if_needed "$control" "auto"
+}
+
+apply_runtime_pm() {
+    local net_dev pci_dev
+
+    # Unused wired NICs, NVMe, Wi-Fi. Leave the APU and USB hosts alone.
+    for net_dev in /sys/class/net/enp* /sys/class/net/wlp*; do
+        [[ -e "$net_dev/device/power/control" ]] || continue
+        set_runtime_pm_auto "$net_dev/device"
+    done
+
+    for pci_dev in /sys/bus/pci/devices/*/nvme; do
+        [[ -e "$pci_dev" ]] || continue
+        set_runtime_pm_auto "$(dirname "$pci_dev")"
+    done
+}
+
+apply_unlinked_ethernet() {
+    local iface_path iface carrier
+
+    if [[ "$ac_online" == "1" ]]; then
+        for iface_path in /sys/class/net/enp*; do
+            [[ -d "$iface_path" ]] || continue
+            iface="$(basename "$iface_path")"
+            ip link set "$iface" up >/dev/null 2>&1 || true
+        done
+        return
+    fi
+
+    [[ "${BAT_DOWN_UNLINKED_ETHERNET:-on}" == "on" ]] || return 0
+
+    for iface_path in /sys/class/net/enp*; do
+        [[ -d "$iface_path" ]] || continue
+        iface="$(basename "$iface_path")"
+        carrier="$(<"$iface_path/carrier" 2>/dev/null || printf '0')"
+        [[ "$carrier" != "1" ]] || continue
+        ip link set "$iface" down >/dev/null 2>&1 || log_warn "unable to down unused ethernet $iface"
+        if command -v nmcli >/dev/null 2>&1; then
+            nmcli device disconnect "$iface" >/dev/null 2>&1 || true
+        fi
+    done
+}
+
+
+encode_curve_optimizer() {
+    local co="$1"
+
+    if [[ "$co" -ge 0 ]]; then
+        printf '%s' "$co"
+        return
+    fi
+
+    printf '%s' "$((0x100000 - ${co#-}))"
+}
+
+apply_curve_optimizer() {
+    local co encoded mode_flag
+    local -a args
+
+    if [[ "$ac_online" == "1" ]]; then
+        co="${AC_RYZENADJ_CO_ALL:-0}"
+        mode_flag="${AC_RYZENADJ_MODE:-}"
+    else
+        co="${BAT_RYZENADJ_CO_ALL:-0}"
+        mode_flag="${BAT_RYZENADJ_MODE:-}"
+    fi
+
+    if [[ -z "$co" && -z "$mode_flag" ]]; then
+        return 0
+    fi
+
+    if [[ ! -x "$RYZENADJ" ]]; then
+        log_warn "ryzenadj missing at $RYZENADJ"
+        return 0
+    fi
+
+    if [[ -n "$co" ]] && ! [[ "$co" =~ ^-?[0-9]+$ ]]; then
+        log_warn "invalid Curve Optimizer value: $co"
+        return 0
+    fi
+
+    case "$mode_flag" in
+        max-performance)
+            mode_flag="--max-performance"
+            ;;
+        power-saving)
+            mode_flag="--power-saving"
+            ;;
+        "")
+            ;;
+        *)
+            log_warn "invalid RyzenAdj mode: $mode_flag"
+            mode_flag=""
+            ;;
+    esac
+
+    args=()
+    [[ -n "$mode_flag" ]] && args+=("$mode_flag")
+    if [[ -n "$co" ]]; then
+        encoded="$(encode_curve_optimizer "$co")"
+        args+=("--set-coall=$encoded")
+    fi
+    [[ "${#args[@]}" -gt 0 ]] || return 0
+
+    # ACPI profile changes overwrite CO. Wait, then apply twice.
+    sleep 0.4
+    if ! "$RYZENADJ" "${args[@]}" >/dev/null 2>&1; then
+        log_warn "unable to apply RyzenAdj co=$co mode=${mode_flag:-none}"
+        return 0
+    fi
+    sleep 0.4
+    if ! "$RYZENADJ" "${args[@]}" >/dev/null 2>&1; then
+        log_warn "unable to reapply RyzenAdj co=$co mode=${mode_flag:-none}"
+    fi
+}
+
 if [[ ! -r "$AC_ONLINE_PATH" ]]; then
     exit 0
 fi
@@ -152,14 +317,23 @@ ac_online="$(<"$AC_ONLINE_PATH")"
 target_profile="$AC_POWER_PROFILE"
 target_platform_profile="$AC_PLATFORM_PROFILE"
 target_wifi_power_save="$AC_WIFI_POWER_SAVE"
+target_gpu_dpm_state="$AC_GPU_DPM_STATE"
+target_pcie_aspm="$AC_PCIE_ASPM"
 
 if [[ "$ac_online" != "1" ]]; then
     target_profile="$BAT_POWER_PROFILE"
     target_platform_profile="$BAT_PLATFORM_PROFILE"
     target_wifi_power_save="$BAT_WIFI_POWER_SAVE"
+    target_gpu_dpm_state="$BAT_GPU_DPM_STATE"
+    target_pcie_aspm="$BAT_PCIE_ASPM"
 fi
 
 set_power_profile "$target_profile" "$target_platform_profile"
 set_wifi_power_save "$target_wifi_power_save"
+set_gpu_dpm_state "$target_gpu_dpm_state"
+set_pcie_aspm "$target_pcie_aspm"
+apply_runtime_pm
+apply_unlinked_ethernet
 apply_battery_thresholds
 stop_idle_socket_activated_services_on_battery
+apply_curve_optimizer

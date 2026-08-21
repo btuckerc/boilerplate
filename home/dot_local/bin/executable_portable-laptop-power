@@ -9,6 +9,9 @@ readonly SERVICE_SOURCE_PATH="${SHARE_DIR}/thinkpad-power-source-policy.service"
 readonly UDEV_RULE_SOURCE_PATH="${SHARE_DIR}/99-thinkpad-power-source-policy.rules"
 readonly LOGIND_DROPIN_SOURCE_PATH="${SHARE_DIR}/50-portable-laptop-logind.conf"
 readonly SLEEP_DROPIN_SOURCE_PATH="${SHARE_DIR}/50-portable-laptop-sleep.conf"
+readonly SLEEP_HOOK_SOURCE_PATH="${SHARE_DIR}/thinkpad-power-source-policy-sleep"
+readonly TIMER_SOURCE_PATH="${SHARE_DIR}/thinkpad-power-source-policy.timer"
+readonly MODULES_LOAD_SOURCE_PATH="${SHARE_DIR}/ryzen_smu.conf"
 
 readonly CONFIG_PATH="/etc/portable-laptop-power.conf"
 readonly POLICY_PATH="/usr/local/libexec/thinkpad-power-source-policy"
@@ -16,7 +19,11 @@ readonly SERVICE_PATH="/etc/systemd/system/thinkpad-power-source-policy.service"
 readonly UDEV_RULE_PATH="/etc/udev/rules.d/99-thinkpad-power-source-policy.rules"
 readonly LOGIND_DROPIN_PATH="/etc/systemd/logind.conf.d/50-portable-laptop.conf"
 readonly SLEEP_DROPIN_PATH="/etc/systemd/sleep.conf.d/50-portable-laptop.conf"
+readonly SLEEP_HOOK_PATH="/usr/lib/systemd/system-sleep/thinkpad-power-source-policy"
+readonly TIMER_PATH="/etc/systemd/system/thinkpad-power-source-policy.timer"
+readonly MODULES_LOAD_PATH="/etc/modules-load.d/ryzen_smu.conf"
 readonly SERVICE_NAME="thinkpad-power-source-policy.service"
+readonly TIMER_NAME="thinkpad-power-source-policy.timer"
 
 ROOT_CMD=()
 
@@ -27,11 +34,13 @@ Usage:
   portable-laptop-power status
   portable-laptop-power mode desk|travel
   portable-laptop-power travel on|off|status
+  portable-laptop-power co [AC_CO [BAT_CO]]
 
 apply   Install or refresh the machine-local power policy stack.
 status  Show the current config, battery health, and active power state.
 mode    Switch the charging mode stored in /etc/portable-laptop-power.conf.
 travel  Convenience alias for mode travel / mode desk.
+co      Show or set Curve Optimizer offsets in /etc/portable-laptop-power.conf.
 EOF
 }
 
@@ -155,8 +164,17 @@ restart_policy_service() {
     require_root_runner
     run_root systemctl daemon-reload
     run_root udevadm control --reload
-    run_root systemctl enable "$SERVICE_NAME" >/dev/null
-    run_root systemctl start "$SERVICE_NAME"
+    run_root systemctl enable "$SERVICE_NAME" "$TIMER_NAME" >/dev/null
+    run_root systemctl start "$SERVICE_NAME" "$TIMER_NAME"
+}
+
+ensure_config_key() {
+    local key="$1"
+    local value="$2"
+
+    if [ -z "$(read_config_value "$key" 2>/dev/null || true)" ]; then
+        set_config_value "$key" "$value"
+    fi
 }
 
 apply_stack() {
@@ -164,10 +182,23 @@ apply_stack() {
 
     install_managed_file 0755 "$POLICY_SOURCE_PATH" "$POLICY_PATH"
     install_managed_file 0644 "$SERVICE_SOURCE_PATH" "$SERVICE_PATH"
+    install_managed_file 0644 "$TIMER_SOURCE_PATH" "$TIMER_PATH"
     install_managed_file 0644 "$UDEV_RULE_SOURCE_PATH" "$UDEV_RULE_PATH"
     install_managed_file 0644 "$LOGIND_DROPIN_SOURCE_PATH" "$LOGIND_DROPIN_PATH"
     install_managed_file 0644 "$SLEEP_DROPIN_SOURCE_PATH" "$SLEEP_DROPIN_PATH"
+    install_managed_file 0755 "$SLEEP_HOOK_SOURCE_PATH" "$SLEEP_HOOK_PATH"
+    install_managed_file 0644 "$MODULES_LOAD_SOURCE_PATH" "$MODULES_LOAD_PATH"
     ensure_config_file
+    ensure_config_key AC_RYZENADJ_CO_ALL "-30"
+    ensure_config_key BAT_RYZENADJ_CO_ALL "-15"
+    ensure_config_key RYZENADJ "/usr/local/bin/ryzenadj"
+    ensure_config_key AC_RYZENADJ_MODE "max-performance"
+    ensure_config_key BAT_RYZENADJ_MODE "power-saving"
+    ensure_config_key AC_GPU_DPM_STATE "performance"
+    ensure_config_key BAT_GPU_DPM_STATE "battery"
+    ensure_config_key AC_PCIE_ASPM "default"
+    ensure_config_key BAT_PCIE_ASPM "powersave"
+    ensure_config_key BAT_DOWN_UNLINKED_ETHERNET "on"
     restart_policy_service
 }
 
@@ -205,8 +236,13 @@ print_status() {
 
     if command -v iw >/dev/null 2>&1; then
         wifi_power_save="$(
-            { iw dev wlan0 get power_save 2>/dev/null || true; } |
-                awk '/Power save:/ { print tolower($3) }'
+            for wireless_dir in /sys/class/net/*/wireless; do
+                [ -d "$wireless_dir" ] || continue
+                iface="$(basename "$(dirname "$wireless_dir")")"
+                { iw dev "$iface" get power_save 2>/dev/null || true; } |
+                    awk '/Power save:/ { print tolower($3) }'
+                break
+            done
         )"
     fi
 
@@ -254,8 +290,18 @@ print_status() {
     printf 'charge_start_threshold=%s\n' "${start_threshold:-unknown}"
     printf 'charge_end_threshold=%s\n' "${end_threshold:-unknown}"
     printf 'power_profile=%s\n' "${power_profile:-unknown}"
+    printf 'gpu_dpm_state=%s\n' "$(read_path /sys/class/drm/card1/device/power_dpm_state || printf 'unknown')"
+    printf 'pcie_aspm=%s\n' "$(read_path /sys/module/pcie_aspm/parameters/policy || printf 'unknown')"
+    printf 'gpu_dpm_config_ac=%s\n' "$(read_config_value AC_GPU_DPM_STATE 2>/dev/null || printf 'unset')"
+    printf 'gpu_dpm_config_bat=%s\n' "$(read_config_value BAT_GPU_DPM_STATE 2>/dev/null || printf 'unset')"
     printf 'platform_profile=%s\n' "${platform_profile:-unknown}"
     printf 'wifi_power_save=%s\n' "${wifi_power_save:-unknown}"
+    printf 'ac_curve_optimizer=%s\n' "$(read_config_value AC_RYZENADJ_CO_ALL 2>/dev/null || printf 'unset')"
+    printf 'bat_curve_optimizer=%s\n' "$(read_config_value BAT_RYZENADJ_CO_ALL 2>/dev/null || printf 'unset')"
+    printf 'ac_ryzenadj_mode=%s\n' "$(read_config_value AC_RYZENADJ_MODE 2>/dev/null || printf 'unset')"
+    printf 'bat_ryzenadj_mode=%s\n' "$(read_config_value BAT_RYZENADJ_MODE 2>/dev/null || printf 'unset')"
+    printf 'ryzenadj=%s\n' "$(read_config_value RYZENADJ 2>/dev/null || printf '/usr/local/bin/ryzenadj')"
+    printf 'ryzen_smu=%s\n' "$(lsmod | awk '/^ryzen_smu / {print $1}' || true)"
 }
 
 set_mode() {
@@ -300,6 +346,31 @@ travel_command() {
     esac
 }
 
+co_command() {
+    local ac_co bat_co
+
+    if [ "$#" -eq 0 ]; then
+        printf 'ac_curve_optimizer=%s\n' "$(read_config_value AC_RYZENADJ_CO_ALL 2>/dev/null || printf 'unset')"
+        printf 'bat_curve_optimizer=%s\n' "$(read_config_value BAT_RYZENADJ_CO_ALL 2>/dev/null || printf 'unset')"
+        return
+    fi
+
+    ac_co="$1"
+    bat_co="${2:-$1}"
+
+    if ! [[ "$ac_co" =~ ^-?[0-9]+$ && "$bat_co" =~ ^-?[0-9]+$ ]]; then
+        echo "Curve Optimizer values must be integers, e.g. -30 -15" >&2
+        exit 1
+    fi
+
+    require_root_runner
+    set_config_value AC_RYZENADJ_CO_ALL "$ac_co"
+    set_config_value BAT_RYZENADJ_CO_ALL "$bat_co"
+    restart_policy_service
+    print_status
+}
+
+
 command_name="${1:-status}"
 case "$command_name" in
     apply)
@@ -322,6 +393,10 @@ case "$command_name" in
     travel)
         shift
         travel_command "${1:-status}"
+        ;;
+    co)
+        shift
+        co_command "$@"
         ;;
     help|-h|--help)
         usage

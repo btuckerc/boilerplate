@@ -1,0 +1,7 @@
+#!/bin/sh
+# Reapply AC/DC power policy and Curve Optimizer after resume.
+case "$1" in
+    post)
+        /usr/local/libexec/thinkpad-power-source-policy
+        ;;
+esac

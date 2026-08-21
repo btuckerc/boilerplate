@@ -304,6 +304,110 @@ harden_runtime_permissions() {
   done
 }
 
+
+yaml_indented_scalar() {
+  local file="$1" section="$2" key="$3"
+  awk -v section="$section" -v key="$key" '
+    $0 ~ "^[[:space:]]*" section ":" { in_sec=1; next }
+    in_sec && /^[^[:space:]#]/ { in_sec=0 }
+    in_sec && $1 == key ":" { print $2; exit }
+  ' "$file"
+}
+
+
+yaml_top_scalar() {
+  awk -v key="$2" '$0 ~ "^" key ":" { print $2; exit }' "$1"
+}
+
+require_scalar() {
+  local label="$1" actual="$2" expected="$3"
+  if [ "$actual" = "$expected" ]; then
+    printf 'CONFIG  %s %s\n' "$label" "$actual"
+    return 0
+  fi
+  printf 'CONFIG  %s expected %s, found %s\n' "$label" "$expected" "${actual:-missing}" >&2
+  return 1
+}
+
+check_thinking_and_loop_policy() {
+  local failures=0
+  local source_config source_models live_config live_models
+  local source_global live_global effective_global
+  local source_model_level live_model_level
+  local source_retries live_retries
+  local source_fallback live_fallback
+  local source_advisor live_advisor
+  local source_stop live_stop
+  local source_chain live_chain
+
+  source_config="$REPO_ROOT/home/private_dot_omp/private_agent/config.yml"
+  source_models="$REPO_ROOT/home/private_dot_omp/private_agent/models.yml"
+  live_config="$HOME/.omp/agent/config.yml"
+  live_models="$HOME/.omp/agent/models.yml"
+
+  source_global="$(yaml_top_scalar "$source_config" defaultThinkingLevel)"
+  live_global="$(yaml_top_scalar "$live_config" defaultThinkingLevel)"
+  effective_global="$(omp config get defaultThinkingLevel --json 2>/dev/null | jq -r '.value // empty')"
+  source_model_level="$(yaml_indented_scalar "$source_models" thinking defaultLevel)"
+  live_model_level="$(yaml_indented_scalar "$live_models" thinking defaultLevel)"
+  source_retries="$(yaml_indented_scalar "$source_config" retry maxRetries)"
+  live_retries="$(yaml_indented_scalar "$live_config" retry maxRetries)"
+  source_fallback="$(yaml_indented_scalar "$source_config" retry modelFallback)"
+  live_fallback="$(yaml_indented_scalar "$live_config" retry modelFallback)"
+  source_advisor="$(yaml_indented_scalar "$source_config" advisor enabled)"
+  live_advisor="$(yaml_indented_scalar "$live_config" advisor enabled)"
+  source_stop="$(yaml_indented_scalar "$source_config" features unexpectedStopDetection)"
+  live_stop="$(yaml_indented_scalar "$live_config" features unexpectedStopDetection)"
+
+  require_scalar "source defaultThinkingLevel" "$source_global" medium || failures=1
+  require_scalar "live defaultThinkingLevel" "$live_global" medium || failures=1
+  require_scalar "effective defaultThinkingLevel" "$effective_global" medium || failures=1
+  require_scalar "source grok-4.6 defaultLevel" "$source_model_level" medium || failures=1
+  require_scalar "live grok-4.6 defaultLevel" "$live_model_level" medium || failures=1
+
+  if [ "$source_global" = "$live_global" ] && [ "$source_model_level" = "$live_model_level" ]; then
+    printf 'CONFIG  thinking defaults agree\n'
+  else
+    printf 'CONFIG  canonical and live thinking defaults disagree\n' >&2
+    failures=1
+  fi
+
+  require_scalar "source retry.maxRetries" "$source_retries" 0 || failures=1
+  require_scalar "live retry.maxRetries" "$live_retries" 0 || failures=1
+  require_scalar "source retry.modelFallback" "$source_fallback" true || failures=1
+  require_scalar "live retry.modelFallback" "$live_fallback" true || failures=1
+  require_scalar "source advisor.enabled" "$source_advisor" false || failures=1
+  require_scalar "live advisor.enabled" "$live_advisor" false || failures=1
+  require_scalar "source unexpectedStopDetection" "$source_stop" false || failures=1
+  require_scalar "live unexpectedStopDetection" "$live_stop" false || failures=1
+
+  source_chain="$(awk '
+    $0 ~ /^[[:space:]]*xai-oauth\/grok-4\.6:[[:space:]]*$/ { in_chain=1; next }
+    in_chain && $1 == "-" { print $2; exit }
+  ' "$source_config")"
+  live_chain="$(awk '
+    $0 ~ /^[[:space:]]*xai-oauth\/grok-4\.6:[[:space:]]*$/ { in_chain=1; next }
+    in_chain && $1 == "-" { print $2; exit }
+  ' "$live_config")"
+  require_scalar "source grok fallback" "$source_chain" "openrouter/x-ai/grok-4.6" || failures=1
+  require_scalar "live grok fallback" "$live_chain" "openrouter/x-ai/grok-4.6" || failures=1
+
+  if awk '
+    $0 ~ /^[[:space:]]*-[[:space:]]*low[[:space:]]*$/ { low=1 }
+    $0 ~ /^[[:space:]]*-[[:space:]]*medium[[:space:]]*$/ { medium=1 }
+    $0 ~ /^[[:space:]]*-[[:space:]]*high[[:space:]]*$/ { high=1 }
+    $0 ~ /^[[:space:]]*-[[:space:]]*xhigh[[:space:]]*$/ { xhigh=1 }
+    END { exit !(low && medium && high && xhigh) }
+  ' "$source_models"; then
+    printf 'CONFIG  grok efforts include low medium high xhigh\n'
+  else
+    printf 'CONFIG  grok efforts missing low/medium/high/xhigh\n' >&2
+    failures=1
+  fi
+
+  return "$failures"
+}
+
 check_omp_config() {
   local failures=0 pin source_pin setup_pin output omp_path
   pin="$(expected_version)"
@@ -367,9 +471,11 @@ check_omp_config() {
     printf 'PYTHON  unavailable\n' >&2
     failures=1
   fi
+  check_thinking_and_loop_policy || failures=1
 
   return "$failures"
 }
+
 
 quarantine_legacy_wrapper() {
   local wrapper backup

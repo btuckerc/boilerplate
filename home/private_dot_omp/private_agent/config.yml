@@ -21,6 +21,7 @@ enabledModels:
   - xai-oauth/grok-4.6
   - openrouter/x-ai/grok-4.6
   - openrouter/x-ai/grok-4.6:nitro
+  - openrouter/stealth/ox-alpha
 
 # Do not import superseded harness-level settings, commands, or skills.
 disabledProviders:
@@ -40,6 +41,8 @@ disabledProviders:
 includeModelInPrompt: false
 
 # Keep every new session at medium unless it is explicitly overridden.
+# Grok 4.6 thinking.defaultLevel in models.yml must stay medium too; that
+# model override is what new sessions start with and otherwise supersedes this.
 defaultThinkingLevel: medium
 hideThinkingBlock: true
 # Skip thinking-summary tokens on the wire when the provider supports it.

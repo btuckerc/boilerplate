@@ -132,7 +132,7 @@ jobs = 2
 verbose = false
 asdf_compat = true
 color = true
-task_output = "prefix"
+task.output = "prefix"
 http_timeout = "120"
 raw = false
 

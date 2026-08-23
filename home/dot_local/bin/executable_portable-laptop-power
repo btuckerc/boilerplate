@@ -12,6 +12,9 @@ readonly SLEEP_DROPIN_SOURCE_PATH="${SHARE_DIR}/50-portable-laptop-sleep.conf"
 readonly SLEEP_HOOK_SOURCE_PATH="${SHARE_DIR}/thinkpad-power-source-policy-sleep"
 readonly TIMER_SOURCE_PATH="${SHARE_DIR}/thinkpad-power-source-policy.timer"
 readonly MODULES_LOAD_SOURCE_PATH="${SHARE_DIR}/ryzen_smu.conf"
+readonly CMDLINE_SOURCE_PATH="${SHARE_DIR}/60-portable-laptop-power-cmdline.conf"
+readonly IWLWIFI_SOURCE_PATH="${SHARE_DIR}/portable-laptop-iwlwifi.conf"
+
 
 readonly CONFIG_PATH="/etc/portable-laptop-power.conf"
 readonly POLICY_PATH="/usr/local/libexec/thinkpad-power-source-policy"
@@ -22,6 +25,9 @@ readonly SLEEP_DROPIN_PATH="/etc/systemd/sleep.conf.d/50-portable-laptop.conf"
 readonly SLEEP_HOOK_PATH="/usr/lib/systemd/system-sleep/thinkpad-power-source-policy"
 readonly TIMER_PATH="/etc/systemd/system/thinkpad-power-source-policy.timer"
 readonly MODULES_LOAD_PATH="/etc/modules-load.d/ryzen_smu.conf"
+readonly CMDLINE_PATH="/etc/limine-entry-tool.d/60-portable-laptop-power.conf"
+readonly IWLWIFI_PATH="/etc/modprobe.d/portable-laptop-iwlwifi.conf"
+
 readonly SERVICE_NAME="thinkpad-power-source-policy.service"
 readonly TIMER_NAME="thinkpad-power-source-policy.timer"
 
@@ -188,6 +194,9 @@ apply_stack() {
     install_managed_file 0644 "$SLEEP_DROPIN_SOURCE_PATH" "$SLEEP_DROPIN_PATH"
     install_managed_file 0755 "$SLEEP_HOOK_SOURCE_PATH" "$SLEEP_HOOK_PATH"
     install_managed_file 0644 "$MODULES_LOAD_SOURCE_PATH" "$MODULES_LOAD_PATH"
+    install_managed_file 0644 "$CMDLINE_SOURCE_PATH" "$CMDLINE_PATH"
+    install_managed_file 0644 "$IWLWIFI_SOURCE_PATH" "$IWLWIFI_PATH"
+
     ensure_config_file
     ensure_config_key AC_RYZENADJ_CO_ALL "-30"
     ensure_config_key BAT_RYZENADJ_CO_ALL "-15"
@@ -199,6 +208,13 @@ apply_stack() {
     ensure_config_key AC_PCIE_ASPM "default"
     ensure_config_key BAT_PCIE_ASPM "powersave"
     ensure_config_key BAT_DOWN_UNLINKED_ETHERNET "on"
+    ensure_config_key UNBIND_RTL8111_SIDEBAND "on"
+    ensure_config_key ENABLE_GPP_ASPM_L1 "on"
+    ensure_config_key AC_NMI_WATCHDOG "1"
+    ensure_config_key BAT_NMI_WATCHDOG "0"
+    ensure_config_key AC_DIRTY_WRITEBACK_CENTISECS "1500"
+    ensure_config_key BAT_DIRTY_WRITEBACK_CENTISECS "6000"
+
     restart_policy_service
 }
 
@@ -302,6 +318,11 @@ print_status() {
     printf 'bat_ryzenadj_mode=%s\n' "$(read_config_value BAT_RYZENADJ_MODE 2>/dev/null || printf 'unset')"
     printf 'ryzenadj=%s\n' "$(read_config_value RYZENADJ 2>/dev/null || printf '/usr/local/bin/ryzenadj')"
     printf 'ryzen_smu=%s\n' "$(lsmod | awk '/^ryzen_smu / {print $1}' || true)"
+    printf 'nmi_watchdog=%s\n' "$(read_path /proc/sys/kernel/nmi_watchdog || printf 'unknown')"
+    printf 'dirty_writeback_centisecs=%s\n' "$(read_path /proc/sys/vm/dirty_writeback_centisecs || printf 'unknown')"
+    printf 'rtl8111_02_00_1=%s\n' "$(read_path /sys/bus/pci/devices/0000:02:00.1/power/runtime_status || printf 'missing')"
+    printf 'rtl8111_02_00_4=%s\n' "$(read_path /sys/bus/pci/devices/0000:02:00.4/power/runtime_status || printf 'missing')"
+
 }
 
 set_mode() {

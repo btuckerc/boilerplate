@@ -27,6 +27,13 @@ BAT_PCIE_ASPM="powersave"
 BAT_DOWN_UNLINKED_ETHERNET="on"
 AC_RYZENADJ_MODE="max-performance"
 BAT_RYZENADJ_MODE="power-saving"
+UNBIND_RTL8111_SIDEBAND="on"
+ENABLE_GPP_ASPM_L1="on"
+AC_NMI_WATCHDOG="1"
+BAT_NMI_WATCHDOG="0"
+AC_DIRTY_WRITEBACK_CENTISECS="1500"
+BAT_DIRTY_WRITEBACK_CENTISECS="6000"
+
 
 log_warn() {
     printf 'thinkpad-power-source-policy: %s\n' "$*" >&2
@@ -194,9 +201,8 @@ set_runtime_pm_auto() {
 }
 
 apply_runtime_pm() {
-    local net_dev pci_dev
+    local net_dev pci_dev vendor device class driver
 
-    # Unused wired NICs, NVMe, Wi-Fi. Leave the APU and USB hosts alone.
     for net_dev in /sys/class/net/enp* /sys/class/net/wlp*; do
         [[ -e "$net_dev/device/power/control" ]] || continue
         set_runtime_pm_auto "$net_dev/device"
@@ -206,7 +212,84 @@ apply_runtime_pm() {
         [[ -e "$pci_dev" ]] || continue
         set_runtime_pm_auto "$(dirname "$pci_dev")"
     done
+
+    # USB hosts, CCP, unused audio DSP, and every PCIe root port.
+    # Do not touch the display function (class 0x030000).
+    for pci_dev in /sys/bus/pci/devices/*; do
+        [[ -d "$pci_dev" ]] || continue
+        class="$(<"$pci_dev/class" 2>/dev/null || true)"
+        driver=""
+        if [[ -L "$pci_dev/driver" ]]; then
+            driver="$(basename "$(readlink -f "$pci_dev/driver")")"
+        fi
+        case "$class:$driver" in
+            0x0c0330:*|0x0c0320:*|*:ccp|*:xhci_hcd|*:xhci-pci-renesas|0x048000:*|*:pcieport)
+                set_runtime_pm_auto "$pci_dev"
+                ;;
+        esac
+    done
 }
+
+unbind_rtl8111_sideband() {
+    local pci_dev vendor device driver unbind
+
+    [[ "${UNBIND_RTL8111_SIDEBAND:-on}" == "on" ]] || return 0
+
+    for pci_dev in /sys/bus/pci/devices/*; do
+        [[ -d "$pci_dev" ]] || continue
+        vendor="$(<"$pci_dev/vendor" 2>/dev/null || true)"
+        device="$(<"$pci_dev/device" 2>/dev/null || true)"
+        # RTL8111xP UART / IPMI / EHCI. Leave 0x8168 (the NIC) bound.
+        case "$vendor:$device" in
+            0x10ec:0x816a|0x10ec:0x816b|0x10ec:0x816c|0x10ec:0x816d) ;;
+            *) continue ;;
+        esac
+        if [[ -L "$pci_dev/driver" ]]; then
+            driver="$(basename "$(readlink -f "$pci_dev/driver")")"
+            unbind="/sys/bus/pci/drivers/$driver/unbind"
+            if [[ -w "$unbind" ]]; then
+                printf '%s' "${pci_dev##*/}" >"$unbind" 2>/dev/null || log_warn "unable to unbind ${pci_dev##*/}"
+            fi
+        fi
+        set_runtime_pm_auto "$pci_dev"
+    done
+}
+
+
+enable_gpp_aspm_l1() {
+    local dev current new
+
+    [[ "${ENABLE_GPP_ASPM_L1:-on}" == "on" ]] || return 0
+    command -v setpci >/dev/null 2>&1 || return 0
+
+    # External GPP bridges only. Skip internal APU fabric (00:08.1 / 07:00.x).
+    for dev in 00:02.1 00:02.2 00:02.3 00:02.4 00:02.6; do
+        [[ -e "/sys/bus/pci/devices/0000:$dev" ]] || continue
+        current="$(setpci -s "$dev" CAP_EXP+0x10.w 2>/dev/null || true)"
+        [[ -n "$current" ]] || continue
+        current="$((16#$current))"
+        if (( (current & 0x2) == 0 )); then
+            new="$(printf '%04x' "$((current | 0x2))")"
+            setpci -s "$dev" "CAP_EXP+0x10.w=$new" >/dev/null 2>&1 || log_warn "unable to enable ASPM L1 on $dev"
+        fi
+    done
+}
+
+apply_vm_power_tweaks() {
+    local nmi dirty
+
+    if [[ "$ac_online" == "1" ]]; then
+        nmi="${AC_NMI_WATCHDOG:-1}"
+        dirty="${AC_DIRTY_WRITEBACK_CENTISECS:-1500}"
+    else
+        nmi="${BAT_NMI_WATCHDOG:-0}"
+        dirty="${BAT_DIRTY_WRITEBACK_CENTISECS:-6000}"
+    fi
+
+    write_value_if_needed /proc/sys/kernel/nmi_watchdog "$nmi"
+    write_value_if_needed /proc/sys/vm/dirty_writeback_centisecs "$dirty"
+}
+
 
 apply_unlinked_ethernet() {
     local iface_path iface carrier
@@ -333,6 +416,9 @@ set_wifi_power_save "$target_wifi_power_save"
 set_gpu_dpm_state "$target_gpu_dpm_state"
 set_pcie_aspm "$target_pcie_aspm"
 apply_runtime_pm
+unbind_rtl8111_sideband
+enable_gpp_aspm_l1
+apply_vm_power_tweaks
 apply_unlinked_ethernet
 apply_battery_thresholds
 stop_idle_socket_activated_services_on_battery

@@ -51,12 +51,17 @@ omitThinking: true
 
 retry:
   enabled: true
-  # A detected reasoning loop must not replay the same xAI OAuth stream.
-  # Exhaust its retry budget immediately so OpenRouter continues the turn.
-  maxRetries: 0
+  # Thinking-loop aborts are retryable stream stalls. The detector already
+  # injects thinking-loop-redirect; one same-provider resample lets SuperGrok
+  # act on that notice. maxRetries 0 skipped that and billed OpenRouter on
+  # the first stall. Exhausted budget still falls through to overflow.
+  maxRetries: 1
   baseDelayMs: 2000
   maxDelayMs: 60000
   modelFallback: true
+  # Return to SuperGrok after the overflow cooldown instead of staying on
+  # the paid path for the rest of the session.
+  fallbackRevertPolicy: cooldown-expiry
   fallbackChains:
     xai-oauth/grok-4.6:
       - openrouter/x-ai/grok-4.6
@@ -83,24 +88,39 @@ astGrep:
 bash:
   autoBackground:
     enabled: true
+    # Foreground bash blocked the turn for 15-60s. Background after 15s and
+    # deliver the result when the command finishes.
+    thresholdMs: 15000
 
 # SuperGrok cache is prefix-exact. Auto only covers DeepSeek/Xiaomi/Anthropic.
 provider:
   appendOnlyContext: on
 
 # Compact before xAI's 200k long-context price/quota cliff (500k window).
+# 17.4 dropped compaction.strategy. methodOrder is the live list; snapcompact
+# is first and the only method we want. Do not add remote/soft/handoff: those
+# are extra Grok calls. mid-turn and idle stay off because snapcompact frames
+# leave stored text at ~95-168k while the mid-turn estimate sits at 180-187k
+# and would re-snap the same archive between provider calls. Post-turn still
+# enforces 180k. asyncEnabled default is on and would speculate the first
+# LLM-backed method (remote/soft) near threshold; we have none, so keep it off.
 compaction:
   enabled: true
-  strategy: snapcompact
+  methodOrder:
+    - snapcompact
+  asyncEnabled: false
   thresholdTokens: 180000
-  midTurnEnabled: true
+  midTurnEnabled: false
   keepRecentTokens: 20000
   autoContinue: true
   dropUseless: true
   supersedeReads: true
-  idleEnabled: true
-  idleThresholdTokens: 170000
-  idleTimeoutSeconds: 180
+  idleEnabled: false
+
+recap:
+  # Extra Grok 4.6 call after 240s idle. Same model as the working
+  # turn; fires while the session is already sitting on the compact cliff.
+  enabled: false
 
 theme:
   dark: ghostty
@@ -136,9 +156,15 @@ display:
   # Tokens appear as they arrive; no client-side reveal delay.
   smoothStreaming: false
 
+title:
+  # First-message titles stay. Replan titles are extra Grok 4.6 calls
+  # (tiny role is the same model) that contend with the working turn.
+  refreshOnReplan: false
+
 
 terminal:
-  showProgress: true
+  # OSC 9;4 Kitty/Ghostty tab progress while a turn or compaction runs.
+  showProgress: false
 
 power:
   sleepPrevention: display
@@ -154,8 +180,18 @@ features:
 providers:
   # Default OpenRouter routing (price/uptime). :nitro is a manual enabledModels pick.
   openrouterVariant: default
+  # xAI search is grok-4.5 + web_search (24-53s here). Public Web races
+  # Startpage/DDG in ~5s with no key. If that fan-out fails, try each
+  # scraper alone before the model-backed fallback.
   webSearchOrder:
+    - public
+    - startpage
+    - duckduckgo
     - xai
+  webSearchExclude:
+    - google
+    - ecosia
+    - mojeek
   imageOrder:
     - xai
   # Keep titles and classifiers on the configured online tiny role, which is

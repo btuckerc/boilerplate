@@ -1,5 +1,7 @@
-# kind	live_path	repo_relative_path
-# omp-version	17.3.4
+# kind	live_path	repo_relative_path	os
+# omp-version	17.4.2
+# os is optional: all (default), linux, or darwin. linux-only rows stay in Git
+# but are not applied or required live on other operating systems.
 # Credentials, databases, sessions, caches, logs, and tiny-model weights are
 # deliberately absent. They remain machine-local under ~/.omp/agent.
 file	~/.config/mise/config.toml	home/dot_config/mise/config.toml
@@ -12,7 +14,7 @@ file	~/.omp/agent/prompts/update.md	home/private_dot_omp/private_agent/prompts/u
 file	~/.omp/agent/themes/ghostty.json	home/private_dot_omp/private_agent/themes/ghostty.json
 exec	~/.local/bin/bw-secret	home/dot_local/bin/executable_bw-secret
 exec	~/.local/bin/omp-openrouter-env	home/dot_local/bin/executable_omp-openrouter-env
-exec	~/.local/bin/omp-chromium	home/dot_local/bin/executable_omp-chromium
+exec	~/.local/bin/omp-chromium	home/dot_local/bin/executable_omp-chromium	linux
 file	~/.config/decent-angl/opnsense.env	home/dot_config/decent-angl/opnsense.env.tmpl
 exec	~/.local/bin/opnsense-api	home/dot_local/bin/executable_opnsense-api
 exec	~/.local/bin/opnsense-store-secret	home/dot_local/bin/executable_opnsense-store-secret

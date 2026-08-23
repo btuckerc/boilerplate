@@ -10,21 +10,26 @@ CHEZMOI_ROOT="${OMP_BASELINE_CHEZMOI_ROOT:-$HOME/.local/share/chezmoi}"
 MANIFEST="${OMP_BASELINE_MANIFEST:-$HOME/.config/decent-angl/omp-baseline-manifest.tsv}"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/decent-angl"
 MARKER="$STATE_DIR/omp-baseline-drift"
+UPSTREAM_MARKER="$STATE_DIR/omp-upstream"
 LOG_FILE="$STATE_DIR/omp-baseline.log"
 LOCK_DIR="$STATE_DIR/omp-baseline.lock"
 STRICT=false
+OMP_GITHUB_REPO="can1357/oh-my-pi"
 
 usage() {
   cat <<'EOF'
-Usage: omp-baseline <status|validate|apply|pull|guard|install-guard> [--strict]
+Usage: omp-baseline <status|validate|apply|pull|check-upstream|upgrade|guard|install-guard> [options]
 
-  status        Compare repo, chezmoi source, rendered live files, and version.
-  validate      Run status plus coverage, secret-boundary, and OMP parser checks.
-  apply         Apply the local published source, install its exact pin, validate.
-  pull          Reconcile the complete published baseline, then validate OMP.
-  guard         Validate local OMP state without overwriting source.
-  install-guard Install the hourly launchd/systemd user guard.
-  --strict      Also require every portable source file to be tracked by Git.
+  status          Compare repo, chezmoi source, rendered live files, and version.
+  validate        Run status plus coverage, secret-boundary, and OMP parser checks.
+  apply           Apply the local published source, install its exact pin, validate.
+  pull            Reconcile the complete published baseline, then validate OMP.
+  check-upstream  Compare the published pin to GitHub latest. Write omp-upstream.
+  upgrade [VER]   Move the three pin sites to VER or GitHub latest, install, validate.
+                  Does not commit or reconcile. --dry-run prints the plan only.
+  guard           Validate local OMP state without overwriting source.
+  install-guard   Install the hourly launchd/systemd user guard.
+  --strict        Also require every portable source file to be tracked by Git.
 EOF
 }
 
@@ -70,12 +75,24 @@ expand_home() {
   esac
 }
 
+os_in_scope() {
+  case "${1:-all}" in
+    ""|all) return 0 ;;
+    linux) [ "$(uname -s)" = Linux ] ;;
+    darwin) [ "$(uname -s)" = Darwin ] ;;
+    *)
+      printf 'MANIFEST unknown os scope %s\n' "$1" >&2
+      return 1
+      ;;
+  esac
+}
+
 iter_manifest() {
-  local kind live_path repo_rel
-  while IFS=$'\t' read -r kind live_path repo_rel; do
+  local kind live_path repo_rel os_scope
+  while IFS=$'\t' read -r kind live_path repo_rel os_scope; do
     [ -n "${kind:-}" ] || continue
     case "$kind" in \#*) continue ;; esac
-    printf '%s\t%s\t%s\n' "$kind" "$(expand_home "$live_path")" "$repo_rel"
+    printf '%s\t%s\t%s\t%s\n' "$kind" "$(expand_home "$live_path")" "$repo_rel" "${os_scope:-all}"
   done <"$MANIFEST"
 }
 
@@ -120,7 +137,7 @@ EOF
 }
 
 portable_paths() {
-  iter_manifest | while IFS=$'\t' read -r _kind _live repo_rel; do
+  iter_manifest | while IFS=$'\t' read -r _kind _live repo_rel _os_scope; do
     printf '%s\n' "$repo_rel"
   done
   printf '%s\n' home/private_dot_omp/private_agent/.chezmoiignore
@@ -147,8 +164,12 @@ check_manifest_status() {
     printf 'VERSION expected omp/%s, found %s\n' "$pin" "${actual:-missing}" >&2
     failures=1
   fi
+  if [ -s "$UPSTREAM_MARKER" ]; then
+    printf 'UPSTREAM %s\n' "$(tr '\n' ' ' <"$UPSTREAM_MARKER")"
+  fi
 
-  while IFS=$'\t' read -r kind live_path repo_rel; do
+
+  while IFS=$'\t' read -r kind live_path repo_rel os_scope; do
     repo_path="$REPO_ROOT/$repo_rel"
     mirror_path="$CHEZMOI_ROOT/$repo_rel"
 
@@ -165,6 +186,10 @@ check_manifest_status() {
     if ! cmp -s "$repo_path" "$mirror_path"; then
       printf 'SOURCE  drift %s\n' "$repo_rel" >&2
       failures=1
+      continue
+    fi
+    if ! os_in_scope "$os_scope"; then
+      printf 'SKIP    %s (%s-only)\n' "$live_path" "$os_scope"
       continue
     fi
     case "$kind" in
@@ -208,7 +233,7 @@ check_source_coverage() {
   actual="$tmp_dir/actual"
   trap 'rm -rf "$tmp_dir"' RETURN
 
-  iter_manifest | while IFS=$'\t' read -r _kind _live repo_rel; do
+  iter_manifest | while IFS=$'\t' read -r _kind _live repo_rel _os_scope; do
     case "$repo_rel" in home/private_dot_omp/private_agent/*) printf '%s\n' "$repo_rel" ;; esac
   done | sort >"$expected"
 
@@ -339,6 +364,8 @@ check_thinking_and_loop_policy() {
   local source_advisor live_advisor
   local source_stop live_stop
   local source_chain live_chain
+  local source_search_first live_search_first
+  local source_bash_bg live_bash_bg
 
   source_config="$REPO_ROOT/home/private_dot_omp/private_agent/config.yml"
   source_models="$REPO_ROOT/home/private_dot_omp/private_agent/models.yml"
@@ -358,6 +385,26 @@ check_thinking_and_loop_policy() {
   live_advisor="$(yaml_indented_scalar "$live_config" advisor enabled)"
   source_stop="$(yaml_indented_scalar "$source_config" features unexpectedStopDetection)"
   live_stop="$(yaml_indented_scalar "$live_config" features unexpectedStopDetection)"
+  source_title_replan="$(yaml_indented_scalar "$source_config" title refreshOnReplan)"
+  live_title_replan="$(yaml_indented_scalar "$live_config" title refreshOnReplan)"
+  source_midturn="$(yaml_indented_scalar "$source_config" compaction midTurnEnabled)"
+  live_midturn="$(yaml_indented_scalar "$live_config" compaction midTurnEnabled)"
+  source_idle_compact="$(yaml_indented_scalar "$source_config" compaction idleEnabled)"
+  live_idle_compact="$(yaml_indented_scalar "$live_config" compaction idleEnabled)"
+  source_compact_threshold="$(yaml_indented_scalar "$source_config" compaction thresholdTokens)"
+  live_compact_threshold="$(yaml_indented_scalar "$live_config" compaction thresholdTokens)"
+  source_async_compact="$(yaml_indented_scalar "$source_config" compaction asyncEnabled)"
+  live_async_compact="$(yaml_indented_scalar "$live_config" compaction asyncEnabled)"
+  source_method_first="$(awk '
+    $0 ~ /^[[:space:]]*methodOrder:[[:space:]]*$/ { in_list=1; next }
+    in_list && $1 == "-" { print $2; exit }
+  ' "$source_config")"
+  live_method_first="$(awk '
+    $0 ~ /^[[:space:]]*methodOrder:[[:space:]]*$/ { in_list=1; next }
+    in_list && $1 == "-" { print $2; exit }
+  ' "$live_config")"
+  source_recap="$(yaml_indented_scalar "$source_config" recap enabled)"
+  live_recap="$(yaml_indented_scalar "$live_config" recap enabled)"
 
   require_scalar "source defaultThinkingLevel" "$source_global" medium || failures=1
   require_scalar "live defaultThinkingLevel" "$live_global" medium || failures=1
@@ -372,14 +419,81 @@ check_thinking_and_loop_policy() {
     failures=1
   fi
 
-  require_scalar "source retry.maxRetries" "$source_retries" 0 || failures=1
-  require_scalar "live retry.maxRetries" "$live_retries" 0 || failures=1
+  require_scalar "source retry.maxRetries" "$source_retries" 1 || failures=1
+  require_scalar "live retry.maxRetries" "$live_retries" 1 || failures=1
   require_scalar "source retry.modelFallback" "$source_fallback" true || failures=1
   require_scalar "live retry.modelFallback" "$live_fallback" true || failures=1
   require_scalar "source advisor.enabled" "$source_advisor" false || failures=1
   require_scalar "live advisor.enabled" "$live_advisor" false || failures=1
   require_scalar "source unexpectedStopDetection" "$source_stop" false || failures=1
   require_scalar "live unexpectedStopDetection" "$live_stop" false || failures=1
+  require_scalar "source title.refreshOnReplan" "$source_title_replan" false || failures=1
+  require_scalar "live title.refreshOnReplan" "$live_title_replan" false || failures=1
+  require_scalar "source compaction.midTurnEnabled" "$source_midturn" false || failures=1
+  require_scalar "live compaction.midTurnEnabled" "$live_midturn" false || failures=1
+  require_scalar "source compaction.idleEnabled" "$source_idle_compact" false || failures=1
+  require_scalar "live compaction.idleEnabled" "$live_idle_compact" false || failures=1
+  require_scalar "source compaction.thresholdTokens" "$source_compact_threshold" 180000 || failures=1
+  require_scalar "live compaction.thresholdTokens" "$live_compact_threshold" 180000 || failures=1
+  require_scalar "source compaction.asyncEnabled" "$source_async_compact" false || failures=1
+  require_scalar "live compaction.asyncEnabled" "$live_async_compact" false || failures=1
+  require_scalar "source compaction.methodOrder[0]" "$source_method_first" snapcompact || failures=1
+  require_scalar "live compaction.methodOrder[0]" "$live_method_first" snapcompact || failures=1
+  if awk '
+    $0 ~ /^[[:space:]]*methodOrder:[[:space:]]*$/ { in_list=1; next }
+    in_list && /^[^[:space:]#]/ { in_list=0 }
+    in_list && $1 == "-" { n++ }
+    END { exit !(n == 1) }
+  ' "$source_config" && awk '
+    $0 ~ /^[[:space:]]*methodOrder:[[:space:]]*$/ { in_list=1; next }
+    in_list && /^[^[:space:]#]/ { in_list=0 }
+    in_list && $1 == "-" { n++ }
+    END { exit !(n == 1) }
+  ' "$live_config"; then
+    printf 'CONFIG  compaction.methodOrder is snapcompact only\n'
+  else
+    printf 'CONFIG  compaction.methodOrder expected snapcompact only\n' >&2
+    failures=1
+  fi
+  require_scalar "source recap.enabled" "$source_recap" false || failures=1
+  require_scalar "live recap.enabled" "$live_recap" false || failures=1
+
+
+  source_search_first="$(awk '
+    $0 ~ /^[[:space:]]*webSearchOrder:[[:space:]]*$/ { in_list=1; next }
+    in_list && $1 == "-" { print $2; exit }
+  ' "$source_config")"
+  live_search_first="$(awk '
+    $0 ~ /^[[:space:]]*webSearchOrder:[[:space:]]*$/ { in_list=1; next }
+    in_list && $1 == "-" { print $2; exit }
+  ' "$live_config")"
+  require_scalar "source webSearchOrder[0]" "$source_search_first" public || failures=1
+  require_scalar "live webSearchOrder[0]" "$live_search_first" public || failures=1
+  if awk '
+    $0 ~ /^[[:space:]]*webSearchExclude:[[:space:]]*$/ { in_list=1; next }
+    in_list && /^[^[:space:]#]/ { in_list=0 }
+    in_list && $2 == "google" { google=1 }
+    in_list && $2 == "ecosia" { ecosia=1 }
+    in_list && $2 == "mojeek" { mojeek=1 }
+    END { exit !(google && ecosia && mojeek) }
+  ' "$source_config" && awk '
+    $0 ~ /^[[:space:]]*webSearchExclude:[[:space:]]*$/ { in_list=1; next }
+    in_list && /^[^[:space:]#]/ { in_list=0 }
+    in_list && $2 == "google" { google=1 }
+    in_list && $2 == "ecosia" { ecosia=1 }
+    in_list && $2 == "mojeek" { mojeek=1 }
+    END { exit !(google && ecosia && mojeek) }
+  ' "$live_config"; then
+    printf 'CONFIG  webSearchExclude blocks chromium scrapers\n'
+  else
+    printf 'CONFIG  webSearchExclude missing google/ecosia/mojeek\n' >&2
+    failures=1
+  fi
+
+  source_bash_bg="$(yaml_indented_scalar "$source_config" autoBackground thresholdMs)"
+  live_bash_bg="$(yaml_indented_scalar "$live_config" autoBackground thresholdMs)"
+  require_scalar "source bash.autoBackground.thresholdMs" "$source_bash_bg" 15000 || failures=1
+  require_scalar "live bash.autoBackground.thresholdMs" "$live_bash_bg" 15000 || failures=1
 
   source_chain="$(awk '
     $0 ~ /^[[:space:]]*xai-oauth\/grok-4\.6:[[:space:]]*$/ { in_chain=1; next }
@@ -515,9 +629,12 @@ validate() {
 }
 
 apply_local() {
-  local pin kind live_path repo_rel skill_manager
+  local pin kind live_path repo_rel os_scope skill_manager
   local paths=()
-  while IFS=$'\t' read -r kind live_path repo_rel; do
+  while IFS=$'\t' read -r kind live_path repo_rel os_scope; do
+    if ! os_in_scope "$os_scope"; then
+      continue
+    fi
     paths+=("$live_path")
     case "$live_path" in
       "$HOME/.omp/agent/"*) install -d -m 700 "$(dirname "$live_path")" ;;
@@ -552,6 +669,205 @@ pull_published() {
   fi
   "$fleet_sync" reconcile --with-scripts
   validate
+}
+
+normalize_omp_version() {
+  local raw="$1"
+  raw="${raw#omp/}"
+  raw="${raw#v}"
+  case "$raw" in
+    [0-9]*.[0-9]*.[0-9]*) printf '%s\n' "$raw" ;;
+    *) return 1 ;;
+  esac
+}
+
+fetch_github_release_tag() {
+  local path="$1"
+  local tag=""
+  if command -v gh >/dev/null 2>&1; then
+    tag="$(gh api "repos/${OMP_GITHUB_REPO}/${path}" --jq .tag_name 2>/dev/null || true)"
+  fi
+  if [ -z "$tag" ]; then
+    tag="$(curl -fsSL -A omp-baseline \
+      "https://api.github.com/repos/${OMP_GITHUB_REPO}/${path}" \
+      | jq -r '.tag_name // empty')" || return 1
+  fi
+  [ -n "$tag" ] || return 1
+  normalize_omp_version "$tag"
+}
+
+fetch_latest_omp_version() {
+  fetch_github_release_tag releases/latest
+}
+
+verify_omp_release() {
+  local version="$1"
+  fetch_github_release_tag "releases/tags/v${version}" >/dev/null
+}
+
+rewrite_one_pin_line() {
+  local file="$1"
+  local pattern="$2"
+  local replacement="$3"
+  local tmp count
+  tmp="$(mktemp "${TMPDIR:-/tmp}/omp-pin.XXXXXX")"
+  count="$(awk -v pat="$pattern" ' $0 ~ pat { n++ } END { print n+0 }' "$file")"
+  if [ "$count" != 1 ]; then
+    rm -f "$tmp"
+    printf 'UPGRADE expected one pin line matching %s in %s, found %s\n' \
+      "$pattern" "$file" "$count" >&2
+    return 1
+  fi
+  awk -v pat="$pattern" -v repl="$replacement" '
+    $0 ~ pat { print repl; next }
+    { print }
+  ' "$file" >"$tmp"
+  mv "$tmp" "$file"
+}
+
+set_pin_sites() {
+  local version="$1"
+  rewrite_one_pin_line \
+    "$REPO_ROOT/home/dot_config/decent-angl/omp-baseline-manifest.tsv" \
+    '^# omp-version[[:space:]]' \
+    "# omp-version	${version}" || return 1
+  rewrite_one_pin_line \
+    "$REPO_ROOT/home/dot_config/mise/config.toml" \
+    '^"github:can1357/oh-my-pi"[[:space:]]*=' \
+    "\"github:can1357/oh-my-pi\" = \"${version}\"" || return 1
+  rewrite_one_pin_line \
+    "$REPO_ROOT/home/run_onchange_after_04-setup-omp.sh.tmpl" \
+    '^OMP_VERSION=' \
+    "OMP_VERSION=\"${version}\"" || return 1
+}
+
+restore_pin_sites() {
+  git -C "$REPO_ROOT" checkout -- \
+    home/dot_config/decent-angl/omp-baseline-manifest.tsv \
+    home/dot_config/mise/config.toml \
+    home/run_onchange_after_04-setup-omp.sh.tmpl
+}
+
+require_clean_pin_files() {
+  local dirty
+  dirty="$(git -C "$REPO_ROOT" status --porcelain=v1 -- \
+    home/dot_config/decent-angl/omp-baseline-manifest.tsv \
+    home/dot_config/mise/config.toml \
+    home/run_onchange_after_04-setup-omp.sh.tmpl)"
+  if [ -n "$dirty" ]; then
+    printf 'UPGRADE pin files are dirty; commit or discard them first.\n%s\n' "$dirty" >&2
+    return 1
+  fi
+}
+
+apply_pin_files_live() {
+  [ "${OMP_BASELINE_IN_CHEZMOI:-0}" = 1 ] && return 0
+  cm apply --force \
+    "$HOME/.config/decent-angl/omp-baseline-manifest.tsv" \
+    "$HOME/.config/mise/config.toml"
+}
+
+check_upstream() {
+  local pin latest
+  pin="$(expected_version)"
+  if ! latest="$(fetch_latest_omp_version)"; then
+    printf 'UPSTREAM unreachable\n' >&2
+    return 1
+  fi
+  if [ "$pin" = "$latest" ]; then
+    rm -f "$UPSTREAM_MARKER"
+    printf 'UPSTREAM pin=%s latest=%s current\n' "$pin" "$latest"
+    return 0
+  fi
+  mkdir -p "$STATE_DIR"
+  printf 'pin=%s\nlatest=%s\nnext=omp-baseline upgrade %s\n' \
+    "$pin" "$latest" "$latest" >"$UPSTREAM_MARKER"
+  printf 'UPSTREAM pin=%s latest=%s available\n' "$pin" "$latest"
+  printf 'NEXT    omp-baseline upgrade %s\n' "$latest"
+}
+
+upgrade() {
+  local pin target="" dry=false raw
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --dry-run) dry=true ;;
+      --strict) STRICT=true ;;
+      -h|--help) usage; return 0 ;;
+      -*)
+        printf 'Unknown option: %s\n' "$1" >&2
+        usage >&2
+        return 1
+        ;;
+      *)
+        if [ -n "$target" ]; then
+          printf 'upgrade accepts one VERSION\n' >&2
+          return 1
+        fi
+        target="$1"
+        ;;
+    esac
+    shift
+  done
+
+  pin="$(expected_version)"
+  if [ -z "$target" ]; then
+    target="$(fetch_latest_omp_version)" || {
+      printf 'UPGRADE could not resolve GitHub latest\n' >&2
+      return 1
+    }
+  else
+    raw="$target"
+    if ! target="$(normalize_omp_version "$raw")"; then
+      printf 'UPGRADE invalid version: %s\n' "$raw" >&2
+      return 1
+    fi
+  fi
+
+  if [ "$dry" = true ]; then
+    printf 'PIN     %s -> %s\n' "$pin" "$target"
+    printf 'FILES   manifest mise setup-omp\n'
+    if [ "$pin" = "$target" ]; then
+      printf 'UPGRADE already on %s\n' "$target"
+    else
+      printf 'NEXT    would install github:can1357/oh-my-pi@%s then validate\n' "$target"
+    fi
+    return 0
+  fi
+
+  if [ "$pin" = "$target" ]; then
+    printf 'UPGRADE already on %s\n' "$target"
+    apply_local
+    return
+  fi
+
+  require_clean_pin_files || return 1
+  verify_omp_release "$target" || {
+    printf 'UPGRADE GitHub has no release v%s\n' "$target" >&2
+    return 1
+  }
+
+  set_pin_sites "$target" || {
+    printf 'UPGRADE failed to rewrite pin sites; restoring\n' >&2
+    restore_pin_sites
+    return 1
+  }
+  apply_pin_files_live || {
+    printf 'UPGRADE failed to apply pin files; restoring\n' >&2
+    restore_pin_sites
+    return 1
+  }
+  if ! apply_local; then
+    printf 'UPGRADE apply/validate failed; restoring pin %s\n' "$pin" >&2
+    restore_pin_sites
+    apply_pin_files_live || true
+    mise install "github:can1357/oh-my-pi@$pin" || true
+    mise reshim || true
+    return 1
+  fi
+
+  rm -f "$UPSTREAM_MARKER"
+  printf 'UPGRADE %s -> %s\n' "$pin" "$target"
+  printf 'NEXT    review, commit the three pin files, then decent-angl-sync reconcile --with-scripts\n'
 }
 
 install_guard() {
@@ -635,12 +951,26 @@ guard() {
     printf '%s\n' "$output" >"$MARKER"
     logger -t omp-baseline -p user.err "OMP baseline drift on $current_machine; see $MARKER" >/dev/null 2>&1 || true
   fi
+  check_upstream >>"$LOG_FILE" 2>&1 || true
+  if [ -s "$UPSTREAM_MARKER" ]; then
+    logger -t omp-baseline "OMP upstream available; see $UPSTREAM_MARKER" >/dev/null 2>&1 || true
+  fi
   return "$status"
 }
 
 main() {
   local command="${1:-status}"
   [ "$#" -gt 0 ] && shift
+  case "$command" in
+    check-upstream)
+      check_upstream
+      return
+      ;;
+    upgrade)
+      upgrade "$@"
+      return
+      ;;
+  esac
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --strict) STRICT=true ;;

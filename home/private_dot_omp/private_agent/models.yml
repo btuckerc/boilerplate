@@ -1,10 +1,6 @@
-# Managed by chezmoi. Restores Grok 4.6 effort metadata missing from OMP 17.3.4.
-# Remove this override after a pin that lists thinking on xai-oauth/grok-4.6.
-#
-# Global defaultThinkingLevel in config.yml is medium. This model override is
-# what new Grok 4.6 sessions actually start with; keep it medium so the global
-# default is not silently superseded. low, medium, high, and xhigh remain
-# available for explicit per-session overrides.
+# Managed by chezmoi. Pins Grok 4.6 session thinking to medium so the catalog
+# default cannot silently supersede config.yml defaultThinkingLevel. low,
+# medium, high, and xhigh remain available for explicit per-session overrides.
 providers:
   xai-oauth:
     modelOverrides:

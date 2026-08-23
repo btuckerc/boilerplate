@@ -1,6 +1,6 @@
 ---
 name: omp-config
-description: Maintain the shared Oh My Pi baseline in chezmoi. Use for OMP upgrades, provider or model defaults, auth-broker configuration, skills, prompts, or cross-platform rollout.
+description: Maintain the shared Oh My Pi baseline in chezmoi. Use for OMP upgrades, omp-baseline upgrade, provider or model defaults, auth-broker configuration, skills, prompts, or cross-platform rollout. Never run omp update.
 ---
 
 # OMP config
@@ -16,7 +16,7 @@ description: Maintain the shared Oh My Pi baseline in chezmoi. Use for OMP upgra
 ## Invariants
 
 - Pin OMP to an exact reviewed mise release; do not combine the shared pin with
-  `omp update`.
+  `omp update`. Use `omp-baseline upgrade` to move the three pin sites together.
 - Prefer native OMP config and features. Keep native skill discovery enabled.
 - Authenticate SuperGrok locally with `omp auth-broker login xai-oauth`.
 - OpenRouter is overflow only. Materialize its key with `omp-openrouter-env`;
@@ -27,6 +27,7 @@ description: Maintain the shared Oh My Pi baseline in chezmoi. Use for OMP upgra
   (`PUPPETEER_EXECUTABLE_PATH`). Do not point that variable at `/usr/bin/chromium`
   (Omarchy `--load-extension`) or the raw `/usr/lib/chromium/chromium` binary
   (OMP strips `--disable-extensions`; dirty profiles then abort in SafeBuiltins).
+  The baseline manifest marks that wrapper `linux`; macOS must not install it.
 
 ## Workflow
 
@@ -38,7 +39,32 @@ description: Maintain the shared Oh My Pi baseline in chezmoi. Use for OMP upgra
    session.
 5. Run `omp-baseline validate --strict`, commit, then
    `decent-angl-sync reconcile --with-scripts` when script effects are required.
+   Scheduled fleet apply skips scripts, so pin upgrades need `omp-baseline pull`
+   on every other host after publish.
 
 The hourly OMP guard checks the focused baseline without overwriting source.
-The whole-tree guard owns Git reconciliation. Investigate
+It also compares the published pin to GitHub latest and writes
+`~/.local/state/decent-angl/omp-upstream` when a newer tag exists. That marker
+is a reminder, not drift. Investigate
 `~/.local/state/decent-angl/omp-baseline-drift` before declaring convergence.
+The whole-tree guard owns Git reconciliation.
+
+## Upgrade
+
+Do not run `omp update`. The three pin sites must move together:
+
+- `home/dot_config/decent-angl/omp-baseline-manifest.tsv` (`# omp-version`)
+- `home/dot_config/mise/config.toml`
+- `home/run_onchange_after_04-setup-omp.sh.tmpl`
+
+```sh
+omp-baseline check-upstream
+omp-baseline upgrade --dry-run
+omp-baseline upgrade 17.4.2
+omp-baseline validate --strict
+```
+
+`upgrade` rewrites the pin sites, installs that mise release, and validates.
+It does not commit or reconcile. Review the pin diff, commit, then
+`decent-angl-sync reconcile --with-scripts` so the fleet follows. On each
+other machine run `omp-baseline pull`.

@@ -7,7 +7,7 @@ node = "24.14.1"
 go = "1.25.9"
 
 # Pin the primary cross-platform coding harness so every machine stays aligned.
-"github:can1357/oh-my-pi" = "17.3.4"
+"github:can1357/oh-my-pi" = "17.4.2"
 
 # CLI tools (fast binary downloads)
 "ubi:twpayne/chezmoi" = "2.66.0"
@@ -27,7 +27,6 @@ go = "1.25.9"
 
 # Editor and dev tools
 "aqua:neovim/neovim" = "0.12.1"
-"aqua:cli/cli" = "2.89.0"
 "aqua:BurntSushi/ripgrep" = "15.1.0"
 "asdf:mise-plugins/mise-tmux" = "3.6a"
 
@@ -62,6 +61,7 @@ ruby = "3.4.9"
 "gem:solargraph" = "0.59.0.dev.2"
 "gem:rails" = "8.1.3"
 codex = "0.148.0"
+gh = "2.98.0"
 
 [settings]
 experimental = true

@@ -15,6 +15,7 @@ Shared agent state is managed with chezmoi.
 - For machine settings, native app preferences, or platform-specific operations, use the shared `platform-ops` skill.
 - For the home OPNsense router at `10.77.77.1`, use the `opnsense` skill and `opnsense-api`. Keep API secrets in Bitwarden item `opnsense-api`; never Git or chezmoi.
 - Do not add marketplace plugins, extra MCP servers, or foreign-harness skills unless a task needs them.
+- Drive is cwd-local. `/board` writes `$PWD/docs/board`. `/drive` writes then spawns. `/vibe` keeps workers. `/recover` inspects orphan in-flight cards. Use `omp-board` for every board write. Project `.omp/commands` override the user commands.
 
 Current target:
 {{ template "codex/current-target.md.tmpl" . }}

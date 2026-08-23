@@ -1,0 +1,655 @@
+#!/usr/bin/env python3
+"""Cwd-scoped board mutations with a lock and compare-and-swap."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+SLUG_RE = re.compile(r"[^a-z0-9]+")
+CARD_RE = re.compile(r"(?m)^## Card: +(.+?)\s*$")
+STATUS_RE = re.compile(r"(?m)^Status: +(pending|blocked|in-flight|done)\s*$")
+LEASE_RE = re.compile(
+    r"(?m)^Lease: +host=(?P<host>\S+) +pid=(?P<pid>\d+) +session=(?P<session>\S+) +expires=(?P<expires>\S+)\s*$"
+)
+OWN_LINE_RE = re.compile(r"`([^`]+)`|(\S+)")
+INDEX_ROW_RE = re.compile(
+    r"^\| (?P<slug>[^|]+?) \| (?P<title>[^|]+?) \| (?P<open>[^|]+?) \| (?P<updated>[^|]+?) \|\s*$"
+)
+
+
+class BoardError(Exception):
+    def __init__(self, message: str, code: int = 1) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def iso(dt: datetime) -> str:
+    return dt.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def parse_iso(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def die(message: str, code: int = 1) -> None:
+    print(message, file=sys.stderr)
+    raise SystemExit(code)
+
+
+def resolve_root(cwd: str | None) -> Path:
+    root = Path(cwd or os.environ.get("OMP_BOARD_CWD") or Path.cwd()).resolve()
+    if not root.is_dir():
+        raise BoardError(f"cwd is not a directory: {root}")
+    return root
+
+
+def inside(root: Path, path: Path) -> Path:
+    resolved = path.resolve()
+    try:
+        resolved.relative_to(root)
+    except ValueError as exc:
+        raise BoardError(f"refusing path outside cwd: {resolved}") from exc
+    return resolved
+
+
+def board_dir(root: Path) -> Path:
+    return inside(root, root / "docs" / "board")
+
+
+def index_path(root: Path) -> Path:
+    return inside(root, root / "docs" / "board.md")
+
+
+def topic_path(root: Path, slug: str) -> Path:
+    return inside(root, board_dir(root) / f"{slug}.md")
+
+
+def state_dir(root: Path) -> Path:
+    digest = hashlib.sha256(str(root).encode()).hexdigest()[:16]
+    base = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state"))
+    return base / "omp-board" / digest
+
+
+def lock_dir(root: Path, name: str) -> Path:
+    return state_dir(root) / f"{name}.lockdir"
+
+
+def slugify(text: str) -> str:
+    slug = SLUG_RE.sub("-", text.strip().lower()).strip("-")
+    slug = re.sub(r"-{2,}", "-", slug)[:40].strip("-")
+    if not slug:
+        raise BoardError("empty slug")
+    return slug
+
+
+def file_hash(path: Path) -> str:
+    if not path.exists():
+        return "missing"
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def atomic_write(path: Path, data: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def process_field(pid: int, field: str) -> str:
+    return subprocess.check_output(["ps", "-o", f"{field}=", "-p", str(pid)], text=True).strip()
+
+
+def owner_pid() -> int:
+    override = os.environ.get("OMP_BOARD_OWNER")
+    if override:
+        return int(override)
+    pid = os.getpid()
+    seen: set[int] = set()
+    last = pid
+    while pid and pid not in seen:
+        seen.add(pid)
+        comm = Path(process_field(pid, "comm")).name
+        if comm in {"omp", "oh-my-pi"}:
+            return pid
+        last = pid
+        try:
+            pid = int(process_field(pid, "ppid"))
+        except (ValueError, subprocess.CalledProcessError):
+            break
+    return last
+
+
+def pid_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def read_lock_meta(path: Path) -> dict[str, str] | None:
+    meta = path / "meta"
+    if not meta.is_file():
+        return None
+    values: dict[str, str] = {}
+    for line in meta.read_text(encoding="utf-8").splitlines():
+        if "=" in line:
+            key, value = line.split("=", 1)
+            values[key] = value
+    return values
+
+
+def lock_stale(meta: dict[str, str] | None) -> bool:
+    if not meta:
+        return True
+    try:
+        expires = parse_iso(meta.get("expires", ""))
+    except ValueError:
+        return True
+    if expires <= utc_now():
+        return True
+    if meta.get("host", "") == os.uname().nodename:
+        try:
+            pid = int(meta.get("pid", "0"))
+        except ValueError:
+            return True
+        return not pid_alive(pid)
+    return False
+
+def acquire_lock(root: Path, name: str, ttl: int, wait: float = 0.0) -> dict[str, str]:
+    path = lock_dir(root, name)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    meta = {
+        "host": os.uname().nodename,
+        "pid": str(owner_pid()),
+        "session": os.environ.get("OMP_SESSION_ID", "unknown"),
+        "started": iso(utc_now()),
+        "expires": iso(datetime.fromtimestamp(time.time() + ttl, tz=timezone.utc)),
+        "cwd": str(root),
+        "name": name,
+    }
+    deadline = time.time() + wait
+    while True:
+        try:
+            path.mkdir()
+            atomic_write(path / "meta", "".join(f"{k}={v}\n" for k, v in meta.items()))
+            return meta
+        except FileExistsError:
+            existing = read_lock_meta(path)
+            if lock_stale(existing):
+                if existing:
+                    print(
+                        f"stealing stale lock {name} host={existing.get('host')} pid={existing.get('pid')}",
+                        file=sys.stderr,
+                    )
+                try:
+                    (path / "meta").unlink(missing_ok=True)
+                    path.rmdir()
+                except OSError:
+                    time.sleep(0.02)
+                continue
+            if time.time() < deadline:
+                time.sleep(0.02)
+                continue
+            raise BoardError(
+                f"lock held: {name} host={existing.get('host') if existing else '?'} "
+                f"pid={existing.get('pid') if existing else '?'}",
+                75,
+            )
+    raise BoardError(f"could not acquire lock: {name}", 75)
+
+
+def release_lock(root: Path, name: str) -> None:
+    path = lock_dir(root, name)
+    meta = read_lock_meta(path)
+    if not path.exists():
+        return
+    owner = str(owner_pid())
+    if meta and meta.get("host") == os.uname().nodename and meta.get("pid") not in {owner, None}:
+        if not lock_stale(meta):
+            raise BoardError(f"lock owned by pid {meta.get('pid')}")
+    (path / "meta").unlink(missing_ok=True)
+    try:
+        path.rmdir()
+    except OSError as exc:
+        raise BoardError(f"could not release lock: {name}") from exc
+
+
+def require_lock(root: Path, name: str) -> dict[str, str]:
+    meta = read_lock_meta(lock_dir(root, name))
+    owner = str(owner_pid())
+    if not meta or lock_stale(meta):
+        raise BoardError(f"lock not held: {name}", 75)
+    if meta.get("host") == os.uname().nodename and meta.get("pid") != owner:
+        raise BoardError(f"lock held by another omp: {name} pid={meta.get('pid')}", 75)
+    return meta
+
+
+def parse_cards(text: str) -> list[dict]:
+    matches = list(CARD_RE.finditer(text))
+    cards: list[dict] = []
+    for index, match in enumerate(matches):
+        start = match.start()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        block = text[start:end]
+        status_match = STATUS_RE.search(block)
+        lease_match = LEASE_RE.search(block)
+        own: list[str] = []
+        own_section = re.search(r"(?ms)^# Ownership\n(.*?)(?:\n# |\n## |\Z)", block)
+        if own_section:
+            for line in own_section.group(1).splitlines():
+                line = line.strip()
+                if not line or line.lower() == "none":
+                    continue
+                found = OWN_LINE_RE.search(line)
+                if found:
+                    own.append((found.group(1) or found.group(2)).strip())
+        cards.append(
+            {
+                "name": match.group(1).strip(),
+                "status": status_match.group(1) if status_match else "unknown",
+                "ownership": own,
+                "lease": lease_match.groupdict() if lease_match else None,
+            }
+        )
+    return cards
+
+
+def ownership_overlap(cards: list[dict]) -> list[tuple[str, str, str]]:
+    live = [c for c in cards if c["status"] in {"pending", "blocked", "in-flight"}]
+    hits: list[tuple[str, str, str]] = []
+    for i, left in enumerate(live):
+        left_paths = {p.rstrip("/") for p in left["ownership"]}
+        for right in live[i + 1 :]:
+            right_paths = {p.rstrip("/") for p in right["ownership"]}
+            for path in sorted(left_paths & right_paths):
+                hits.append((left["name"], right["name"], path))
+            for lpath in left_paths:
+                for rpath in right_paths:
+                    if lpath == rpath:
+                        continue
+                    if rpath.startswith(lpath + "/") or lpath.startswith(rpath + "/"):
+                        hits.append((left["name"], right["name"], f"{lpath} ∩ {rpath}"))
+    return hits
+
+
+def parse_index(text: str) -> tuple[str, list[dict[str, str]]]:
+    active = "none"
+    for line in text.splitlines():
+        if line.startswith("Active:"):
+            active = line.split(":", 1)[1].strip() or "none"
+            break
+    rows: list[dict[str, str]] = []
+    for line in text.splitlines():
+        match = INDEX_ROW_RE.match(line)
+        if not match:
+            continue
+        if match.group("slug").strip().lower() == "slug":
+            continue
+        rows.append({k: v.strip() for k, v in match.groupdict().items()})
+    return active, rows
+
+
+def render_index(active: str, rows: list[dict[str, str]]) -> str:
+    lines = [
+        "# Boards",
+        "",
+        f"Active: {active}",
+        "",
+        "| Slug | Title | Open | Updated |",
+        "|---|---|---|---|",
+    ]
+    for row in rows:
+        lines.append(f"| {row['slug']} | {row['title']} | {row['open']} | {row['updated']} |")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def cmd_root(args: argparse.Namespace) -> None:
+    root = resolve_root(args.cwd)
+    print(f"cwd={root}")
+    print(f"board={board_dir(root)}")
+    print(f"index={index_path(root)}")
+    print(f"state={state_dir(root)}")
+
+
+def cmd_slug(args: argparse.Namespace) -> None:
+    print(slugify(args.text))
+
+
+def cmd_init(args: argparse.Namespace) -> None:
+    root = resolve_root(args.cwd)
+    board_dir(root).mkdir(parents=True, exist_ok=True)
+    path = index_path(root)
+    if not path.exists():
+        atomic_write(path, render_index("none", []))
+    print(file_hash(path))
+
+
+def cmd_lock(args: argparse.Namespace) -> None:
+    root = resolve_root(args.cwd)
+    meta = acquire_lock(root, slugify(args.name), args.ttl)
+    print(json.dumps(meta, sort_keys=True))
+
+
+def cmd_unlock(args: argparse.Namespace) -> None:
+    root = resolve_root(args.cwd)
+    release_lock(root, slugify(args.name))
+
+
+def cmd_hash(args: argparse.Namespace) -> None:
+    root = resolve_root(args.cwd)
+    if args.target == "index":
+        print(file_hash(index_path(root)))
+        return
+    print(file_hash(topic_path(root, slugify(args.target))))
+
+
+def cmd_write_topic(args: argparse.Namespace) -> None:
+    root = resolve_root(args.cwd)
+    slug = slugify(args.slug)
+    require_lock(root, slug)
+    path = topic_path(root, slug)
+    current = file_hash(path)
+    if current != args.expect:
+        raise BoardError(f"cas failed: expected {args.expect} got {current}", 76)
+    data = sys.stdin.read()
+    if not data.endswith("\n"):
+        data += "\n"
+    atomic_write(path, data)
+    print(file_hash(path))
+
+
+def cmd_write_index(args: argparse.Namespace) -> None:
+    root = resolve_root(args.cwd)
+    require_lock(root, "index")
+    path = index_path(root)
+    current = file_hash(path)
+    if current != args.expect:
+        raise BoardError(f"cas failed: expected {args.expect} got {current}", 76)
+    data = sys.stdin.read()
+    if not data.endswith("\n"):
+        data += "\n"
+    atomic_write(path, data)
+    print(file_hash(path))
+def cmd_index_upsert(args: argparse.Namespace) -> None:
+    root = resolve_root(args.cwd)
+    slug = slugify(args.slug)
+    acquire_lock(root, "index", args.ttl, wait=5.0)
+    try:
+        path = index_path(root)
+        if not path.exists():
+            atomic_write(path, render_index("none", []))
+        active, rows = parse_index(path.read_text(encoding="utf-8"))
+        updated = utc_now().date().isoformat()
+        found = False
+        for row in rows:
+            if row["slug"] == slug:
+                row["title"] = args.title or row["title"]
+                row["open"] = str(args.open)
+                row["updated"] = updated
+                found = True
+                break
+        if not found:
+            rows.append(
+                {
+                    "slug": slug,
+                    "title": args.title or slug,
+                    "open": str(args.open),
+                    "updated": updated,
+                }
+            )
+        if args.active:
+            active = slug
+        atomic_write(path, render_index(active, rows))
+        print(file_hash(path))
+    finally:
+        release_lock(root, "index")
+
+
+def cmd_cards(args: argparse.Namespace) -> None:
+    root = resolve_root(args.cwd)
+    path = topic_path(root, slugify(args.slug))
+    if not path.exists():
+        raise BoardError(f"missing topic: {path}", 2)
+    print(json.dumps(parse_cards(path.read_text(encoding="utf-8")), indent=2))
+
+
+def cmd_overlap(args: argparse.Namespace) -> None:
+    root = resolve_root(args.cwd)
+    path = topic_path(root, slugify(args.slug))
+    if not path.exists():
+        raise BoardError(f"missing topic: {path}", 2)
+    hits = ownership_overlap(parse_cards(path.read_text(encoding="utf-8")))
+    if not hits:
+        print("ok")
+        return
+    for left, right, path_name in hits:
+        print(f"{left}\t{right}\t{path_name}")
+    raise SystemExit(2)
+
+
+def cmd_orphans(args: argparse.Namespace) -> None:
+    root = resolve_root(args.cwd)
+    path = topic_path(root, slugify(args.slug))
+    if not path.exists():
+        raise BoardError(f"missing topic: {path}", 2)
+    now = utc_now()
+    found = False
+    for card in parse_cards(path.read_text(encoding="utf-8")):
+        if card["status"] != "in-flight":
+            continue
+        lease = card["lease"]
+        reason = "no-lease"
+        if lease:
+            try:
+                expired = parse_iso(lease["expires"]) <= now
+            except ValueError:
+                expired = True
+            same_host = lease["host"] == os.uname().nodename
+            dead = same_host and not pid_alive(int(lease["pid"]))
+            if expired:
+                reason = "expired"
+            elif dead:
+                reason = "dead-pid"
+            else:
+                continue
+        found = True
+        print(f"{card['name']}\t{reason}")
+    if not found:
+        print("ok")
+
+
+def cmd_active(args: argparse.Namespace) -> None:
+    root = resolve_root(args.cwd)
+    path = index_path(root)
+    if not path.exists():
+        print("none")
+        return
+    active, _ = parse_index(path.read_text(encoding="utf-8"))
+    if args.slug:
+        raise BoardError("use index-upsert --active to set Active")
+    print(active)
+
+
+def sample_topic(alpha: str, beta: str) -> str:
+    return (
+        "# Board: demo\n\n"
+        f"## Card: Alpha\nStatus: {alpha}\n\n# Ownership\n`src/a.py`\n\n"
+        f"## Card: Beta\nStatus: {beta}\n\n# Ownership\n`src/b.py`\n"
+    )
+
+
+def cmd_selftest(_args: argparse.Namespace) -> None:
+    with tempfile.TemporaryDirectory(prefix="omp-board-") as tmp:
+        root = Path(tmp)
+        owner = str(os.getpid())
+
+        def run(argv: list[str], stdin: str | None = None) -> tuple[int, str, str]:
+            env = os.environ.copy()
+            env["OMP_BOARD_CWD"] = str(root)
+            env["OMP_BOARD_OWNER"] = owner
+            proc = subprocess.run(
+                [sys.executable, str(Path(__file__).resolve()), "--cwd", str(root), *argv],
+                input=stdin,
+                text=True,
+                capture_output=True,
+                env=env,
+                check=False,
+            )
+            return proc.returncode, proc.stdout, proc.stderr
+
+        code, _, err = run(["init"])
+        assert code == 0, err
+        code, _, err = run(["lock", "demo", "--ttl", "30"])
+        assert code == 0, err
+        code, out, err = run(["write-topic", "demo", "--expect", "missing"], sample_topic("pending", "pending"))
+        assert code == 0, err
+        first = out.strip()
+        code, _, err = run(["write-topic", "demo", "--expect", "deadbeef"], sample_topic("done", "done"))
+        assert code == 76, err
+        assert topic_path(root, "demo").read_text(encoding="utf-8").count("pending") == 2
+        code, _, err = run(["overlap", "demo"])
+        assert code == 0, err
+        overlap = (
+            "# Board: demo\n\n"
+            "## Card: Alpha\nStatus: pending\n\n# Ownership\n`src/shared.py`\n\n"
+            "## Card: Beta\nStatus: pending\n\n# Ownership\n`src/shared.py`\n"
+        )
+        code, _, err = run(["write-topic", "demo", "--expect", first], overlap)
+        assert code == 0, err
+        code, out, _ = run(["overlap", "demo"])
+        assert code == 2 and "shared.py" in out
+        run(["unlock", "demo"])
+
+        def upsert(title: str) -> None:
+            subprocess.run(
+                [sys.executable, str(Path(__file__).resolve()), "--cwd", str(root), "index-upsert", title, "--title", title, "--open", "1"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+        children = []
+        for name in ("topic-a", "topic-b"):
+            pid = os.fork()
+            if pid == 0:
+                try:
+                    upsert(name)
+                    os._exit(0)
+                except Exception:
+                    os._exit(1)
+            children.append(pid)
+        failed = False
+        for pid in children:
+            _, status = os.waitpid(pid, 0)
+            if not os.WIFEXITED(status) or os.WEXITSTATUS(status) != 0:
+                failed = True
+        text = index_path(root).read_text(encoding="utf-8")
+        assert "topic-a" in text and "topic-b" in text, text
+        assert not failed
+
+        try:
+            inside(root, Path("/etc/passwd"))
+            raise AssertionError("escape allowed")
+        except BoardError:
+            pass
+
+        print("ok")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="omp-board")
+    parser.add_argument("--cwd", default=None, help="project root; default is process cwd")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("root")
+    p = sub.add_parser("slug")
+    p.add_argument("text")
+    sub.add_parser("init")
+    p = sub.add_parser("lock")
+    p.add_argument("name")
+    p.add_argument("--ttl", type=int, default=1800)
+    p = sub.add_parser("unlock")
+    p.add_argument("name")
+    p = sub.add_parser("hash")
+    p.add_argument("target")
+    p = sub.add_parser("write-topic")
+    p.add_argument("slug")
+    p.add_argument("--expect", required=True)
+    p = sub.add_parser("write-index")
+    p.add_argument("--expect", required=True)
+    p = sub.add_parser("index-upsert")
+    p.add_argument("slug")
+    p.add_argument("--title", default="")
+    p.add_argument("--open", required=True)
+    p.add_argument("--active", action="store_true")
+    p.add_argument("--ttl", type=int, default=1800)
+    p = sub.add_parser("cards")
+    p.add_argument("slug")
+    p = sub.add_parser("overlap")
+    p.add_argument("slug")
+    p = sub.add_parser("orphans")
+    p.add_argument("slug")
+    p = sub.add_parser("active")
+    p.add_argument("slug", nargs="?")
+    sub.add_parser("selftest")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    commands = {
+        "root": cmd_root,
+        "slug": cmd_slug,
+        "init": cmd_init,
+        "lock": cmd_lock,
+        "unlock": cmd_unlock,
+        "hash": cmd_hash,
+        "write-topic": cmd_write_topic,
+        "write-index": cmd_write_index,
+        "index-upsert": cmd_index_upsert,
+        "cards": cmd_cards,
+        "overlap": cmd_overlap,
+        "orphans": cmd_orphans,
+        "active": cmd_active,
+        "selftest": cmd_selftest,
+    }
+    try:
+        commands[args.cmd](args)
+    except BoardError as exc:
+        die(str(exc), exc.code)
+
+
+if __name__ == "__main__":
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+    main()

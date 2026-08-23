@@ -21,7 +21,7 @@ Boards are always `$PWD/docs/board`. A session started in `~/tmp` writes `~/tmp/
 | `/vibe` then `/dispatch` | Same list. Workers stay until `/vibe` is turned off. |
 | `/recover [slug]` | Inspect orphan `in-flight` cards. Do not reset the board. |
 
-Project `.omp/commands` override these. Present Company keeps its own luna/SLOT commands.
+Project `.omp/commands` override these. Present Company keeps luna/SLOT/qa and still uses `omp-board`.
 
 ## Files
 
@@ -52,6 +52,8 @@ omp-board unlock <slug>
 
 `write-topic` fails (exit 76) if the file changed since `--expect`. Re-read, merge, retry once. `index-upsert` updates one row under its own index lock. Do not rewrite `docs/board.md` as a whole file.
 
+`overlap` prints `ok` only when every live card owns at least one file path and no two live cards share a path. `Ownership: none` and symbol-only lines (`private var bed` with no file) fail as `empty-ownership`. A line like `` `private var bed` in `App/Foo.swift` `` owns `App/Foo.swift`.
+
 ## SMART card
 
 ```
@@ -65,13 +67,14 @@ exact files and symbols; explicit non-goals
 steps, APIs, patterns to reuse
 
 # Acceptance
-observable result; no project-wide commands
+observable result; the one safety fact and the command that proves it, or unproven
+If you skip a failing test, say why and name the closest check.
 
 # Blockers
 what must finish first
 
 # Ownership
-exclusive paths this worker may edit
+exclusive file paths this worker may edit. Not none. Not symbols alone.
 
 # Lease
 host=<host> pid=<omp-pid> session=<id> expires=<ISO-8601>
@@ -79,15 +82,26 @@ host=<host> pid=<omp-pid> session=<id> expires=<ISO-8601>
 
 Set `Lease` when you mark `in-flight`. Clear it when the card becomes `done` or `blocked`.
 
+## Checkpoint
+
+Before any spawn, answer all four. Use `n/a: <reason>` rather than dropping one.
+
+1. Blocking first steps. What must finish before fan-out.
+2. Independent workstreams. Which cards have disjoint files.
+3. Shared mutable state. Split the target. Serialize only for a real invariant.
+4. Smallest safe decomposition. If one worker is best, name why.
+
+Done when `omp-board overlap <slug>` prints `ok` and each question has an answer.
+
 ## Order
 
 1. `omp-board lock <slug>`. If exit 75, stop. Another dispatcher holds it.
 2. Shared contracts in `docs/board/<slug>-*.md` before fan-out.
-3. `omp-board overlap <slug>` must print `ok` before any spawn.
+3. Checkpoint, then `omp-board overlap <slug>` must print `ok`.
 4. Independent cards in one batch. A dependent card waits until you have read the upstream files.
 5. Mark `in-flight` with a lease, `write-topic` with the current hash, then spawn.
 6. Prefer `vibe_spawn` `cli: good` when those tools exist. Otherwise `task` with the default worker. Do not invent a model id.
-7. After a yield, re-hash, mark `done` or `blocked`, `index-upsert` the Open count, next wave.
+7. After a yield, run the card's proof command or write `unproven`. Re-hash, mark `done` or `blocked`, `index-upsert` the Open count, next wave.
 8. `omp-board unlock <slug>` before you stop.
 
 Cap 3 unless the project overlay sets a higher `task.maxConcurrency` and the cards are disjoint.

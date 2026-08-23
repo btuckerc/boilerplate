@@ -22,7 +22,9 @@ STATUS_RE = re.compile(r"(?m)^Status: +(pending|blocked|in-flight|done)\s*$")
 LEASE_RE = re.compile(
     r"(?m)^Lease: +host=(?P<host>\S+) +pid=(?P<pid>\d+) +session=(?P<session>\S+) +expires=(?P<expires>\S+)\s*$"
 )
-OWN_LINE_RE = re.compile(r"`([^`]+)`|(\S+)")
+PATH_RE = re.compile(
+    r"(?:[\w.+-]+/)+[\w.+-]+|[\w.+-]+\.(?:swift|md|py|ts|tsx|js|mjs|c|h|m|mm|rs|go|toml|yml|yaml|json|sh|rb|kt|java|cs)"
+)
 INDEX_ROW_RE = re.compile(
     r"^\| (?P<slug>[^|]+?) \| (?P<title>[^|]+?) \| (?P<open>[^|]+?) \| (?P<updated>[^|]+?) \|\s*$"
 )
@@ -254,6 +256,18 @@ def require_lock(root: Path, name: str) -> dict[str, str]:
     return meta
 
 
+def ownership_paths(text: str) -> list[str]:
+    found: list[str] = []
+    seen: set[str] = set()
+    for match in PATH_RE.findall(text):
+        path = match.rstrip("/")
+        if path.lower() == "none" or path in seen:
+            continue
+        seen.add(path)
+        found.append(path)
+    return found
+
+
 def parse_cards(text: str) -> list[dict]:
     matches = list(CARD_RE.finditer(text))
     cards: list[dict] = []
@@ -264,15 +278,9 @@ def parse_cards(text: str) -> list[dict]:
         status_match = STATUS_RE.search(block)
         lease_match = LEASE_RE.search(block)
         own: list[str] = []
-        own_section = re.search(r"(?ms)^# Ownership\n(.*?)(?:\n# |\n## |\Z)", block)
+        own_section = re.search(r"(?ms)^# Ownership\n(.*?)(?:\n---\s*$|\n# |\n## |\Z)", block)
         if own_section:
-            for line in own_section.group(1).splitlines():
-                line = line.strip()
-                if not line or line.lower() == "none":
-                    continue
-                found = OWN_LINE_RE.search(line)
-                if found:
-                    own.append((found.group(1) or found.group(2)).strip())
+            own = ownership_paths(own_section.group(1))
         cards.append(
             {
                 "name": match.group(1).strip(),
@@ -287,6 +295,9 @@ def parse_cards(text: str) -> list[dict]:
 def ownership_overlap(cards: list[dict]) -> list[tuple[str, str, str]]:
     live = [c for c in cards if c["status"] in {"pending", "blocked", "in-flight"}]
     hits: list[tuple[str, str, str]] = []
+    for card in live:
+        if not card["ownership"]:
+            hits.append((card["name"], "-", "empty-ownership"))
     for i, left in enumerate(live):
         left_paths = {p.rstrip("/") for p in left["ownership"]}
         for right in live[i + 1 :]:
@@ -549,6 +560,47 @@ def cmd_selftest(_args: argparse.Namespace) -> None:
         assert code == 0, err
         code, out, _ = run(["overlap", "demo"])
         assert code == 2 and "shared.py" in out
+        crumb = (
+            "# Board: demo\n\n"
+            "## Card: Alpha\nStatus: pending\n\n# Ownership\n`private var bed` in `App/FurnitureGlyph.swift`\n\n"
+            "## Card: Beta\nStatus: pending\n\n# Ownership\n`App/FurnitureGlyph.swift` except `plant`\n"
+        )
+        current = file_hash(topic_path(root, "demo"))
+        code, _, err = run(["write-topic", "demo", "--expect", current], crumb)
+        assert code == 0, err
+        code, out, _ = run(["overlap", "demo"])
+        assert code == 2 and "FurnitureGlyph.swift" in out, out
+        empty = (
+            "# Board: demo\n\n"
+            "## Card: Alpha\nStatus: pending\n\n# Ownership\nnone\n\n"
+            "## Card: Beta\nStatus: pending\n\n# Ownership\n`src/b.py`\n"
+        )
+        current = file_hash(topic_path(root, "demo"))
+        code, _, err = run(["write-topic", "demo", "--expect", current], empty)
+        assert code == 0, err
+        code, out, _ = run(["overlap", "demo"])
+        assert code == 2 and "empty-ownership" in out, out
+        done_empty = (
+            "# Board: demo\n\n"
+            "## Card: Alpha\nStatus: done\n\n# Ownership\nnone\n\n"
+            "## Card: Beta\nStatus: pending\n\n# Ownership\n`src/b.py`\n"
+        )
+        current = file_hash(topic_path(root, "demo"))
+        code, _, err = run(["write-topic", "demo", "--expect", current], done_empty)
+        assert code == 0, err
+        code, out, err = run(["overlap", "demo"])
+        assert code == 0 and out.strip() == "ok", (out, err)
+        rule = (
+            "# Board: demo\n\n"
+            "## Card: Alpha\nStatus: pending\n\n# Ownership\n`src/a.py`\n\n---\n\n"
+            "## Card: Beta\nStatus: pending\n\n# Ownership\n`src/b.py`\n\n---\n"
+        )
+        current = file_hash(topic_path(root, "demo"))
+        code, _, err = run(["write-topic", "demo", "--expect", current], rule)
+        assert code == 0, err
+        code, out, err = run(["overlap", "demo"])
+        assert code == 0 and out.strip() == "ok", (out, err)
+
         run(["unlock", "demo"])
 
         def upsert(title: str) -> None:

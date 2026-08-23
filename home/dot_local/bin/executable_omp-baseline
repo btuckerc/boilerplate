@@ -663,11 +663,18 @@ apply_local() {
 
 pull_published() {
   local fleet_sync="$HOME/.local/bin/decent-angl-sync"
+  local extra=()
   if [ ! -x "$fleet_sync" ]; then
     printf 'decent-angl-sync is unavailable; apply the complete shared baseline first.\n' >&2
     return 127
   fi
   "$fleet_sync" reconcile --with-scripts
+  # A pre-upgrade `pull` still has the old validator in memory. Re-exec
+  # the applied binary so new pin, OS-scope, and policy checks run.
+  [ "$STRICT" = true ] && extra+=(--strict)
+  if [ -x "$HOME/.local/bin/omp-baseline" ]; then
+    exec "$HOME/.local/bin/omp-baseline" validate "${extra[@]}"
+  fi
   validate
 }
 

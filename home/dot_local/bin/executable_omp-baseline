@@ -644,7 +644,7 @@ apply_local() {
   done < <(iter_manifest)
 
   install -d -m 700 "$HOME/.omp" "$HOME/.omp/agent"
-  if [ "${OMP_BASELINE_IN_CHEZMOI:-0}" != 1 ]; then
+  if [ "${OMP_BASELINE_IN_CHEZMOI:-0}" != 1 ] && [ "${#paths[@]}" -gt 0 ]; then
     cm apply --force "${paths[@]}"
   fi
   skill_manager="$HOME/.local/bin/decent-angl-skills"
@@ -669,7 +669,6 @@ apply_local() {
 
 pull_published() {
   local fleet_sync="$HOME/.local/bin/decent-angl-sync"
-  local extra=()
   if [ ! -x "$fleet_sync" ]; then
     printf 'decent-angl-sync is unavailable; apply the complete shared baseline first.\n' >&2
     return 127
@@ -677,9 +676,13 @@ pull_published() {
   "$fleet_sync" reconcile --with-scripts
   # A pre-upgrade `pull` still has the old validator in memory. Re-exec
   # the applied binary so new pin, OS-scope, and policy checks run.
-  [ "$STRICT" = true ] && extra+=(--strict)
+  # Do not expand an empty array under `set -u`; macOS bash 3.2 treats that
+  # as unbound.
   if [ -x "$HOME/.local/bin/omp-baseline" ]; then
-    exec "$HOME/.local/bin/omp-baseline" validate "${extra[@]}"
+    if [ "$STRICT" = true ]; then
+      exec "$HOME/.local/bin/omp-baseline" validate --strict
+    fi
+    exec "$HOME/.local/bin/omp-baseline" validate
   fi
   validate
 }

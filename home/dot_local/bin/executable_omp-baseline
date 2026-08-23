@@ -18,7 +18,7 @@ OMP_GITHUB_REPO="can1357/oh-my-pi"
 
 usage() {
   cat <<'EOF'
-Usage: omp-baseline <status|validate|apply|pull|check-upstream|upgrade|guard|install-guard> [options]
+Usage: omp-baseline <status|validate|apply|pull|check-upstream|upgrade|guard|install-guard|fleet> [options]
 
   status          Compare repo, chezmoi source, rendered live files, and version.
   validate        Run status plus coverage, secret-boundary, and OMP parser checks.
@@ -29,6 +29,7 @@ Usage: omp-baseline <status|validate|apply|pull|check-upstream|upgrade|guard|ins
                   Does not commit or reconcile. --dry-run prints the plan only.
   guard           Validate local OMP state without overwriting source.
   install-guard   Install the hourly launchd/systemd user guard.
+  fleet           SSH to t14, macbook, and macmini and report pin, gh, and validate.
   --strict        Also require every portable source file to be tracked by Git.
 EOF
 }
@@ -651,10 +652,15 @@ apply_local() {
   DECENT_ANGL_REPO_ROOT="$REPO_ROOT" bash "$skill_manager" sync
   quarantine_legacy_wrapper
   pin="$(expected_version)"
-  if [ "$(omp --version 2>/dev/null || true)" != "omp/$pin" ]; then
-    mise install "github:can1357/oh-my-pi@$pin"
+  if command -v mise >/dev/null 2>&1; then
+    if [ "$(omp --version 2>/dev/null || true)" != "omp/$pin" ]; then
+      mise install "github:can1357/oh-my-pi@$pin"
+    fi
+    # Companion pins live in the same mise file (gh, etc.).
+    mise install
     mise reshim
   fi
+  printf '%s' "$pin" >"$HOME/.omp/agent/last-changelog-version"
   if [ "${OMP_BASELINE_IN_GUARD:-0}" != 1 ]; then
     install_guard
   fi
@@ -964,6 +970,48 @@ guard() {
   fi
   return "$status"
 }
+fleet_probe() {
+  local git_rev omp_ver gh_ver pin val oauth
+  git_rev="$(git -C "$HOME/src/boilerplate" rev-parse --short HEAD 2>/dev/null || printf missing)"
+  omp_ver="$(omp --version 2>/dev/null || printf missing)"
+  omp_ver="${omp_ver#omp/}"
+  gh_ver="$(gh --version 2>/dev/null | awk 'NR==1 { print $3 }')"
+  [ -n "$gh_ver" ] || gh_ver=missing
+  pin="$(sed -n 's/^# omp-version[[:space:]]*//p' "$HOME/.config/decent-angl/omp-baseline-manifest.tsv" | awk 'NR==1 { print; exit }')"
+  [ -n "$pin" ] || pin=missing
+  if omp-baseline validate --strict >/dev/null 2>&1; then val=ok; else val=fail; fi
+  if omp models xai-oauth --json 2>/dev/null | grep -q 'grok-4.6'; then oauth=yes; else oauth=no; fi
+  printf '%s %s %s %s %s %s\n' "$git_rev" "$omp_ver" "$gh_ver" "$pin" "$val" "$oauth"
+}
+
+fleet() {
+  local host self line rc=0
+  case "$(machine_id)" in
+    omarchy) self=t14 ;;
+    *) self="$(machine_id)" ;;
+  esac
+  printf '%-8s %-8s %-8s %-8s %-8s %-8s %s\n' HOST GIT OMP GH PIN VALIDATE OAUTH
+  for host in t14 macbook macmini; do
+    if [ "$host" = "$self" ]; then
+      if line="$(fleet_probe)"; then
+        :
+      else
+        line="error error error error fail no"
+        rc=1
+      fi
+    elif line="$(ssh -o BatchMode=yes -o ConnectTimeout=8 "$host" 'omp-baseline fleet-probe' 2>/dev/null)"; then
+      :
+    else
+      line="unreachable - - - fail no"
+      rc=1
+    fi
+    printf '%-8s %-8s %-8s %-8s %-8s %-8s %s\n' "$host" $line
+    case "$line" in
+      *fail*|unreachable*) rc=1 ;;
+    esac
+  done
+  return "$rc"
+}
 
 main() {
   local command="${1:-status}"
@@ -994,6 +1042,8 @@ main() {
     pull) pull_published ;;
     guard) guard ;;
     install-guard) install_guard ;;
+    fleet) fleet ;;
+    fleet-probe) fleet_probe ;;
     -h|--help) usage ;;
     *) printf 'Unknown command: %s\n' "$command" >&2; usage >&2; return 1 ;;
   esac

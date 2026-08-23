@@ -67,4 +67,6 @@ omp-baseline validate --strict
 `upgrade` rewrites the pin sites, installs that mise release, and validates.
 It does not commit or reconcile. Review the pin diff, commit, then
 `decent-angl-sync reconcile --with-scripts` so the fleet follows. On each
-other machine run `omp-baseline pull`.
+other machine run `omp-baseline pull`. `apply`/`pull` also `mise install`
+every missing pin from the shared mise file. `omp-baseline fleet` checks
+t14, macbook, and macmini.

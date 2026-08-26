@@ -17,6 +17,7 @@ file	~/.config/omarchy/branding/screensaver.txt	home/dot_config/omarchy/branding
 file	~/.config/omarchy/extensions/menu.sh	home/dot_config/omarchy/extensions/menu.sh
 exec	~/.config/omarchy/hooks/post-update.d/10-decent-angl-compat	home/dot_config/omarchy/hooks/post-update.d/executable_10-decent-angl-compat
 exec	~/.local/bin/omarchy-agent-usage-omp	home/dot_local/bin/executable_omarchy-agent-usage-omp
+exec	~/.local/bin/omarchy-agent-usage-openrouter	home/dot_local/bin/executable_omarchy-agent-usage-openrouter
 exec	~/.local/bin/omarchy-agent-usage-update	home/dot_local/bin/executable_omarchy-agent-usage-update
 exec	~/.local/bin/omarchy-launch-shell	home/dot_local/bin/executable_omarchy-launch-shell
 exec	~/.local/bin/omarchy-shell-overlay	home/dot_local/bin/executable_omarchy-shell-overlay
@@ -24,6 +25,7 @@ exec	~/.local/bin/qs	home/dot_local/bin/executable_qs
 exec	~/.local/bin/quickshell	home/dot_local/bin/executable_quickshell
 file	~/.local/share/omarchy-shell-overlay/upstream.sha256	home/dot_local/share/omarchy-shell-overlay/upstream.sha256
 file	~/.local/share/omarchy-shell-overlay/Ui/KeyboardPanel.qml	home/dot_local/share/omarchy-shell-overlay/Ui/KeyboardPanel.qml
+file	~/.local/share/omarchy-shell-overlay/Ui/BorderSurface.qml	home/dot_local/share/omarchy-shell-overlay/Ui/BorderSurface.qml
 file	~/.local/share/omarchy-shell-overlay/Ui/PopupCard.qml	home/dot_local/share/omarchy-shell-overlay/Ui/PopupCard.qml
 file	~/.local/share/omarchy-shell-overlay/plugins/panels/power/Panel.qml	home/dot_local/share/omarchy-shell-overlay/plugins/panels/power/Panel.qml
 file	~/.local/share/omarchy-shell-overlay/plugins/panels/bluetooth/Panel.qml	home/dot_local/share/omarchy-shell-overlay/plugins/panels/bluetooth/Panel.qml

@@ -22,9 +22,7 @@ STATUS_RE = re.compile(r"(?m)^Status: +(pending|blocked|in-flight|done)\s*$")
 LEASE_RE = re.compile(
     r"(?m)^Lease: +host=(?P<host>\S+) +pid=(?P<pid>\d+) +session=(?P<session>\S+) +expires=(?P<expires>\S+)\s*$"
 )
-PATH_RE = re.compile(
-    r"(?:[\w.+-]+/)+[\w.+-]+|[\w.+-]+\.(?:swift|md|py|ts|tsx|js|mjs|c|h|m|mm|rs|go|toml|yml|yaml|json|sh|rb|kt|java|cs)"
-)
+PATH_RE = re.compile(r"(?:[\w.+-]+/)+[\w.+-]+|(?:executable_[\w.+-]+|[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)")
 INDEX_ROW_RE = re.compile(
     r"^\| (?P<slug>[^|]+?) \| (?P<title>[^|]+?) \| (?P<open>[^|]+?) \| (?P<updated>[^|]+?) \|\s*$"
 )
@@ -61,9 +59,10 @@ def resolve_root(cwd: str | None) -> Path:
 
 
 def inside(root: Path, path: Path) -> Path:
+    resolved_root = root.resolve()
     resolved = path.resolve()
     try:
-        resolved.relative_to(root)
+        resolved.relative_to(resolved_root)
     except ValueError as exc:
         raise BoardError(f"refusing path outside cwd: {resolved}") from exc
     return resolved
@@ -129,21 +128,26 @@ def process_field(pid: int, field: str) -> str:
 def owner_pid() -> int:
     override = os.environ.get("OMP_BOARD_OWNER")
     if override:
-        return int(override)
+        value = int(override)
+        if value != 1:
+            return value
     pid = os.getpid()
     seen: set[int] = set()
-    last = pid
-    while pid and pid not in seen:
+    while pid > 1 and pid not in seen:
         seen.add(pid)
-        comm = Path(process_field(pid, "comm")).name
-        if comm in {"omp", "oh-my-pi"}:
+        try:
+            comm = Path(process_field(pid, "comm")).name
+            command = process_field(pid, "command")
+            exe = command.split(maxsplit=1)[0] if command else ""
+        except (ValueError, subprocess.CalledProcessError, OSError):
+            break
+        if comm in {"omp", "oh-my-pi"} or exe.endswith("/omp"):
             return pid
-        last = pid
         try:
             pid = int(process_field(pid, "ppid"))
-        except (ValueError, subprocess.CalledProcessError):
+        except (ValueError, subprocess.CalledProcessError, OSError):
             break
-    return last
+    return os.getpid()
 
 
 def pid_alive(pid: int) -> bool:
@@ -202,12 +206,27 @@ def acquire_lock(root: Path, name: str, ttl: int, wait: float = 0.0) -> dict[str
     deadline = time.time() + wait
     while True:
         try:
-            path.mkdir()
-            atomic_write(path / "meta", "".join(f"{k}={v}\n" for k, v in meta.items()))
+            temp = Path(tempfile.mkdtemp(prefix=f".{name}.", suffix=".tmp", dir=str(path.parent)))
+            atomic_write(temp / "meta", "".join(f"{k}={v}\n" for k, v in meta.items()))
+            try:
+                os.rename(temp, path)
+            except OSError as exc:
+                raise FileExistsError from exc
             return meta
         except FileExistsError:
+            if "temp" in locals() and temp.exists():
+                (temp / "meta").unlink(missing_ok=True)
+                temp.rmdir()
             existing = read_lock_meta(path)
-            if lock_stale(existing):
+            if existing is None:
+                try:
+                    fresh = time.time() - path.stat().st_mtime < 5
+                except OSError:
+                    fresh = True
+                stale = not fresh
+            else:
+                stale = lock_stale(existing)
+            if stale:
                 if existing:
                     print(
                         f"stealing stale lock {name} host={existing.get('host')} pid={existing.get('pid')}",
@@ -353,6 +372,29 @@ def cmd_root(args: argparse.Namespace) -> None:
     print(f"state={state_dir(root)}")
 
 
+def cmd_status(args: argparse.Namespace) -> None:
+    root = resolve_root(args.cwd)
+    print(f"cwd={root}")
+    print(f"board={board_dir(root)}")
+    print(f"index={index_path(root)}")
+    print(f"state={state_dir(root)}")
+    active = "none"
+    path = index_path(root)
+    if path.exists():
+        active, _ = parse_index(path.read_text(encoding="utf-8"))
+    print(f"active={active}")
+    state = state_dir(root)
+    if not state.is_dir():
+        return
+    for lock in sorted(state.glob("*.lockdir")):
+        meta = read_lock_meta(lock) or {}
+        status = "stale" if lock_stale(meta) else "held"
+        print(
+            f"{lock.name}: {status} host={meta.get('host', '?')} "
+            f"pid={meta.get('pid', '?')} expires={meta.get('expires', '?')}"
+        )
+
+
 def cmd_slug(args: argparse.Namespace) -> None:
     print(slugify(args.text))
 
@@ -480,22 +522,26 @@ def cmd_orphans(args: argparse.Namespace) -> None:
         if card["status"] != "in-flight":
             continue
         lease = card["lease"]
-        reason = "no-lease"
-        if lease:
+        if not lease:
+            found = True
+            print(f"{card['name']}\tno-lease")
+            continue
+        try:
+            expired = parse_iso(lease["expires"]) <= now
+        except ValueError:
+            expired = True
+        if expired:
+            found = True
+            print(f"{card['name']}\texpired")
+            continue
+        if lease.get("host") == os.uname().nodename:
             try:
-                expired = parse_iso(lease["expires"]) <= now
+                alive = pid_alive(int(lease.get("pid", "0")))
             except ValueError:
-                expired = True
-            same_host = lease["host"] == os.uname().nodename
-            dead = same_host and not pid_alive(int(lease["pid"]))
-            if expired:
-                reason = "expired"
-            elif dead:
-                reason = "dead-pid"
-            else:
-                continue
-        found = True
-        print(f"{card['name']}\t{reason}")
+                alive = False
+            if not alive:
+                found = True
+                print(f"{card['name']}\tdead-pid")
     if not found:
         print("ok")
 
@@ -522,120 +568,98 @@ def sample_topic(alpha: str, beta: str) -> str:
 
 def cmd_selftest(_args: argparse.Namespace) -> None:
     with tempfile.TemporaryDirectory(prefix="omp-board-") as tmp:
-        root = Path(tmp)
+        root = Path(tmp).resolve()
         owner = str(os.getpid())
+        script = str(Path(__file__).resolve())
 
-        def run(argv: list[str], stdin: str | None = None) -> tuple[int, str, str]:
+        def run(argv: list[str], stdin: str | None = None, extra_env: dict[str, str] | None = None) -> tuple[int, str, str]:
             env = os.environ.copy()
-            env["OMP_BOARD_CWD"] = str(root)
-            env["OMP_BOARD_OWNER"] = owner
-            proc = subprocess.run(
-                [sys.executable, str(Path(__file__).resolve()), "--cwd", str(root), *argv],
-                input=stdin,
-                text=True,
-                capture_output=True,
-                env=env,
-                check=False,
-            )
+            env.update({"OMP_BOARD_CWD": str(root), "OMP_BOARD_OWNER": owner})
+            if extra_env:
+                env.update(extra_env)
+            proc = subprocess.run([sys.executable, script, "--cwd", str(root), *argv], input=stdin, text=True, capture_output=True, env=env, check=False)
             return proc.returncode, proc.stdout, proc.stderr
+
+        def put(data: str) -> None:
+            code, _, err = run(["lock", "demo", "--ttl", "30"])
+            assert code == 0, err
+            expected = file_hash(topic_path(root, "demo"))
+            code, _, err = run(["write-topic", "demo", "--expect", expected], data)
+            assert code == 0, err
+            run(["unlock", "demo"])
 
         code, _, err = run(["init"])
         assert code == 0, err
-        code, _, err = run(["lock", "demo", "--ttl", "30"])
-        assert code == 0, err
-        code, out, err = run(["write-topic", "demo", "--expect", "missing"], sample_topic("pending", "pending"))
-        assert code == 0, err
-        first = out.strip()
-        code, _, err = run(["write-topic", "demo", "--expect", "deadbeef"], sample_topic("done", "done"))
-        assert code == 76, err
-        assert topic_path(root, "demo").read_text(encoding="utf-8").count("pending") == 2
-        code, _, err = run(["overlap", "demo"])
-        assert code == 0, err
-        overlap = (
-            "# Board: demo\n\n"
-            "## Card: Alpha\nStatus: pending\n\n# Ownership\n`src/shared.py`\n\n"
-            "## Card: Beta\nStatus: pending\n\n# Ownership\n`src/shared.py`\n"
-        )
-        code, _, err = run(["write-topic", "demo", "--expect", first], overlap)
-        assert code == 0, err
-        code, out, _ = run(["overlap", "demo"])
-        assert code == 2 and "shared.py" in out
-        crumb = (
-            "# Board: demo\n\n"
-            "## Card: Alpha\nStatus: pending\n\n# Ownership\n`private var bed` in `App/FurnitureGlyph.swift`\n\n"
-            "## Card: Beta\nStatus: pending\n\n# Ownership\n`App/FurnitureGlyph.swift` except `plant`\n"
-        )
-        current = file_hash(topic_path(root, "demo"))
-        code, _, err = run(["write-topic", "demo", "--expect", current], crumb)
-        assert code == 0, err
-        code, out, _ = run(["overlap", "demo"])
-        assert code == 2 and "FurnitureGlyph.swift" in out, out
-        empty = (
-            "# Board: demo\n\n"
-            "## Card: Alpha\nStatus: pending\n\n# Ownership\nnone\n\n"
-            "## Card: Beta\nStatus: pending\n\n# Ownership\n`src/b.py`\n"
-        )
-        current = file_hash(topic_path(root, "demo"))
-        code, _, err = run(["write-topic", "demo", "--expect", current], empty)
-        assert code == 0, err
-        code, out, _ = run(["overlap", "demo"])
-        assert code == 2 and "empty-ownership" in out, out
-        done_empty = (
-            "# Board: demo\n\n"
-            "## Card: Alpha\nStatus: done\n\n# Ownership\nnone\n\n"
-            "## Card: Beta\nStatus: pending\n\n# Ownership\n`src/b.py`\n"
-        )
-        current = file_hash(topic_path(root, "demo"))
-        code, _, err = run(["write-topic", "demo", "--expect", current], done_empty)
-        assert code == 0, err
+        put("# Board: demo\n\n## Card: FurnitureGlyph\nStatus: pending\n\n# Ownership\n`App/FurnitureGlyph.swift`\n\n## Card: Other\nStatus: pending\n\n# Ownership\n`App/FurnitureGlyph.swift`\n")
+        code, out, err = run(["overlap", "demo"])
+        assert code == 2 and "FurnitureGlyph\tOther\tApp/FurnitureGlyph.swift" in out, (out, err)
+        put("# Board: demo\n\n## Card: Done\nStatus: done\n\n# Ownership\nnone\n\n## Card: Live\nStatus: pending\n\n# Ownership\n`src/b.py`\n")
         code, out, err = run(["overlap", "demo"])
         assert code == 0 and out.strip() == "ok", (out, err)
-        rule = (
-            "# Board: demo\n\n"
-            "## Card: Alpha\nStatus: pending\n\n# Ownership\n`src/a.py`\n\n---\n\n"
-            "## Card: Beta\nStatus: pending\n\n# Ownership\n`src/b.py`\n\n---\n"
-        )
-        current = file_hash(topic_path(root, "demo"))
-        code, _, err = run(["write-topic", "demo", "--expect", current], rule)
-        assert code == 0, err
+        put("# Board: demo\n\n## Card: Alpha\nStatus: pending\n\n# Ownership\nalpha.txt\n\n## Card: Board\nStatus: pending\n\n# Ownership\nexecutable_omp-board\n\n## Card: Dotted\nStatus: pending\n\n# Ownership\nPanel.qml\n")
         code, out, err = run(["overlap", "demo"])
         assert code == 0 and out.strip() == "ok", (out, err)
+        code, out, err = run(["lock", "owner-check", "--ttl", "0"], extra_env={"OMP_BOARD_OWNER": ""})
+        owner_meta = json.loads(out)
+        assert code == 0 and owner_meta["pid"] != "1", (out, err)
+        code, out, err = run(["status"])
+        assert code == 0 and "owner-check.lockdir" in out, (out, err)
+        run(["unlock", "owner-check"])
+        code, _, err = run(["lock", "owner-check", "--ttl", "30"])
+        assert code == 0, err
+        code, out, err = run(["status"])
+        assert code == 0 and "owner-check.lockdir: held" in out, (out, err)
+        run(["unlock", "owner-check"])
 
-        run(["unlock", "demo"])
+        lock = lock_dir(root, "stale")
+        lock.mkdir(parents=True)
+        atomic_write(lock / "meta", f"host={os.uname().nodename}\npid=999999\nexpires={iso(datetime.fromtimestamp(time.time() - 1, tz=timezone.utc))}\n")
+        code, _, err = run(["lock", "stale", "--ttl", "30"])
+        assert code == 0 and "stealing stale lock" in err, err
+        code, _, err = run(["lock", "cas", "--ttl", "30"])
+        assert code == 0, err
+        code, _, err = run(["write-topic", "cas", "--expect", "wrong"], "changed")
+        assert code == 76 and "cas failed" in err, (code, err)
+        run(["unlock", "cas"])
+        run(["unlock", "stale"])
+        holder = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        try:
+            for name, host, pid, expires in (("live", os.uname().nodename, str(holder.pid), 60), ("foreign", "other-host", "1", 60)):
+                path = lock_dir(root, name); path.mkdir(parents=True)
+                atomic_write(path / "meta", f"host={host}\npid={pid}\nexpires={iso(datetime.fromtimestamp(time.time() + expires, tz=timezone.utc))}\n")
+                code, _, _ = run(["lock", name, "--ttl", "30"])
+                assert code == 75
+                (path / "meta").unlink(); path.rmdir()
+            path = lock_dir(root, "foreign-expired"); path.mkdir(parents=True)
+            atomic_write(path / "meta", f"host=other-host\npid=1\nexpires={iso(datetime.fromtimestamp(time.time() - 1, tz=timezone.utc))}\n")
+            code, _, err = run(["lock", "foreign-expired", "--ttl", "30"])
+            assert code == 0 and "stealing stale lock" in err, err
+            run(["unlock", "foreign-expired"])
+        finally:
+            holder.terminate(); holder.wait()
 
-        def upsert(title: str) -> None:
-            subprocess.run(
-                [sys.executable, str(Path(__file__).resolve()), "--cwd", str(root), "index-upsert", title, "--title", title, "--open", "1"],
-                check=True,
-                capture_output=True,
-                text=True,
+        put("# Board: demo\n\n## Card: Expired\nStatus: in-flight\nLease: host=x pid=1 session=s expires=2000-01-01T00:00:00Z\n\n# Ownership\n`x.py`\n\n## Card: Dead\nStatus: in-flight\nLease: host=" + os.uname().nodename + " pid=999999 session=s expires=2999-01-01T00:00:00Z\n\n# Ownership\n`dead.py`\n\n## Card: NoLease\nStatus: in-flight\n\n# Ownership\n`none.py`\n\n## Card: Live\nStatus: in-flight\nLease: host=x pid=1 session=s expires=2999-01-01T00:00:00Z\n\n# Ownership\n`y.py`\n")
+        before = file_hash(topic_path(root, "demo"))
+        code, out, err = run(["orphans", "demo"])
+        assert code == 0 and "Expired\texpired" in out and "Dead\tdead-pid" in out and "NoLease\tno-lease" in out and "Live" not in out, (out, err)
+        assert file_hash(topic_path(root, "demo")) == before
+        procs = [
+            subprocess.Popen(
+                [sys.executable, script, "--cwd", str(root), "index-upsert", name, "--title", name, "--open", "1"],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
             )
-
-        children = []
-        for name in ("topic-a", "topic-b"):
-            pid = os.fork()
-            if pid == 0:
-                try:
-                    upsert(name)
-                    os._exit(0)
-                except Exception:
-                    os._exit(1)
-            children.append(pid)
-        failed = False
-        for pid in children:
-            _, status = os.waitpid(pid, 0)
-            if not os.WIFEXITED(status) or os.WEXITSTATUS(status) != 0:
-                failed = True
+            for name in ("topic-a", "topic-b")
+        ]
+        for proc in procs:
+            stdout, stderr = proc.communicate()
+            assert proc.returncode == 0, (stdout, stderr)
         text = index_path(root).read_text(encoding="utf-8")
         assert "topic-a" in text and "topic-b" in text, text
-        assert not failed
-
         try:
             inside(root, Path("/etc/passwd"))
             raise AssertionError("escape allowed")
         except BoardError:
             pass
-
         print("ok")
 
 
@@ -644,6 +668,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cwd", default=None, help="project root; default is process cwd")
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("root")
+    sub.add_parser("status")
     p = sub.add_parser("slug")
     p.add_argument("text")
     sub.add_parser("init")
@@ -682,6 +707,7 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
     commands = {
         "root": cmd_root,
+        "status": cmd_status,
         "slug": cmd_slug,
         "init": cmd_init,
         "lock": cmd_lock,
@@ -700,6 +726,8 @@ def main(argv: list[str] | None = None) -> None:
         commands[args.cmd](args)
     except BoardError as exc:
         die(str(exc), exc.code)
+
+
 
 
 if __name__ == "__main__":

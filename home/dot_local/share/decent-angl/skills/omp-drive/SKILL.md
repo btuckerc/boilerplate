@@ -23,6 +23,19 @@ Boards are always `$PWD/docs/board`. A session started in `~/tmp` writes `~/tmp/
 
 Project `.omp/commands` override these. Present Company keeps luna/SLOT/qa and still uses `omp-board`.
 
+## Inventory facts
+
+`/vibe` is the built-in 17.4.2 TUI stay-alive toggle; `vibe_spawn` exists only after `/vibe`. There is no `vibe.md` overlay; do not add one.
+
+Lock `host=` is `os.uname().nodename`: `btct14`, `BTC-MBP14.local`, or `mc.angl.gg`. It is not the Tailscale name (`macbook` or `macmini`). A same-host dead pid is stolen; a foreign host is not.
+
+Fleet install is chezmoi via `omp-baseline apply` or `omp-baseline pull`. Dirty Git blocks scheduled reconcile. Boards stay `$PWD/docs/board`.
+
+Ownership is a slash path, an `executable_*` name, or a dotted name such as `alpha.txt`.
+`owner_pid` must be an `omp` ancestor or this process; it must never be PID 1.
+`omp-board status` lists locks.
+The first fleet install is `omp-baseline apply` (which creates destination directories), not raw `chezmoi apply` of a missing destination.
+
 ## Files
 
 | Path | Role |
@@ -40,6 +53,7 @@ Every board mutation goes through `omp-board`. Do not `write`/`edit` board files
 
 ```
 omp-board init
+omp-board status
 omp-board slug "<topic>"
 omp-board lock <slug>
 omp-board hash <slug>

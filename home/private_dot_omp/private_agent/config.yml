@@ -1,14 +1,16 @@
 # Managed by chezmoi. Authentication remains in the machine-local agent.db
-# and ~/.omp/agent/.env. OpenRouter is overflow only; SuperGrok stays default.
+# and ~/.omp/agent/.env. SuperGrok is the main agent. OpenRouter luna does
+# titles and workers so the SuperGrok quota lasts. Overflow fallback is
+# still openrouter/x-ai/grok-4.6, not :nitro.
 modelRoles:
   default: xai-oauth/grok-4.6
-  smol: xai-oauth/grok-4.6
+  smol: openrouter/openai/gpt-5.6-luna
   slow: xai-oauth/grok-4.6
   vision: xai-oauth/grok-4.6
   plan: xai-oauth/grok-4.6
   commit: xai-oauth/grok-4.6
-  tiny: xai-oauth/grok-4.6
-  task: xai-oauth/grok-4.6
+  tiny: openrouter/openai/gpt-5.6-luna
+  task: openrouter/openai/gpt-5.6-luna
 
 modelProviderOrder:
   - xai-oauth
@@ -19,8 +21,10 @@ cycleOrder:
 
 enabledModels:
   - xai-oauth/grok-4.6
+  - xai-oauth/grok-composer-2.5-fast
   - openrouter/x-ai/grok-4.6
   - openrouter/x-ai/grok-4.6:nitro
+  - openrouter/openai/gpt-5.6-luna
   - openrouter/stealth/ox-alpha
 
 # Do not import superseded harness-level settings, commands, or skills.
@@ -69,8 +73,29 @@ retry:
 task:
   maxConcurrency: 3
   maxRecursionDepth: 2
-  enableLsp: true
-  eager: preferred
+  # Keep delegation on the default path without injecting eager instructions.
+  eager: default
+  # Main's LSP remains available; worker LSP is opt-in to avoid startup cost.
+  enableLsp: false
+  # Surface the resolved worker model for cheap routing verification.
+  showResolvedModelBadge: true
+  # Workers leave SuperGrok. Reviewer/security stay on the session model.
+  agentModelOverrides:
+    sonic: openrouter/openai/gpt-5.6-luna
+    luna: openrouter/openai/gpt-5.6-luna
+    scout: openrouter/openai/gpt-5.6-luna
+    task: openrouter/openai/gpt-5.6-luna
+  # Skip the redundant filesystem walk for each delegated task.
+  prewalk: false
+
+# Keep the native prewalk feature explicitly disabled for snappier startup.
+prewalk:
+  enabled: false
+
+# Keep the LSP service available while loading it only when requested.
+lsp:
+  enabled: true
+  lazy: true
 
 tools:
   approvalMode: yolo
@@ -157,8 +182,8 @@ display:
   smoothStreaming: false
 
 title:
-  # First-message titles stay. Replan titles are extra Grok 4.6 calls
-  # (tiny role is the same model) that contend with the working turn.
+  # First-message titles stay and now use the tiny role (luna).
+  # Replan titles stay off so they do not contend with the working turn.
   refreshOnReplan: false
 
 
@@ -178,7 +203,7 @@ features:
   unexpectedStopDetection: false
 
 providers:
-  # Default OpenRouter routing (price/uptime). :nitro is a manual enabledModels pick.
+  # Default OpenRouter routing (price/uptime). :nitro and luna are manual enabledModels picks.
   openrouterVariant: default
   # xAI search is grok-4.5 + web_search (24-53s here). Public Web races
   # Startpage/DDG in ~5s with no key. If that fan-out fails, try each
@@ -194,8 +219,8 @@ providers:
     - mojeek
   imageOrder:
     - xai
-  # Keep titles and classifiers on the configured online tiny role, which is
-  # Grok 4.6. Never start an embedded ONNX model worker.
+  # Titles and classifiers use the tiny role (luna) as an online model.
+  # Never start an embedded ONNX model worker.
   tinyModel: online
   memoryModel: online
   autoThinkingModel: online

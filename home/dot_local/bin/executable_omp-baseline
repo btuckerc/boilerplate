@@ -292,7 +292,7 @@ check_tracking_and_secrets() {
 }
 
 check_runtime_permissions() {
-  local failures=0 file mode
+  local failures=0 file mode fstype attrs
   for file in \
     "$HOME/.omp/agent/.env" \
     "$HOME/.omp/agent"/agent.db* \
@@ -312,12 +312,32 @@ check_runtime_permissions() {
     esac
   done
   [ "$failures" -eq 0 ] && printf 'MODE    local credentials private\n'
+  if [ "$(uname -s)" = Linux ] && command -v lsattr >/dev/null 2>&1; then
+    fstype="$(findmnt -n -o FSTYPE -T "$HOME/.omp/agent" 2>/dev/null || true)"
+    if [ "$fstype" = btrfs ]; then
+      attrs="$(lsattr -d "$HOME/.omp/agent" 2>/dev/null || true)"
+      case "$attrs" in
+        *C*) printf 'NOCOW   ~/.omp/agent\n' ;;
+        *) printf 'NOCOW   expected chattr +C on ~/.omp/agent\n' >&2; failures=1 ;;
+      esac
+    fi
+  fi
   return "$failures"
 }
 
 harden_runtime_permissions() {
-  local file
+  local file fstype
   install -d -m 700 "$HOME/.omp" "$HOME/.omp/agent"
+  # btrfs CoW + sqlite page writes can displace pages (Firefox/Chrome
+  # guidance; OMP #8082 saw the same cache-autoindex damage). Directory
+  # +C is inherited by new files. Existing non-empty files stay CoW
+  # until rewritten idle. APFS has no equivalent.
+  if [ "$(uname -s)" = Linux ] && command -v chattr >/dev/null 2>&1; then
+    fstype="$(findmnt -n -o FSTYPE -T "$HOME/.omp/agent" 2>/dev/null || true)"
+    if [ "$fstype" = btrfs ]; then
+      chattr +C "$HOME/.omp/agent" 2>/dev/null || true
+    fi
+  fi
   for file in \
     "$HOME/.omp/agent/.env" \
     "$HOME/.omp/agent"/agent.db* \
@@ -547,7 +567,7 @@ check_omp_config() {
   esac
 
   if output="$(omp config get modelRoles --json 2>/dev/null)" \
-    && printf '%s' "$output" | jq -e '.value.default == "xai-oauth/grok-4.6" and .value.task == "xai-oauth/grok-4.6"' >/dev/null; then
+    && printf '%s' "$output" | jq -e '.value.default == "xai-oauth/grok-4.6" and .value.task == "openrouter/openai/gpt-5.6-luna"' >/dev/null; then
     printf 'CONFIG  model roles parse\n'
   else
     printf 'CONFIG  model roles invalid\n' >&2

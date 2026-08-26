@@ -42,3 +42,6 @@ home/private_dot_omp/private_agent/*.log
 
 # Generated Rust build output for the shared iMessage TUI.
 home/dot_local/share/decent-angl/imsg/tui/target/
+# Cwd-local OMP boards are working state, not published config.
+docs/board/
+docs/board.md

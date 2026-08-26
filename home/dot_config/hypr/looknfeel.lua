@@ -28,20 +28,23 @@ hl.config({
 	},
 })
 
--- Restore outer gap and chrome only when two or more tiled windows are visible.
--- Opening a second window is itself a layout event, so this path is reliable.
+-- Restore outer gap and border when two or more tiled windows are visible.
+-- Do not set rounding in a window rule. That value sticks on the client
+-- after the workspace selector stops matching. Chromium on a one-tile
+-- workspace kept rounding 6; kitty on never-multi workspaces stayed 0.
+-- decoration.rounding stays 0 so the first map is already square.
+local single = "w[tv1]s[false]"
 local multi = "w[tv2-99]s[false]"
+hl.workspace_rule({
+	workspace = single,
+	gaps_out = 0,
+	border_size = 0,
+})
 hl.workspace_rule({
 	workspace = multi,
 	gaps_out = 4,
 	gaps_in = 2,
 	border_size = 2,
-})
-hl.window_rule({
-	name = "multi-window-chrome",
-	match = { float = false, workspace = multi },
-	border_size = 2,
-	rounding = 6,
 })
 
 -- Make windows carrying Omarchy's default-opacity tag fully opaque.

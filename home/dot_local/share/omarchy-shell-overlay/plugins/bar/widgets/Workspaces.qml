@@ -6,7 +6,8 @@ import qs.Ui
 
 // Decent-angl overlay of Omarchy's Workspaces widget. Packaged file is
 // untouched; omarchy-launch-shell copies this into the runtime tree when
-// enabled. Empty workspaces are open circles; occupied ones are filled.
+// enabled. Focused is the solid disc at 1, occupied-inactive is the same
+// disc at 0.45, and empty is the ring at 0.5.
 BarWidget {
   id: root
   moduleName: "omarchy.workspaces"
@@ -62,9 +63,9 @@ BarWidget {
         readonly property bool focused: Hyprland.focusedWorkspace !== null && Hyprland.focusedWorkspace.id === modelData
 
         bar: root.bar
-        text: occupied ? "\u25CF" : "\u25CB"
+        text: (focused || occupied) ? "\u25CF" : "\u25CB"
         tooltipText: "Workspace " + (modelData === 10 ? "0" : String(modelData))
-        opacity: occupied || focused ? 1 : 0.5
+        opacity: focused ? 1 : (occupied ? 0.45 : 0.5)
         horizontalMargin: 6
         verticalPadding: 6
         fixedWidth: root.vertical ? root.barSize : Style.space(20)

@@ -304,6 +304,16 @@ def apple_ns_to_iso(raw_value: Any) -> str | None:
     return datetime.fromtimestamp(seconds, tz=timezone.utc).isoformat()
 
 
+def unix_seconds_to_apple_ns(raw_value: Any) -> int:
+    try:
+        value = int(raw_value)
+    except Exception:
+        return 0
+    if value <= 0:
+        return 0
+    return int((value - APPLE_EPOCH_UNIX) * 1_000_000_000)
+
+
 def display_timestamp(raw_value: Any) -> str:
     seconds = apple_ns_to_unix_seconds(raw_value)
     if seconds is None:
@@ -381,6 +391,8 @@ def extract_attributed_body_text(raw_value: Any) -> str | None:
             return False
         if value in blacklist or value.startswith("NS") or value.startswith(metadata_prefixes):
             return False
+        if len(value) >= 2 and any(character.isalpha() for character in value):
+            return True
         if " " in value or value.startswith("- ") or value.endswith(("?", ".", "!", ":")):
             return True
         return False
@@ -1231,9 +1243,20 @@ def refresh_messages_and_attachments(
     index: sqlite3.Connection,
     attachments_root: Path | None,
     anchor_rowid: int,
+    through_rowid: int | None = None,
 ) -> dict[str, int]:
+    where_sql = "where ROWID >= ?"
+    join_where_sql = "where message_id >= ?"
+    attachment_where_sql = "where maj.message_id >= ?"
+    params: list[Any] = [anchor_rowid]
+    if through_rowid is not None:
+        where_sql += " and ROWID <= ?"
+        join_where_sql += " and message_id <= ?"
+        attachment_where_sql += " and maj.message_id <= ?"
+        params.append(through_rowid)
+
     message_rows = source.execute(
-        """
+        f"""
         select
             ROWID, guid, text, subject, attributedBody, handle_id, service, account,
             coalesce(date, 0) as date,
@@ -1259,14 +1282,20 @@ def refresh_messages_and_attachments(
             coalesce(group_action_type, 0) as group_action_type,
             coalesce(message_action_type, 0) as message_action_type
         from message
-        where ROWID >= ?
+        {where_sql}
         order by ROWID
         """,
-        (anchor_rowid,),
+        tuple(params),
     ).fetchall()
 
-    index.execute("delete from chat_messages where message_rowid >= ?", (anchor_rowid,))
-    index.execute("delete from message_attachments where message_rowid >= ?", (anchor_rowid,))
+    index.execute(
+        f"delete from chat_messages where message_rowid >= ?{'' if through_rowid is None else ' and message_rowid <= ?'}",
+        tuple(params),
+    )
+    index.execute(
+        f"delete from message_attachments where message_rowid >= ?{'' if through_rowid is None else ' and message_rowid <= ?'}",
+        tuple(params),
+    )
 
     index.executemany(
         """
@@ -1351,12 +1380,12 @@ def refresh_messages_and_attachments(
     )
 
     chat_message_rows = source.execute(
-        """
+        f"""
         select chat_id, message_id, coalesce(message_date, 0) as message_date
         from chat_message_join
-        where message_id >= ?
+        {join_where_sql}
         """,
-        (anchor_rowid,),
+        tuple(params),
     ).fetchall()
     index.executemany(
         """
@@ -1374,7 +1403,7 @@ def refresh_messages_and_attachments(
     )
 
     attachment_rows = source.execute(
-        """
+        f"""
         select
             maj.message_id,
             a.ROWID as attachment_rowid,
@@ -1388,9 +1417,9 @@ def refresh_messages_and_attachments(
             coalesce(a.created_date, 0) as created_date
         from message_attachment_join maj
         join attachment a on a.ROWID = maj.attachment_id
-        where maj.message_id >= ?
+        {attachment_where_sql}
         """,
-        (anchor_rowid,),
+        tuple(params),
     ).fetchall()
     unique_attachments: dict[int, tuple[Any, ...]] = {}
     message_attachments: list[tuple[int, int]] = []
@@ -1443,6 +1472,7 @@ def refresh_messages_and_attachments(
         "messages_refreshed": len(message_rows),
         "chat_message_joins_refreshed": len(chat_message_rows),
         "attachments_refreshed": len(unique_attachments),
+        "max_copied_message_rowid": max((int(row["ROWID"]) for row in message_rows), default=0),
     }
 
 
@@ -1527,30 +1557,29 @@ def sync_index(
         state_lock_path(cfg, DEFAULT_SYNC_LOCK_NAME),
         blocking=not nonblocking,
     ):
-        with sqlite_connect_ro(cfg.chat_db) as source:
-            with sqlite_connect_rw(cfg.index_db) as index:
-                initialize_index_schema(index)
-                if rebuild:
-                    index.executescript(
-                        """
-                        delete from chat_messages;
-                        delete from message_attachments;
-                        delete from attachments;
-                        delete from messages;
-                        delete from chat_handles;
-                        delete from chats;
-                        delete from handles;
-                        """
-                    )
-                    meta_set(index, "last_message_rowid", "0")
+        with sqlite_connect_rw(cfg.index_db) as index:
+            initialize_index_schema(index)
+            if rebuild:
+                index.executescript(
+                    """
+                    delete from chat_messages;
+                    delete from message_attachments;
+                    delete from attachments;
+                    delete from messages;
+                    delete from chat_handles;
+                    delete from chats;
+                    delete from handles;
+                    """
+                )
+                meta_set(index, "last_message_rowid", "0")
 
+            previous_rowid = int(meta_get(index, "last_message_rowid", "0") or "0")
+            anchor_rowid = 1 if rebuild else max(1, previous_rowid - cfg.sync_backfill_rows)
+            started_at = datetime.now(timezone.utc).isoformat()
+
+            with sqlite_connect_ro(cfg.chat_db) as source:
                 source_rowid = source_latest_message_rowid(source)
                 source_date = source_latest_message_date(source)
-                previous_rowid = int(meta_get(index, "last_message_rowid", "0") or "0")
-                anchor_rowid = 1 if rebuild else max(1, previous_rowid - cfg.sync_backfill_rows)
-
-                started_at = datetime.now(timezone.utc).isoformat()
-
                 refresh_handles(source, index)
                 enrich_handles_from_addressbook(index)
                 refresh_chats(source, index)
@@ -1561,16 +1590,43 @@ def sync_index(
                     cfg.attachments_root,
                     anchor_rowid,
                 )
-                refresh_derived_fields(index)
 
-                meta_set(index, "last_message_rowid", str(source_rowid))
-                meta_set(index, "last_source_message_date", str(source_date))
-                meta_set(index, "last_sync_started_at", started_at)
-                meta_set(index, "last_sync_completed_at", datetime.now(timezone.utc).isoformat())
-                meta_set(index, "chat_db_path", str(cfg.chat_db))
-                meta_set(index, "account_hint", cfg.account_hint)
-                meta_set(index, "phone_account_hint", cfg.phone_account_hint)
-                index.commit()
+            copied_max = int(message_summary.get("max_copied_message_rowid") or 0)
+            if copied_max <= 0:
+                copied_max = 0 if rebuild else previous_rowid
+
+            with sqlite_connect_ro(cfg.chat_db) as source:
+                source_rowid = source_latest_message_rowid(source)
+                source_date = source_latest_message_date(source)
+                if source_rowid > copied_max:
+                    extra_summary = refresh_messages_and_attachments(
+                        source,
+                        index,
+                        cfg.attachments_root,
+                        copied_max + 1,
+                    )
+                    extra_max = int(extra_summary.get("max_copied_message_rowid") or 0)
+                    if extra_max > copied_max:
+                        copied_max = extra_max
+                    message_summary = {
+                        "messages_refreshed": int(message_summary["messages_refreshed"])
+                        + int(extra_summary["messages_refreshed"]),
+                        "chat_message_joins_refreshed": int(message_summary["chat_message_joins_refreshed"])
+                        + int(extra_summary["chat_message_joins_refreshed"]),
+                        "attachments_refreshed": int(message_summary["attachments_refreshed"])
+                        + int(extra_summary["attachments_refreshed"]),
+                        "max_copied_message_rowid": copied_max,
+                    }
+
+            refresh_derived_fields(index)
+            meta_set(index, "last_message_rowid", str(copied_max))
+            meta_set(index, "last_source_message_date", str(source_date))
+            meta_set(index, "last_sync_started_at", started_at)
+            meta_set(index, "last_sync_completed_at", datetime.now(timezone.utc).isoformat())
+            meta_set(index, "chat_db_path", str(cfg.chat_db))
+            meta_set(index, "account_hint", cfg.account_hint)
+            meta_set(index, "phone_account_hint", cfg.phone_account_hint)
+            index.commit()
 
     summary = {
         "chat_db": str(cfg.chat_db),
@@ -1946,6 +2002,114 @@ def query_contacts(con: sqlite3.Connection, query: str | None, limit: int) -> li
     ]
 
 
+def latest_send_job_texts(
+    con: sqlite3.Connection,
+    chat_rowids: list[int],
+) -> dict[int, str]:
+    if not chat_rowids:
+        return {}
+    placeholders = ",".join("?" for _ in chat_rowids)
+    rows = con.execute(
+        f"""
+        with ranked as (
+            select
+                destination_chat_rowid,
+                message_text,
+                row_number() over (
+                    partition by destination_chat_rowid
+                    order by coalesce(nullif(sent_at, 0), updated_at, created_at) desc, rowid desc
+                ) as rank_in_chat
+            from send_jobs
+            where destination_chat_rowid in ({placeholders})
+              and status in ('sent', 'sending')
+        )
+        select destination_chat_rowid, message_text
+        from ranked
+        where rank_in_chat = 1
+        """,
+        tuple(chat_rowids),
+    ).fetchall()
+    texts: dict[int, str] = {}
+    for row in rows:
+        text = (row["message_text"] or "").strip()
+        if text:
+            texts[int(row["destination_chat_rowid"])] = text
+    return texts
+
+
+def prefer_send_job_preview(current_preview: str, job_text: str | None) -> str:
+    if not job_text:
+        return current_preview
+    stripped = job_text.strip()
+    if not stripped:
+        return current_preview
+    if stripped == current_preview or compact_text(stripped) == current_preview:
+        return current_preview
+    return compact_text(stripped)
+
+
+def send_job_message_payload(
+    job: sqlite3.Row,
+    parent_map: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    job_id = int(job["rowid"])
+    text = job["message_text"] or ""
+    unix = int(job["sent_at"] or 0) or int(job["updated_at"] or 0) or int(job["created_at"] or 0)
+    date_ns = unix_seconds_to_apple_ns(unix)
+    sent = job["status"] == "sent"
+    parent_guid = normalize_guid_reference(job["parent_message_guid"])
+    row_like = {
+        "text": text,
+        "subject": None,
+        "has_attachments": 0,
+        "associated_message_type": 0,
+        "associated_message_emoji": None,
+        "date_retracted": 0,
+        "date_edited": 0,
+        "is_system_message": 0,
+        "group_action_type": 0,
+        "message_action_type": 0,
+        "thread_originator_guid": parent_guid,
+        "thread_originator_part": None,
+        "reply_to_guid": parent_guid,
+    }
+    return {
+        "message_rowid": -job_id,
+        "guid": f"send-job:{job_id}",
+        "handle_id": None,
+        "handle_display": "",
+        "service": job["service_type"],
+        "account": None,
+        "date": date_ns,
+        "date_read": 0,
+        "date_delivered": 0,
+        "is_from_me": 1,
+        "is_delivered": 1 if sent else 0,
+        "is_read": 0,
+        "is_sent": 1 if sent else 0,
+        "text": text,
+        "subject": None,
+        "has_attachments": 0,
+        "associated_message_type": 0,
+        "associated_message_emoji": None,
+        "reply_to_guid": parent_guid,
+        "thread_originator_guid": parent_guid,
+        "associated_message_guid": None,
+        "date_edited": 0,
+        "date_retracted": 0,
+        "is_system_message": 0,
+        "group_action_type": 0,
+        "message_action_type": 0,
+        "kind": message_kind(row_like),
+        "preview": text,
+        "reaction_label": None,
+        "attachments": [],
+        "reply_target_guid": parent_guid,
+        "reply_target_preview": parent_map.get(parent_guid or "", {}).get("preview"),
+        "timestamp": apple_ns_to_iso(date_ns),
+    }
+
+
 def query_chats(con: sqlite3.Connection, query: str | None, limit: int, unread_only: bool) -> list[dict[str, Any]]:
     where_sql = ""
     params: list[Any] = []
@@ -2014,6 +2178,7 @@ def query_chats(con: sqlite3.Connection, query: str | None, limit: int, unread_o
         ).fetchall()
         for row in preview_rows:
             preview_rows_by_chat.setdefault(int(row["chat_rowid"]), []).append(row)
+    latest_job_texts = latest_send_job_texts(con, chat_ids)
 
     result = []
     for row in rows:
@@ -2031,7 +2196,10 @@ def query_chats(con: sqlite3.Connection, query: str | None, limit: int, unread_o
                 "unread_count": int(row["unread_count"] or 0),
                 "last_message_rowid": last_rowid or None,
                 "last_message_at": apple_ns_to_iso(row["last_message_date"]),
-                "last_message_preview": best_chat_preview(preview_rows_by_chat.get(chat_rowid, [])),
+                "last_message_preview": prefer_send_job_preview(
+                    best_chat_preview(preview_rows_by_chat.get(chat_rowid, [])),
+                    latest_job_texts.get(chat_rowid),
+                ),
             }
         )
     return result
@@ -2064,7 +2232,12 @@ def chat_payload_from_row(con: sqlite3.Connection, row: sqlite3.Row | dict[str, 
         "unread_count": int(row_value(row, "unread_count", 0) or 0),
         "last_message_rowid": last_rowid or None,
         "last_message_at": apple_ns_to_iso(row_value(row, "last_message_date", 0)),
-        "last_message_preview": message_preview(preview_row),
+        "last_message_preview": prefer_send_job_preview(
+            message_preview(preview_row),
+            latest_send_job_texts(con, [int(row_value(row, "rowid", 0) or 0)]).get(
+                int(row_value(row, "rowid", 0) or 0)
+            ),
+        ),
     }
 
 
@@ -2149,6 +2322,32 @@ def query_messages_for_chat(
             reaction_target = normalize_guid_reference(row["associated_message_guid_normalized"])
             if reaction_target:
                 parent_guids.add(reaction_target)
+    from_me_texts = {
+        (row["text"] or "").strip()
+        for row in rows
+        if int(row["is_from_me"] or 0) == 1 and (row["text"] or "").strip()
+    }
+    unmatched_jobs = con.execute(
+        """
+        select rowid, message_text, service_type, status, sent_at, created_at, updated_at,
+               parent_message_guid
+        from send_jobs
+        where destination_chat_rowid = ?
+          and status in ('sent', 'sending')
+        order by coalesce(nullif(sent_at, 0), updated_at, created_at) asc, rowid asc
+        """,
+        (chat_rowid,),
+    ).fetchall()
+    pending_jobs: list[sqlite3.Row] = []
+    for job in unmatched_jobs:
+        job_text = (job["message_text"] or "").strip()
+        if not job_text or job_text in from_me_texts:
+            continue
+        pending_jobs.append(job)
+        from_me_texts.add(job_text)
+        parent_guid = normalize_guid_reference(job["parent_message_guid"])
+        if parent_guid:
+            parent_guids.add(parent_guid)
     parent_map: dict[str, dict[str, Any]] = {}
     if parent_guids:
         placeholders = ",".join("?" for _ in parent_guids)
@@ -2214,6 +2413,8 @@ def query_messages_for_chat(
                 "timestamp": apple_ns_to_iso(row["date"]),
             }
         )
+    for job in pending_jobs:
+        result.append(send_job_message_payload(job, parent_map))
     return result
 
 
@@ -2928,6 +3129,72 @@ def claim_next_queued_send_job(con: sqlite3.Connection) -> sqlite3.Row | None:
     return fetch_send_job_row(con, job_rowid)
 
 
+def ingest_sent_job_message(
+    cfg: Config,
+    chat_rowid: int | None,
+    message_text: str,
+) -> None:
+    if chat_rowid is None or cfg.chat_db is None or not cfg.chat_db.exists():
+        return
+    job_text = (message_text or "").strip()
+    if not job_text:
+        return
+    with exclusive_lock(state_lock_path(cfg, DEFAULT_SYNC_LOCK_NAME), blocking=False):
+        with sqlite_connect_ro(cfg.chat_db) as source:
+            candidates = source.execute(
+                """
+                select
+                    m.ROWID as rowid,
+                    m.text as text,
+                    m.attributedBody as attributedBody
+                from message m
+                join chat_message_join cmj on cmj.message_id = m.ROWID
+                where cmj.chat_id = ?
+                  and coalesce(m.is_from_me, 0) = 1
+                order by coalesce(m.date, 0) desc, m.ROWID desc
+                limit 8
+                """,
+                (chat_rowid,),
+            ).fetchall()
+            matched: sqlite3.Row | None = None
+            newest_empty: sqlite3.Row | None = None
+            for candidate in candidates:
+                extracted = (
+                    candidate["text"]
+                    or extract_attributed_body_text(candidate["attributedBody"])
+                    or ""
+                ).strip()
+                if extracted == job_text:
+                    matched = candidate
+                    break
+                if newest_empty is None and not extracted:
+                    newest_empty = candidate
+            chosen = matched or newest_empty
+            if chosen is None:
+                return
+            chosen_rowid = int(chosen["rowid"])
+            with sqlite_connect_rw(cfg.index_db) as index:
+                initialize_index_schema(index)
+                refresh_messages_and_attachments(
+                    source,
+                    index,
+                    cfg.attachments_root,
+                    chosen_rowid,
+                    through_rowid=chosen_rowid,
+                )
+                index.execute(
+                    """
+                    update messages
+                    set text = ?
+                    where rowid = ?
+                      and (text is null or trim(text) = '')
+                    """,
+                    (message_text, chosen_rowid),
+                )
+                refresh_derived_fields(index)
+                index.commit()
+
+
 def execute_claimed_send_job(cfg: Config, row: sqlite3.Row) -> sqlite3.Row:
     job_rowid = int(row["rowid"])
     chat_rowid = int(row["destination_chat_rowid"]) if row["destination_chat_rowid"] not in (None, "") else None
@@ -2969,7 +3236,13 @@ def execute_claimed_send_job(cfg: Config, row: sqlite3.Row) -> sqlite3.Row:
         index.commit()
 
     if final_status == "sent":
-        sync_index_safe(cfg, quiet=True)
+        try:
+            ingest_sent_job_message(cfg, chat_rowid, row["message_text"])
+        except LockBusyError:
+            pass
+        except sqlite3.OperationalError as exc:
+            if "database is locked" not in str(exc).lower():
+                raise
     if updated_row is None:
         raise SystemExit(f"Send job disappeared after processing: {job_rowid}")
     return updated_row

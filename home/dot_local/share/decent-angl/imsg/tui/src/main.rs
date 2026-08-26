@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{self, Stdout};
 use std::process::Command;
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -586,9 +586,11 @@ impl App {
         if self.sync_inflight {
             return;
         }
-        if let Some(last_sync) = self.last_sync_finished_at {
-            if last_sync.elapsed() < AUTO_SYNC_INTERVAL {
-                return;
+        if self.pending_echo_rowids.is_empty() {
+            if let Some(last_sync) = self.last_sync_finished_at {
+                if last_sync.elapsed() < AUTO_SYNC_INTERVAL {
+                    return;
+                }
             }
         }
         self.sync_now(false);
@@ -657,7 +659,24 @@ impl App {
                             } else {
                                 let previous_message_rowid =
                                     self.selected_message().map(|message| message.message_rowid);
-                                self.messages = response.messages;
+                                let pending: Vec<MessageRow> = self
+                                    .messages
+                                    .iter()
+                                    .filter(|message| {
+                                        message.kind == "pending"
+                                            || self.pending_echo_rowids.values().any(|&rowid| {
+                                                rowid == message.message_rowid
+                                            })
+                                    })
+                                    .cloned()
+                                    .collect();
+                                self.messages =
+                                    merge_pending_messages(response.messages, &pending);
+                                self.pending_echo_rowids.retain(|_, rowid| {
+                                    self.messages
+                                        .iter()
+                                        .any(|message| message.message_rowid == *rowid)
+                                });
                                 if self.messages.is_empty() {
                                     self.messages_state.select(None);
                                 } else {
@@ -1226,6 +1245,36 @@ fn message_body(message: &MessageRow) -> String {
         return preview.to_string();
     }
     "[empty message]".to_string()
+}
+
+fn outbound_match_keys(message: &MessageRow) -> Vec<String> {
+    [message.text.as_str(), message.preview.as_str()]
+        .into_iter()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+fn merge_pending_messages(mut server: Vec<MessageRow>, pending: &[MessageRow]) -> Vec<MessageRow> {
+    let mut seen = HashSet::new();
+    for message in &server {
+        if message.is_from_me != 0 {
+            seen.extend(outbound_match_keys(message));
+        }
+    }
+    for message in pending {
+        if message.is_from_me == 0 {
+            continue;
+        }
+        let matched = outbound_match_keys(message)
+            .iter()
+            .any(|key| seen.contains(key));
+        if !matched {
+            server.push(message.clone());
+        }
+    }
+    server
 }
 
 fn message_kind_label(kind: &str) -> Option<(&'static str, Color)> {
@@ -2197,4 +2246,58 @@ fn draw_help_popup(frame: &mut Frame, app: &App) {
         .block(Block::default().borders(Borders::ALL).title("Help"))
         .wrap(Wrap { trim: true });
     frame.render_widget(paragraph, area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn from_me(rowid: i64, text: &str, preview: &str) -> MessageRow {
+        MessageRow {
+            message_rowid: rowid,
+            is_from_me: 1,
+            text: text.to_string(),
+            preview: preview.to_string(),
+            ..MessageRow::default()
+        }
+    }
+
+    fn inbound(rowid: i64, text: &str) -> MessageRow {
+        MessageRow {
+            message_rowid: rowid,
+            is_from_me: 0,
+            text: text.to_string(),
+            ..MessageRow::default()
+        }
+    }
+
+    #[test]
+    fn merge_pending_keeps_unmatched() {
+        let server = vec![from_me(10, "already sent", ""), inbound(11, "hey")];
+        let pending = [from_me(-1, "still sending", "still sending")];
+        let merged = merge_pending_messages(server, &pending);
+        assert_eq!(merged.len(), 3);
+        assert_eq!(merged[2].message_rowid, -1);
+        assert_eq!(merged[2].text, "still sending");
+    }
+
+    #[test]
+    fn merge_pending_drops_matching_text() {
+        let server = vec![from_me(42, "same body", "same body")];
+        let pending = [from_me(-7, "same body", "same body")];
+        let merged = merge_pending_messages(server, &pending);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].message_rowid, 42);
+    }
+
+    #[test]
+    fn merge_pending_empty_is_identity() {
+        let server = vec![inbound(1, "a"), from_me(2, "b", "")];
+        let merged = merge_pending_messages(server.clone(), &[]);
+        assert_eq!(merged.len(), server.len());
+        assert_eq!(merged[0].message_rowid, server[0].message_rowid);
+        assert_eq!(merged[1].message_rowid, server[1].message_rowid);
+        assert_eq!(merged[0].text, server[0].text);
+        assert_eq!(merged[1].text, server[1].text);
+    }
 }

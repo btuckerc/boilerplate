@@ -14,12 +14,12 @@ file	~/.omp/agent/prompts/update.md	home/private_dot_omp/private_agent/prompts/u
 file	~/.omp/agent/themes/ghostty.json	home/private_dot_omp/private_agent/themes/ghostty.json
 exec	~/.local/bin/bw-secret	home/dot_local/bin/executable_bw-secret
 exec	~/.local/bin/omp-openrouter-env	home/dot_local/bin/executable_omp-openrouter-env
-exec	~/.local/bin/omp-chromium	home/dot_local/bin/executable_omp-chromium	linux
 file	~/.config/decent-angl/opnsense.env	home/dot_config/decent-angl/opnsense.env.tmpl
 exec	~/.local/bin/opnsense-api	home/dot_local/bin/executable_opnsense-api
 file	~/.omp/agent/commands/board.md	home/private_dot_omp/private_agent/commands/board.md
 file	~/.omp/agent/commands/dispatch.md	home/private_dot_omp/private_agent/commands/dispatch.md
 file	~/.omp/agent/commands/drive.md	home/private_dot_omp/private_agent/commands/drive.md
 file	~/.omp/agent/commands/recover.md	home/private_dot_omp/private_agent/commands/recover.md
+file	~/.local/share/decent-angl/skills/omp-drive/SKILL.md	home/dot_local/share/decent-angl/skills/omp-drive/SKILL.md
 exec	~/.local/bin/omp-board	home/dot_local/bin/executable_omp-board
 exec	~/.local/bin/opnsense-store-secret	home/dot_local/bin/executable_opnsense-store-secret

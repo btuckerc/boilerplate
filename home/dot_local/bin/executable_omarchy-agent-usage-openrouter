@@ -1,0 +1,425 @@
+#!/usr/bin/python3
+# omarchy:summary=Print the OpenRouter usage record as JSON
+# omarchy:args=[--force] [--limits-only] [--api-base-url <url>]
+# omarchy:hidden=true
+"""Collect local OpenRouter usage and account credit information."""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import fcntl
+import hashlib
+import json
+import math
+import os
+import tempfile
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+from typing import Any
+
+AGENT_ID = "openrouter"
+AGENT_NAME = "OpenRouter"
+API_BASE_URL = "https://openrouter.ai/api/v1"
+AUTH_HELP = "Run `omp-openrouter-env` to restore OpenRouter credits."
+SCAN_REUSE_SECONDS = 20
+LIMITS_ONLY_REUSE_SECONDS = 900
+PROBE_REUSE_SECONDS = 15
+
+
+def number(value: Any) -> int:
+  try:
+    n = float(value or 0)
+    return round(n) if math.isfinite(n) else 0
+  except (TypeError, ValueError, OverflowError):
+    return 0
+
+
+def decimal(value: Any) -> float | None:
+  if isinstance(value, bool):
+    return None
+  try:
+    n = float(value)
+    return n if math.isfinite(n) else None
+  except (TypeError, ValueError, OverflowError):
+    return None
+
+
+def usage_token(usage: dict[str, Any], snake_key: str, camel_key: str) -> int:
+  return number(usage.get(snake_key, usage.get(camel_key, 0)))
+
+
+def empty_bucket() -> dict[str, int]:
+  return {
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "cacheReadInputTokens": 0,
+    "cacheCreationInputTokens": 0,
+  }
+
+
+def date_string(value: dt.date) -> str:
+  return value.strftime("%Y-%m-%d")
+
+
+def local_date_string() -> str:
+  return date_string(dt.datetime.now().date())
+
+
+def recent_date_strings() -> list[str]:
+  today = dt.datetime.now().date()
+  return [date_string(today - dt.timedelta(days=offset)) for offset in range(6, -1, -1)]
+
+
+def local_date_from_timestamp(value: Any) -> str:
+  if value is None:
+    return local_date_string()
+  if isinstance(value, (int, float)) and not isinstance(value, bool):
+    try:
+      raw = float(value)
+      seconds = raw / 1000.0 if raw > 10_000_000_000 else raw
+      return date_string(dt.datetime.fromtimestamp(seconds).date())
+    except (TypeError, ValueError, OverflowError, OSError):
+      return local_date_string()
+  raw = str(value).strip()
+  if not raw:
+    return local_date_string()
+  try:
+    parsed = dt.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    if parsed.tzinfo is not None:
+      parsed = parsed.astimezone()
+    return date_string(parsed.date())
+  except (TypeError, ValueError, OverflowError):
+    return local_date_string()
+
+
+def empty_stats() -> dict[str, Any]:
+  today = local_date_string()
+  recent_dates = recent_date_strings()
+  return {
+    "todayPrompts": 0,
+    "todaySessions": 0,
+    "todayTotalTokens": 0,
+    "todayTokensByModel": {},
+    "recentDays": [{"date": day, "messageCount": 0} for day in recent_dates],
+    "modelUsage": {},
+    "totalPrompts": 0,
+    "totalSessions": 0,
+    "activeDays": 0,
+    "activeDates": [],
+    "scanDate": today,
+  }
+
+
+def cache_root() -> Path:
+  root = Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache"))) / "omarchy" / "agent-usage"
+  root.mkdir(parents=True, exist_ok=True)
+  return root
+
+
+def session_roots() -> list[Path]:
+  roots: list[Path] = []
+  configured = os.environ.get("PI_CODING_AGENT_DIR")
+  if configured:
+    roots.append(Path(configured).expanduser() / "sessions")
+  roots.extend([Path.home() / ".omp" / "agent" / "sessions", Path.home() / ".pi" / "agent" / "sessions"])
+  seen: set[Path] = set()
+  out: list[Path] = []
+  for root in roots:
+    try:
+      resolved = root.resolve()
+    except OSError:
+      continue
+    if resolved in seen or not resolved.is_dir():
+      continue
+    seen.add(resolved)
+    out.append(resolved)
+  return out
+
+
+def write_json(path: Path, payload: dict[str, Any]) -> None:
+  handle_fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=".tmp")
+  tmp = Path(tmp_name)
+  try:
+    with os.fdopen(handle_fd, "w", encoding="utf-8") as handle:
+      handle.write(json.dumps(payload, separators=(",", ":"), sort_keys=True) + "\n")
+    tmp.chmod(0o644)
+    tmp.replace(path)
+  except BaseException:
+    tmp.unlink(missing_ok=True)
+    raise
+
+
+def read_fresh_json(path: Path, max_age_seconds: float) -> dict[str, Any] | None:
+  if max_age_seconds <= 0 or not path.exists():
+    return None
+  try:
+    age = time.time() - path.stat().st_mtime
+    if 0 <= age <= max_age_seconds:
+      value = json.loads(path.read_text(encoding="utf-8"))
+      return value if isinstance(value, dict) else None
+  except (OSError, TypeError, ValueError):
+    pass
+  return None
+
+
+def scan_sessions() -> dict[str, Any]:
+  today = local_date_string()
+  recent_dates = recent_date_strings()
+  recent = {day: {"date": day, "messageCount": 0} for day in recent_dates}
+  seen: set[str] = set()
+  sessions: set[str] = set()
+  active_days: set[str] = set()
+  today_sessions: set[str] = set()
+  today_tokens: dict[str, int] = {}
+  usage_by_model: dict[str, dict[str, int]] = {}
+  prompts = 0
+  today_prompt_count = 0
+  today_token_total = 0
+
+  for root in session_roots():
+    for path in root.rglob("*.jsonl"):
+      try:
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+          for line_number, line in enumerate(handle, 1):
+            if '"usage"' not in line or '"assistant"' not in line:
+              continue
+            try:
+              entry = json.loads(line)
+              message = entry.get("message") if isinstance(entry.get("message"), dict) else {}
+              if entry.get("type") != "message" or message.get("role") != "assistant":
+                continue
+              if str(message.get("provider") or "") != "openrouter":
+                continue
+              unique_key = f"{path}:{entry.get('id') or line_number}"
+              if unique_key in seen:
+                continue
+              seen.add(unique_key)
+              usage = message.get("usage") or {}
+              if not isinstance(usage, dict):
+                continue
+              input_tokens = usage_token(usage, "input", "inputTokens")
+              output_tokens = usage_token(usage, "output", "outputTokens")
+              cache_read = usage_token(usage, "cacheRead", "cacheReadInputTokens")
+              cache_write = usage_token(usage, "cacheWrite", "cacheCreationInputTokens")
+              total = input_tokens + output_tokens + cache_read + cache_write
+              if total <= 0:
+                total = number(usage.get("totalTokens"))
+                input_tokens = total
+              if total <= 0:
+                continue
+              model = str(message.get("model") or "openrouter")
+              day = local_date_from_timestamp(entry.get("timestamp") or message.get("timestamp"))
+            except (TypeError, ValueError, OSError):
+              continue
+
+            session_key = str(path)
+            sessions.add(session_key)
+            active_days.add(day)
+            prompts += 1
+            bucket = usage_by_model.setdefault(model, empty_bucket())
+            bucket["inputTokens"] += input_tokens
+            bucket["outputTokens"] += output_tokens
+            bucket["cacheReadInputTokens"] += cache_read
+            bucket["cacheCreationInputTokens"] += cache_write
+            if day in recent:
+              recent[day]["messageCount"] += total
+            if day == today:
+              today_prompt_count += 1
+              today_sessions.add(session_key)
+              today_token_total += total
+              today_tokens[model] = today_tokens.get(model, 0) + total
+      except OSError:
+        continue
+
+  return {
+    "todayPrompts": today_prompt_count,
+    "todaySessions": len(today_sessions),
+    "todayTotalTokens": today_token_total,
+    "todayTokensByModel": today_tokens,
+    "recentDays": [recent[day] for day in recent_dates],
+    "modelUsage": usage_by_model,
+    "totalPrompts": prompts,
+    "totalSessions": len(sessions),
+    "activeDays": len(active_days),
+    "activeDates": sorted(active_days),
+    "scanDate": today,
+  }
+
+
+def scan_cache_paths() -> tuple[Path, Path]:
+  digest_parts = [str(root) for root in session_roots()]
+  digest = hashlib.sha1("\n".join(digest_parts).encode("utf-8")).hexdigest()[:16]
+  root = cache_root()
+  return root / f"openrouter-scan-{digest}.json", root / f"openrouter-scan-{digest}.lock"
+
+
+def cached_scan(max_age_seconds: float) -> dict[str, Any]:
+  cache_file, lock_file = scan_cache_paths()
+  cached = read_fresh_json(cache_file, max_age_seconds)
+  if isinstance(cached, dict) and cached.get("scanDate") == local_date_string():
+    return cached
+  with lock_file.open("w") as lock:
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    cached = read_fresh_json(cache_file, max_age_seconds)
+    if isinstance(cached, dict) and cached.get("scanDate") == local_date_string():
+      return cached
+    stats = scan_sessions()
+    try:
+      write_json(cache_file, stats)
+    except OSError:
+      pass
+    return stats
+
+
+def load_api_key() -> str | None:
+  direct = os.environ.get("OPENROUTER_API_KEY", "").strip()
+  if direct:
+    return direct
+  env_path = os.environ.get("OMP_OPENROUTER_ENV", "").strip()
+  if not env_path:
+    env_path = str(Path.home() / ".omp" / "agent" / ".env")
+  try:
+    for line in Path(env_path).expanduser().read_text(encoding="utf-8").splitlines():
+      line = line.strip()
+      if not line or line.startswith("#"):
+        continue
+      if line.startswith("export "):
+        line = line[7:].lstrip()
+      name, separator, value = line.partition("=")
+      if separator and name.strip() == "OPENROUTER_API_KEY":
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+          value = value[1:-1]
+        if value:
+          return value
+  except OSError:
+    pass
+  return None
+
+
+def api_get(api_base_url: str, endpoint: str, api_key: str) -> dict[str, Any] | None:
+  url = api_base_url.rstrip("/") + endpoint
+  request = urllib.request.Request(url, headers={"Authorization": "Bearer " + api_key, "Accept": "application/json"})
+  try:
+    response = urllib.request.urlopen(request, timeout=15)
+    try:
+      payload = json.loads(response.read().decode("utf-8"))
+    finally:
+      close = getattr(response, "close", None)
+      if close is not None:
+        close()
+    return payload if isinstance(payload, dict) else None
+  except (OSError, ValueError, TypeError, urllib.error.URLError):
+    return None
+
+
+def balance_from_payload(payload: dict[str, Any] | None) -> dict[str, Any] | None:
+  data = payload.get("data") if isinstance(payload, dict) else None
+  if not isinstance(data, dict):
+    return None
+  total_credits = decimal(data.get("total_credits"))
+  total_usage = decimal(data.get("total_usage"))
+  if total_credits is None or total_usage is None:
+    return None
+  return {
+    "remaining": max(0.0, total_credits - total_usage),
+    "currency": "USD",
+    "estimated": False,
+  }
+
+
+def key_balance_from_payload(payload: dict[str, Any] | None) -> dict[str, Any] | None:
+  data = payload.get("data") if isinstance(payload, dict) else None
+  if not isinstance(data, dict):
+    return None
+  funded = decimal(data.get("limit"))
+  if funded is None or funded <= 0:
+    return None
+  usage = decimal(data.get("usage")) or 0.0
+  remaining = decimal(data.get("limit_remaining"))
+  if remaining is None:
+    remaining = funded - usage
+  return {
+    "remaining": max(0.0, remaining),
+    "funded": funded,
+    "spent": usage,
+    "currency": "USD",
+    "estimated": False,
+  }
+
+
+
+
+def collect_remote(force: bool, api_base_url: str, api_key: str | None) -> dict[str, Any]:
+  result: dict[str, Any] = {"usageStatusText": "", "authHelpText": AUTH_HELP}
+  if not api_key:
+    result["usageStatusText"] = "OpenRouter credits unavailable"
+    return result
+
+  root = cache_root()
+  credits_cache = root / "openrouter-credits.json"
+  key_cache = root / "openrouter-key.json"
+  credits_payload = None if force else read_fresh_json(credits_cache, PROBE_REUSE_SECONDS)
+  key_payload = None if force else read_fresh_json(key_cache, PROBE_REUSE_SECONDS)
+  if credits_payload is None:
+    credits_payload = api_get(api_base_url, "/credits", api_key)
+    if credits_payload is not None:
+      try:
+        write_json(credits_cache, credits_payload)
+      except OSError:
+        pass
+  if key_payload is None:
+    key_payload = api_get(api_base_url, "/key", api_key)
+    if key_payload is not None:
+      try:
+        write_json(key_cache, key_payload)
+      except OSError:
+        pass
+
+  balance = balance_from_payload(credits_payload)
+  key_balance = key_balance_from_payload(key_payload)
+  if key_balance is not None:
+    balance = key_balance
+  if balance is not None:
+    result["balance"] = balance
+  if balance is None:
+    result["usageStatusText"] = "OpenRouter credits unavailable"
+  return result
+
+def main() -> int:
+  parser = argparse.ArgumentParser()
+  parser.add_argument("--force", action="store_true")
+  parser.add_argument("--limits-only", action="store_true")
+  parser.add_argument("--api-base-url", default=API_BASE_URL)
+  args = parser.parse_args()
+
+  max_age = 0 if args.force else (LIMITS_ONLY_REUSE_SECONDS if args.limits_only else SCAN_REUSE_SECONDS)
+  try:
+    stats = cached_scan(max_age)
+  except (OSError, ValueError):
+    stats = scan_sessions()
+
+  remote = collect_remote(args.force, args.api_base_url, load_api_key())
+  record: dict[str, Any] = {
+    "schemaVersion": 1,
+    "id": AGENT_ID,
+    "name": AGENT_NAME,
+    "updatedAt": dt.datetime.now(dt.timezone.utc).isoformat(),
+    "ready": number(stats.get("totalPrompts")) > 0 or "balance" in remote,
+    "hasLocalStats": True,
+    "tierLabel": "Prepaid",
+    "usageStatusText": remote["usageStatusText"],
+    "authHelpText": remote["authHelpText"],
+  }
+  if "balance" in remote:
+    record["balance"] = remote["balance"]
+  record.update({key: stats[key] for key in empty_stats() if key != "scanDate"})
+  print(json.dumps(record, separators=(",", ":"), sort_keys=True))
+  return 0
+
+
+if __name__ == "__main__":
+  raise SystemExit(main())

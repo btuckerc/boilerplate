@@ -44,7 +44,7 @@ VAULT_DIR="${OBSIDIAN_LIVESYNC_VAULT_DIR:-$HOME/notes/obsidian/weavedweb}"
 VAULT_NAME="${OBSIDIAN_LIVESYNC_VAULT_NAME:-$(basename "$VAULT_DIR")}"
 CONFIG_DIR="${OBSIDIAN_LIVESYNC_CONFIG_DIR:-$VAULT_DIR/.obsidian-macmini}"
 APP_SOURCE_PATH="${OBSIDIAN_APP_SOURCE_PATH:-/Applications/Obsidian.app}"
-APP_PATH="${OBSIDIAN_APP_PATH:-$HOME/Applications/Obsidian.app}"
+APP_PATH="${OBSIDIAN_APP_PATH:-/Applications/Obsidian.app}"
 APP_BIN="${OBSIDIAN_APP_BIN:-$APP_PATH/Contents/MacOS/Obsidian}"
 CLI_BIN="${OBSIDIAN_APP_CLI_BIN:-$APP_PATH/Contents/MacOS/obsidian-cli}"
 CLI_SOCKET="${OBSIDIAN_APP_CLI_SOCKET:-$HOME/.obsidian-cli.sock}"
@@ -149,7 +149,9 @@ ensure_obsidian_symlink() {
 
 ensure_client_config() {
     "$HOME/.local/bin/obsidian-livesync-install-plugin" >/dev/null
-    "$HOME/.local/bin/obsidian-livesync-apply-setup-uri" apply >/dev/null
+    if [ "$COMMAND" != "run" ]; then
+        "$HOME/.local/bin/obsidian-livesync-apply-setup-uri" apply >/dev/null
+    fi
 }
 
 ensure_vault_registry() {
@@ -213,13 +215,17 @@ PY
 launch_obsidian() {
     vault_id="$1"
     [ -d "$APP_PATH" ] || return 1
-    open -na "$APP_PATH" --args "--remote-debugging-port=${DEBUG_PORT}" "$VAULT_DIR" >/dev/null 2>&1 || true
+    open -na "$APP_PATH" --args "$VAULT_DIR" >/dev/null 2>&1 || true
     sleep 6
     open -gj "obsidian://open?vault=${vault_id}&file=Home" >/dev/null 2>&1 || true
 }
 
 launch_obsidian_debug() {
-    launch_obsidian "$1"
+    vault_id="$1"
+    [ -d "$APP_PATH" ] || return 1
+    open -na "$APP_PATH" --args "--remote-debugging-port=${DEBUG_PORT}" "$VAULT_DIR" >/dev/null 2>&1 || true
+    sleep 6
+    open -gj "obsidian://open?vault=${vault_id}&file=Home" >/dev/null 2>&1 || true
 }
 
 obsidian_running() {
@@ -385,6 +391,10 @@ write_launch_agent() {
     <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${HOME}/.local/bin:${HOME}/.local/share/mise/shims</string>
     <key>HOME</key>
     <string>${HOME}</string>
+    <key>OBSIDIAN_APP_PATH</key>
+    <string>${APP_PATH}</string>
+    <key>OBSIDIAN_APP_BIN</key>
+    <string>${APP_BIN}</string>
   </dict>
   <key>StandardOutPath</key>
   <string>${STDOUT_LOG}</string>

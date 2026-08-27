@@ -7,14 +7,15 @@ set -euo pipefail
 # ~/.local/state/decent-angl/omarchy-shell-overlay.off.
 #
 # Overlay files mirror paths under $OMARCHY_PATH/shell/. upstream.sha256
-# lists those relative paths; a changed packaged hash skips the overlay.
+# lists those relative paths. Matching hashes copy overlay QML. A changed
+# packaged hash 3-way-merges that path; a conflict uses packaged QML for
+# that path only. Other overlay files still apply.
 #
 # Do not wrap the shell in bwrap. A user namespace remaps root to 65534 and
 # sets NoNewPrivs, which breaks sudo and pam_unix lock-screen passwords.
-# Copy the packaged shell to a runtime tree, overlay the QML, retarget
-# first-party plugin scan at that tree, and leave a path stamp for the
-# qs/quickshell wrappers. Without the retarget, bar widgets keep loading
-# from $OMARCHY_PATH/shell/plugins and overlay widgets are ignored.
+# omarchy-shell-overlay sync-runtime copies the packaged shell to a runtime
+# tree, overlays or merges each path, retargets first-party plugin scan, and
+# leaves a path stamp for the qs/quickshell wrappers.
 
 OMARCHY_PATH="${OMARCHY_PATH:-/usr/share/omarchy}"
 PACKAGED="${OMARCHY_PATH}/bin/omarchy-launch-shell"
@@ -28,99 +29,27 @@ fi
 
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/decent-angl"
 DISABLE_FLAG="${STATE_DIR}/omarchy-shell-overlay.off"
-DRIFT_FLAG="${STATE_DIR}/omarchy-shell-overlay.drift"
 RUNTIME_STAMP="${STATE_DIR}/omarchy-shell-runtime.path"
-RUNTIME_DIR="${STATE_DIR}/omarchy-shell-runtime"
-RUNTIME_SHELL="${RUNTIME_DIR}/shell"
-OVERLAY_DIR="${OMARCHY_SHELL_OVERLAY_DIR:-$HOME/.local/share/omarchy-shell-overlay}"
-SHELL_DIR="${OMARCHY_PATH}/shell"
-HASH_FILE="${OVERLAY_DIR}/upstream.sha256"
+OVERLAY_BIN="${OMARCHY_SHELL_OVERLAY_BIN:-$HOME/.local/bin/omarchy-shell-overlay}"
 
 run_packaged() {
   rm -f "${RUNTIME_STAMP}"
   exec "${PACKAGED}" "$@"
 }
 
-overlay_rels() {
-  [[ -f ${HASH_FILE} ]] || return 1
-  awk 'NF >= 2 { print $2 }' "${HASH_FILE}"
-}
-
-sync_runtime_tree() {
-  mkdir -p "${RUNTIME_DIR}"
-  if command -v rsync >/dev/null 2>&1; then
-    rsync -a --delete "${SHELL_DIR}/" "${RUNTIME_SHELL}/"
-  else
-    rm -rf "${RUNTIME_SHELL}"
-    mkdir -p "${RUNTIME_SHELL}"
-    cp -a "${SHELL_DIR}/." "${RUNTIME_SHELL}/"
-  fi
-
-  local rel
-  for rel in "${OVERLAY_RELS[@]}"; do
-    mkdir -p "$(dirname "${RUNTIME_SHELL}/${rel}")"
-    cp -a "${OVERLAY_DIR}/${rel}" "${RUNTIME_SHELL}/${rel}"
-  done
-
-  # Packaged shell.qml pins firstPartyPluginsDir to $OMARCHY_PATH.
-  # Point it at the runtime tree so overlay widgets (Workspaces) load.
-  if ! python3 - "${RUNTIME_SHELL}/shell.qml" <<'PY'
-from pathlib import Path
-import sys
-
-path = Path(sys.argv[1])
-old = 'readonly property string firstPartyPluginsDir: shellPath + "/plugins"'
-new = 'readonly property string firstPartyPluginsDir: Quickshell.shellDir + "/plugins"'
-text = path.read_text()
-if old not in text:
-    raise SystemExit(1)
-path.write_text(text.replace(old, new, 1))
-PY
-  then
-    logger -t omarchy-shell-overlay "firstPartyPluginsDir rewrite failed; overlay widgets would be ignored" || true
-    return 1
-  fi
-
-  mkdir -p "${STATE_DIR}"
-  printf '%s\n' "${RUNTIME_SHELL}" >"${RUNTIME_STAMP}"
-}
-
 if [[ -e ${DISABLE_FLAG} ]]; then
   run_packaged "$@"
 fi
 
-if [[ ! -f ${HASH_FILE} ]]; then
-  logger -t omarchy-shell-overlay "overlay hash list missing; using packaged popups" || true
+if [[ ! -x ${OVERLAY_BIN} ]]; then
+  OVERLAY_BIN="$(command -v omarchy-shell-overlay || true)"
+fi
+if [[ ! -x ${OVERLAY_BIN} ]]; then
+  logger -t omarchy-shell-overlay "omarchy-shell-overlay missing; using packaged popups" || true
   run_packaged "$@"
 fi
 
-mapfile -t OVERLAY_RELS < <(overlay_rels)
-if ((${#OVERLAY_RELS[@]} == 0)); then
-  logger -t omarchy-shell-overlay "overlay hash list empty; using packaged popups" || true
-  run_packaged "$@"
-fi
-
-for rel in "${OVERLAY_RELS[@]}"; do
-  if [[ ! -f ${OVERLAY_DIR}/${rel} ]]; then
-    logger -t omarchy-shell-overlay "overlay QML missing: ${rel}; using packaged popups" || true
-    run_packaged "$@"
-  fi
-  if [[ ! -f ${SHELL_DIR}/${rel} ]]; then
-    logger -t omarchy-shell-overlay "packaged QML missing: ${rel}; using packaged launcher" || true
-    run_packaged "$@"
-  fi
-done
-
-if ! (cd "${SHELL_DIR}" && sha256sum --strict -c "${HASH_FILE}" >/dev/null 2>&1); then
-  mkdir -p "${STATE_DIR}"
-  : >"${DRIFT_FLAG}"
-  logger -t omarchy-shell-overlay "packaged overlay targets changed; overlay skipped. omarchy-shell-overlay status" || true
-  run_packaged "$@"
-fi
-rm -f "${DRIFT_FLAG}"
-
-if ! sync_runtime_tree; then
-  logger -t omarchy-shell-overlay "runtime overlay copy failed; using packaged popups" || true
+if ! "${OVERLAY_BIN}" sync-runtime; then
   run_packaged "$@"
 fi
 

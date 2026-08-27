@@ -1,11 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Toggle the bar-popup overlay without touching packaged Omarchy files.
+# Toggle and apply the bar-popup overlay without touching packaged Omarchy files.
+# Overlay QML is applied per path. A matching upstream hash copies the overlay
+# file. A changed hash 3-way-merges onto the new packaged file using a base
+# snapshot; a conflict uses packaged QML for that path only.
 
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/decent-angl"
 DISABLE_FLAG="${STATE_DIR}/omarchy-shell-overlay.off"
 DRIFT_FLAG="${STATE_DIR}/omarchy-shell-overlay.drift"
+RUNTIME_STAMP="${STATE_DIR}/omarchy-shell-runtime.path"
+RUNTIME_DIR="${STATE_DIR}/omarchy-shell-runtime"
+RUNTIME_SHELL="${RUNTIME_DIR}/shell"
+BASE_DIR="${OMARCHY_SHELL_OVERLAY_BASE:-$STATE_DIR/omarchy-shell-overlay-base}"
 OVERLAY_DIR="${OMARCHY_SHELL_OVERLAY_DIR:-$HOME/.local/share/omarchy-shell-overlay}"
 OMARCHY_PATH="${OMARCHY_PATH:-/usr/share/omarchy}"
 SHELL_DIR="${OMARCHY_PATH}/shell"
@@ -13,19 +20,24 @@ HASH_FILE="${OVERLAY_DIR}/upstream.sha256"
 
 usage() {
   cat <<'EOF'
-Usage: omarchy-shell-overlay <status|enable|disable|reset>
+Usage: omarchy-shell-overlay <status|enable|disable|reset|sync-runtime>
 
-  status   Show whether the overlay would apply on the next shell launch
-  enable   Use overlay popups and restart the shell
-  disable  Use packaged popups and restart the shell
-  reset    Copy packaged overlay targets into the overlay tree and
-           refresh upstream hashes. Local edits are discarded.
+  status       Per-file match/merge/skip and whether the next launch overlays
+  enable       Use overlay popups and restart the shell
+  disable      Use packaged popups and restart the shell
+  reset        Copy packaged overlay targets into the overlay tree and
+               refresh upstream hashes and merge bases. Local edits are discarded.
+  sync-runtime Build the runtime tree (called by omarchy-launch-shell)
 EOF
 }
 
-overlay_rels() {
+log() {
+  logger -t omarchy-shell-overlay "$@" || true
+}
+
+overlay_entries() {
   [[ -f ${HASH_FILE} ]] || return 1
-  awk 'NF >= 2 { print $2 }' "${HASH_FILE}"
+  awk 'NF >= 2 { printf "%s\t%s\n", $1, $2 }' "${HASH_FILE}"
 }
 
 need_overlay_dir() {
@@ -35,17 +47,109 @@ need_overlay_dir() {
   }
 }
 
-hashes_match() {
-  [[ -f ${HASH_FILE} ]] || return 1
-  (cd "${SHELL_DIR}" && sha256sum --strict -c "${HASH_FILE}" >/dev/null 2>&1)
+file_hash() {
+  sha256sum -- "$1" | awk '{ print $1 }'
 }
 
-files_present() {
-  local rel
-  [[ -f ${HASH_FILE} ]] || return 1
-  while IFS= read -r rel; do
-    [[ -f ${OVERLAY_DIR}/${rel} ]] || return 1
-  done < <(overlay_rels)
+snapshot_base() {
+  local rel="$1"
+  mkdir -p "$(dirname "${BASE_DIR}/${rel}")"
+  cp -a "${SHELL_DIR}/${rel}" "${BASE_DIR}/${rel}"
+}
+
+# Prints MATCH, MERGE, or SKIP <reason>.
+classify_rel() {
+  local expected="$1"
+  local rel="$2"
+  local overlay="${OVERLAY_DIR}/${rel}"
+  local packaged="${SHELL_DIR}/${rel}"
+  local base="${BASE_DIR}/${rel}"
+  local actual
+
+  if [[ ! -f ${overlay} ]]; then
+    printf 'SKIP missing-overlay\n'
+    return
+  fi
+  if [[ ! -f ${packaged} ]]; then
+    printf 'SKIP missing-packaged\n'
+    return
+  fi
+
+  actual="$(file_hash "${packaged}")"
+  if [[ ${actual} == "${expected}" ]]; then
+    printf 'MATCH\n'
+    return
+  fi
+
+  if [[ ! -f ${base} ]]; then
+    printf 'SKIP no-base\n'
+    return
+  fi
+  if ! command -v git >/dev/null 2>&1; then
+    printf 'SKIP no-git\n'
+    return
+  fi
+  if git merge-file -p -q "${overlay}" "${base}" "${packaged}" >/dev/null; then
+    printf 'MERGE\n'
+    return
+  fi
+  printf 'SKIP conflict\n'
+}
+
+rewrite_first_party_plugins_dir() {
+  python3 - "${RUNTIME_SHELL}/shell.qml" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+old = 'readonly property string firstPartyPluginsDir: shellPath + "/plugins"'
+new = 'readonly property string firstPartyPluginsDir: Quickshell.shellDir + "/plugins"'
+text = path.read_text()
+if old not in text:
+    raise SystemExit(1)
+path.write_text(text.replace(old, new, 1))
+PY
+}
+
+copy_packaged_shell() {
+  mkdir -p "${RUNTIME_DIR}"
+  if command -v rsync >/dev/null 2>&1; then
+    rsync -a --delete --checksum "${SHELL_DIR}/" "${RUNTIME_SHELL}/"
+  else
+    rm -rf "${RUNTIME_SHELL}"
+    mkdir -p "${RUNTIME_SHELL}"
+    cp -a "${SHELL_DIR}/." "${RUNTIME_SHELL}/"
+  fi
+}
+
+apply_rel() {
+  local kind="$1"
+  local rel="$2"
+  local dest="${RUNTIME_SHELL}/${rel}"
+  local tmp
+
+  mkdir -p "$(dirname "${dest}")"
+  case "${kind}" in
+    MATCH)
+      cp -a "${OVERLAY_DIR}/${rel}" "${dest}"
+      snapshot_base "${rel}"
+      ;;
+    MERGE)
+      tmp="$(mktemp)"
+      if git merge-file -p -q "${OVERLAY_DIR}/${rel}" "${BASE_DIR}/${rel}" "${SHELL_DIR}/${rel}" >"${tmp}"; then
+        mv "${tmp}" "${dest}"
+        log "${rel}: merged onto new packaged QML"
+      else
+        rm -f "${tmp}"
+        return 1
+      fi
+      ;;
+    SKIP)
+      ;;
+    *)
+      return 1
+      ;;
+  esac
 }
 
 restart_shell() {
@@ -57,38 +161,118 @@ restart_shell() {
   fi
 }
 
+write_drift_flag() {
+  mkdir -p "${STATE_DIR}"
+  if ((${#drift_lines[@]} > 0)); then
+    printf '%s\n' "${drift_lines[@]}" >"${DRIFT_FLAG}"
+  else
+    rm -f "${DRIFT_FLAG}"
+  fi
+}
+
 cmd_status() {
   local state="enabled"
   local count=0
+  local expected rel kind rest
+  local match=0 merge=0 skip=0
+  local next="packaged"
+
   [[ -e ${DISABLE_FLAG} ]] && state="disabled"
   if [[ -f ${HASH_FILE} ]]; then
-    count="$(overlay_rels | wc -l)"
+    count="$(overlay_entries | wc -l)"
   fi
 
   printf 'STATE   %s\n' "${state}"
   printf 'OVERLAY %s\n' "${OVERLAY_DIR}"
   printf 'PACKAGE %s\n' "${SHELL_DIR}"
+  printf 'BASE    %s\n' "${BASE_DIR}"
   printf 'TARGETS %s\n' "${count}"
 
-  if files_present; then
-    printf 'FILES   present\n'
-  else
-    printf 'FILES   missing\n'
+  if [[ -f ${HASH_FILE} ]]; then
+    while IFS=$'\t' read -r expected rel; do
+      [[ -n ${rel} ]] || continue
+      rest="$(classify_rel "${expected}" "${rel}")"
+      kind="${rest%% *}"
+      printf '%-7s %s' "${kind}" "${rel}"
+      if [[ ${kind} == SKIP ]]; then
+        printf ' %s' "${rest#SKIP }"
+        skip=$((skip + 1))
+      elif [[ ${kind} == MERGE ]]; then
+        merge=$((merge + 1))
+      else
+        match=$((match + 1))
+      fi
+      printf '\n'
+    done < <(overlay_entries)
   fi
 
-  if hashes_match; then
+  if ((skip + merge == 0)) && ((count > 0)); then
     printf 'UPSTREAM match\n'
-    rm -f "${DRIFT_FLAG}"
+  elif ((merge + match > 0)); then
+    printf 'UPSTREAM %s match, %s merge, %s skip\n' "${match}" "${merge}" "${skip}"
   else
-    printf 'UPSTREAM drifted (packaged overlay targets changed)\n'
-    [[ -e ${DRIFT_FLAG} ]] && printf 'DRIFT   %s\n' "${DRIFT_FLAG}"
+    printf 'UPSTREAM drifted\n'
   fi
 
-  if [[ ${state} == enabled ]] && hashes_match && files_present; then
-    printf 'NEXT    overlay\n'
-  else
-    printf 'NEXT    packaged\n'
+  if [[ ${state} == enabled ]] && ((match + merge > 0)); then
+    next="overlay"
   fi
+  printf 'NEXT    %s\n' "${next}"
+}
+
+cmd_sync_runtime() {
+  local expected rel kind rest
+  local applied=0
+  local -a drift_lines=()
+
+  if [[ -e ${DISABLE_FLAG} ]]; then
+    return 1
+  fi
+  if [[ ! -f ${HASH_FILE} ]]; then
+    log "overlay hash list missing; using packaged popups"
+    return 1
+  fi
+  if [[ ! -d ${SHELL_DIR} ]]; then
+    log "packaged shell missing: ${SHELL_DIR}"
+    return 1
+  fi
+
+  copy_packaged_shell
+
+  while IFS=$'\t' read -r expected rel; do
+    [[ -n ${rel} ]] || continue
+    rest="$(classify_rel "${expected}" "${rel}")"
+    kind="${rest%% *}"
+    apply_rel "${kind}" "${rel}"
+    case "${kind}" in
+      MATCH | MERGE)
+        applied=$((applied + 1))
+        ;;
+    esac
+    if [[ ${kind} == SKIP ]]; then
+      drift_lines+=("SKIP ${rel} ${rest#SKIP }")
+      log "${rel}: ${rest#SKIP }; using packaged QML"
+    elif [[ ${kind} == MERGE ]]; then
+      drift_lines+=("MERGE ${rel}")
+    fi
+  done < <(overlay_entries)
+
+  if ((applied == 0)); then
+    log "no overlay files applied; using packaged popups"
+    rm -f "${RUNTIME_STAMP}"
+    write_drift_flag
+    return 1
+  fi
+
+  if ! rewrite_first_party_plugins_dir; then
+    log "firstPartyPluginsDir rewrite failed; overlay widgets would be ignored"
+    rm -f "${RUNTIME_STAMP}"
+    return 1
+  fi
+
+  mkdir -p "${STATE_DIR}"
+  printf '%s\n' "${RUNTIME_SHELL}" >"${RUNTIME_STAMP}"
+  write_drift_flag
 }
 
 cmd_enable() {
@@ -101,28 +285,31 @@ cmd_enable() {
 cmd_disable() {
   mkdir -p "${STATE_DIR}"
   : >"${DISABLE_FLAG}"
+  rm -f "${RUNTIME_STAMP}"
   cmd_status
   restart_shell
 }
 
 cmd_reset() {
-  local rel
+  local expected rel
   need_overlay_dir
   [[ -f ${HASH_FILE} ]] || {
     echo "overlay hash list missing: ${HASH_FILE}" >&2
     exit 1
   }
-  while IFS= read -r rel; do
+  while IFS=$'\t' read -r expected rel; do
+    [[ -n ${rel} ]] || continue
     [[ -f ${SHELL_DIR}/${rel} ]] || {
       echo "packaged QML missing: ${SHELL_DIR}/${rel}" >&2
       exit 1
     }
     mkdir -p "$(dirname "${OVERLAY_DIR}/${rel}")"
     cp -a "${SHELL_DIR}/${rel}" "${OVERLAY_DIR}/${rel}"
-  done < <(overlay_rels)
+    snapshot_base "${rel}"
+  done < <(overlay_entries)
   (
     cd "${SHELL_DIR}"
-    sha256sum -- $(overlay_rels)
+    sha256sum -- $(overlay_entries | awk -F '\t' '{ print $2 }')
   ) >"${HASH_FILE}"
   rm -f "${DRIFT_FLAG}"
   echo "Overlay reset to packaged targets."
@@ -134,6 +321,7 @@ case "${1:-status}" in
   enable) cmd_enable ;;
   disable) cmd_disable ;;
   reset) cmd_reset ;;
+  sync-runtime) cmd_sync_runtime ;;
   -h | --help) usage ;;
   *)
     usage >&2

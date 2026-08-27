@@ -11,6 +11,21 @@ marker="$state_dir/omarchy-compatibility-blocked"
 validator="$HOME/.local/bin/omarchy-roaming-sync"
 
 mkdir -p "$state_dir"
+overlay_bin="$HOME/.local/bin/omarchy-shell-overlay"
+if [[ -x "$overlay_bin" ]]; then
+  # Rebuild the runtime overlay now so the post-update shell restart keeps
+  # matching files and mergeable customizations. Conflicts stay packaged for
+  # that path only and are announced separately from the baseline alert.
+  "$overlay_bin" sync-runtime >/dev/null 2>&1 || true
+  if grep -q '^SKIP ' "$state_dir/omarchy-shell-overlay.drift" 2>/dev/null \
+    && [[ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ]] \
+    && command -v notify-send >/dev/null 2>&1; then
+    skipped="$(awk '/^SKIP / { print $2 }' "$state_dir/omarchy-shell-overlay.drift" | paste -sd, -)"
+    notify-send --urgency=normal --app-name=Omarchy \
+      "Shell overlay partial" \
+      "Packaged QML for: ${skipped}. Other overlay files still apply."
+  fi
+fi
 
 if [[ ! -x "$validator" ]]; then
   output="Missing executable validator: $validator"

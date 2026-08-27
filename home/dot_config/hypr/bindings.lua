@@ -16,3 +16,6 @@ o.bind("SUPER + L", "Focus window right", hl.dsp.focus({ direction = "r" }))
 o.bind("SUPER + SHIFT + J", "Toggle window split", hl.dsp.layout("togglesplit"))
 o.bind("SUPER + SHIFT + K", "Show keybindings", "omarchy-menu-keybindings")
 o.bind("SUPER + SHIFT + L", "Toggle workspace layout", "omarchy-hyprland-workspace-layout-toggle")
+
+-- Chromium PiP hide/show. SUPER+P is stock Pseudo window.
+o.bind("SUPER + ALT + P", "Toggle Chromium PiP", "omarchy-shell tux.chromium-pip toggle")

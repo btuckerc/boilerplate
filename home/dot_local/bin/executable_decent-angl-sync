@@ -28,7 +28,8 @@ Usage: decent-angl-sync <status|validate|adopt-source|reconcile|guard|capture|in
   install-guard          Install the 15-minute launchd/systemd user guard.
   --with-scripts         Allow chezmoi scripts during a manual reconcile.
 
-Dirty, diverged, or locally modified state is never overwritten or auto-merged.
+Dirty trees that are not publishing commits are stashed around a fast-forward.
+Diverged history is never merged. Local work is never committed or dropped.
 EOF
 }
 
@@ -174,7 +175,7 @@ adopt_source() {
 }
 
 apply_tree() {
-  local args=(apply --no-tty --refresh-externals=never)
+  local args=(apply --force --no-tty --refresh-externals=never)
   # Directory entries are excluded because OMP intentionally hardens several
   # managed directories to 0700. Managed file and symlink contents still apply.
   if [[ "$WITH_SCRIPTS" != true ]]; then
@@ -190,8 +191,19 @@ apply_tree() {
   fi
 }
 
+restore_absorbed_stash() {
+  if git -C "$REPO_ROOT" stash apply; then
+    git -C "$REPO_ROOT" stash drop
+    printf 'GIT     restored local work\n'
+    return 0
+  fi
+  git -C "$REPO_ROOT" reset --hard HEAD
+  echo "GIT     local work kept in stash after apply conflict; run git stash pop after resolving." >&2
+  return 1
+}
+
 reconcile() {
-  local branch counts ahead behind
+  local branch counts ahead behind absorbed=0
   require_repo
   mkdir -p "$STATE_DIR"
   source_is_canonical || {
@@ -203,10 +215,6 @@ reconcile() {
     echo "Refusing automatic reconciliation from branch '$branch'; expected '$BRANCH'." >&2
     return 1
   }
-  if git_dirty; then
-    echo "Working tree is dirty; commit, stash, or discard intentionally before reconciliation." >&2
-    return 1
-  fi
 
   git -C "$REPO_ROOT" fetch "$REMOTE" "$BRANCH"
   counts="$(ahead_behind)"
@@ -215,6 +223,15 @@ reconcile() {
   if (( ahead > 0 && behind > 0 )); then
     echo "Local and remote histories diverged; no automatic merge was attempted." >&2
     return 1
+  fi
+  if git_dirty; then
+    if (( ahead > 0 )); then
+      echo "Working tree is dirty; commit or stash before publishing local commits." >&2
+      return 1
+    fi
+    git -C "$REPO_ROOT" stash push --include-untracked -m "decent-angl-sync: absorb"
+    absorbed=1
+    printf 'GIT     stashed local work\n'
   fi
   if (( behind > 0 )); then
     git -C "$REPO_ROOT" merge --ff-only "$REMOTE/$BRANCH"
@@ -225,10 +242,17 @@ reconcile() {
   skill_audit
   git -C "$REPO_ROOT" diff --check "$REMOTE/$BRANCH..HEAD"
   apply_tree
+  if (( absorbed == 1 )); then
+    restore_absorbed_stash || return 1
+  fi
 
   counts="$(ahead_behind)"
   ahead="$(awk '{print $1}' <<<"$counts")"
   if (( ahead > 0 )); then
+    if git_dirty; then
+      echo "Local commits are ready but the worktree is dirty; not pushing." >&2
+      return 1
+    fi
     git -C "$REPO_ROOT" push "$REMOTE" "HEAD:$BRANCH"
     printf 'GIT     published %s commit(s)\n' "$ahead"
   fi

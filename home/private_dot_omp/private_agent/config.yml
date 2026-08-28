@@ -80,8 +80,9 @@ task:
   # Surface the resolved worker model for cheap routing verification.
   showResolvedModelBadge: true
   # Subagents leave SuperGrok. Reviewer/security stay on the session model.
-  # Override keys are bundled agent ids (sonic/scout/task). There is no
-  # bundled agent named luna; do not add a fake subagent id.
+  # Override keys are bundled agent ids (sonic/scout/task). Agent files use
+  # @smol/@task so a model switch is config.yml only. There is no bundled
+  # agent named luna; do not add a fake subagent id.
   agentModelOverrides:
     sonic: openrouter/z-ai/glm-5.3-flash
     scout: openrouter/z-ai/glm-5.3-flash

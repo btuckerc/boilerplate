@@ -23,6 +23,9 @@ description: Maintain the shared Oh My Pi baseline in chezmoi. Use for OMP upgra
   keep the value out of config, Git, commands, and output.
 - Treat OMP model discovery as authoritative before changing shared model IDs.
 - Keep `models.yml` override-only and retain the custom `ghostty` theme.
+- User agents live in `home/private_dot_omp/private_agent/agents/`. They use
+  `@smol` / `@task`, never a vendor model id. `thinkingLevel` must exist on
+  both Grok and Flash: `low` or `high`. Do not pin `medium`.
 
 ## Workflow
 

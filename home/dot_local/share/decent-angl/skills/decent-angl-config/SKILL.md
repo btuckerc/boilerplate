@@ -13,8 +13,9 @@ commit; no mutable live filesystem silently wins.
 - The only editable checkout is `~/src/boilerplate`.
 - `~/.local/share/chezmoi` resolves to that checkout. `adopt-source` preserves
   and replaces an old independent source tree.
-- Dirty state and diverged history block reconciliation. Never auto-commit,
-  reset, or overwrite either side.
+- Dirty trees that are not publishing commits are stashed around a
+  fast-forward, then restored. Never auto-commit, never `reset --hard` onto
+  local work, never publish a dirty tree. Diverged history still blocks.
 - Clean commits flow both ways: remote commits fast-forward and apply; local
   commits apply and publish.
 - Scheduled applies exclude scripts. Use `reconcile --with-scripts` only for a
@@ -24,7 +25,10 @@ commit; no mutable live filesystem silently wins.
 ## Workflow
 
 Start with `decent-angl-sync status`. If `source=split`, run `adopt-source`. If
-`dirty=yes`, identify the owner of every change before altering it.
+`dirty=yes` while publishing local commits, stop and commit or stash. If the
+machine is only behind or already matches origin, reconcile stashes, applies,
+then restores. A stash apply conflict leaves work in the stash and writes the
+drift marker.
 
 Capture an intentional live-file change with:
 

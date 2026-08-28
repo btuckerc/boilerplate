@@ -9,6 +9,8 @@ file	~/.omp/agent/AGENTS.md	home/private_dot_omp/private_agent/AGENTS.md.tmpl
 file	~/.omp/agent/RULES.md	home/private_dot_omp/private_agent/RULES.md
 file	~/.omp/agent/config.yml	home/private_dot_omp/private_agent/config.yml
 file	~/.omp/agent/models.yml	home/private_dot_omp/private_agent/models.yml
+file	~/.omp/agent/agents/scout.md	home/private_dot_omp/private_agent/agents/scout.md
+file	~/.omp/agent/agents/sonic.md	home/private_dot_omp/private_agent/agents/sonic.md
 file	~/.omp/agent/prompts/review.md	home/private_dot_omp/private_agent/prompts/review.md
 file	~/.omp/agent/prompts/update.md	home/private_dot_omp/private_agent/prompts/update.md
 file	~/.omp/agent/themes/ghostty.json	home/private_dot_omp/private_agent/themes/ghostty.json

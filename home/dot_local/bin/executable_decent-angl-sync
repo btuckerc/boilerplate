@@ -178,6 +178,14 @@ apply_tree() {
   local args=(apply --force --no-tty --refresh-externals=never)
   # Directory entries are excluded because OMP intentionally hardens several
   # managed directories to 0700. Managed file and symlink contents still apply.
+  # Create those parents here so a new file is not rejected with ENOENT.
+  install -d -m 700 \
+    "$HOME/.omp" \
+    "$HOME/.omp/agent" \
+    "$HOME/.omp/agent/agents" \
+    "$HOME/.omp/agent/commands" \
+    "$HOME/.omp/agent/prompts" \
+    "$HOME/.omp/agent/themes"
   if [[ "$WITH_SCRIPTS" != true ]]; then
     args+=(--exclude scripts,dirs)
   else

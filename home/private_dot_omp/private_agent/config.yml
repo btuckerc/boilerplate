@@ -1,16 +1,16 @@
 # Managed by chezmoi. Authentication remains in the machine-local agent.db
-# and ~/.omp/agent/.env. SuperGrok is the main agent. OpenRouter luna does
-# titles and workers so the SuperGrok quota lasts. Overflow fallback is
-# still openrouter/x-ai/grok-4.6, not :nitro.
+# and ~/.omp/agent/.env. SuperGrok is the main agent. OpenRouter
+# GLM-5.3-Flash does titles and subagents so the SuperGrok quota lasts.
+# Overflow fallback is still openrouter/x-ai/grok-4.6, not :nitro.
 modelRoles:
   default: xai-oauth/grok-4.6
-  smol: openrouter/openai/gpt-5.6-luna
+  smol: openrouter/z-ai/glm-5.3-flash
   slow: xai-oauth/grok-4.6
   vision: xai-oauth/grok-4.6
   plan: xai-oauth/grok-4.6
   commit: xai-oauth/grok-4.6
-  tiny: openrouter/openai/gpt-5.6-luna
-  task: openrouter/openai/gpt-5.6-luna
+  tiny: openrouter/z-ai/glm-5.3-flash
+  task: openrouter/z-ai/glm-5.3-flash
 
 modelProviderOrder:
   - xai-oauth
@@ -25,7 +25,7 @@ enabledModels:
   - openrouter/x-ai/grok-4.6
   - openrouter/x-ai/grok-4.6:nitro
   - openrouter/openai/gpt-5.6-luna
-  - openrouter/stealth/ox-alpha
+  - openrouter/z-ai/glm-5.3-flash
 
 # Do not import superseded harness-level settings, commands, or skills.
 disabledProviders:
@@ -79,12 +79,13 @@ task:
   enableLsp: false
   # Surface the resolved worker model for cheap routing verification.
   showResolvedModelBadge: true
-  # Workers leave SuperGrok. Reviewer/security stay on the session model.
+  # Subagents leave SuperGrok. Reviewer/security stay on the session model.
+  # Override keys are bundled agent ids (sonic/scout/task). There is no
+  # bundled agent named luna; do not add a fake subagent id.
   agentModelOverrides:
-    sonic: openrouter/openai/gpt-5.6-luna
-    luna: openrouter/openai/gpt-5.6-luna
-    scout: openrouter/openai/gpt-5.6-luna
-    task: openrouter/openai/gpt-5.6-luna
+    sonic: openrouter/z-ai/glm-5.3-flash
+    scout: openrouter/z-ai/glm-5.3-flash
+    task: openrouter/z-ai/glm-5.3-flash
   # Skip the redundant filesystem walk for each delegated task.
   prewalk: false
 
@@ -182,7 +183,7 @@ display:
   smoothStreaming: false
 
 title:
-  # First-message titles stay and now use the tiny role (luna).
+  # First-message titles stay and use the tiny role (GLM-5.3-Flash).
   # Replan titles stay off so they do not contend with the working turn.
   refreshOnReplan: false
 
@@ -203,7 +204,7 @@ features:
   unexpectedStopDetection: false
 
 providers:
-  # Default OpenRouter routing (price/uptime). :nitro and luna are manual enabledModels picks.
+  # Default OpenRouter routing (price/uptime). :nitro and luna remain manual enabledModels picks.
   openrouterVariant: default
   # xAI search is grok-4.5 + web_search (24-53s here). Public Web races
   # Startpage/DDG in ~5s with no key. If that fan-out fails, try each
@@ -219,7 +220,7 @@ providers:
     - mojeek
   imageOrder:
     - xai
-  # Titles and classifiers use the tiny role (luna) as an online model.
+  # Titles and classifiers use the tiny role (GLM-5.3-Flash) as an online model.
   # Never start an embedded ONNX model worker.
   tinyModel: online
   memoryModel: online
@@ -262,3 +263,6 @@ marketplace:
 
 memory:
   backend: off
+
+dev:
+  autoqaConsent: denied

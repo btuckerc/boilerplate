@@ -567,7 +567,7 @@ check_omp_config() {
   esac
 
   if output="$(omp config get modelRoles --json 2>/dev/null)" \
-    && printf '%s' "$output" | jq -e '.value.default == "xai-oauth/grok-4.6" and .value.task == "openrouter/openai/gpt-5.6-luna"' >/dev/null; then
+    && printf '%s' "$output" | jq -e '.value.default == "xai-oauth/grok-4.6" and .value.task == "openrouter/z-ai/glm-5.3-flash"' >/dev/null; then
     printf 'CONFIG  model roles parse\n'
   else
     printf 'CONFIG  model roles invalid\n' >&2

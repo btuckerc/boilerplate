@@ -1,6 +1,8 @@
 # Managed by chezmoi. Pins Grok 4.6 session thinking to medium so the catalog
 # default cannot silently supersede config.yml defaultThinkingLevel. low,
 # medium, high, and xhigh remain available for explicit per-session overrides.
+# GLM-5.3-Flash has no medium; pin its default to high (between low and max)
+# without changing Grok.
 providers:
   xai-oauth:
     modelOverrides:
@@ -14,6 +16,20 @@ providers:
             - medium
             - high
             - xhigh
+        compat:
+          supportsReasoningEffort: true
+          omitReasoningEffort: false
+  openrouter:
+    modelOverrides:
+      z-ai/glm-5.3-flash:
+        reasoning: true
+        thinking:
+          mode: effort
+          defaultLevel: high
+          efforts:
+            - low
+            - high
+            - max
         compat:
           supportsReasoningEffort: true
           omitReasoningEffort: false

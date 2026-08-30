@@ -19,7 +19,13 @@ commit; no mutable live filesystem silently wins.
 - Clean commits flow both ways: remote commits fast-forward and apply; local
   commits apply and publish.
 - Scheduled applies exclude scripts. Use `reconcile --with-scripts` only for a
-  reviewed change that needs script effects.
+  reviewed change that needs script effects. New
+  `home/dot_local/bin/executable_*` dest files are scripts. After publish,
+  each machine needs a targeted `chezmoi apply` of those paths or
+  `reconcile --with-scripts`. `command not found` on a new wrapper is
+  "the dest file was never applied" until you have checked PATH and the
+  dest path.
+
 - Secrets and runtime state stay outside Git. Use `bitwarden-secrets`.
 
 ## Workflow

@@ -15,8 +15,24 @@ cannot create its own initial credential.
 
 ## SSH key
 
-1. On a machine that already has `~/.ssh/opnsense_agent`, unlock bw and run
-   `opnsense-agent-key store --from ~/.ssh/opnsense_agent`.
-2. On every other fleet machine, unlock bw and run `opnsense-agent-key`.
-3. `opnsense-ssh` should print a remote `uname` line. Never copy the private
-   key through chat, scp, or Git.
+Item `opnsense-agent-ssh`: private key in notes, public key in custom
+field `public`. Unlock is per shell. The agent cannot use another
+terminal's `BW_SESSION`.
+
+1. Wrappers must exist. If `opnsense-agent-key` is not on PATH, pull
+   published master and
+   `chezmoi apply ~/.local/bin/opnsense-agent-key ~/.local/bin/opnsense-ssh`.
+   Scheduled reconcile skips scripts.
+2. Writer (already has `~/.ssh/opnsense_agent`):
+   `export BW_SESSION="$(bw unlock --raw)"`
+   `opnsense-agent-key store --from ~/.ssh/opnsense_agent`
+   Expect `stored:opnsense-agent-ssh`.
+3. Consumer (every other fleet machine): same unlock, then
+   `opnsense-agent-key`. The wrapper runs `bw sync` first. Unlock alone
+   does not pull. Expect `materialized:~/.ssh/opnsense_agent`.
+4. `opnsense-ssh 'id -un; hostname'` prints `agent` and
+   `router.home.arpa`.
+
+Never copy the private key through chat, scp, or Git. If
+vault.weavedweb.com returns 5xx, wait and retry. Do not paste vault
+error JSON into chat.

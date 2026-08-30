@@ -250,6 +250,7 @@ print(hit["id"] if hit else "")
         rm -f "$tmp" "$tmp_pub"
     }
     trap cleanup EXIT INT TERM
+    # Env prefix on a pipeline applies only to the left-hand command.
     "$BW_BIN" get item "$ITEM_NAME" | TMP_PRIV="$tmp" TMP_PUB="$tmp_pub" python3 -c '
 import json, os, sys
 try:

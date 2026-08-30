@@ -14,7 +14,7 @@ Shared agent state is managed with chezmoi.
 - On macOS with iCloud Desktop & Documents, keep active repos, build trees, virtualenvs, and agent workspaces under `~/src`, not `~/Documents`.
 - Prefer Tailscale hostnames for remote access: `t14`, `btcaw`, `macbook`, `macmini`, `clt`.
 - For machine settings, native app preferences, or platform-specific operations, use the shared `platform-ops` skill.
-- For the home OPNsense router `clt` at `10.77.77.1`, use the `opnsense` skill and `opnsense-api`. Keep API secrets in Bitwarden item `opnsense-api` and the SSH key in `opnsense-agent-ssh`; never Git or chezmoi. Shell is `opnsense-ssh` after `opnsense-agent-key`.
+- For the home OPNsense router `clt` at `10.77.77.1`, use the `opnsense` skill. API is `opnsense-api`. Shell is `opnsense-ssh` after the user unlocks bw in their own shell and runs `opnsense-agent-key` (store once from a host that has the key, then sync on every other machine). Never Git, chezmoi, scp, or chat the key. Items: `opnsense-api`, `opnsense-agent-ssh`.
 - Do not add marketplace plugins, extra MCP servers, or foreign-harness skills unless a task needs them.
 - Drive is cwd-local. `/board` writes `$PWD/docs/board`. `/drive` writes then spawns. `/vibe` keeps workers. `/recover` inspects orphan in-flight cards. Use `omp-board` for every board write. Project `.omp/commands` override the user commands.
 

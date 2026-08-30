@@ -1,6 +1,6 @@
 ---
 name: opnsense
-description: Manage the home OPNsense router through its REST API. Use for firewall, interfaces, DHCP, DNS, firmware status, services, WireGuard, Unbound, or router GUI changes.
+description: Manage the home OPNsense router through its REST API, and fleet SSH to clt via opnsense-ssh. Use for firewall, interfaces, DHCP, DNS, firmware, WireGuard, Unbound, Tailscale on the router, or agent shell access.
 ---
 
 # OPNsense
@@ -57,13 +57,38 @@ does not listen on the Tailscale address. Off-LAN API access needs the
 advertised `10.77.77.0/24` subnet route approved in the Tailscale admin
 console.
 
-Shell user is `agent` (wheel, uid 2001), keys only. Vault item
-`opnsense-agent-ssh` materializes to `~/.ssh/opnsense_agent` via
-`opnsense-agent-key`. sshd listens on LAN only, no password, no root.
-`ssh clt` is Tailscale SSH and may prompt. Unattended shell is
-`opnsense-ssh`.
+Shell user is `agent` (wheel, uid 2001), keys only. sshd listens on LAN
+only, no password, no root. `ssh clt` is Tailscale SSH and may prompt.
+Unattended shell is `opnsense-ssh` after the fleet key steps below.
 
 Do not `auth/user/set` on `root`. That API reassigns uid 0.
 
 Tailscale plugin: `acceptDNS` stays off so Unbound remains LAN DNS. Do not
 open 22/443 on WAN.
+
+## Fleet shell
+
+Never copy `~/.ssh/opnsense_agent` through chat, scp, or Git. Item
+`opnsense-agent-ssh` is the only distribution path.
+
+Agents do not unlock Bitwarden. `BW_SESSION` is per shell. Give the user
+the commands; they run them. `opnsense-agent-key status` is safe without
+unlock. It only reports local key mode and fingerprint.
+
+1. Wrappers on PATH. `command -v opnsense-agent-key` and
+   `command -v opnsense-ssh`. If missing, pull published master and
+   `chezmoi apply ~/.local/bin/opnsense-agent-key ~/.local/bin/opnsense-ssh`.
+   Scheduled reconcile skips scripts.
+2. One writer. On a host that already has `~/.ssh/opnsense_agent`, the user
+   unlocks bw in that shell and runs
+   `opnsense-agent-key store --from ~/.ssh/opnsense_agent`.
+   Expect `stored:opnsense-agent-ssh`.
+3. Each consumer. The user unlocks bw in that machine's shell and runs
+   `opnsense-agent-key`. The wrapper syncs the CLI cache, then writes
+   mode 600. Unlock does not pull. Expect `materialized:...`.
+4. `opnsense-ssh 'id -un; hostname'` prints `agent` and `router.home.arpa`.
+
+Do not run step 3 before step 2. Do not run step 4 if step 3 failed.
+Vault 5xx: wait and retry. The wrapper retries sync and must not print
+origin error bodies.
+

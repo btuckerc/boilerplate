@@ -25,6 +25,18 @@ Values, sessions, generated env files, and exports stay machine-local.
 
 Supported fields: `username`, `password`, `notes`, and `custom:NAME`.
 
+## Sessions and cache
+
+`BW_SESSION` is per shell. Unlocking Ghostty does not unlock an agent
+shell. Ask the user to run secret commands in their terminal. Do not
+capture `BW_SESSION` from a PTY, logs, or chat.
+
+Each machine has its own CLI database. `bw unlock` does not pull. After a
+write on another host, `bw sync` before `get` or `list`. Wrappers that
+materialize from the vault must sync themselves.
+
+Vault HTTP 5xx: retry, fail closed, do not print the origin error body.
+
 ## Provisioning and rotation
 
 Use hidden prompts or a user-supplied `0600` import file. A one-shot `/tmp`
@@ -36,7 +48,8 @@ only for behavior shared by multiple consumers.
 
 ## Safety invariants
 
-- Fail closed when `bw` is locked, unauthenticated, missing, or ambiguous.
+- Fail closed when `bw` is locked, unauthenticated, missing, ambiguous, or
+  returns non-JSON or HTTP 5xx.
 - Creating or editing a vault item requires authorization for that external write.
 - Use item names or IDs as shared lookup identifiers.
 - Validate Git and chezmoi boundaries after every new integration.

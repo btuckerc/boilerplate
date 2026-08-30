@@ -10,6 +10,7 @@ Shared agent state is managed with chezmoi.
 - Prefer Tailscale hostnames for remote access: `t14`, `btcaw`, `macbook`, `macmini`, `clt`.
 - OMP is the primary cross-platform terminal harness; Codex remains available. Legacy Claude/OpenCode material lives on `legacy/claude-opencode`.
 - For machine settings, native app preferences, or platform-specific operations, use the shared `platform-ops` skill.
+- For the home OPNsense router `clt`, use the `opnsense` skill. Never Git, scp, or chat `~/.ssh/opnsense_agent`.
 - For shared dotfiles or cross-machine drift, use `decent-angl-config`; published Git history is authoritative and every machine may author reviewed commits.
 - Keep `~/.local/share/chezmoi` linked to `~/src/boilerplate` so the working repo and chezmoi source cannot diverge.
 - On packaged Omarchy, let `/usr/share/omarchy` and the stock UWSM environment own `OMARCHY_PATH`; never persist or prepend the legacy `~/.local/share/omarchy` path.

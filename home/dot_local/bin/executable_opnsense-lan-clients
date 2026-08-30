@@ -1,0 +1,78 @@
+#!/bin/sh
+set -eu
+
+# Join live dnsmasq leases with ARP. No extra services on the router.
+# Never prints API credentials.
+
+usage() {
+    cat <<'EOF'
+Usage: opnsense-lan-clients
+
+Print LAN DHCP clients joined with ARP vendor. Names come from the
+DHCP hostname the device sent. "*" means it sent none (often a
+randomized MAC). Per-host byte counts need Netflow, which is off.
+EOF
+}
+
+case "${1:-}" in
+    -h|--help|help)
+        usage
+        exit 0
+        ;;
+esac
+
+if ! command -v opnsense-api >/dev/null 2>&1; then
+    echo "opnsense-api not on PATH." >&2
+    exit 1
+fi
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "python3 is required." >&2
+    exit 1
+fi
+umask 077
+LEASES="$(mktemp)"
+ARP="$(mktemp)"
+NF="$(mktemp)"
+cleanup() {
+    rm -f "$LEASES" "$ARP" "$NF"
+}
+trap cleanup EXIT INT TERM
+
+opnsense-api get dnsmasq/leases/search >"$LEASES"
+opnsense-api get diagnostics/interface/getArp >"$ARP"
+opnsense-api get diagnostics/netflow/isEnabled >"$NF"
+export LEASES ARP NF
+
+python3 -c '
+import json, os, sys
+
+leases = json.load(open(os.environ["LEASES"], encoding="utf-8"))
+arp = json.load(open(os.environ["ARP"], encoding="utf-8"))
+nf = json.load(open(os.environ["NF"], encoding="utf-8"))
+rows = leases.get("rows") or []
+arp_by_mac = {(a.get("mac") or "").lower(): a for a in arp}
+arp_by_ip = {a.get("ip"): a for a in arp}
+
+named = 0
+unnamed = 0
+print("ip\thostname\tvendor\tmac\tarp")
+for row in sorted(rows, key=lambda r: r.get("address") or ""):
+    mac = (row.get("hwaddr") or "").lower()
+    ip = row.get("address") or ""
+    host = row.get("hostname") or ""
+    if host in ("", "*"):
+        host = "*"
+        unnamed += 1
+    else:
+        named += 1
+    a = arp_by_mac.get(mac) or arp_by_ip.get(ip) or {}
+    vendor = (a.get("manufacturer") or "").strip() or "-"
+    present = "yes" if a else "no"
+    print(f"{ip}\t{host}\t{vendor}\t{mac}\t{present}")
+
+print(
+    "clients=%s named=%s unnamed=%s netflow=%s local=%s"
+    % (len(rows), named, unnamed, nf.get("netflow"), nf.get("local")),
+    file=sys.stderr,
+)
+'

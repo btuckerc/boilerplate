@@ -1,6 +1,6 @@
 ---
 name: opnsense
-description: Manage the home OPNsense router through its REST API, and fleet SSH to clt via opnsense-ssh. Use for firewall, interfaces, DHCP, DNS, firmware, WireGuard, Unbound, Tailscale on the router, or agent shell access.
+description: Manage the home OPNsense router through its REST API, fleet SSH to clt, and LAN client inventory via opnsense-lan-clients. Use for firewall, DHCP, DNS, firmware, Tailscale on the router, visitor/device names, or traffic questions.
 ---
 
 # OPNsense
@@ -91,4 +91,28 @@ unlock. It only reports local key mode and fingerprint.
 Do not run step 3 before step 2. Do not run step 4 if step 3 failed.
 Vault 5xx: wait and retry. The wrapper retries sync and must not print
 origin error bodies.
+
+## LAN clients
+
+`opnsense-lan-clients` joins `dnsmasq/leases/search` with ARP vendors.
+That is the agent view. Do not scrape the GUI. DHCP is dnsmasq, not Kea.
+Unbound `regdhcp` is off, so ARP `hostname` is empty even when DHCP has a
+name.
+
+A name is whatever the device put in DHCP option 12. iPhone, Mac,
+Ben-s-S26-Ultra are that. `*` is no name, usually a randomized MAC.
+Manufacturer is the MAC OUI, not a model. OPNsense does not know "Pixel 9"
+or "Galaxy S26" unless the device said so.
+
+Per-host bytes are not collected. `diagnostics/netflow/isEnabled` is
+`netflow=0 local=0`. Interface RRD is LAN/WAN totals only. Packet capture
+exists at `diagnostics/packet_capture` as an on-demand debug, not a
+daemon. Do not leave a capture running.
+
+Do not install ntopng, Zenarmor, or Sensei on this box. Local Netflow
+(OPNsense Insight) is the cheap per-client usage path. Enable it only if
+the user asks.
+
+Do not dump guest DNS queries or packet payloads into chat.
+
 

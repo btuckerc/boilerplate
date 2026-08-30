@@ -203,6 +203,7 @@ print(base64.b64encode(json.dumps(obj).encode()).decode())
 cmd_sync() {
     require_tools
     require_unlocked
+    "$BW_BIN" sync >/dev/null
     export ITEM_NAME
     existing="$(ITEM_NAME="$ITEM_NAME" "$BW_BIN" list items --search "$ITEM_NAME" | python3 -c '
 import json, os, sys
@@ -216,7 +217,7 @@ hit = next((i for i in items if i.get("name") == name), None)
 print(hit["id"] if hit else "")
 ')"
     if [ -z "$existing" ]; then
-        echo "Vault item $ITEM_NAME not found." >&2
+        echo "Vault item $ITEM_NAME not found after bw sync." >&2
         echo "On a machine that already has the private key, run:" >&2
         echo "  opnsense-agent-key store --from ~/.ssh/opnsense_agent" >&2
         echo "Then run opnsense-agent-key here again." >&2

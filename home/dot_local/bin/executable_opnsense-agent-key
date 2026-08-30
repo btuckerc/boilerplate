@@ -203,6 +203,25 @@ print(base64.b64encode(json.dumps(obj).encode()).decode())
 cmd_sync() {
     require_tools
     require_unlocked
+    export ITEM_NAME
+    existing="$(ITEM_NAME="$ITEM_NAME" "$BW_BIN" list items --search "$ITEM_NAME" | python3 -c '
+import json, os, sys
+name = os.environ["ITEM_NAME"]
+try:
+    items = json.load(sys.stdin)
+except json.JSONDecodeError:
+    sys.stderr.write("bw list items returned non-JSON.\n")
+    sys.exit(1)
+hit = next((i for i in items if i.get("name") == name), None)
+print(hit["id"] if hit else "")
+')"
+    if [ -z "$existing" ]; then
+        echo "Vault item $ITEM_NAME not found." >&2
+        echo "On a machine that already has the private key, run:" >&2
+        echo "  opnsense-agent-key store --from ~/.ssh/opnsense_agent" >&2
+        echo "Then run opnsense-agent-key here again." >&2
+        exit 1
+    fi
     mkdir -p "$HOME/.ssh"
     chmod 700 "$HOME/.ssh"
     umask 077
@@ -214,7 +233,11 @@ cmd_sync() {
     trap cleanup EXIT INT TERM
     TMP_PRIV="$tmp" TMP_PUB="$tmp_pub" ITEM_NAME="$ITEM_NAME" "$BW_BIN" get item "$ITEM_NAME" | python3 -c '
 import json, os, sys
-item = json.load(sys.stdin)
+try:
+    item = json.load(sys.stdin)
+except json.JSONDecodeError:
+    sys.stderr.write("Vault item was not JSON.\n")
+    sys.exit(1)
 priv = item.get("notes") or ""
 pub = ""
 for field in item.get("fields") or []:

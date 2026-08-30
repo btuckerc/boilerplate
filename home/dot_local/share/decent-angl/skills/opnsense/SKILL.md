@@ -104,15 +104,21 @@ Ben-s-S26-Ultra are that. `*` is no name, usually a randomized MAC.
 Manufacturer is the MAC OUI, not a model. OPNsense does not know "Pixel 9"
 or "Galaxy S26" unless the device said so.
 
-Per-host bytes are not collected. `diagnostics/netflow/isEnabled` is
-`netflow=0 local=0`. Interface RRD is LAN/WAN totals only. Packet capture
-exists at `diagnostics/packet_capture` as an on-demand debug, not a
-daemon. Do not leave a capture running.
+Per-host bytes come from local Netflow (Insight). Live config:
+LAN+WAN capture, WAN egress-only (avoid NAT double count), v9 (IPv6),
+local collector only at `127.0.0.1:2056`, `collect.enable=1`,
+`activeTimeout=1800`, `inactiveTimeout=15`. No remote destinations.
+Confirm with `diagnostics/netflow/isEnabled` (`netflow=1 local=1`) and
+`diagnostics/netflow/status` (`active`). Top talkers:
+`diagnostics/networkinsight/top/FlowSourceAddrTotals/<from>/<to>/src_addr/octets/15`
+with unix timestamps. Per-IP aggregations start at 300s resolution.
+Do not dump destination lists or DNS queries into chat.
 
-Do not install ntopng, Zenarmor, or Sensei on this box. Local Netflow
-(OPNsense Insight) is the cheap per-client usage path. Enable it only if
-the user asks.
+Interface RRD is still LAN/WAN totals. Packet capture is on-demand at
+`diagnostics/packet_capture`. Do not leave a capture running.
 
-Do not dump guest DNS queries or packet payloads into chat.
+Do not install ntopng, Zenarmor, or Sensei. Do not add a remote Netflow
+collector. Do not listen for Netflow on WAN.
+
 
 

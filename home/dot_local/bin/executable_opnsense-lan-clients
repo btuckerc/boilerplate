@@ -10,7 +10,7 @@ Usage: opnsense-lan-clients
 
 Print LAN DHCP clients joined with ARP vendor. Names come from the
 DHCP hostname the device sent. "*" means it sent none (often a
-randomized MAC). Per-host byte counts need Netflow, which is off.
+randomized MAC). Per-host bytes are Insight Netflow, not this command.
 EOF
 }
 

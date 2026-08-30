@@ -250,7 +250,7 @@ print(hit["id"] if hit else "")
         rm -f "$tmp" "$tmp_pub"
     }
     trap cleanup EXIT INT TERM
-    TMP_PRIV="$tmp" TMP_PUB="$tmp_pub" ITEM_NAME="$ITEM_NAME" "$BW_BIN" get item "$ITEM_NAME" | python3 -c '
+    "$BW_BIN" get item "$ITEM_NAME" | TMP_PRIV="$tmp" TMP_PUB="$tmp_pub" python3 -c '
 import json, os, sys
 try:
     item = json.load(sys.stdin)

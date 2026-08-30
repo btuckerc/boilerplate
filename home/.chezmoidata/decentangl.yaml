@@ -9,11 +9,14 @@ decentangl:
     restic_item: "restic-decent-angl"
     obsidian_livesync_item: "obsidian-livesync-weavedweb"
     opnsense_item: "opnsense-api"
+    opnsense_ssh_item: "opnsense-agent-ssh"
   network:
     opnsense:
       host: "https://10.77.77.1"
       hostname: "OPNsense.internal"
       vault_item: "opnsense-api"
+      ssh_vault_item: "opnsense-agent-ssh"
+      ssh_user: "agent"
       tls_fingerprint_sha256: "20915FA97BB4B3E59F1B41563D7F13C07643BDFD55DFE85F8A703456BA13459E"
       tls_pinned_pubkey_sha256: "5g/kVN6nFwMdNqW9pWiKmtV9syYtqmHBBW4HX7YlZqs="
   backup:

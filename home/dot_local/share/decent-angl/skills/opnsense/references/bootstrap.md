@@ -12,3 +12,11 @@ cannot create its own initial credential.
    env file without printing values.
 5. Require `tls_pin=ok` and `api=ok` from `opnsense-api status`, then delete the
    one-time download.
+
+## SSH key
+
+1. On a machine that already has `~/.ssh/opnsense_agent`, unlock bw and run
+   `opnsense-agent-key store --from ~/.ssh/opnsense_agent`.
+2. On every other fleet machine, unlock bw and run `opnsense-agent-key`.
+3. `opnsense-ssh` should print a remote `uname` line. Never copy the private
+   key through chat, scp, or Git.

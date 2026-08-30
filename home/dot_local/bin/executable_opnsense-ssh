@@ -1,0 +1,21 @@
+#!/bin/sh
+set -eu
+
+# SSH to the CLT OPNsense box as user agent. Key is machine-local.
+
+CONFIG_FILE="${OPNSENSE_CONFIG_FILE:-$HOME/.config/decent-angl/opnsense.env}"
+if [ -f "$CONFIG_FILE" ]; then
+    # shellcheck disable=SC1090
+    . "$CONFIG_FILE"
+fi
+
+HOST="${OPNSENSE_SSH_HOST:-10.77.77.1}"
+USER="${OPNSENSE_SSH_USER:-agent}"
+KEY_FILE="${OPNSENSE_SSH_KEY_FILE:-$HOME/.ssh/opnsense_agent}"
+
+if [ ! -f "$KEY_FILE" ]; then
+    echo "Missing $KEY_FILE. Unlock bw, then run: opnsense-agent-key" >&2
+    exit 1
+fi
+
+exec ssh -i "$KEY_FILE" -o IdentitiesOnly=yes -o ForwardAgent=no "${USER}@${HOST}" "$@"

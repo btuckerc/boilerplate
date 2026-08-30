@@ -45,3 +45,25 @@ documentation uses snake_case.
 - API filter endpoints may omit legacy GUI-only rules. Inspect before assuming
   the API sees every rule.
 - Do not expose management, API, or SSH on WAN unless explicitly requested.
+
+## CLT node
+
+This site's firewall is Tailscale name `clt` (`clt.tail4d5aec.ts.net`,
+`100.109.139.83`). LAN is still `10.77.77.1` / `router.home.arpa`. Future
+sites get their own Tailscale name. Do not reuse `clt`.
+
+`opnsense-api` stays on `https://10.77.77.1` with the TLS pin. The GUI/API
+does not listen on the Tailscale address. Off-LAN API access needs the
+advertised `10.77.77.0/24` subnet route approved in the Tailscale admin
+console.
+
+Shell user is `agent` (wheel, uid 2001), keys only. Vault item
+`opnsense-agent-ssh` materializes to `~/.ssh/opnsense_agent` via
+`opnsense-agent-key`. sshd listens on LAN only, no password, no root.
+`ssh clt` is Tailscale SSH and may prompt. Unattended shell is
+`opnsense-ssh`.
+
+Do not `auth/user/set` on `root`. That API reassigns uid 0.
+
+Tailscale plugin: `acceptDNS` stays off so Unbound remains LAN DNS. Do not
+open 22/443 on WAN.

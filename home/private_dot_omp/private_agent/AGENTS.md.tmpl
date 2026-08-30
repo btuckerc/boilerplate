@@ -12,9 +12,9 @@ Shared agent state is managed with chezmoi.
 - OpenRouter is SuperGrok overflow only. Inject `OPENROUTER_API_KEY` locally with `omp-openrouter-env` after unlocking Bitwarden (`omp-openrouter`); never put the key in Git or chezmoi.
 - Prefer OMP's built-in tools, LSP, diffs, compaction, image handling, approvals, and subagents before adding extensions.
 - On macOS with iCloud Desktop & Documents, keep active repos, build trees, virtualenvs, and agent workspaces under `~/src`, not `~/Documents`.
-- Prefer Tailscale hostnames for remote access: `t14`, `btcaw`, `macbook`, `macmini`.
+- Prefer Tailscale hostnames for remote access: `t14`, `btcaw`, `macbook`, `macmini`, `clt`.
 - For machine settings, native app preferences, or platform-specific operations, use the shared `platform-ops` skill.
-- For the home OPNsense router at `10.77.77.1`, use the `opnsense` skill and `opnsense-api`. Keep API secrets in Bitwarden item `opnsense-api`; never Git or chezmoi.
+- For the home OPNsense router `clt` at `10.77.77.1`, use the `opnsense` skill and `opnsense-api`. Keep API secrets in Bitwarden item `opnsense-api` and the SSH key in `opnsense-agent-ssh`; never Git or chezmoi. Shell is `opnsense-ssh` after `opnsense-agent-key`.
 - Do not add marketplace plugins, extra MCP servers, or foreign-harness skills unless a task needs them.
 - Drive is cwd-local. `/board` writes `$PWD/docs/board`. `/drive` writes then spawns. `/vibe` keeps workers. `/recover` inspects orphan in-flight cards. Use `omp-board` for every board write. Project `.omp/commands` override the user commands.
 

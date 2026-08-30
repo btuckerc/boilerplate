@@ -112,6 +112,24 @@ require_unlocked() {
     esac
 }
 
+bw_sync() {
+    attempt=1
+    max=4
+    while [ "$attempt" -le "$max" ]; do
+        if "$BW_BIN" sync >/dev/null 2>/dev/null; then
+            return 0
+        fi
+        if [ "$attempt" -eq "$max" ]; then
+            echo "bw sync failed after $max attempts. vault.weavedweb.com unreachable; retry later." >&2
+            exit 1
+        fi
+        echo "bw sync failed (attempt $attempt/$max); retrying..." >&2
+        sleep $((attempt * 15))
+        attempt=$((attempt + 1))
+    done
+}
+
+
 cmd_status() {
     if [ -f "$KEY_FILE" ]; then
         mode="-"
@@ -196,14 +214,14 @@ print(base64.b64encode(json.dumps(obj).encode()).decode())
         "$BW_BIN" create item "$PAYLOAD" >/dev/null
     fi
     unset PAYLOAD
-    "$BW_BIN" sync >/dev/null
+    bw_sync
     echo "stored:$ITEM_NAME"
 }
 
 cmd_sync() {
     require_tools
     require_unlocked
-    "$BW_BIN" sync >/dev/null
+    bw_sync
     export ITEM_NAME
     existing="$(ITEM_NAME="$ITEM_NAME" "$BW_BIN" list items --search "$ITEM_NAME" | python3 -c '
 import json, os, sys

@@ -1,6 +1,6 @@
 ---
 name: opnsense
-description: Manage the home OPNsense router through its REST API, fleet SSH to clt, and LAN client inventory via opnsense-lan-clients. Use for firewall, DHCP, DNS, firmware, Tailscale on the router, visitor/device names, or traffic questions.
+description: Manage the home OPNsense router through its REST API, fleet SSH to clt, and LAN client inventory via opnsense-lan-clients. Use for firewall, DHCP, DNS, firmware, Tailscale on the router, visitor/device names, WAN traffic shaper, Steam vs other hosts, or traffic questions.
 ---
 
 # OPNsense
@@ -34,6 +34,15 @@ documentation uses snake_case.
 
 - API guide: https://docs.opnsense.org/development/how-tos/api.html
 - Endpoint index: https://docs.opnsense.org/development/api.html
+
+## Traffic shaper
+
+Live WAN share recipe and the Steam multi-flow failure are in
+[references/shaper.md](references/shaper.md). Do not put FQ-CoDel on a pipe
+and a host mask on its queue. That does not isolate LAN IPs. Current share
+recipe is WFQ pipes at 85/21 Mbit, queue mask `dst-ip` down and `src-ip` up,
+CoDel on the queues. Two bulk WAN hosts split the pipe. They cannot each
+get 85 Mbit on this circuit.
 
 ## Safety
 
@@ -96,13 +105,22 @@ origin error bodies.
 
 `opnsense-lan-clients` joins `dnsmasq/leases/search` with ARP vendors.
 That is the agent view. Do not scrape the GUI. DHCP is dnsmasq, not Kea.
-Unbound `regdhcp` is off, so ARP `hostname` is empty even when DHCP has a
-name.
 
-A name is whatever the device put in DHCP option 12. iPhone, Mac,
-Ben-s-S26-Ultra are that. `*` is no name, usually a randomized MAC.
-Manufacturer is the MAC OUI, not a model. OPNsense does not know "Pixel 9"
-or "Galaxy S26" unless the device said so.
+Unbound `regdhcp` is ISC-only and stays off. DHCP names live in dnsmasq
+on port 53053. Unbound forwards `home.arpa` and `77.77.10.in-addr.arpa`
+to `127.0.0.1:53053`, with `private-domain: home.arpa` so RFC1918
+answers are not stripped. `dnsmasq.no_resolv=1`. LAN DHCP range domain
+is `home.arpa`. Do not enable Unbound global forwarding.
+
+Kernel ARP has no hostname column. Names come from DHCP option 12 and
+from Unbound/dnsmasq (`dig @10.77.77.1 host.home.arpa`,
+`diagnostics/dns/reverse_lookup`). `*` is no name, usually a
+randomized MAC. Manufacturer is the MAC OUI, not a model. OPNsense
+does not know "Pixel 9" or "Galaxy S26" unless the device said so.
+
+Default-deny packet logging is Firewall > Settings > Advanced
+(`syslog.nologdefaultblock`). No REST API in 26.7. Do not add a WAN
+catch-all block to fake it; that can steal last-match from WAN DHCP.
 
 Per-host bytes come from local Netflow (Insight). Live config:
 LAN+WAN capture, WAN egress-only (avoid NAT double count), v9 (IPv6),

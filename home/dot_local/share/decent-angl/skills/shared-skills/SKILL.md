@@ -24,6 +24,15 @@ For a first-party skill, create one directory containing `SKILL.md` and any
 referenced resources, then audit it. Never edit generated views or discovery
 links.
 
+Every file under `references/` must appear in `SKILL.md` as
+`(references/name.md)`. `decent-angl-skills validate` and `sync` audit the
+live dest under `~/.local/share/decent-angl/skills/`. `sync` does not copy
+source to dest; that is chezmoi. After a source edit, targeted
+`chezmoi apply` of the dest skill directory, then `decent-angl-skills sync`.
+A dest `references/` file without a dest SKILL.md link is
+`undisclosed reference` even when source is already linked. That dest drift
+is what blocks `--strict`, not an unlinked source file.
+
 ## Invocation
 
 Omit `disable-model-invocation` by default. Add

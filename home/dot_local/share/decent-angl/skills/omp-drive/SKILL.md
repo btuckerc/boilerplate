@@ -25,7 +25,7 @@ Project `.omp/commands` override these. Present Company keeps luna/SLOT/qa and s
 
 ## Inventory facts
 
-`/vibe` is the built-in 17.4.2 TUI stay-alive toggle; `vibe_spawn` exists only after `/vibe`. There is no `vibe.md` overlay; do not add one.
+`/vibe` is the built-in TUI stay-alive toggle; `vibe_spawn` exists only after `/vibe`. There is no `vibe.md` overlay; do not add one.
 
 Lock `host=` is `os.uname().nodename`: `btct14`, `BTC-MBP14.local`, or `mc.angl.gg`. It is not the Tailscale name (`macbook` or `macmini`). A same-host dead pid is stolen; a foreign host is not.
 

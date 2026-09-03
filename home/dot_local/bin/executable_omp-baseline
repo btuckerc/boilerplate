@@ -25,8 +25,9 @@ Usage: omp-baseline <status|validate|apply|pull|check-upstream|upgrade|guard|ins
   apply           Apply the local published source, install its exact pin, validate.
   pull            Reconcile the complete published baseline, then validate OMP.
   check-upstream  Compare the published pin to GitHub latest. Write omp-upstream.
-  upgrade [VER]   Move the three pin sites to VER or GitHub latest, install, validate.
-                  Does not commit or reconcile. --dry-run prints the plan only.
+  upgrade [VER]   Move the three pin sites to VER or GitHub latest, install, check OMP.
+                  Does not commit, reconcile, or fail closed on unrelated skill audits.
+                  --dry-run prints the plan only.
   guard           Validate local OMP state without overwriting source.
   install-guard   Install the hourly launchd/systemd user guard.
   fleet           SSH to t14, macbook, and macmini and report pin, gh, and validate.
@@ -517,15 +518,15 @@ check_thinking_and_loop_policy() {
   require_scalar "live bash.autoBackground.thresholdMs" "$live_bash_bg" 15000 || failures=1
 
   source_chain="$(awk '
-    $0 ~ /^[[:space:]]*xai-oauth\/grok-4\.6:[[:space:]]*$/ { in_chain=1; next }
+    $0 ~ /^[[:space:]]*default:[[:space:]]*$/ { in_chain=1; next }
     in_chain && $1 == "-" { print $2; exit }
   ' "$source_config")"
   live_chain="$(awk '
-    $0 ~ /^[[:space:]]*xai-oauth\/grok-4\.6:[[:space:]]*$/ { in_chain=1; next }
+    $0 ~ /^[[:space:]]*default:[[:space:]]*$/ { in_chain=1; next }
     in_chain && $1 == "-" { print $2; exit }
   ' "$live_config")"
-  require_scalar "source grok fallback" "$source_chain" "openrouter/x-ai/grok-4.6" || failures=1
-  require_scalar "live grok fallback" "$live_chain" "openrouter/x-ai/grok-4.6" || failures=1
+  require_scalar "source default fallback" "$source_chain" "google-antigravity/gemini-3.8-flash:high" || failures=1
+  require_scalar "live default fallback" "$live_chain" "google-antigravity/gemini-3.8-flash:high" || failures=1
 
   if awk '
     $0 ~ /^[[:space:]]*-[[:space:]]*low[[:space:]]*$/ { low=1 }
@@ -567,7 +568,16 @@ check_omp_config() {
   esac
 
   if output="$(omp config get modelRoles --json 2>/dev/null)" \
-    && printf '%s' "$output" | jq -e '.value.default == "xai-oauth/grok-4.6" and .value.task == "openrouter/z-ai/glm-5.3-flash"' >/dev/null; then
+    && printf '%s' "$output" | jq -e '
+      .value.default == "xai-oauth/grok-4.6:medium" and
+      .value.slow == "xai-oauth/grok-4.6:xhigh" and
+      .value.plan == "xai-oauth/grok-4.6:high" and
+      .value.vision == "google-antigravity/gemini-3.8-flash:high" and
+      .value.commit == "openrouter/z-ai/glm-5.3-flash:low" and
+      .value.smol == "google-antigravity/gemini-3.8-flash" and
+      .value.tiny == "openrouter/z-ai/glm-5.3-flash:low" and
+      .value.task == "google-antigravity/gemini-3.8-flash"
+    ' >/dev/null; then
     printf 'CONFIG  model roles parse\n'
   else
     printf 'CONFIG  model roles invalid\n' >&2
@@ -590,13 +600,33 @@ check_omp_config() {
     printf 'PROVIDER xai-oauth missing\n' >&2
     failures=1
   fi
-
   if omp models xai-oauth --json 2>/dev/null | grep -q 'grok-4.6'; then
     printf 'MODEL   grok-4.6 discoverable\n'
   elif grep -q 'grok-4.6' "$HOME/.omp/agent/models.yml" 2>/dev/null; then
     printf 'MODEL   grok-4.6 configured; discovery awaits machine-local OAuth\n'
   else
     printf 'MODEL   grok-4.6 absent from discovery and portable catalog\n' >&2
+    failures=1
+  fi
+
+  if grep -Eq '^[[:space:]]*-[[:space:]]*google-antigravity/gemini-3.8-flash[[:space:]]*$' "$REPO_ROOT/home/private_dot_omp/private_agent/config.yml"; then
+    printf 'CONFIG  gemini-3.8-flash enabled\n'
+  else
+    printf 'CONFIG  gemini-3.8-flash missing from enabledModels\n' >&2
+    failures=1
+  fi
+  if omp models google-antigravity --json 2>/dev/null | grep -q 'gemini-3.8-flash'; then
+    printf 'MODEL   gemini-3.8-flash discoverable\n'
+  elif grep -Eq '^[[:space:]]*-[[:space:]]*google-antigravity/gemini-3.8-flash[[:space:]]*$' "$REPO_ROOT/home/private_dot_omp/private_agent/config.yml"; then
+    printf 'MODEL   gemini-3.8-flash configured; discovery awaits machine-local OAuth\n'
+  else
+    printf 'MODEL   gemini-3.8-flash absent from discovery and source config\n' >&2
+    failures=1
+  fi
+  if grep -Eq '^[[:space:]]*-[[:space:]]*openrouter/z-ai/glm-5.3[[:space:]]*$' "$REPO_ROOT/home/private_dot_omp/private_agent/config.yml"; then
+    printf 'CONFIG  glm-5.3 enabled\n'
+  else
+    printf 'CONFIG  enabledModels missing glm-5.3\n' >&2
     failures=1
   fi
 
@@ -683,6 +713,9 @@ apply_local() {
   printf '%s' "$pin" >"$HOME/.omp/agent/last-changelog-version"
   if [ "${OMP_BASELINE_IN_GUARD:-0}" != 1 ]; then
     install_guard
+  fi
+  if [ "${OMP_BASELINE_SKIP_VALIDATE:-0}" = 1 ]; then
+    return 0
   fi
   validate
 }
@@ -892,8 +925,25 @@ upgrade() {
     restore_pin_sites
     return 1
   }
+  OMP_BASELINE_SKIP_VALIDATE=1
   if ! apply_local; then
-    printf 'UPGRADE apply/validate failed; restoring pin %s\n' "$pin" >&2
+    printf 'UPGRADE apply/install failed; restoring pin %s\n' "$pin" >&2
+    restore_pin_sites
+    apply_pin_files_live || true
+    mise install "github:can1357/oh-my-pi@$pin" || true
+    mise reshim || true
+    return 1
+  fi
+  if [ "$(omp --version 2>/dev/null || true)" != "omp/$target" ]; then
+    printf 'UPGRADE omp/%s not installed; restoring pin %s\n' "$target" "$pin" >&2
+    restore_pin_sites
+    apply_pin_files_live || true
+    mise install "github:can1357/oh-my-pi@$pin" || true
+    mise reshim || true
+    return 1
+  fi
+  if ! check_omp_config; then
+    printf 'UPGRADE OMP config checks failed; restoring pin %s\n' "$pin" >&2
     restore_pin_sites
     apply_pin_files_live || true
     mise install "github:can1357/oh-my-pi@$pin" || true
@@ -903,7 +953,8 @@ upgrade() {
 
   rm -f "$UPSTREAM_MARKER"
   printf 'UPGRADE %s -> %s\n' "$pin" "$target"
-  printf 'NEXT    review, commit the three pin files, then decent-angl-sync reconcile --with-scripts\n'
+  printf 'NEXT    omp-baseline validate --strict, commit the three pin files, then decent-angl-sync reconcile --with-scripts\n'
+  printf 'NEXT    other hosts: omp-baseline pull. This process stays on the old binary until a new session.\n'
 }
 
 install_guard() {

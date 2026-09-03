@@ -19,8 +19,15 @@ description: Maintain the shared Oh My Pi baseline in chezmoi. Use for OMP upgra
   `omp update`. Use `omp-baseline upgrade` to move the three pin sites together.
 - Prefer native OMP config and features. Keep native skill discovery enabled.
 - Authenticate SuperGrok locally with `omp auth-broker login xai-oauth`.
-- OpenRouter is overflow only. Materialize its key with `omp-openrouter-env`;
-  keep the value out of config, Git, commands, and output.
+- Authenticate Google AI Pro Gemini Flash locally with
+  `omp auth-broker login google-antigravity`. Do not use `google-gemini-cli`
+  or set `GOOGLE_CLOUD_PROJECT` for that subscription.
+- OpenRouter GLM-5.3-Flash is tiny/commit and the Antigravity 429 fallback.
+  Materialize its key with `omp-openrouter-env`; keep the value out of config,
+  Git, commands, and output.
+- Role routing: SuperGrok serves default/slow/plan; Antigravity Gemini 3.8
+  Flash serves vision/smol/task; OpenRouter GLM-5.3-Flash materializes
+  tiny/commit and acts as the Antigravity 429 fallback.
 - Treat OMP model discovery as authoritative before changing shared model IDs.
 - Keep `models.yml` override-only and retain the custom `ghostty` theme.
 - User agents live in `home/private_dot_omp/private_agent/agents/`. They use
@@ -37,8 +44,10 @@ description: Maintain the shared Oh My Pi baseline in chezmoi. Use for OMP upgra
    session.
 5. Run `omp-baseline validate --strict`, commit, then
    `decent-angl-sync reconcile --with-scripts` when script effects are required.
-   Scheduled fleet apply skips scripts, so pin upgrades need `omp-baseline pull`
-   on every other host after publish.
+   An uncommitted pin is local only. Scheduled reconcile stashes dirty trees
+   and applies published master, so the fleet stays on the old pin until you
+   commit. Scheduled apply also skips scripts; after publish, other hosts run
+   `omp-baseline pull`.
 
 The hourly OMP guard checks the focused baseline without overwriting source.
 It also compares the published pin to GitHub latest and writes
@@ -49,22 +58,44 @@ The whole-tree guard owns Git reconciliation.
 
 ## Upgrade
 
-Do not run `omp update`. The three pin sites must move together:
+Do not run `omp update`. That mutates the live binary off the shared pin.
+The three pin sites must move together:
 
 - `home/dot_config/decent-angl/omp-baseline-manifest.tsv` (`# omp-version`)
 - `home/dot_config/mise/config.toml`
 - `home/run_onchange_after_04-setup-omp.sh.tmpl`
 
+Preconditions: those three files are Git-clean. Other dirty work in
+`~/src/boilerplate` is fine and must be preserved. `upgrade` refuses dirty pin
+files. Auth, `agent.db`, `.env`, and sessions stay machine-local.
+
 ```sh
 omp-baseline check-upstream
 omp-baseline upgrade --dry-run
-omp-baseline upgrade 17.4.2
-omp-baseline validate --strict
+omp-baseline upgrade            # or: omp-baseline upgrade 18.1.5
+omp --version                   # new shells; the running session stays old
+omp-baseline validate --strict  # commit gate, not a pin-install rollback
 ```
 
-`upgrade` rewrites the pin sites, installs that mise release, and validates.
-It does not commit or reconcile. Review the pin diff, commit, then
-`decent-angl-sync reconcile --with-scripts` so the fleet follows. On each
-other machine run `omp-baseline pull`. `apply`/`pull` also `mise install`
-every missing pin from the shared mise file. `omp-baseline fleet` checks
-t14, macbook, and macmini.
+`upgrade` rewrites the pin sites, applies the mise file and manifest, `mise
+install`s that exact GitHub release, reshims, writes
+`~/.omp/agent/last-changelog-version`, refreshes the hourly guard, and runs
+OMP config/discovery checks. It does not commit, reconcile, or fail closed on
+an unrelated skill audit (opnsense, Omarchy, …). A failed OMP install or
+`check_omp_config` restores the previous pin.
+
+After a green pin install, review the three-file diff and any config changes
+required by the release notes. Then commit, then
+`decent-angl-sync reconcile --with-scripts` so the fleet follows. Scheduled
+apply skips scripts. On every other host: `omp-baseline pull` (reconcile +
+`mise install` missing pins). `omp-baseline fleet` checks t14, macbook, and
+macmini.
+
+Rollback the pin with `omp-baseline upgrade <previous>` (same clean-pin-file
+rule). After every pin move, treat live `omp models` as authoritative before
+keeping shared model IDs. 18.1.5 collapsed Antigravity Gemini 3.8 to
+`google-antigravity/gemini-3.8-flash` plus `:high`/`:low`; the old
+`-tiered`/`-high`/`-low` SKUs are gone. 18.x also removed the bundled
+`designer` role; foreign `~/.cursor` / `~/.codex` / `~/.claude` / `~/.gemini`
+user configs are opt-in. Keep native Pi skills on. Never copy OAuth tokens
+between machines.

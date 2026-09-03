@@ -1,31 +1,41 @@
-# Managed by chezmoi. Authentication remains in the machine-local agent.db
-# and ~/.omp/agent/.env. SuperGrok is the main agent. OpenRouter
-# GLM-5.3-Flash does titles and subagents so the SuperGrok quota lasts.
-# Overflow fallback is still openrouter/x-ai/grok-4.6, not :nitro.
+# Managed by chezmoi. Auth stays machine-local (agent.db / ~/.omp/agent/.env).
+# Routing principles:
+# - Burn SuperGrok (xai-oauth/grok-4.6) only on default, slow, and plan.
+# - Burn Antigravity Gemini 3.8 (google-antigravity, not Vertex, not
+#   google-gemini-cli) on vision, smol, and task first.
+# - Burn OpenRouter GLM-5.3-Flash on tiny, commit, and as the fallback when
+#   Antigravity 429s.
+# - Prefer first-party SuperGrok over OpenRouter Grok.
+# - Prefer Antigravity Gemini over paid OpenRouter Gemini.
 modelRoles:
-  default: xai-oauth/grok-4.6
-  smol: openrouter/z-ai/glm-5.3-flash
-  slow: xai-oauth/grok-4.6
-  vision: xai-oauth/grok-4.6
-  plan: xai-oauth/grok-4.6
-  commit: xai-oauth/grok-4.6
-  tiny: openrouter/z-ai/glm-5.3-flash
-  task: openrouter/z-ai/glm-5.3-flash
+  default: xai-oauth/grok-4.6:medium
+  slow: xai-oauth/grok-4.6:xhigh
+  plan: xai-oauth/grok-4.6:high
+  vision: google-antigravity/gemini-3.8-flash:high
+  commit: openrouter/z-ai/glm-5.3-flash:low
+  smol: google-antigravity/gemini-3.8-flash
+  tiny: openrouter/z-ai/glm-5.3-flash:low
+  task: google-antigravity/gemini-3.8-flash
 
 modelProviderOrder:
   - xai-oauth
+  - google-antigravity
   - openrouter
 
 cycleOrder:
   - default
+  - google-antigravity/gemini-3.8-flash
 
 enabledModels:
   - xai-oauth/grok-4.6
+  - google-antigravity/gemini-3.8-flash
   - xai-oauth/grok-composer-2.5-fast
   - openrouter/x-ai/grok-4.6
   - openrouter/x-ai/grok-4.6:nitro
   - openrouter/openai/gpt-5.6-luna
   - openrouter/z-ai/glm-5.3-flash
+  - openrouter/z-ai/glm-5.3
+  - openrouter/moonshotai/kimi-k3
 
 # Do not import superseded harness-level settings, commands, or skills.
 disabledProviders:
@@ -66,9 +76,30 @@ retry:
   # Return to SuperGrok after the overflow cooldown instead of staying on
   # the paid path for the rest of the session.
   fallbackRevertPolicy: cooldown-expiry
+  # Per-role chains. SuperGrok quota walls fall to Antigravity then GLM,
+  # never to paid OpenRouter Grok.
   fallbackChains:
-    xai-oauth/grok-4.6:
-      - openrouter/x-ai/grok-4.6
+    default:
+      - google-antigravity/gemini-3.8-flash:high
+      - openrouter/z-ai/glm-5.3
+    slow:
+      - openrouter/z-ai/glm-5.3:max
+      - openrouter/moonshotai/kimi-k3:max
+      - google-antigravity/gemini-3.8-flash:high
+    plan:
+      - google-antigravity/gemini-3.8-flash:high
+      - openrouter/z-ai/glm-5.3:high
+    vision:
+      - xai-oauth/grok-4.6
+    commit:
+      - google-antigravity/gemini-3.8-flash:low
+    smol:
+      - openrouter/z-ai/glm-5.3-flash
+    tiny:
+      - google-antigravity/gemini-3.8-flash:low
+    task:
+      - openrouter/z-ai/glm-5.3-flash
+      - openrouter/z-ai/glm-5.3
 
 task:
   maxConcurrency: 3
@@ -84,9 +115,9 @@ task:
   # @smol/@task so a model switch is config.yml only. There is no bundled
   # agent named luna; do not add a fake subagent id.
   agentModelOverrides:
-    sonic: openrouter/z-ai/glm-5.3-flash
-    scout: openrouter/z-ai/glm-5.3-flash
-    task: openrouter/z-ai/glm-5.3-flash
+    sonic: "@smol"
+    scout: "@smol"
+    task: "@task"
   # Skip the redundant filesystem walk for each delegated task.
   prewalk: false
 
@@ -221,7 +252,7 @@ providers:
     - mojeek
   imageOrder:
     - xai
-  # Titles and classifiers use the tiny role (GLM-5.3-Flash) as an online model.
+  # The tiny role (GLM-5.3-Flash) is an online model.
   # Never start an embedded ONNX model worker.
   tinyModel: online
   memoryModel: online

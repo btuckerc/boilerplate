@@ -16,6 +16,9 @@ commit; no mutable live filesystem silently wins.
 - Dirty trees that are not publishing commits are stashed around a
   fast-forward, then restored. Never auto-commit, never `reset --hard` onto
   local work, never publish a dirty tree. Diverged history still blocks.
+  An uncommitted OMP pin upgrade is local only. Leave it dirty and the
+  scheduled guard stashes it, applies published master, and the fleet stays
+  on the old pin.
 - Clean commits flow both ways: remote commits fast-forward and apply; local
   commits apply and publish.
 - Scheduled applies exclude scripts. Use `reconcile --with-scripts` only for a
@@ -31,7 +34,9 @@ commit; no mutable live filesystem silently wins.
 ## Workflow
 
 Start with `decent-angl-sync status`. If `source=split`, run `adopt-source`. If
-`dirty=yes` while publishing local commits, stop and commit or stash. If the
+`dirty=yes` while publishing local commits, stop and commit or stash. If
+`skills=invalid`, dest skill projections are stale or a `references/` file is
+unlinked in dest SKILL.md; `decent-angl-skills sync` then re-validate. If the
 machine is only behind or already matches origin, reconcile stashes, applies,
 then restores. A stash apply conflict leaves work in the stash and writes the
 drift marker.

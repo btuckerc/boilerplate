@@ -101,7 +101,7 @@ secret_boundary() {
     printf 'Refusing to publish machine-local paths:\n%s\n' "$forbidden" >&2
     return 1
   fi
-  token_hits="$(git -C "$REPO_ROOT" grep --untracked -I -n -E '(BEGIN (RSA |OPENSSH )?PRIVATE KEY|ghp_[A-Za-z0-9]{30,}|sk-or-v1-[A-Za-z0-9_-]{30,}|xox[baprs]-[A-Za-z0-9-]{20,})' -- . ':(exclude)*.lock' 2>/dev/null || true)"
+  token_hits="$(git -C "$REPO_ROOT" grep --untracked -I -n -E '(-----BEGIN (RSA |OPENSSH )?PRIVATE KEY-----|ghp_[A-Za-z0-9]{30,}|sk-or-v1-[A-Za-z0-9_-]{30,}|xox[baprs]-[A-Za-z0-9-]{20,})' -- . ':(exclude)*.lock' 2>/dev/null || true)"
   if [[ -n "$token_hits" ]]; then
     echo "Refusing to publish content matching a credential signature." >&2
     return 1

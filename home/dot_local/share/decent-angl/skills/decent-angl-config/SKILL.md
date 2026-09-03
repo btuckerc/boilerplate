@@ -29,7 +29,9 @@ commit; no mutable live filesystem silently wins.
   "the dest file was never applied" until you have checked PATH and the
   dest path.
 
-- Secrets and runtime state stay outside Git. Use `bitwarden-secrets`.
+- Secrets and runtime state stay outside Git. Use `bitwarden-secrets`. The
+  publish scanner matches PEM armor (`-----BEGIN … PRIVATE KEY-----`), not
+  wrappers that mention the header in source.
 
 ## Workflow
 

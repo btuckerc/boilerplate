@@ -575,7 +575,7 @@ check_omp_config() {
       .value.vision == "google-antigravity/gemini-3.8-flash:high" and
       .value.commit == "openrouter/z-ai/glm-5.3-flash:low" and
       .value.smol == "google-antigravity/gemini-3.8-flash" and
-      .value.tiny == "openrouter/z-ai/glm-5.3-flash:low" and
+      .value.tiny == "google-antigravity/gemini-3.8-flash:low" and
       .value.task == "google-antigravity/gemini-3.8-flash"
     ' >/dev/null; then
     printf 'CONFIG  model roles parse\n'

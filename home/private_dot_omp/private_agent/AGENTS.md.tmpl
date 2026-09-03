@@ -10,8 +10,8 @@ Shared agent state is managed with chezmoi.
 - OMP is the primary coding harness across macOS and Omarchy/Linux. Its release is pinned in mise; move the pin with `omp-baseline upgrade`, never `omp update`.
 - Use the native `xai-oauth` provider for SuperGrok. Authenticate once per machine with `omp auth-broker login xai-oauth`; never copy OAuth tokens into config files or Git.
 - Use the native `google-antigravity` provider for Google AI Pro Gemini Flash. Authenticate once per machine with `omp auth-broker login google-antigravity`. Do not use `google-gemini-cli` or set `GOOGLE_CLOUD_PROJECT` for that sub.
-- OpenRouter GLM-5.3-Flash is tiny/commit and the Antigravity 429 fallback. Inject `OPENROUTER_API_KEY` locally with `omp-openrouter-env` after unlocking Bitwarden (`omp-openrouter`); never put the key in Git or chezmoi.
-- Model routing: SuperGrok is default/slow/plan only; Antigravity Gemini 3.8 Flash is vision/smol/task; OpenRouter GLM-5.3-Flash is tiny/commit and the Antigravity 429 fallback.
+- OpenRouter GLM-5.3-Flash is commit and the Antigravity 429 fallback. Inject `OPENROUTER_API_KEY` locally with `omp-openrouter-env` after unlocking Bitwarden (`omp-openrouter`); never put the key in Git or chezmoi.
+- Model routing: SuperGrok is default/slow/plan only; Antigravity Gemini 3.8 Flash is vision/smol/task/tiny; OpenRouter GLM-5.3-Flash is commit and the Antigravity 429 fallback.
 - Prefer OMP's built-in tools, LSP, diffs, compaction, image handling, approvals, and subagents before adding extensions.
 - On macOS with iCloud Desktop & Documents, keep active repos, build trees, virtualenvs, and agent workspaces under `~/src`, not `~/Documents`.
 - Prefer Tailscale hostnames for remote access: `t14`, `btcaw`, `macbook`, `macmini`, `clt`.

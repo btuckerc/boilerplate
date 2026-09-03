@@ -2,8 +2,8 @@
 # Routing principles:
 # - Burn SuperGrok (xai-oauth/grok-4.6) only on default, slow, and plan.
 # - Burn Antigravity Gemini 3.8 (google-antigravity, not Vertex, not
-#   google-gemini-cli) on vision, smol, and task first.
-# - Burn OpenRouter GLM-5.3-Flash on tiny, commit, and as the fallback when
+#   google-gemini-cli) on vision, smol, task, and tiny first.
+# - Burn OpenRouter GLM-5.3-Flash on commit, and as the fallback when
 #   Antigravity 429s.
 # - Prefer first-party SuperGrok over OpenRouter Grok.
 # - Prefer Antigravity Gemini over paid OpenRouter Gemini.
@@ -14,7 +14,7 @@ modelRoles:
   vision: google-antigravity/gemini-3.8-flash:high
   commit: openrouter/z-ai/glm-5.3-flash:low
   smol: google-antigravity/gemini-3.8-flash
-  tiny: openrouter/z-ai/glm-5.3-flash:low
+  tiny: google-antigravity/gemini-3.8-flash:low
   task: google-antigravity/gemini-3.8-flash
 
 modelProviderOrder:
@@ -96,7 +96,7 @@ retry:
     smol:
       - openrouter/z-ai/glm-5.3-flash
     tiny:
-      - google-antigravity/gemini-3.8-flash:low
+      - openrouter/z-ai/glm-5.3-flash:low
     task:
       - openrouter/z-ai/glm-5.3-flash
       - openrouter/z-ai/glm-5.3

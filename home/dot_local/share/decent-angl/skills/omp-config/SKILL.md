@@ -22,12 +22,12 @@ description: Maintain the shared Oh My Pi baseline in chezmoi. Use for OMP upgra
 - Authenticate Google AI Pro Gemini Flash locally with
   `omp auth-broker login google-antigravity`. Do not use `google-gemini-cli`
   or set `GOOGLE_CLOUD_PROJECT` for that subscription.
-- OpenRouter GLM-5.3-Flash is tiny/commit and the Antigravity 429 fallback.
+- OpenRouter GLM-5.3-Flash is commit and the Antigravity 429 fallback.
   Materialize its key with `omp-openrouter-env`; keep the value out of config,
   Git, commands, and output.
 - Role routing: SuperGrok serves default/slow/plan; Antigravity Gemini 3.8
-  Flash serves vision/smol/task; OpenRouter GLM-5.3-Flash materializes
-  tiny/commit and acts as the Antigravity 429 fallback.
+  Flash serves vision/smol/task/tiny; OpenRouter GLM-5.3-Flash materializes
+  commit and acts as the Antigravity 429 fallback.
 - Treat OMP model discovery as authoritative before changing shared model IDs.
 - Keep `models.yml` override-only and retain the custom `ghostty` theme.
 - User agents live in `home/private_dot_omp/private_agent/agents/`. They use

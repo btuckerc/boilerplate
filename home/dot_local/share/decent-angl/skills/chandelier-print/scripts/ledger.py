@@ -166,7 +166,11 @@ def apply_event(state, event, project, stamp=None):
         require(plan['action'] in {'prepare_and_print', 'prepare_partial_plate'}, 'A prior job needs reconciliation or inspection, or the kit is complete.')
         require(event['plate'] in state['plates'], 'Unknown prepared plate.')
         plate = state['plates'][event['plate']]
-        require(plate['parts'] == plan['parts'], 'Plate does not match the next missing quantities.')
+        if event.get('purpose') == 'validation_test':
+            require(all(n <= plan['parts'].get(p, 0) for p, n in plate['parts'].items()),
+                    'Validation plate exceeds the next missing quantities.')
+        else:
+            require(plate['parts'] == plan['parts'], 'Plate does not match the next missing quantities.')
         obs = printer.get('observation', {})
         require(obs.get('state') == 'idle' and 0 <= age(obs['at']) <= 600, 'A fresh live idle observation is required before sending.')
         clear = printer.get('bed_clear')

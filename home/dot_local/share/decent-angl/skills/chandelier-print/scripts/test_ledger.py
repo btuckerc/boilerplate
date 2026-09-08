@@ -123,6 +123,28 @@ class LedgerTests(unittest.TestCase):
         self.event('inspect',job='j2',good={'key':12})
         self.assertEqual(ledger.next_step(self.state)['action'],'kit_complete')
 
+    def test_validation_subset_keeps_send_guards(self):
+        self.event('add_plate',plate='one-rib',parts={'rib':1},file='plate.3mf')
+        with self.assertRaises(ValueError):
+            self.event('reserve',job='test',plate='one-rib',purpose='validation_test')
+        self.ready()
+        with self.assertRaises(ValueError):
+            self.event('reserve',job='test',plate='one-rib')
+        self.event('reserve',job='test',plate='one-rib',purpose='validation_test')
+        self.assertIsNone(self.state['printer']['bed_clear'])
+        with self.assertRaises(ValueError):
+            self.event('reserve',job='duplicate',plate='one-rib',purpose='validation_test')
+        self.event('observe',state='finished',job='test',job_status='finished')
+        with self.assertRaises(ValueError):
+            self.event('reserve',job='uninspected',plate='one-rib',purpose='validation_test')
+        self.event('inspect',job='test',good={'rib':1})
+        self.assertEqual(ledger.remaining(self.state)['rib'],5)
+        self.assertEqual(ledger.next_step(self.state)['parts'],{'arc':12,'rib':5})
+        self.event('add_plate',plate='wrong-plate',parts={'key':1},file='plate.3mf')
+        self.ready()
+        with self.assertRaises(ValueError):
+            self.event('reserve',job='wrong',plate='wrong-plate',purpose='validation_test')
+
     def test_cli_archive_reset_retry(self):
         path=self.root/'print_tracking/ledger.json'
         ledger.atomic_json(path,self.state)

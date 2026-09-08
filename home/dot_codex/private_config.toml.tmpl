@@ -1,10 +1,9 @@
-{{- $localConfig := (output "sh" "-c" "config=\"$HOME/.codex/config.toml\"; if [ -f \"$config\" ]; then awk 'BEGIN { skip = 0 } /^\\[tui(\\.|\\])/ { skip = 1; next } /^\\[/ { skip = 0 } !skip { print }' \"$config\"; else printf '%s\n' 'model = \"gpt-5.4\"' 'model_reasoning_effort = \"xhigh\"' 'service_tier = \"fast\"' 'commit_attribution = \"\"' '' '[plugins.\"github@openai-curated\"]' 'enabled = true'; fi") | trim }}
-
-{{ $localConfig }}
-
-[tui]
-status_line = ["model-name", "five-hour-limit", "weekly-limit", "used-tokens", "fast-mode"]
-theme = "dracula"
-# Prefer non-intrusive notifications over focus-stealing prompts.
-notifications = ["agent-turn-complete", "user-input-requested", "approval-requested", "plan-mode-prompt"]
-notification_condition = "unfocused"
+{{- $path := joinPath .chezmoi.homeDir ".codex/config.toml" -}}
+{{- $config := dict "model_reasoning_effort" "xhigh" "service_tier" "fast" "commit_attribution" "" "cli_auth_credentials_store" "file" "plugins" (dict "github@openai-curated" (dict "enabled" true)) -}}
+{{- if stat $path -}}
+{{- $config = include $path | fromToml -}}
+{{- end -}}
+{{- /* Preserve runtime settings; the TUI baseline remains chezmoi-owned. */ -}}
+{{- $tui := dict "status_line" (list "model-name" "five-hour-limit" "weekly-limit" "used-tokens" "fast-mode") "theme" "dracula" "notifications" (list "agent-turn-complete" "user-input-requested" "approval-requested" "plan-mode-prompt") "notification_condition" "unfocused" -}}
+{{- $config = setValueAtPath "tui" $tui $config -}}
+{{ template "codex/model-policy.toml.tmpl" $config }}

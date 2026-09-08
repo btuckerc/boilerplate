@@ -1,0 +1,21 @@
+#!/bin/sh
+set -eu
+
+# Resolve the applied shared mise pin outside project overrides, but keep the
+# caller's working directory and CODEX_HOME when launching Codex.
+mise_bin=""
+for candidate in \
+  "$(command -v mise 2>/dev/null || true)" \
+  "$HOME/.local/bin/mise" \
+  "$HOME/.local/share/mise/bin/mise" \
+  /opt/homebrew/bin/mise /usr/local/bin/mise /usr/bin/mise
+do
+  if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+    mise_bin="$candidate"
+    break
+  fi
+done
+[ -n "$mise_bin" ] || { echo "mise is required for codex-baseline." >&2; exit 127; }
+codex_bin="$("$mise_bin" -C "$HOME" which codex)"
+[ -x "$codex_bin" ] || { echo "Install the shared Codex pin with mise install codex." >&2; exit 127; }
+exec "$codex_bin" "$@"

@@ -1,0 +1,19 @@
+#!/bin/sh
+set -eu
+
+# Login and status for the T3 Code shadow account. Do not copy ~/.codex here.
+CODEX_HOME="${CODEX_HOME:-$HOME/.codex-t3/second}"
+export CODEX_HOME
+umask 077
+mkdir -p "$CODEX_HOME"
+chmod 700 "$CODEX_HOME"
+
+case "$CODEX_HOME" in
+  "$HOME/.codex"|"$HOME/.codex/")
+    echo "codex-t3-second refuses the primary ~/.codex home." >&2
+    exit 1
+    ;;
+esac
+
+# Use the same applied mise pin as both T3 account instances.
+exec "$HOME/.local/bin/codex-baseline" -c cli_auth_credentials_store=file "$@"

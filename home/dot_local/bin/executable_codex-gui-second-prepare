@@ -1,0 +1,125 @@
+#!/usr/bin/env python3
+"""Give the second desktop account its own runtime, preserving local task history."""
+import argparse
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import sqlite3
+import subprocess
+import uuid
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--prepare-only", action="store_true")
+args = parser.parse_args()
+user_root = Path.home()
+old = user_root / ".codex-t3/second"
+new = Path(os.environ.get("CODEX_GUI_SECOND_HOME", str(user_root / ".codex-gui/second")))
+marker = new / ".desktop-profile-migrated.json"
+
+def restore_t3_shadow():
+    """Preserve desktop leftovers, then restore T3's required shared links."""
+    backup = new / "migration-backups" / ("t3-shadow-" + uuid.uuid4().hex)
+    for name in (".codex-global-state.json", ".codex-global-state.json.bak",
+                 "transcription-history.jsonl"):
+        entry, target = old / name, user_root / ".codex" / name
+        if entry.is_symlink() or not entry.is_file() or not target.exists():
+            continue
+        if not (new / name).is_file():
+            raise SystemExit("Desktop migration is incomplete for " + name)
+        backup.mkdir(parents=True, exist_ok=True, mode=0o700)
+        saved = backup / name
+        entry.rename(saved)
+        try:
+            entry.symlink_to(target)
+        except Exception:
+            saved.rename(entry)
+            raise
+        print("Restored T3 shared link: " + name)
+
+if new.resolve() in (old.resolve(), (user_root / ".codex").resolve()):
+    raise SystemExit("The second desktop runtime must have its own directory.")
+if marker.exists():
+    restore_t3_shadow()
+    raise SystemExit(0)
+if not old.is_dir() or not (old / "auth.json").is_file():
+    raise SystemExit("The existing second-account login was not found.")
+if (old / "auth.json").resolve() == (user_root / ".codex/auth.json").resolve():
+    raise SystemExit("Refusing to migrate the first account's login.")
+os.umask(0o077)
+new.mkdir(parents=True, exist_ok=True, mode=0o700)
+
+# These files describe task content or shared guidance. Runtime, database, plugin,
+# browser, approval, IPC, and model-cache directories are deliberately separate.
+shared = ["AGENTS.md", "skills", "rules", "sessions", "archived_sessions",
+          "attachments", "generated_images", "visualizations", "worktrees",
+          "shell_snapshots", "history.jsonl", "session_index.jsonl",
+          "thread-writer-locks"]
+for name in shared:
+    src, dst = old / name, new / name
+    if src.exists() and not dst.exists() and not dst.is_symlink():
+        dst.symlink_to(src.resolve(), target_is_directory=src.is_dir())
+
+def clone_dir(src, dst):
+    if src.exists() and not dst.exists():
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        # APFS clone: independent writable files without copying all their blocks.
+        subprocess.run(["/bin/cp", "-cR", str(src.resolve()), str(dst)], check=True)
+
+clone_dir(old / "plugins/cache", new / "plugins/cache")
+clone_dir(old / ".tmp/bundled-marketplaces/openai-bundled",
+          new / ".tmp/bundled-marketplaces/openai-bundled")
+clone_dir(old / "computer-use/Codex Computer Use.app",
+          new / "computer-use/Codex Computer Use.app")
+
+# Keep portable settings and installed-plugin choices. The desktop app will
+# regenerate its MCP connections for this profile when it starts.
+config = (old / "config.toml").read_text()
+sections = re.split(r"(?=^\[)", config, flags=re.M)
+config = "".join(s for s in sections if not re.match(
+    r"^\[mcp_servers\.(?:node_repl|cua_repl)(?:\.|\])", s))
+for before in (str(old), str(user_root / ".codex")):
+    config = config.replace(before + "/plugins/", str(new) + "/plugins/")
+    config = config.replace(before + "/.tmp/", str(new) + "/.tmp/")
+    config = config.replace(before + "/computer-use/", str(new) + "/computer-use/")
+(new / "config.toml").write_text(config)
+(new / "config.toml").chmod(0o600)
+
+# Bundled browser/CUA manifests are app-generated and contain absolute runtime
+# paths. Rebase those paths; keep approval and model-check settings unchanged.
+for root in (new / "plugins/cache/openai-bundled", new / ".tmp/bundled-marketplaces/openai-bundled"):
+    if root.exists():
+        for path in root.rglob(".mcp.json"):
+            data = path.read_text()
+            for before in (str(old), str(user_root / ".codex")):
+                data = data.replace(before + "/", str(new) + "/")
+                data = data.replace('"' + before + '"', '"' + str(new) + '"')
+                data = data.replace(before + ":", str(new) + ":")
+            json.loads(data)
+            path.write_text(data)
+
+if args.prepare_only:
+    print("Second desktop runtime prepared. Login and database migration will run on first launch.")
+    raise SystemExit(0)
+
+# First launch occurs after quitting the old desktop instance, so the final turn
+# is included. SQLite backup also handles the T3 CLI's still-open source files.
+for name in ("state_5.sqlite", "thread_history_1.sqlite", "memories_1.sqlite", "goals_1.sqlite"):
+    src, dst = old / name, new / name
+    if src.exists():
+        with sqlite3.connect(src.resolve().as_uri() + "?mode=ro", uri=True) as source:
+            with sqlite3.connect(dst) as target:
+                source.backup(target)
+                if target.execute("PRAGMA quick_check").fetchone()[0] != "ok":
+                    raise SystemExit("Database migration check failed: " + name)
+for name in ("auth.json", ".codex-global-state.json", ".codex-global-state.json.bak",
+             "transcription-history.jsonl", "installation_id"):
+    src, dst = old / name, new / name
+    if src.is_file():
+        shutil.copyfile(src, dst)
+        dst.chmod(0o600)
+marker.write_text(json.dumps({"version": 1, "source": str(old),
+                             "runtime": str(new), "task_content_shared": shared}, indent=2) + "\n")
+restore_t3_shadow()
+print("Second desktop profile migrated. Login retained; settings, plugins and databases isolated.")

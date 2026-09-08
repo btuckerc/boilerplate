@@ -18,8 +18,13 @@ description: Maintain the shared Codex baseline in chezmoi. Use when changing Co
 
 - Edit the canonical checkout, not `{{ .decentangl.defaults.codex_home }}/`.
 - Keep auth, history, caches, sqlite files, logs, and project trust local.
-- Keep `config.toml` portable. Preserve runtime-managed plugins, marketplaces,
-  notifications, project trust, and local model preferences.
+- T3 Code extra accounts use an empty shadow home under `~/.codex-t3/`.
+  Never copy `~/.codex` into it. Login with `codex-t3-second login`.
+- Shared Astra policy: `home/.chezmoitemplates/codex/model-policy.toml.tmpl`.
+  It manages the default model, context overrides, and experimental context
+  flag across independent runtime configs. Preserve other local settings.
+- CLI pin: `home/dot_config/mise/config.toml`. T3 uses `codex-baseline` for
+  every account. Desktop runtime versions are separate from the CLI pin.
 - Put durable workflow rules in `AGENTS.md`.
 - Render platform or host differences with templates. Move repeated mechanics
   into manifest-driven scripts and leave command pointers in agent guidance.
@@ -29,4 +34,5 @@ description: Maintain the shared Codex baseline in chezmoi. Use when changing Co
 1. Run `decent-angl-sync status`, then edit `~/src/boilerplate/home/...`.
 2. Apply targeted files with `chezmoi apply`.
 3. Verify rendered files and `codex --version`, then publish through
-   `decent-angl-sync reconcile`.
+   `decent-angl-sync publish`. Unrelated dirty work does not block publication
+   of reviewed commits.

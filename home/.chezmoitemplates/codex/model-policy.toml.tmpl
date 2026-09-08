@@ -1,0 +1,7 @@
+{{- /* Shared model policy. Input is this runtime's parsed local config. */ -}}
+{{- $config := . | setValueAtPath "model" "gpt-6-astra" -}}
+{{- $config = setValueAtPath "features.context_management.experimental_mode" true $config -}}
+{{- /* Let the selected model supply its context and compaction defaults. */ -}}
+{{- $_ := unset $config "model_context_window" -}}
+{{- $_ := unset $config "model_auto_compact_token_limit" -}}
+{{- $config | toToml -}}

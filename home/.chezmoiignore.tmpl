@@ -34,6 +34,12 @@ nvim.backup.*
 # Local mise configuration (machine-specific)
 .config/mise/mise.local.toml
 
+{{- if or (ne .chezmoi.os "darwin") (not (stat (joinPath .chezmoi.homeDir ".codex-gui/second/config.toml"))) }}
+# Apply shared policy only to an already initialized second desktop runtime.
+.codex-gui
+.codex-gui/**
+{{- end }}
+
 # Legacy assistant configs are preserved in source but not deployed by default.
 .claude
 .claude/**

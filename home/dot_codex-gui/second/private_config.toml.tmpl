@@ -1,0 +1,6 @@
+{{- $path := joinPath .chezmoi.homeDir ".codex-gui/second/config.toml" -}}
+{{- $config := dict -}}
+{{- if stat $path -}}
+{{- $config = include $path | fromToml -}}
+{{- end -}}
+{{ template "codex/model-policy.toml.tmpl" $config }}

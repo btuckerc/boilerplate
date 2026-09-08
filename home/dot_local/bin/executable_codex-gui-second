@@ -1,0 +1,33 @@
+#!/bin/sh
+set -eu
+
+# Dedicated desktop runtime. T3's shadow home links mutable runtime files to
+# the primary account and must not be used as the desktop CODEX_HOME.
+
+second_codex_dir="${CODEX_GUI_SECOND_HOME:-$HOME/.codex-gui/second}"
+second_user_data="${CODEX_GUI_SECOND_USER_DATA:-$HOME/Library/Application Support/Codex-second/user-data}"
+second_app="${CODEX_GUI_APP:-/Applications/ChatGPT.app}"
+
+case "$second_codex_dir" in
+"$HOME/.codex" | "$HOME/.codex/" | "$HOME/.codex-t3/second" | "$HOME/.codex-t3/second/")
+    echo "codex-gui-second requires an isolated desktop runtime." >&2
+    exit 1
+    ;;
+esac
+
+if [ ! -d "$second_app" ]; then
+    echo "ChatGPT.app not found at $second_app" >&2
+    exit 127
+fi
+
+umask 077
+mkdir -p "$second_codex_dir" "$second_user_data"
+chmod 700 "$second_codex_dir" "$second_user_data"
+
+CODEX_GUI_SECOND_HOME="$second_codex_dir" "$HOME/.local/bin/codex-gui-second-prepare"
+
+exec open -n \
+    --env "CODEX_HOME=$second_codex_dir" \
+    --env "CODEX_ELECTRON_USER_DATA_PATH=$second_user_data" \
+    -a "$second_app" \
+    --args --user-data-dir="$second_user_data"

@@ -47,6 +47,15 @@ class ChezmoiContract(unittest.TestCase):
         self.apply()
         self.assertEqual((self.dest / ".example").read_text(), "local edit\n")
 
+    def test_managed_directory_list_uses_nul_separator(self):
+        (self.source / 'dot_nested').mkdir()
+        (self.source / 'dot_nested/example').write_text('fixture\n')
+        result = subprocess.run([*self.base, 'managed', '--include', 'dirs',
+                                 '--path-style', 'absolute', '--nul-path-separator'],
+                                capture_output=True, check=True)
+        self.assertEqual(result.stdout.split(bytes([0])),
+                         [os.fsencode(self.dest / '.nested'), b''])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -44,6 +44,7 @@ shift
 shift
 shift
 case "$1" in
+  managed) python3 -c 'import json,os,sys; [sys.stdout.buffer.write(os.fsencode(n)+bytes([0])) for n in json.loads(os.environ.get("MANAGED_DIRS_JSON","[]"))]'; exit "${FAIL_MANAGED:-0}" ;;
   apply) echo apply >> "$HOME/apply.log"; exit "${FAIL_APPLY:-0}" ;;
   diff) exit 0 ;;
   *) exit 0 ;;
@@ -82,6 +83,21 @@ esac
 
     def remote_head(self):
         return self.command("git", "--git-dir", str(self.remote), "rev-parse", "master").stdout.strip()
+
+    def test_new_directories_created_without_changing_existing_modes(self):
+        import json
+        existing, new = self.user / 'private', self.user / 'new/nested'
+        existing.mkdir(mode=0o700)
+        self.env['MANAGED_DIRS_JSON'] = json.dumps([str(existing), str(new)])
+        self.run_sync('reconcile')
+        self.assertTrue(new.is_dir())
+        self.assertEqual(existing.stat().st_mode & 0o777, 0o700)
+        self.assertEqual(new.stat().st_mode & 0o777, 0o700)
+
+    def test_directory_enumeration_failure_stops_before_apply(self):
+        self.env['FAIL_MANAGED'] = '42'
+        self.run_sync('guard', success=False)
+        self.assertFalse((self.user / 'apply.log').exists())
 
     def outgoing(self):
         self.write("home/example", "reviewed\n")

@@ -44,9 +44,9 @@ description: Maintain the shared Oh My Pi baseline in chezmoi. Use for OMP upgra
    session.
 5. Run `omp-baseline validate --strict`, commit, then
    `decent-angl-sync reconcile --with-scripts` when script effects are required.
-   An uncommitted pin is local only. Scheduled reconcile stashes dirty trees
-   and applies published master, so the fleet stays on the old pin until you
-   commit. Scheduled apply also skips scripts; after publish, other hosts run
+   An uncommitted pin is local only. The native guard defers dirty checkouts
+   and never publishes, so the fleet stays on the old pin until you commit
+   and publish. Scheduled apply skips run_* hooks; after publish, other hosts run
    `omp-baseline pull`.
 
 The hourly OMP guard checks the focused baseline without overwriting source.
@@ -86,8 +86,8 @@ an unrelated skill audit (opnsense, Omarchy, …). A failed OMP install or
 
 After a green pin install, review the three-file diff and any config changes
 required by the release notes. Then commit, then
-`decent-angl-sync reconcile --with-scripts` so the fleet follows. Scheduled
-apply skips scripts. On every other host: `omp-baseline pull` (reconcile +
+`decent-angl-sync publish` so the fleet follows, even with unrelated dirty work.
+Scheduled apply skips run_* hooks. On every other host: `omp-baseline pull` (reconcile +
 `mise install` missing pins). `omp-baseline fleet` checks t14, macbook, and
 macmini.
 

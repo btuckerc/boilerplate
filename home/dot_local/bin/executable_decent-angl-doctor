@@ -1,0 +1,189 @@
+#!/usr/bin/env python3
+"""Read-only fleet health report. Never sends raw configs, logs, or credentials."""
+import argparse
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
+import json
+import os
+from pathlib import Path
+import platform
+import re
+import shutil
+import subprocess
+import sys
+import tomllib
+
+
+def run(args, timeout=30):
+    try:
+        p = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                           text=True, timeout=timeout)
+        return p.returncode, p.stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return 124, ""
+
+
+def read_toml(path):
+    try:
+        return tomllib.loads(path.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def backup_jobs(state):
+    jobs = {}
+    for job in ("backup", "restore-smoke", "forget-prune", "check"):
+        record = {}
+        try:
+            with (state / f"restic-scheduler/logs/{job}.out.log").open("rb") as stream:
+                stream.seek(0, 2)
+                stream.seek(max(0, stream.tell() - 65536))
+                lines = stream.read().decode("utf-8", errors="replace").splitlines()
+            for line in lines:
+                if re.fullmatch(r"started_at=\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", line):
+                    record = {"started_at": line.split("=", 1)[1]}
+                elif re.fullmatch(r"finished_at=\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", line):
+                    record["finished_at"] = line.split("=", 1)[1]
+                elif re.fullmatch(r"exit_code=\d+", line):
+                    record["exit_code"] = int(line.split("=", 1)[1])
+        except OSError:
+            pass
+        jobs[job] = record
+    return jobs
+
+
+def local_report():
+    user = Path.home()
+    repo = Path(os.environ.get("DECENT_ANGL_REPO_ROOT", user / "src/boilerplate"))
+    state = Path(os.environ.get("XDG_STATE_HOME", user / ".local/state")) / "decent-angl"
+    config = read_toml(user / ".config/chezmoi/chezmoi.toml")
+    machine = config.get("data", {}).get("decentangl", {}).get("machine_id", platform.node())
+    status_code, status = run([str(user / ".local/bin/decent-angl-sync"), "status"])
+    allowed = {"branch", "dirty", "source", "live_drift", "ahead", "behind", "marker", "skills", "pending"}
+    sync = {k: v for line in status.splitlines() if "=" in line
+            for k, v in [line.split("=", 1)] if k in allowed}
+    code, head = run(["git", "-C", str(repo), "rev-parse", "HEAD"])
+    sync["head"] = head.strip() if code == 0 else None
+    sync["status_ok"] = status_code == 0
+    sync["remote_counts_are_cached"] = True
+    for key, name in (("applied_commit", "config-applied-commit"), ("published_commit", "config-published-commit")):
+        try:
+            value = (state / name).read_text().strip()
+            sync[key] = value if re.fullmatch(r"[0-9a-f]{40,64}", value) else None
+        except OSError:
+            sync[key] = None
+    source_tools = read_toml(repo / "home/dot_config/mise/config.toml").get("tools", {})
+    live_tools = read_toml(user / ".config/mise/config.toml").get("tools", {})
+    pins = {}
+    mise = shutil.which("mise")
+    for name, key in (("codex", "codex"), ("omp", "github:can1357/oh-my-pi"),
+                      ("chezmoi", "ubi:twpayne/chezmoi"), ("restic", "aqua:restic/restic")):
+        source, live = source_tools.get(key), live_tools.get(key)
+        version_arg = "version" if name == "restic" else "--version"
+        code, output = run([mise, "-C", str(user), "exec", "--", name, version_arg]) if mise else (127, "")
+        match = re.search(r"(?<!\d)\d+\.\d+\.\d+(?!\d)", output)
+        version = match.group(0) if match else None
+        pins[name] = {"source": source, "applied": live, "binary": version,
+                      "ok": code == 0 and source == live == version}
+    codex = []
+    homes = [user / ".codex", *sorted((user / ".codex-gui").glob("*/config.toml"))]
+    for item in homes:
+        path = item if item.name == "config.toml" else item / "config.toml"
+        if not path.is_file():
+            continue
+        c = read_toml(path)
+        context = c.get("features", {}).get("context_management", {})
+        codex.append({"home": str(path.parent.relative_to(user)), "model": c.get("model"),
+                      "experimental_context": context.get("experimental_mode", False) if isinstance(context, dict) else context,
+                      "context_override": c.get("model_context_window"),
+                      "compaction_override": c.get("model_auto_compact_token_limit")})
+    services = {}
+    if platform.system() == "Darwin":
+        for label in ("gg.angl.decent-angl-sync", "gg.angl.omp-baseline", "com.decentangl.restic.backup",
+                      "com.decentangl.restic.check", "com.decentangl.restic.restore-smoke",
+                      "com.decentangl.restic.forget-prune"):
+            code, output = run(["launchctl", "print", f"gui/{os.getuid()}/{label}"])
+            match = re.search(r"last exit code = (-?\d+)", output)
+            services[label] = {"loaded": code == 0, "last_exit": int(match.group(1)) if match else None}
+    else:
+        for unit in ("decent-angl-sync.timer", "omp-baseline-guard.timer",
+                     "decent-angl-restic-backup.timer", "decent-angl-restic-check.timer",
+                     "decent-angl-restic-restore-smoke.timer", "decent-angl-restic-forget-prune.timer"):
+            code, _ = run(["systemctl", "--user", "is-active", "--quiet", unit])
+            services[unit] = {"active": code == 0}
+    backups = backup_jobs(state)
+    issues = []
+    for name, job in backups.items():
+        if job.get("exit_code") not in (0, None):
+            issues.append(f"last backup job failed: {name}")
+    try:
+        last_backup = datetime.fromisoformat(backups["backup"]["finished_at"])
+        if (datetime.now(timezone.utc) - last_backup).total_seconds() > 3 * 86400:
+            issues.append("last completed backup is more than 3 days old")
+    except (KeyError, ValueError):
+        issues.append("completed backup timestamp unavailable")
+    if not sync["status_ok"]:
+        issues.append("sync status unavailable")
+    for key in ("dirty", "live_drift", "pending"):
+        if sync.get(key) == "yes":
+            issues.append(f"sync {key}")
+    if sync.get("source") != "canonical":
+        issues.append("chezmoi source is split or unavailable")
+    if sync.get("marker") == "present":
+        issues.append("last sync operation failed")
+    if sync.get("branch") != "master":
+        issues.append("checkout is not on master")
+    if any(sync.get(key) not in ("0", None) for key in ("ahead", "behind")):
+        issues.append("local and cached remote commits differ")
+    for name, pin in pins.items():
+        if not pin["ok"]:
+            issues.append(f"{name} source/applied/binary differ or binary unavailable")
+    if sync.get("skills") != "ok":
+        issues.append("shared skills need validation")
+    for name, service in services.items():
+        if not service.get("loaded", service.get("active", False)) or service.get("last_exit") not in (None, 0):
+            issues.append(f"service needs review: {name}")
+    return {"machine": machine, "os": platform.system(), "checked_at": datetime.now(timezone.utc).isoformat(),
+            "sync": sync, "pins": pins, "codex": codex, "services": services,
+            "backup_jobs": backups, "issues": issues}
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--fleet", action="store_true", help="Read each configured host, with bounded SSH waits")
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--strict", action="store_true", help="Exit nonzero on issues or unreachable hosts")
+    args = parser.parse_args()
+    report = local_report()
+    reports = [report]
+    if args.fleet:
+        fleet = Path.home() / ".config/decent-angl/fleet.json"
+        hosts = json.loads(fleet.read_text())["hosts"]
+        def probe(host):
+            if host["id"] == report["machine"]:
+                return report
+            if not re.fullmatch(r"(?:[a-z_][a-z0-9_-]*@)?[a-z0-9.-]+", host["ssh"]):
+                raise ValueError("Invalid SSH target")
+            code, output = run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", host["ssh"],
+                                "~/.local/bin/decent-angl-doctor --json"], timeout=45)
+            if code == 0:
+                try:
+                    return json.loads(output)
+                except ValueError:
+                    pass
+            return {"machine": host["id"], "issues": ["unreachable or doctor not installed"], "unavailable": True}
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            reports = list(pool.map(probe, hosts))
+    result = reports if args.fleet else report
+    if args.json:
+        print(json.dumps(result, indent=2))
+    else:
+        for item in reports:
+            print(item["machine"] + ": " + ("; ".join(item["issues"]) or "checks passed"))
+            if "pins" in item:
+                print("  " + ", ".join(f"{name}={pin['binary'] or 'unavailable'}" for name, pin in item["pins"].items()))
+    return 1 if args.strict and any(item["issues"] for item in reports) else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

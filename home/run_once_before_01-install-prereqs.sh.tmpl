@@ -8,7 +8,12 @@ set -euo pipefail
 # Install Homebrew if not present
 if ! command -v brew >/dev/null 2>&1; then
     echo "Installing Homebrew..."
-    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    installer="$(mktemp)"
+    trap 'rm -f "$installer"' EXIT
+    curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh -o "$installer"
+    /bin/bash "$installer"
+    rm -f "$installer"
+    trap - EXIT
 
     # Set up Homebrew in PATH for Apple Silicon
     if [[ $(uname -m) == "arm64" ]]; then
@@ -26,7 +31,7 @@ fi
 
 # Install minimal tools via Homebrew (not available in mise registry)
 echo "Installing essential tools via Homebrew..."
-brew install git eza btop mise
+brew install git eza btop mise bash
 
 # Install Ruby build dependencies
 echo "Installing Ruby build dependencies..."
@@ -72,7 +77,7 @@ elif command -v dnf >/dev/null 2>&1; then
 
 elif command -v pacman >/dev/null 2>&1; then
     echo "Detected pacman (Arch Linux)"
-    sudo pacman -Sy --noconfirm \
+    sudo pacman -S --needed --noconfirm \
         curl git file base-devel rust libffi libyaml openssl zlib \
         readline gdbm ncurses pcsclite ccid \
         wl-clipboard xclip xsel

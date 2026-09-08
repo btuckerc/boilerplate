@@ -105,7 +105,9 @@ if [ "$PRINT_PLAN" -eq 1 ]; then
 fi
 
 set -- -r "$RESTIC_TARGET_REPO" check
-if [ "$FULL_CHECK" -ne 1 ]; then
+if [ "$FULL_CHECK" -eq 1 ]; then
+    set -- "$@" --read-data
+else
     set -- "$@" --read-data-subset "$READ_DATA_SUBSET"
 fi
 

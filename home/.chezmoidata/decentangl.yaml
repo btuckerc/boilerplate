@@ -4,7 +4,7 @@ decentangl:
     chezmoi_source: "~/.local/share/chezmoi/home"
     codex_source: "~/.local/share/chezmoi/home/dot_codex"
     codex_home: "~/.codex"
-    notes_path: "~/Documents/decent-angl"
+    notes_path: "~/src/decent-angl"
   secrets:
     restic_item: "restic-decent-angl"
     obsidian_livesync_item: "obsidian-livesync-weavedweb"

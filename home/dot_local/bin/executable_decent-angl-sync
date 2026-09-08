@@ -12,24 +12,29 @@ BRANCH="${DECENT_ANGL_BRANCH:-master}"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/decent-angl"
 MARKER="$STATE_DIR/config-drift"
 LOG_FILE="$STATE_DIR/config-sync.log"
-LOCK_DIR="$STATE_DIR/config-sync.lock"
+LOCK_FILE="$STATE_DIR/config-sync.flock"
+PENDING="$STATE_DIR/config-pending"
+VALIDATION_ROOT="${DECENT_ANGL_VALIDATION_ROOT:-$HOME/src/boilerplate-work}"
+GUARD_MODE=false
 WITH_SCRIPTS=false
 
 usage() {
   cat <<'EOF'
-Usage: decent-angl-sync <status|validate|adopt-source|reconcile|guard|capture|install-guard> [options]
+Usage: decent-angl-sync <status|validate|publish|adopt-source|reconcile|guard|capture|install-guard> [options]
 
   status                 Report Git, source-link, live, and guard state.
   validate               Check secret and shared-skill source boundaries.
   adopt-source           Preserve the old chezmoi clone and link it to the repo.
-  reconcile              Fetch, fast-forward/apply, or publish clean local commits.
-  guard                  Run conflict-safe reconciliation for the scheduled job.
+  publish                Validate and push committed HEAD; leave local edits/live files alone.
+  reconcile              Publish reviewed commits, or fast-forward/apply a clean checkout.
+  guard                  Pull/apply published commits only while the checkout is clean.
   capture TARGET...      Explicitly add live targets to the canonical source.
   install-guard          Install the 15-minute launchd/systemd user guard.
   --with-scripts         Allow chezmoi scripts during a manual reconcile.
 
-Dirty trees that are not publishing commits are stashed around a fast-forward.
-Diverged history is never merged. Local work is never committed or dropped.
+Publish validates an exported commit snapshot, so unrelated edits may stay dirty.
+Guard never pushes, stashes, resets, or merges divergent history. Dirty work defers apply.
+--with-scripts runs chezmoi run_* hooks; executable files are applied in either mode.
 EOF
 }
 
@@ -44,7 +49,7 @@ cm() {
     if [[ -n "$candidate" && -x "$candidate" ]]; then mise_bin="$candidate"; break; fi
   done
   if [[ -n "$mise_bin" ]]; then
-    "$mise_bin" exec -- chezmoi "$@"
+    "$mise_bin" -C "$HOME" exec -- chezmoi "$@"
     return
   fi
   chezmoi_bin=""
@@ -72,7 +77,7 @@ source_is_canonical() {
 }
 
 require_repo() {
-  [[ -d "$REPO_ROOT/.git" ]] || { echo "Missing Git checkout: $REPO_ROOT" >&2; return 1; }
+  [[ -e "$REPO_ROOT/.git" ]] || { echo "Missing Git checkout: $REPO_ROOT" >&2; return 1; }
   [[ -d "$REPO_ROOT/home" ]] || { echo "Missing chezmoi tree: $REPO_ROOT/home" >&2; return 1; }
 }
 
@@ -95,15 +100,20 @@ ahead_behind() {
 }
 
 secret_boundary() {
-  local forbidden token_hits
-  forbidden="$(git -C "$REPO_ROOT" ls-files --cached --others --exclude-standard | rg '(^|/)(auth\.json|auth-broker\.token|auth-gateway\.token|agent\.db(-shm|-wal)?|history\.db(-shm|-wal)?|models\.db(-shm|-wal)?|\.env)($|/)|(^|/)(sessions|logs)/' || true)"
+  local paths forbidden hits result=0
+  command -v rg >/dev/null || { echo "ripgrep is required for source checks." >&2; return 1; }
+  paths="$(git -C "$REPO_ROOT" ls-files --cached --others --exclude-standard)" || return 1
+  forbidden="$(printf '%s\n' "$paths" | rg '(^|/)(auth\.json|auth-broker\.token|auth-gateway\.token|agent\.db(-shm|-wal)?|history\.db(-shm|-wal)?|models\.db(-shm|-wal)?|\.env)($|/)|(^|/)(sessions|logs)/' || true)"
   if [[ -n "$forbidden" ]]; then
-    printf 'Refusing to publish machine-local paths:\n%s\n' "$forbidden" >&2
+    printf 'Refusing machine-local paths:\n%s\n' "$forbidden" >&2
     return 1
   fi
-  token_hits="$(git -C "$REPO_ROOT" grep --untracked -I -n -E '(-----BEGIN (RSA |OPENSSH )?PRIVATE KEY-----|ghp_[A-Za-z0-9]{30,}|sk-or-v1-[A-Za-z0-9_-]{30,}|xox[baprs]-[A-Za-z0-9-]{20,})' -- . ':(exclude)*.lock' 2>/dev/null || true)"
-  if [[ -n "$token_hits" ]]; then
-    echo "Refusing to publish content matching a credential signature." >&2
+  hits="$(git -C "$REPO_ROOT" grep --untracked -I -l -E '(-----BEGIN (RSA |OPENSSH )?PRIVATE KEY-----|ghp_[A-Za-z0-9]{30,}|sk-or-v1-[A-Za-z0-9_-]{30,}|xox[baprs]-[A-Za-z0-9-]{20,})' -- . ':(exclude)*.lock')" || result=$?
+  if (( result == 0 )); then
+    printf 'Refusing credential signatures in: %s\n' "$hits" >&2
+    return 1
+  elif (( result != 1 )); then
+    echo "Credential scan failed." >&2
     return 1
   fi
 }
@@ -128,7 +138,7 @@ clear_marker() {
 }
 
 status() {
-  local branch dirty source_state drift counts ahead behind marker_state skill_state
+  local branch dirty source_state drift counts ahead behind marker_state skill_state pending_state
   require_repo
   branch="$(git -C "$REPO_ROOT" branch --show-current)"
   if git_dirty; then dirty=yes; else dirty=no; fi
@@ -142,21 +152,23 @@ status() {
     ahead=unknown; behind=unknown
   fi
   if [[ -s "$MARKER" ]]; then marker_state=present; else marker_state=clear; fi
+  if [[ -s "$PENDING" ]]; then pending_state=yes; else pending_state=no; fi
   if skill_tool validate >/dev/null 2>&1; then skill_state=ok; else skill_state=invalid; fi
-  printf 'repo=%s\nbranch=%s\ndirty=%s\nsource=%s\nlive_drift=%s\nahead=%s\nbehind=%s\nmarker=%s\nskills=%s\n' \
-    "$REPO_ROOT" "$branch" "$dirty" "$source_state" "$drift" "$ahead" "$behind" "$marker_state" "$skill_state"
+  printf 'repo=%s\nbranch=%s\ndirty=%s\nsource=%s\nlive_drift=%s\nahead=%s\nbehind=%s\nmarker=%s\nskills=%s\npending=%s\n' \
+    "$REPO_ROOT" "$branch" "$dirty" "$source_state" "$drift" "$ahead" "$behind" "$marker_state" "$skill_state" "$pending_state"
 }
 
 validate() {
   require_repo
-  secret_boundary
-  skill_tool validate
-  git -C "$REPO_ROOT" diff --check
+  secret_boundary || return 1
+  skill_tool validate || return 1
+  git -C "$REPO_ROOT" diff --check || return 1
+  baseline_check || return 1
   printf 'CONFIG  source boundaries valid\n'
 }
 
 adopt_source() {
-  local backup stamp
+  local backup
   require_repo
   mkdir -p "$(dirname "$SOURCE_LINK")" "$STATE_DIR/source-backups"
   if source_is_canonical; then
@@ -164,8 +176,7 @@ adopt_source() {
     return
   fi
   if [[ -e "$SOURCE_LINK" || -L "$SOURCE_LINK" ]]; then
-    stamp="$(date -u +%Y%m%dT%H%M%SZ)"
-    backup="$STATE_DIR/source-backups/chezmoi-$stamp"
+    backup="$(mktemp -d "$STATE_DIR/source-backups/chezmoi.XXXXXX")/source"
     mv "$SOURCE_LINK" "$backup"
     printf 'SOURCE  preserved %s\n' "$backup"
   fi
@@ -174,140 +185,204 @@ adopt_source() {
   printf 'SOURCE  canonical %s -> %s\n' "$SOURCE_LINK" "$REPO_ROOT"
 }
 
+baseline_check() {
+  if [[ -f "$REPO_ROOT/utils/scripts/check_baseline.py" ]]; then
+    python3 "$REPO_ROOT/utils/scripts/check_baseline.py" "$REPO_ROOT" || return 1
+  fi
+}
+
 apply_tree() {
-  local args=(apply --force --no-tty --refresh-externals=never)
-  # Directory entries are excluded because OMP intentionally hardens several
-  # managed directories to 0700. Managed file and symlink contents still apply.
-  # Create those parents here so a new file is not rejected with ENOENT.
-  install -d -m 700 \
-    "$HOME/.omp" \
-    "$HOME/.omp/agent" \
-    "$HOME/.omp/agent/agents" \
-    "$HOME/.omp/agent/commands" \
-    "$HOME/.omp/agent/prompts" \
-    "$HOME/.omp/agent/themes"
+  local args=(apply --no-tty --refresh-externals=never)
+  # run_* hooks are a separate target type from executable_* files.
   if [[ "$WITH_SCRIPTS" != true ]]; then
     args+=(--exclude scripts,dirs)
   else
     args+=(--exclude dirs)
   fi
-  cm "${args[@]}"
-  "$HOME/.local/bin/decent-angl-skills" sync
+  install -d -m 700 "$HOME/.omp" "$HOME/.omp/agent" \
+    "$HOME/.omp/agent/agents" "$HOME/.omp/agent/commands" \
+    "$HOME/.omp/agent/prompts" "$HOME/.omp/agent/themes" || return 1
+  # No --force: chezmoi must preserve conflicting live edits for review.
+  cm "${args[@]}" || return 1
+  "$HOME/.local/bin/decent-angl-skills" sync || return 1
   if live_drift; then
-    echo "Managed live files still differ after apply; preserving both sides." >&2
+    echo "Managed live files still differ after apply; review chezmoi diff." >&2
     return 1
   fi
 }
 
-restore_absorbed_stash() {
-  if git -C "$REPO_ROOT" stash apply; then
-    git -C "$REPO_ROOT" stash drop
-    printf 'GIT     restored local work\n'
+validate_commit() (
+  local revision="$1" base="$2" snapshot commit commits paths result
+  mkdir -p "$VALIDATION_ROOT" || return 1
+  snapshot="$(mktemp -d "$VALIDATION_ROOT/validate.XXXXXX")" || return 1
+  trap 'rm -rf "$snapshot"' EXIT
+  # Scan every outgoing commit, including secrets later deleted before HEAD.
+  commits="$(git -C "$REPO_ROOT" rev-list "$base..$revision")" || return 1
+  command -v rg >/dev/null || { echo "ripgrep is required for publication checks." >&2; return 1; }
+  for commit in $commits; do
+    paths="$(git -C "$REPO_ROOT" ls-tree -r --name-only "$commit")" || return 1
+    if printf '%s\n' "$paths" | rg -q '(^|/)(auth\.json|auth-broker\.token|auth-gateway\.token|agent\.db(-shm|-wal)?|history\.db(-shm|-wal)?|models\.db(-shm|-wal)?|\.env)($|/)|(^|/)(sessions|logs)/'; then
+      echo "Refusing runtime or credential paths in commit $commit." >&2
+      return 1
+    fi
+    # Print filenames only, never matching credential content.
+    result=0
+    git -C "$REPO_ROOT" grep -I -l -E '(-----BEGIN (RSA |OPENSSH )?PRIVATE KEY-----|ghp_[A-Za-z0-9]{30,}|sk-or-v1-[A-Za-z0-9_-]{30,}|xox[baprs]-[A-Za-z0-9-]{20,})' "$commit" -- . ':(exclude)*.lock' >"$snapshot/credential-paths" || result=$?
+    if (( result == 0 )); then
+      echo "Refusing credential signature in commit $commit." >&2
+      return 1
+    elif (( result != 1 )); then
+      echo "Credential scan failed for commit $commit." >&2
+      return 1
+    fi
+  done
+  git -C "$REPO_ROOT" diff --check "$base..$revision" || return 1
+  git -C "$REPO_ROOT" archive "$revision" | tar -x -C "$snapshot" || return 1
+  DECENT_ANGL_REPO_ROOT="$snapshot" \
+    DECENT_ANGL_SKILL_SOURCE_ROOT="$snapshot/home/dot_local/share/decent-angl/skills" \
+    bash "$snapshot/home/dot_local/bin/executable_decent-angl-skills" audit-source || return 1
+  if [[ -f "$snapshot/utils/scripts/check_baseline.py" ]]; then
+    python3 "$snapshot/utils/scripts/check_baseline.py" "$snapshot" || return 1
+  fi
+  printf 'VALIDATE committed snapshot %s\n' "$revision"
+)
+
+fetch_branch() {
+  require_repo || return 1
+  source_is_canonical || { echo "Split source; run decent-angl-sync adopt-source." >&2; return 1; }
+  [[ "$(git -C "$REPO_ROOT" branch --show-current)" == "$BRANCH" ]] || {
+    echo "Reconciliation requires branch $BRANCH." >&2; return 1;
+  }
+  git -C "$REPO_ROOT" fetch "$REMOTE" "refs/heads/$BRANCH:refs/remotes/$REMOTE/$BRANCH" || return 1
+}
+
+publish_fetched() {
+  local revision base
+  revision="$(git -C "$REPO_ROOT" rev-parse HEAD)" || return 1
+  base="$(git -C "$REPO_ROOT" rev-parse "$REMOTE/$BRANCH")" || return 1
+  if [[ "$revision" == "$base" ]]; then
+    echo "GIT     no unpublished commits"
     return 0
   fi
-  git -C "$REPO_ROOT" reset --hard HEAD
-  echo "GIT     local work kept in stash after apply conflict; run git stash pop after resolving." >&2
-  return 1
+  git -C "$REPO_ROOT" merge-base --is-ancestor "$base" "$revision" || {
+    echo "Remote is ahead or diverged; resolve history before publishing." >&2; return 1;
+  }
+  validate_commit "$revision" "$base" || return 1
+  [[ "$(git -C "$REPO_ROOT" rev-parse HEAD)" == "$revision" ]] || {
+    echo "HEAD changed during validation; run publish again." >&2; return 1;
+  }
+  # Push the exact validated commit. A concurrent remote update rejects normally.
+  git -C "$REPO_ROOT" push "$REMOTE" "$revision:refs/heads/$BRANCH" || return 1
+  printf '%s\n' "$revision" >"$STATE_DIR/config-published-commit" || return 1
+  printf 'GIT     published validated commit %s; working edits preserved\n' "$revision"
+}
+
+publish() {
+  fetch_branch || return 1
+  publish_fetched
+}
+
+defer_apply() {
+  printf '%s\n' "$*" >"$PENDING" || return 1
+  printf 'PENDING %s\n' "$*"
 }
 
 reconcile() {
-  local branch counts ahead behind absorbed=0
-  require_repo
-  mkdir -p "$STATE_DIR"
-  source_is_canonical || {
-    echo "Split chezmoi source detected; run 'decent-angl-sync adopt-source'." >&2
-    return 1
-  }
-  branch="$(git -C "$REPO_ROOT" branch --show-current)"
-  [[ "$branch" == "$BRANCH" ]] || {
-    echo "Refusing automatic reconciliation from branch '$branch'; expected '$BRANCH'." >&2
-    return 1
-  }
-
-  git -C "$REPO_ROOT" fetch "$REMOTE" "$BRANCH"
-  counts="$(ahead_behind)"
-  ahead="$(awk '{print $1}' <<<"$counts")"
-  behind="$(awk '{print $2}' <<<"$counts")"
+  local counts ahead behind revision
+  fetch_branch || return 1
+  counts="$(ahead_behind)" || return 1
+  read -r ahead behind <<<"$counts"
   if (( ahead > 0 && behind > 0 )); then
-    echo "Local and remote histories diverged; no automatic merge was attempted." >&2
+    echo "Local and remote histories diverged; resolve explicitly." >&2
     return 1
+  fi
+  if (( ahead > 0 )); then
+    if [[ "$GUARD_MODE" == true ]]; then
+      defer_apply "Local commits await explicit decent-angl-sync publish."
+      return
+    fi
+    publish_fetched || return 1
   fi
   if git_dirty; then
-    if (( ahead > 0 )); then
-      echo "Working tree is dirty; commit or stash before publishing local commits." >&2
-      return 1
-    fi
-    git -C "$REPO_ROOT" stash push --include-untracked -m "decent-angl-sync: absorb"
-    absorbed=1
-    printf 'GIT     stashed local work\n'
+    defer_apply "Working edits preserved; commit or move them before fleet apply."
+    return
   fi
   if (( behind > 0 )); then
-    git -C "$REPO_ROOT" merge --ff-only "$REMOTE/$BRANCH"
+    git -C "$REPO_ROOT" merge --ff-only "$REMOTE/$BRANCH" || return 1
     printf 'GIT     fast-forwarded %s commit(s)\n' "$behind"
   fi
-
-  secret_boundary
-  skill_audit
-  git -C "$REPO_ROOT" diff --check "$REMOTE/$BRANCH..HEAD"
-  apply_tree
-  if (( absorbed == 1 )); then
-    restore_absorbed_stash || return 1
+  revision="$(git -C "$REPO_ROOT" rev-parse HEAD)" || return 1
+  secret_boundary || return 1
+  skill_audit || return 1
+  baseline_check || return 1
+  # Another editor can ignore our lock. Recheck before touching live files.
+  if git_dirty; then
+    defer_apply "Source changed during validation; apply deferred."
+    return
   fi
-
-  counts="$(ahead_behind)"
-  ahead="$(awk '{print $1}' <<<"$counts")"
-  if (( ahead > 0 )); then
-    if git_dirty; then
-      echo "Local commits are ready but the worktree is dirty; not pushing." >&2
-      return 1
-    fi
-    git -C "$REPO_ROOT" push "$REMOTE" "HEAD:$BRANCH"
-    printf 'GIT     published %s commit(s)\n' "$ahead"
+  apply_tree || return 1
+  if git_dirty || [[ "$(git -C "$REPO_ROOT" rev-parse HEAD)" != "$revision" ]]; then
+    echo "Source changed during apply; review live files before retrying." >&2
+    return 1
   fi
-  git -C "$REPO_ROOT" rev-parse HEAD >"$STATE_DIR/config-applied-commit"
+  printf '%s\n' "$revision" >"$STATE_DIR/config-applied-commit" || return 1
+  rm -f "$PENDING" || return 1
   clear_marker
-  printf 'CONFIG  converged %s\n' "$(git -C "$REPO_ROOT" rev-parse --short HEAD)"
+  printf 'CONFIG  converged %s\n' "${revision:0:12}"
 }
 
 capture() {
   local target
   shift || true
   [[ "$#" -gt 0 ]] || { echo "capture requires at least one explicit target." >&2; return 2; }
-  require_repo
+  require_repo || return 1
   source_is_canonical || { echo "Run 'decent-angl-sync adopt-source' first." >&2; return 1; }
   for target in "$@"; do
     case "$target" in
-      "$HOME/.codex/auth.json"|"$HOME/.omp/agent/.env"|"$HOME/.omp/agent/"*db*|"$HOME/.omp/agent/sessions/"*|"$HOME/.ssh/"*|"$HOME/.config/Bitwarden/"*)
+      "$HOME/.codex/auth.json"|"$HOME/.codex-t3/"*"/auth.json"|"$HOME/.codex-gui/"*"/auth.json"|"$HOME/.omp/agent/.env"|"$HOME/.omp/agent/"*db*|"$HOME/.omp/agent/sessions/"*|"$HOME/.ssh/"*|"$HOME/.config/Bitwarden/"*)
         echo "Refusing known machine-local or credential target: $target" >&2
         return 1
         ;;
     esac
   done
-  cm add -- "$@"
-  secret_boundary
-  git -C "$REPO_ROOT" diff --check
+  cm add -- "$@" || return 1
+  secret_boundary || return 1
+  git -C "$REPO_ROOT" diff --check || return 1
   echo "Captured into the canonical source. Review, test, commit, then run reconcile."
 }
 
 guard() {
-  local output status
-  mkdir -p "$STATE_DIR"
-  if ! mkdir "$LOCK_DIR" 2>/dev/null; then
-    echo "GUARD   another run is active"
-    return 0
-  fi
-  trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
+  local output status signature previous
+  GUARD_MODE=true
   if output="$(reconcile 2>&1)"; then status=0; else status=$?; fi
-  printf '%s\n%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$output" >>"$LOG_FILE"
-  if (( status == 0 )); then
-    clear_marker
-    logger -t decent-angl-sync "fleet config converged" >/dev/null 2>&1 || true
-  else
-    write_marker "$output"
-    logger -t decent-angl-sync -p user.err "fleet config needs attention; see $MARKER" >/dev/null 2>&1 || true
+  if (( status == 0 )); then clear_marker; else write_marker "$output"; fi
+  # Quiet while the result is unchanged. No model or Codex scheduler involved.
+  signature="$(printf '%s\n%s' "$status" "$output" | shasum -a 256 | awk '{print $1}')"
+  previous="$(cat "$STATE_DIR/config-guard-signature" 2>/dev/null || true)"
+  if [[ "$signature" != "$previous" ]]; then
+    printf '%s\n%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$output" >>"$LOG_FILE"
+    printf '%s\n' "$signature" >"$STATE_DIR/config-guard-signature"
+    printf '%s\n' "$output"
   fi
-  printf '%s\n' "$output"
   return "$status"
+}
+
+with_lock() {
+  # Kernel locks release on exit/crash and work on macOS and Linux. Keep the fd
+  # across exec so manual and scheduled mutations share the same lock.
+  mkdir -p "$STATE_DIR" || return 1
+  python3 - "$LOCK_FILE" "$0" "$@" <<'PYLOCK'
+import fcntl, os, sys
+fd = os.open(sys.argv[1], os.O_CREAT | os.O_RDWR, 0o600)
+try:
+    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+except BlockingIOError:
+    print("BUSY    another config mutation is active", file=sys.stderr)
+    sys.exit(75)
+os.set_inheritable(fd, True)
+os.environ["DECENT_ANGL_SYNC_LOCK_HELD"] = "1"
+os.execvp("bash", ["bash", *sys.argv[2:]])
+PYLOCK
 }
 
 install_guard() {
@@ -386,6 +461,7 @@ main() {
     status) status ;;
     validate) validate ;;
     adopt-source) adopt_source ;;
+    publish) publish ;;
     reconcile) reconcile ;;
     guard) guard ;;
     capture) capture capture "$@" ;;
@@ -395,4 +471,12 @@ main() {
   esac
 }
 
+case "${1:-status}" in
+  publish|reconcile|guard|capture|adopt-source|install-guard)
+    if [[ "${DECENT_ANGL_SYNC_LOCK_HELD:-0}" != 1 ]]; then
+      with_lock "$@"
+      exit $?
+    fi
+    ;;
+esac
 main "$@"

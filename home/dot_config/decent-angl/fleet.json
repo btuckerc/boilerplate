@@ -1,0 +1,7 @@
+{
+  "hosts": [
+    {"id": "macbook", "ssh": "tucker@macbook"},
+    {"id": "macmini", "ssh": "admin@macmini"},
+    {"id": "omarchy", "ssh": "t14"}
+  ]
+}

@@ -2,6 +2,7 @@ tap "mongodb/brew"
 tap "neovim/neovim"
 tap "epk/epk"
 
+brew "bash" # Bash 4+ is needed to validate Linux fleet scripts on macOS.
 brew "bat"
 brew "btop"
 brew "carapace"

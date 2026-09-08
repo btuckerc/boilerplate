@@ -15,29 +15,25 @@ Modern, portable dotfiles managed with [chezmoi](https://chezmoi.io) and [mise](
 
 ## Quick Start
 
-### Preferred Bootstrap
+### Bootstrap
+
+Clone into the canonical workspace and preview setup:
 
 ```bash
-sh -c "$(curl -fsLS get.chezmoi.io)" -- init --apply btuckerc/boilerplate
-```
-
-That uses chezmoi's official installer and applies this repo in one step.
-
-If you already cloned the repo locally:
-
-```bash
-git clone https://github.com/btuckerc/boilerplate.git
-cd boilerplate
+mkdir -p ~/src
+git clone https://github.com/btuckerc/boilerplate.git ~/src/boilerplate
+cd ~/src/boilerplate
+./setup --plan
 ./setup
 ```
 
-That's it. The bootstrap path will:
-1. Install `chezmoi` if needed
-2. Apply dotfiles from this repo or your local checkout
-3. Run the OS-specific one-time setup hooks
-4. Install mise-managed tools automatically
+Setup preserves any old independent chezmoi source and links
+`~/.local/share/chezmoi` to `~/src/boilerplate`. It initializes host data, runs
+native prerequisite and tool hooks, applies preferences, and verifies the main
+CLIs and shared skills. Git and curl are the seed requirements. Account logins
+and OS permission prompts remain local steps.
 
-It does not force a shell change.
+Use [UPDATING.md](UPDATING.md) for publishing, convergence, and recovery.
 
 ### SuperGrok Login
 
@@ -51,19 +47,8 @@ omp usage --provider xai-oauth --redact
 
 The default model roles use `xai-oauth/grok-4.6`.
 
-### Manual Setup
-
-```bash
-# Remote repo
-chezmoi init --apply https://github.com/btuckerc/boilerplate.git
-
-# Or if you cloned this repo locally
-cd /path/to/boilerplate
-chezmoi init --source="$(pwd)" --apply
-
-# Install all mise-managed tools
-mise install
-```
+For an existing clone, run `~/src/boilerplate/setup --plan` before setup.
+Avoid initializing a second editable chezmoi clone elsewhere.
 
 ## Documentation
 
@@ -71,15 +56,14 @@ This repository includes comprehensive documentation:
 
 ### For AI Agents and Advanced Users
 
-The active terminal baseline is Codex-first, with OMP available as the shared
-terminal harness. Cross-machine configuration is maintained through one
+OMP is the primary terminal harness, with Codex available alongside it. Cross-machine configuration is maintained through one
 bidirectional Git/chezmoi baseline.
 
-- **[Decent Angl Config](./home/dot_codex/skills/decent-angl-config/SKILL.md)** - Reconcile the full baseline safely from any fleet machine
-- **[Bitwarden Secrets](./home/dot_codex/skills/bitwarden-secrets/SKILL.md)** - Consume machine-local vault secrets without putting values in Git or logs
-- **[OMP Config](./home/private_dot_omp/private_agent/skills/omp-config/SKILL.md)** - Update the shared OMP baseline managed by chezmoi
-- **[Platform Ops](./home/private_dot_omp/private_agent/skills/platform-ops/SKILL.md.tmpl)** - Inspect or change platform-local settings on Omarchy/Linux or macOS
-- **[OPNsense](./home/private_dot_omp/private_agent/skills/opnsense/SKILL.md)** - Manage the home OPNsense router over its REST API
+- **[Decent Angl Config](./home/dot_local/share/decent-angl/skills/decent-angl-config/SKILL.md)** - Reconcile the full baseline safely from any fleet machine
+- **[Bitwarden Secrets](./home/dot_local/share/decent-angl/skills/bitwarden-secrets/SKILL.md)** - Consume machine-local vault secrets without putting values in Git or logs
+- **[OMP Config](./home/dot_local/share/decent-angl/skills/omp-config/SKILL.md)** - Update the shared OMP baseline managed by chezmoi
+- **[Platform Ops](./home/dot_local/share/decent-angl/skills/platform-ops/SKILL.md.tmpl)** - Inspect or change platform-local settings on Omarchy/Linux or macOS
+- **[OPNsense](./home/dot_local/share/decent-angl/skills/opnsense/SKILL.md)** - Manage the home OPNsense router over its REST API
 
 Run `decent-angl-sync adopt-source` once on an existing machine. It preserves
 the old chezmoi clone and makes `~/.local/share/chezmoi` a symlink to
@@ -204,7 +188,7 @@ chezmoi apply ~/.zshrc
 chezmoi add ~/.gitconfig
 
 # Update from remote repository
-chezmoi update
+decent-angl-sync reconcile
 ```
 
 ### macOS Performance Audit
@@ -449,11 +433,9 @@ chezmoi doctor
 # See what chezmoi would apply
 chezmoi diff
 
-# Force apply (overwrites local changes)
-chezmoi apply --force
-
-# Reset to repository state
-chezmoi update --force
+# Inspect fleet state and resolve differences intentionally
+decent-angl-doctor --fleet
+decent-angl-sync status
 ```
 
 ### mise Issues
@@ -506,19 +488,17 @@ zsh -x  # or bash -x
 
 ## Updating
 
-For detailed update procedures and maintenance schedules, see **[UPDATING.md](./UPDATING.md)**.
+For update procedures, see [UPDATING.md](UPDATING.md).
 
 Quick update commands:
 
 ```bash
 # Update dotfiles from repository
-chezmoi update
+decent-angl-sync reconcile
 
-# Update Homebrew packages
-brew update && brew upgrade
-
-# Update mise tools
-mise upgrade
+# Inspect available versions before choosing an upgrade
+brew outdated
+mise outdated
 ```
 
 ## Migration from Old Setup

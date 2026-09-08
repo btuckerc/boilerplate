@@ -4,8 +4,10 @@ set -euo pipefail
 DOTFILES_REPO="${DOTFILES_REPO:-https://github.com/btuckerc/boilerplate.git}"
 CHEZMOI_INSTALL_URL="${CHEZMOI_INSTALL_URL:-https://get.chezmoi.io}"
 CHEZMOI_BIN_DIR="${CHEZMOI_BIN_DIR:-$HOME/.local/bin}"
+CANONICAL_ROOT="${BOILERPLATE_ROOT:-$HOME/src/boilerplate}"
+SOURCE_LINK="${BOILERPLATE_SOURCE_LINK:-$HOME/.local/share/chezmoi}"
 
-export PATH="${CHEZMOI_BIN_DIR}:$PATH"
+export PATH="${CHEZMOI_BIN_DIR}:$HOME/.local/share/mise/shims:/opt/homebrew/bin:/usr/local/bin:$PATH"
 
 log() {
     printf '%s\n' "$*"
@@ -25,43 +27,72 @@ detect_local_source() {
 }
 
 install_chezmoi() {
-    if command -v chezmoi >/dev/null 2>&1; then
+    local installer result=0
+    if command -v chezmoi >/dev/null 2>&1 && chezmoi --version >/dev/null 2>&1; then
         return 0
     fi
 
     mkdir -p "${CHEZMOI_BIN_DIR}"
     log "Installing chezmoi to ${CHEZMOI_BIN_DIR}..."
-    BINDIR="${CHEZMOI_BIN_DIR}" sh -c "$(curl -fsLS "${CHEZMOI_INSTALL_URL}")"
+    installer="$(mktemp)"
+    curl --proto '=https' --tlsv1.2 -fsLS "$CHEZMOI_INSTALL_URL" -o "$installer" || result=$?
+    if [ "$result" -eq 0 ]; then
+        BINDIR="$CHEZMOI_BIN_DIR" sh "$installer" || result=$?
+    fi
+    rm -f "$installer"
+    return "$result"
 }
 
-apply_dotfiles() {
-    local local_source="${1:-}"
-
-    if [ -n "${local_source}" ]; then
-        log "Applying dotfiles from local checkout: ${local_source}"
-        chezmoi init --source="${local_source}" --apply
+prepare_source() {
+    local local_source="${1:-}" backup
+    if [ -n "$local_source" ] && [ "$local_source" != "$CANONICAL_ROOT" ]; then
+        log "Run setup from $CANONICAL_ROOT. This checkout is $local_source."
+        return 1
+    fi
+    if [ ! -d "$CANONICAL_ROOT/.git" ]; then
+        mkdir -p "$(dirname "$CANONICAL_ROOT")"
+        git clone "$DOTFILES_REPO" "$CANONICAL_ROOT"
+    fi
+    if [ -L "$SOURCE_LINK" ] && [ "$(cd "$SOURCE_LINK" && pwd -P)" = "$CANONICAL_ROOT" ]; then
         return
     fi
-
-    log "Applying dotfiles from ${DOTFILES_REPO}"
-    chezmoi init --apply "${DOTFILES_REPO}"
+    mkdir -p "$(dirname "$SOURCE_LINK")"
+    if [ -e "$SOURCE_LINK" ] || [ -L "$SOURCE_LINK" ]; then
+        backup="${XDG_STATE_HOME:-$HOME/.local/state}/decent-angl/source-backups"
+        mkdir -p "$backup"
+        backup="$(mktemp -d "$backup/chezmoi.XXXXXX")/source"
+        mv "$SOURCE_LINK" "$backup"
+        log "Preserved previous chezmoi source at $backup"
+    fi
+    ln -s "$CANONICAL_ROOT" "$SOURCE_LINK"
 }
 
 main() {
     local local_source=""
-
-    if local_source="$(detect_local_source 2>/dev/null)"; then
-        :
-    else
-        local_source=""
-    fi
-
-    log "Starting boilerplate bootstrap..."
+    case "${1:-}" in
+        --plan|--dry-run)
+            log "Checkout: $CANONICAL_ROOT, cloned only if missing."
+            log "Source: $SOURCE_LINK -> $CANONICAL_ROOT; old source preserved if needed."
+            log "Install chezmoi if absent, initialize host data, apply preferences and setup hooks."
+            log "Hooks install native prerequisites, mise tools, OMP, and native drift guards."
+            log "Verify CLI versions and shared skills. Account logins remain machine-local."
+            return ;;
+        -h|--help)
+            log "Usage: ./setup [--plan]. Run from ~/src/boilerplate."
+            return ;;
+        '') ;;
+        *) log "Unknown setup option: $1"; return 2 ;;
+    esac
+    local_source="$(detect_local_source 2>/dev/null || true)"
+    prepare_source "$local_source"
     install_chezmoi
-    apply_dotfiles "${local_source}"
-
-    log ""
-    log "Bootstrap complete. Restart your shell or run: exec ${SHELL:-/bin/sh}"
+    log "Applying dotfiles from $CANONICAL_ROOT"
+    chezmoi init --source="$CANONICAL_ROOT" --apply
+    # Verify required tools instead of treating a skipped install as success.
+    mise -C "$HOME" exec -- codex --version
+    mise -C "$HOME" exec -- omp --version
+    "$HOME/.local/bin/decent-angl-skills" validate
+    log "Bootstrap complete. Open a new shell; authenticate accounts locally."
 }
 
 main "$@"

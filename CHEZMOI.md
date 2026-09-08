@@ -37,11 +37,14 @@ working repo and chezmoi source cannot become independent copies. On an older
 installation, `decent-angl-sync adopt-source` moves the existing clone into a
 timestamped state backup before creating the link.
 
-`decent-angl-sync reconcile` only fast-forwards. It blocks and preserves dirty,
-diverged, secret-bearing, or locally modified state. Clean local commits are
-applied and pushed; clean remote commits are fast-forwarded and applied. The
-scheduled guard excludes chezmoi scripts, while a reviewed manual rollout can
-use `decent-angl-sync reconcile --with-scripts`.
+`decent-angl-sync publish` validates an exported committed HEAD and pushes that
+exact commit, preserving unrelated working edits. `reconcile` publishes reviewed
+local commits, then fast-forwards and applies only a clean checkout. Divergence
+requires explicit resolution. The native guard only pulls and applies; it never
+pushes, stashes, or resets work. It excludes `run_*` hooks, while ordinary
+`executable_*` files still deploy. Use `reconcile --with-scripts` for reviewed
+hooks. See [UPDATING.md](UPDATING.md) for the current operational workflow;
+generic chezmoi examples below describe the underlying tool.
 
 ### Source Directory Structure
 

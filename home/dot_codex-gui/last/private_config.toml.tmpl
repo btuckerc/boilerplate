@@ -1,0 +1,6 @@
+{{- $path := joinPath .chezmoi.homeDir ".codex-gui/last/config.toml" -}}
+{{- $config := dict "cli_auth_credentials_store" "file" "model_reasoning_effort" "xhigh" "service_tier" "default" "personality" "pragmatic" -}}
+{{- if stat $path -}}
+{{- $config = include $path | fromToml -}}
+{{- end -}}
+{{ template "codex/model-policy.toml.tmpl" $config }}

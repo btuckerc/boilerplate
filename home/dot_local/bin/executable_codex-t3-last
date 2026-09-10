@@ -1,0 +1,19 @@
+#!/bin/sh
+set -eu
+
+# Select the third account even inside another Codex account's shell.
+# T3 creates the shared-state overlay; never copy ~/.codex into this home.
+CODEX_HOME="$HOME/.codex-t3/last"
+export CODEX_HOME
+umask 077
+if [ -L "$CODEX_HOME" ]; then
+    echo "codex-t3-last requires its own account directory." >&2
+    exit 1
+fi
+mkdir -p "$CODEX_HOME"
+chmod 700 "$CODEX_HOME"
+if [ -L "$CODEX_HOME/auth.json" ]; then
+    echo "codex-t3-last refuses a linked login." >&2
+    exit 1
+fi
+exec "$HOME/.local/bin/codex-baseline" -c cli_auth_credentials_store=file "$@"

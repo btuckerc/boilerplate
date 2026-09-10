@@ -20,15 +20,16 @@ other settings. TOML comments and formatting are normalized on apply.
 
 - Primary CLI and desktop: `~/.codex/config.toml`.
 - T3 second account: `~/.codex-t3/second/config.toml` links to the primary config.
+- T3 last account: `~/.codex-t3/last/config.toml` links to the primary config.
 - Second desktop: `~/.codex-gui/second/config.toml` stays independent and uses
   the same policy template. It is managed only on macOS after initialization.
-- The screenshot's `~/.codex-t3/personal` path was not present during the
-  September 7, 2026 audit. A T3 shadow linked to the primary config inherits it.
+- Third desktop: `~/.codex-gui/last/config.toml` uses the same policy template.
+  Creating `~/.codex-gui/last` on macOS opts in to its managed config.
 
-Apply on a machine with both runtimes:
+Apply on a machine with all three desktop runtimes initialized:
 
 ```sh
-mise exec -- chezmoi apply ~/.codex/config.toml ~/.codex-gui/second/config.toml
+mise exec -- chezmoi apply ~/.codex/config.toml ~/.codex-gui/second/config.toml ~/.codex-gui/last/config.toml
 ```
 
 For another
@@ -61,15 +62,16 @@ shared template's `experimental_mode` value to false and reapply both configs.
 
 ### One Codex version pin
 
-The version lives in `home/dot_config/mise/config.toml`. Both T3 instances use
+The version lives in `home/dot_config/mise/config.toml`. All T3 instances use
 `/Users/tucker/.local/bin/codex-baseline` on this Mac, or `$HOME/.local/bin/codex-baseline`
 on another host. This wrapper resolves the applied mise version from the home
 directory, avoiding project version overrides, then launches it in the original
 working directory with the original account environment. It fails if the pin is
 not installed. It never falls back to an arbitrary installed version.
 
-`codex-t3-second` uses the same wrapper. The official desktop app has its own
-bundled runtime; changing the CLI pin does not upgrade the desktop app.
+`codex-t3-second` and `codex-t3-last` use the same wrapper. The official desktop
+app has its own bundled runtime; changing the CLI pin does not upgrade the
+desktop app.
 
 For an upgrade, check the official changelog and npm `@openai/codex` stable tag,
 install that exact version with `mise install codex@VERSION`, update the one source
@@ -181,6 +183,47 @@ T3 instance fields:
 CLI for this account is `codex-t3-second`. Login and status:
 `codex-t3-second login` then `codex-t3-second login status`.
 The wrapper defaults `CODEX_HOME` to `~/.codex-t3/second` and uses the shared mise pin.
+
+## Third account: last / Codex Third
+
+Launch the third desktop with `codex-gui-third` or
+`~/Applications/Codex Third.app`. Both select these paths even when launched
+from another account's shell:
+
+- Desktop `CODEX_HOME`: `~/.codex-gui/last`
+- Electron user data: `~/Library/Application Support/Codex-last/user-data`
+- T3 shadow home: `~/.codex-t3/last`
+
+The desktop has independent config, login, databases, plugins and browser state.
+Only `AGENTS.md`, `skills` and `rules` link to the primary shared guidance.
+The initial config uses Astra, xhigh reasoning, default service tier and file
+credential storage. Later policy applies preserve other local settings.
+
+Initialize a new Mac before the first desktop launch:
+
+```sh
+mkdir -p ~/.codex-gui/last
+chmod 700 ~/.codex-gui/last
+mise exec -- chezmoi apply --exclude scripts ~/.local/bin/codex-t3-last ~/.local/bin/codex-gui-third ~/.codex-gui/last/config.toml ~/Applications/'Codex Third.app'
+codex-gui-third
+```
+
+Sign in with the third account in the new desktop window. Keep all credentials
+and runtime data machine-local. The launcher uses the installed ChatGPT.app, so
+it follows desktop updates without maintaining another copy of the app.
+
+T3's local provider entry is named `last`, with instance ID `codex_last`:
+
+- Binary path: `$HOME/.local/bin/codex-baseline`, expanded to an absolute path.
+- CODEX_HOME path: `~/.codex`
+- Shadow home path: `~/.codex-t3/last`
+- Launch arguments: empty
+- Model: `gpt-6-astra`
+
+T3 maintains its shadow links. Never copy the primary Codex home into this path.
+For terminal login use `codex-t3-last login`, then `codex-t3-last login status`.
+This wrapper ignores inherited `CODEX_HOME` and always selects the last account.
+T3 provider entries are app settings and remain local to each machine.
 
 ## Install Standard
 

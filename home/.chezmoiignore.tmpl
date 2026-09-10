@@ -39,10 +39,23 @@ nvim.backup.*
 **/__pycache__/**
 **/*.pyc
 
-{{- if or (ne .chezmoi.os "darwin") (not (stat (joinPath .chezmoi.homeDir ".codex-gui/second/config.toml"))) }}
-# Apply shared policy only to an already initialized second desktop runtime.
+{{- if ne .chezmoi.os "darwin" }}
 .codex-gui
 .codex-gui/**
+Applications/Codex Third.app
+Applications/Codex Third.app/**
+.local/bin/codex-gui-third
+{{- else }}
+{{- if not (stat (joinPath .chezmoi.homeDir ".codex-gui/second/config.toml")) }}
+# Apply shared policy only to an already initialized second desktop runtime.
+.codex-gui/second
+.codex-gui/second/**
+{{- end }}
+{{- if not (stat (joinPath .chezmoi.homeDir ".codex-gui/last")) }}
+# Creating this directory opts in to the third desktop profile.
+.codex-gui/last
+.codex-gui/last/**
+{{- end }}
 {{- end }}
 
 # Legacy assistant configs are preserved in source but not deployed by default.

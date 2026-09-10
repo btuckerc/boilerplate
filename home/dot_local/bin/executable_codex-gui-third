@@ -1,0 +1,39 @@
+#!/bin/sh
+set -eu
+
+# Fresh desktop runtime for the third account, independent of T3's overlay.
+third_codex_dir="$HOME/.codex-gui/last"
+third_user_data="$HOME/Library/Application Support/Codex-last/user-data"
+third_app="/Applications/ChatGPT.app"
+
+if [ ! -d "$third_app" ]; then
+    echo "ChatGPT.app not found at $third_app" >&2
+    exit 127
+fi
+for directory in "$third_codex_dir" "$third_user_data"; do
+    if [ -L "$directory" ]; then
+        echo "codex-gui-third requires independent runtime directories." >&2
+        exit 1
+    fi
+done
+if [ ! -f "$third_codex_dir/config.toml" ] || [ -L "$third_codex_dir/config.toml" ] || [ -L "$third_codex_dir/auth.json" ]; then
+    echo "Initialize ~/.codex-gui/last and apply its config with chezmoi first." >&2
+    exit 1
+fi
+
+umask 077
+mkdir -p "$third_codex_dir" "$third_user_data"
+chmod 700 "$third_codex_dir" "$third_user_data"
+
+# Share guidance only. The app owns its own login, plugins, history and state.
+for name in AGENTS.md skills rules; do
+    if [ -e "$HOME/.codex/$name" ] && [ ! -e "$third_codex_dir/$name" ] && [ ! -L "$third_codex_dir/$name" ]; then
+        ln -s "$HOME/.codex/$name" "$third_codex_dir/$name"
+    fi
+done
+
+exec open -n \
+    --env "CODEX_HOME=$third_codex_dir" \
+    --env "CODEX_ELECTRON_USER_DATA_PATH=$third_user_data" \
+    -a "$third_app" \
+    --args --user-data-dir="$third_user_data"

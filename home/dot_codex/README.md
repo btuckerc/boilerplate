@@ -76,7 +76,7 @@ desktop app.
 For an upgrade, check the official changelog and npm `@openai/codex` stable tag,
 install that exact version with `mise install codex@VERSION`, update the one source
 pin, apply `~/.config/mise/config.toml`, and verify `codex-baseline --version` and
-both T3 provider health checks. Commit and publish via `decent-angl-sync publish`.
+all T3 provider health checks. Commit and publish via `decent-angl-sync publish`.
 Unrelated working edits may remain. Each fleet host must install the new pin.
 The wrapper is an ordinary managed executable and deploys even when chezmoi
 `run_*` hooks are excluded. Use a targeted apply for an actively edited checkout,
@@ -88,6 +88,10 @@ On September 7, 2026, official npm and GitHub release metadata both reported
 0.153.4 as latest stable. `mise latest codex` reported an older 0.152.0, so it was
 not used to downgrade the existing installation. The 0.153.4 source pin had not
 been applied locally, leaving the shell on 0.148.0 until this audit.
+
+On September 10, 2026, the pin was upgraded to 0.154.0 after checking the official
+changelog, npm stable tag and GitHub stable release. T3's `main`, `two` and `last`
+providers all reported 0.154.0 and authenticated status after the targeted apply.
 
 ### Model context defaults
 

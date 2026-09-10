@@ -222,7 +222,9 @@ T3's local provider entry is named `last`, with instance ID `codex_last`:
 
 T3 maintains its shadow links. Never copy the primary Codex home into this path.
 For terminal login use `codex-t3-last login`, then `codex-t3-last login status`.
-This wrapper ignores inherited `CODEX_HOME` and always selects the last account.
+Sign in separately so T3 and the desktop have independent refresh sessions.
+This wrapper ignores inherited `CODEX_HOME`, clears desktop login routing, and
+always selects the last account.
 T3 provider entries are app settings and remain local to each machine.
 
 ## Install Standard

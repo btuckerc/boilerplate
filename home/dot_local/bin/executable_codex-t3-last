@@ -5,6 +5,8 @@ set -eu
 # T3 creates the shared-state overlay; never copy ~/.codex into this home.
 CODEX_HOME="$HOME/.codex-t3/last"
 export CODEX_HOME
+# Desktop-origin login can hand the callback back to the launching app.
+unset CODEX_INTERNAL_ORIGINATOR_OVERRIDE CODEX_ELECTRON_USER_DATA_PATH
 umask 077
 if [ -L "$CODEX_HOME" ]; then
     echo "codex-t3-last requires its own account directory." >&2

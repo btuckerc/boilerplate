@@ -1358,8 +1358,6 @@ chezmoi execute-template < test-template.sh
 
 ## Cross-References
 
-- **AGENTS.md** - Short durable repo rules for coding agents
-
 - **MISE.md** - mise tool manager reference
   - Tool installation patterns
   - Hook script integration

@@ -132,7 +132,6 @@ defaults unless a separate, measured experiment justifies changing them.
 ## What Is Shared
 
 - `config.toml`: portable Codex defaults
-- `AGENTS.md`: short global working rules rendered by chezmoi for the current platform or known machine
 - `skills/`: reusable Codex workflow knowledge rendered the same way
 
 Current shared skills:
@@ -218,7 +217,7 @@ from another account's shell:
 - T3 shadow home: `~/.codex-t3/last`
 
 The desktop has independent config, login, databases, plugins and browser state.
-Only `AGENTS.md`, `skills` and `rules` link to the primary shared guidance.
+Only `skills` and `rules` link to the primary shared guidance.
 The initial config uses Astra, xhigh reasoning, default service tier and file
 credential storage. Later policy applies preserve other local settings.
 

@@ -1,6 +1,6 @@
 ---
 name: codex-config
-description: Maintain the shared Codex baseline in chezmoi. Use when changing Codex configuration, AGENTS.md, skills, bootstrap rules, or cross-machine Codex behavior.
+description: Maintain the shared Codex baseline in chezmoi. Use when changing Codex configuration, skills, bootstrap rules, or cross-machine Codex behavior.
 ---
 
 # Codex config
@@ -26,9 +26,9 @@ description: Maintain the shared Codex baseline in chezmoi. Use when changing Co
   configs. Preserve other local settings.
 - CLI pin: `home/dot_config/mise/config.toml`. T3 uses `codex-baseline` for
   every account. Desktop runtime versions are separate from the CLI pin.
-- Put durable workflow rules in `AGENTS.md`.
+- Keep global `AGENTS.md` out of default context. Durable workflow lives in skills.
 - Render platform or host differences with templates. Move repeated mechanics
-  into manifest-driven scripts and leave command pointers in agent guidance.
+  into manifest-driven scripts.
 
 ## Workflow
 

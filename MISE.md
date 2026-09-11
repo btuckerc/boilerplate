@@ -1636,8 +1636,6 @@ mise doctor
 
 ## Cross-References
 
-- **AGENTS.md** - Short durable repo rules for coding agents
-
 - **CHEZMOI.md** - Dotfile management
   - How config files are applied
   - Template syntax

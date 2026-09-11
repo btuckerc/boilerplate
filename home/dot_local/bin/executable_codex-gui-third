@@ -26,7 +26,7 @@ mkdir -p "$third_codex_dir" "$third_user_data"
 chmod 700 "$third_codex_dir" "$third_user_data"
 
 # Share guidance only. The app owns its own login, plugins, history and state.
-for name in AGENTS.md skills rules; do
+for name in skills rules; do
     if [ -e "$HOME/.codex/$name" ] && [ ! -e "$third_codex_dir/$name" ] && [ ! -L "$third_codex_dir/$name" ]; then
         ln -s "$HOME/.codex/$name" "$third_codex_dir/$name"
     fi

@@ -52,7 +52,7 @@ new.mkdir(parents=True, exist_ok=True, mode=0o700)
 
 # These files describe task content or shared guidance. Runtime, database, plugin,
 # browser, approval, IPC, and model-cache directories are deliberately separate.
-shared = ["AGENTS.md", "skills", "rules", "sessions", "archived_sessions",
+shared = ["skills", "rules", "sessions", "archived_sessions",
           "attachments", "generated_images", "visualizations", "worktrees",
           "shell_snapshots", "history.jsonl", "session_index.jsonl",
           "thread-writer-locks"]

@@ -21,8 +21,9 @@ description: Maintain the shared Codex baseline in chezmoi. Use when changing Co
 - T3 Code extra accounts use an empty shadow home under `~/.codex-t3/`.
   Never copy `~/.codex` into it. Login with `codex-t3-second login`.
 - Shared Astra policy: `home/.chezmoitemplates/codex/model-policy.toml.tmpl`.
-  It manages the default model, context overrides, and experimental context
-  flag across independent runtime configs. Preserve other local settings.
+  It manages the default model, parent reasoning effort, subagent defaults,
+  context overrides, and experimental context flag across independent runtime
+  configs. Preserve other local settings.
 - CLI pin: `home/dot_config/mise/config.toml`. T3 uses `codex-baseline` for
   every account. Desktop runtime versions are separate from the CLI pin.
 - Put durable workflow rules in `AGENTS.md`.

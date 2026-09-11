@@ -1,5 +1,5 @@
 {{- $path := joinPath .chezmoi.homeDir ".codex/config.toml" -}}
-{{- $config := dict "model_reasoning_effort" "xhigh" "service_tier" "fast" "commit_attribution" "" "cli_auth_credentials_store" "file" "plugins" (dict "github@openai-curated" (dict "enabled" true)) -}}
+{{- $config := dict "model_reasoning_effort" "medium" "service_tier" "fast" "commit_attribution" "" "cli_auth_credentials_store" "file" "plugins" (dict "github@openai-curated" (dict "enabled" true)) -}}
 {{- if stat $path -}}
 {{- $config = include $path | fromToml -}}
 {{- end -}}

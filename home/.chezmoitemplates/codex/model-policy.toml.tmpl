@@ -1,6 +1,10 @@
 {{- /* Shared model policy. Input is this runtime's parsed local config. */ -}}
 {{- $config := . | setValueAtPath "model" "gpt-6-astra" -}}
+{{- $config = setValueAtPath "model_reasoning_effort" "medium" $config -}}
 {{- $config = setValueAtPath "features.context_management.experimental_mode" true $config -}}
+{{- $config = setValueAtPath "agents.max_concurrent_threads_per_session" 8 $config -}}
+{{- $config = setValueAtPath "agents.default_subagent_model" "gpt-5.6-luna" $config -}}
+{{- $config = setValueAtPath "agents.default_subagent_reasoning_effort" "low" $config -}}
 {{- /* Let the selected model supply its context and compaction defaults. */ -}}
 {{- $_ := unset $config "model_context_window" -}}
 {{- $_ := unset $config "model_auto_compact_token_limit" -}}

@@ -13,8 +13,9 @@ Edit the source tree, then apply targeted files with `chezmoi`.
 ## Astra policy across accounts
 
 The shared model policy is `home/.chezmoitemplates/codex/model-policy.toml.tmpl`.
-It selects `gpt-6-astra`, enables experimental context management, and leaves
-context and compaction limits to the model.
+It selects `gpt-6-astra` at medium reasoning, Luna subagents at low effort with
+eight concurrent spawned threads, enables experimental context management, and
+leaves context and compaction limits to the model.
 Chezmoi applies that policy to each runtime's own parsed TOML, preserving its
 other settings. TOML comments and formatting are normalized on apply.
 
@@ -38,10 +39,10 @@ and ignores the target until initialized. Never link desktop runtime directories
 or copy one account's complete config into another. Auth and runtime data remain
 local. OMP model configuration is separate and is not changed by this policy.
 
-The policy manages the default model and experimental context flag, and removes
-root context overrides on each
-apply. Reasoning effort, service tier, plugins, MCP connections, and project trust
-remain local. Explicit task selections, project config, profiles, or CLI overrides
+The policy manages the default model, parent reasoning effort, subagent model
+and concurrency, and the experimental context flag, and removes root context
+overrides on each apply. Service tier, plugins, MCP connections, and project
+trust remain local. Explicit task selections, project config, or CLI overrides
 can supersede these defaults. Start a new session after applying.
 
 ### Experimental context management
@@ -59,6 +60,24 @@ off by default upstream; this baseline opts in. Both T3 accounts reported Pro
 subscriptions during validation. Restart app-server sessions to load the change.
 There is no documented subscription-savings guarantee. To roll back, change the
 shared template's `experimental_mode` value to false and reapply both configs.
+
+### Parent and subagent defaults
+
+```toml
+model = "gpt-6-astra"
+model_reasoning_effort = "medium"
+
+[agents]
+max_concurrent_threads_per_session = 8
+default_subagent_model = "gpt-5.6-luna"
+default_subagent_reasoning_effort = "low"
+```
+
+The cap is spawned threads per session, excluding the primary. Use
+`max_concurrent_threads_per_session`, not legacy `max_threads`. No named custom
+agents, profiles, or memories are part of this policy. Restart app-server
+sessions after apply.
+
 
 ### One Codex version pin
 

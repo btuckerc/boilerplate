@@ -22,9 +22,10 @@ modelProviderOrder:
   - google-antigravity
   - openrouter
 
+# Role names so Ctrl+P follows a later smol remap. Do not put slow on the cycle.
 cycleOrder:
   - default
-  - google-antigravity/gemini-3.8-flash
+  - smol
 
 enabledModels:
   - xai-oauth/grok-4.6

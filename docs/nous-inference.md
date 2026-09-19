@@ -257,7 +257,7 @@ general intelligence ranking or a replacement for Luna.
 The current Codex main thread's native `spawn_agent` tool exposes cloud model
 IDs only. It cannot directly select a nous model. A main thread with terminal
 access can explicitly launch a separate OpenCode worker, collect its JSON
-events/session ID, inspect its edits, and resume the same session:
+summary/session ID, inspect its edits, and resume the same session:
 
 ```sh
 nous-worker --dir /absolute/task-directory 'Read the task and make the bounded edit.'
@@ -273,12 +273,26 @@ come from stdin. The command neither chooses models for other sessions nor
 switches inference services; select `ai-stack bonsai` explicitly for Bonsai
 and restore `ai-stack llama` for the other three. Serialize inference work.
 
+The default output is a compact JSON summary with `verified: false` and an
+evidence path under `~/.local/state/nous-workers/`. Full events and stderr stay
+there; `--format json` returns the original events when explicitly needed.
+`--timeout 180` and `--steps 12` bound the default run. Deadline or caller
+cancellation stops the worker process group. A workstation lock returns exit
+75 if another launcher owns the slot, and backend health failure returns 69;
+the launcher never silently falls back to a paid model. This lock coordinates
+only this workstation, not other machines or direct OpenCode clients.
+Its per-process provider allowlist and main/title/compaction model selections
+keep auxiliary inference local too. These settings affect only this worker.
+
 This is a supervised subprocess worker, not a native Codex collaboration
 child or a claimed T3 subagent-tree integration. No global delegation quota
 is imposed. The small `local-workers` skill makes the recommendation
 discoverable across threads and permits useful bounded delegation without
 a quota. Ornith is the launcher default, not the main-thread default. The Nous picker remains
 an optional direct OpenCode route; existing T3 threads can retain their model.
+The skill also prefers a fresh-brief Luna subagent for larger/tool-rich tasks
+or a local failure, with integration and verification kept in the parent.
+See [the usage audit](codex-usage-audit-2026-09-19.md) for this routing policy.
 
 Verified from the active T3 main thread on 2026-09-19 using `nous-worker`:
 

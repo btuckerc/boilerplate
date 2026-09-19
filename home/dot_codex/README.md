@@ -14,8 +14,11 @@ Edit the source tree, then apply targeted files with `chezmoi`.
 
 The shared model policy is `home/.chezmoitemplates/codex/model-policy.toml.tmpl`.
 It selects `gpt-6-astra` at medium reasoning, Luna subagents at low effort with
-eight concurrent spawned threads, enables experimental context management, and
-leaves context and compaction limits to the model.
+four concurrent spawned threads, pins `service_tier = "default"` (Fast off),
+uses stable context management, and leaves context and compaction limits
+to the model. Local workers handle bounded tasks through the `local-workers`
+skill; independent Luna subagents receive a focused brief rather than the
+whole parent conversation.
 Chezmoi applies that policy to each runtime's own parsed TOML, preserving its
 other settings. TOML comments and formatting are normalized on apply.
 
@@ -23,7 +26,9 @@ other settings. TOML comments and formatting are normalized on apply.
 - T3 second account: `~/.codex-t3/second/config.toml` links to the primary config.
 - T3 last account: `~/.codex-t3/last/config.toml` links to the primary config.
 - Second desktop: `~/.codex-gui/second/config.toml` stays independent and uses
-  the same policy template. It is managed only on macOS after initialization.
+  the same policy template while preserving its explicitly selected model and
+  reasoning effort (currently Luna/xhigh). It is managed only on macOS after
+  initialization; applying the baseline must not upgrade that account to Astra.
 - Third desktop: `~/.codex-gui/last/config.toml` uses the same policy template.
   Creating `~/.codex-gui/last` on macOS opts in to its managed config.
 
@@ -39,36 +44,39 @@ and ignores the target until initialized. Never link desktop runtime directories
 or copy one account's complete config into another. Auth and runtime data remain
 local. OMP model configuration is separate and is not changed by this policy.
 
-The policy manages the default model, parent reasoning effort, subagent model
-and concurrency, and the experimental context flag, and removes root context
-overrides on each apply. Service tier, plugins, MCP connections, and project
+The policy manages the default model, parent reasoning effort, service tier,
+subagent model and concurrency, and the experimental context flag, and removes
+root context overrides on each apply. Plugins, MCP connections, and project
 trust remain local. Explicit task selections, project config, or CLI overrides
 can supersede these defaults. Start a new session after applying.
 
-### Experimental context management
+### Context management
 
 ```toml
 [features.context_management]
-experimental_mode = true
+experimental_mode = false
 ```
 
-[Codex 0.153.0 release notes](https://learn.chatgpt.com/docs/changelog) describe
-token-budget context, history notes, and the `new_context` tool for eligible
-ChatGPT Plus, Pro, and Pro Lite sessions using the Codex backend. API-key sessions,
-custom providers, and temporary structured threads are excluded. The feature is
-off by default upstream; this baseline opts in. Both T3 accounts reported Pro
-subscriptions during validation. Restart app-server sessions to load the change.
-There is no documented subscription-savings guarantee. To roll back, change the
-shared template's `experimental_mode` value to false and reapply both configs.
+Use stable compaction by default. The experimental notes/history-search flow
+has no documented subscription-savings guarantee, and the installed model
+catalog currently reports `supports_experimental_context = false`. Disabling
+the opt-in avoids silently activating it when backend eligibility changes;
+this is not a claim of measured savings. Preserve model context/compaction
+defaults: frequent forced compaction can lose useful detail and cached context.
+The usage audit is `python3 utils/scripts/codex_usage_audit.py --days 14` from
+the baseline repository. It reports token metadata, not subscription charges.
+See [the September 19 audit](../../docs/codex-usage-audit-2026-09-19.md) for
+measurements, sources, rejected tuning ideas, and verification.
 
 ### Parent and subagent defaults
 
 ```toml
 model = "gpt-6-astra"
 model_reasoning_effort = "medium"
+service_tier = "default"
 
 [agents]
-max_concurrent_threads_per_session = 8
+max_concurrent_threads_per_session = 4
 default_subagent_model = "gpt-5.6-luna"
 default_subagent_reasoning_effort = "low"
 ```
@@ -218,7 +226,7 @@ from another account's shell:
 
 The desktop has independent config, login, databases, plugins and browser state.
 Only `skills` and `rules` link to the primary shared guidance.
-The initial config uses Astra, xhigh reasoning, default service tier and file
+The initial config uses Astra, medium reasoning, default service tier and file
 credential storage. Later policy applies preserve other local settings.
 
 Initialize a new Mac before the first desktop launch:

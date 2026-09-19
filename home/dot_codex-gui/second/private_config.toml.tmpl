@@ -3,4 +3,8 @@
 {{- if stat $path -}}
 {{- $config = include $path | fromToml -}}
 {{- end -}}
-{{ template "codex/model-policy.toml.tmpl" $config }}
+{{- /* This independent desktop keeps its explicitly selected model/effort. */ -}}
+{{- $policy := includeTemplate "codex/model-policy.toml.tmpl" $config | fromToml -}}
+{{- if hasKey $config "model" -}}{{- $policy = setValueAtPath "model" $config.model $policy -}}{{- end -}}
+{{- if hasKey $config "model_reasoning_effort" -}}{{- $policy = setValueAtPath "model_reasoning_effort" $config.model_reasoning_effort $policy -}}{{- end -}}
+{{ $policy | toToml }}

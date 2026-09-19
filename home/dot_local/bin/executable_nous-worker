@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
-"""Explicit local OpenCode worker. No global model policy or service switching."""
+"""Bounded local OpenCode worker; full evidence on disk, compact result to parent."""
 import argparse
+import fcntl
 import json
 import os
 from pathlib import Path
 import shutil
+import signal
+import subprocess
 import sys
+import tempfile
+import time
+import urllib.request
 
 MODELS = {
     "ornith": "nous/Ornith-1.5-9B-Q5_K_M",
@@ -14,40 +20,145 @@ MODELS = {
     "bonsai": "nous-bonsai/bonsai-2-27b",
 }
 
-parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument("--model", choices=MODELS, default="ornith", help="Local worker model (default: ornith); Nemotron tool use remains experimental")
-parser.add_argument("--dir", type=Path, required=True)
-parser.add_argument("--session", help="Resume the exact worker session ID")
-parser.add_argument("--read-only", action="store_true")
-parser.add_argument("prompt", nargs="?", help="Task text; omit to read stdin")
-args = parser.parse_args()
-if not args.dir.is_dir():
-    parser.error("--dir must be an existing task directory")
-prompt = args.prompt if args.prompt is not None else sys.stdin.read()
-if not prompt.strip():
-    parser.error("a nonempty task is required")
-binary = shutil.which("opencode-baseline")
-if not binary:
-    parser.error("opencode-baseline is required")
-permissions = {"*": "deny", "read": "allow", "glob": "allow", "grep": "allow", "list": "allow"}
-if not args.read_only:
-    permissions["edit"] = "allow"
-config = json.loads(os.environ.get("OPENCODE_CONFIG_CONTENT", "{}"))
-config["permission"] = permissions
-config.setdefault("agent", {})["nous-worker"] = {
-    "description": "Explicitly launched bounded local worker",
-    "mode": "primary",
-    "model": MODELS[args.model],
-    "temperature": 0.6,
-    "top_p": 0.95,
-    "permission": permissions,
-}
-config["compaction"] = {"auto": True, "prune": True, "reserved": 4096}
-env = os.environ.copy()
-env["OPENCODE_CONFIG_CONTENT"] = json.dumps(config)
-command = [binary, "run", "--pure", "--dir", str(args.dir.resolve()),
-           "--agent", "nous-worker", "--model", MODELS[args.model], "--format", "json"]
-if args.session:
-    command += ["--session", args.session]
-command += ["--", prompt]
-os.execve(binary, command, env)
+
+class WorkerInterrupted(Exception):
+    def __init__(self, signum):
+        self.signum = signum
+
+
+def interrupt_worker(signum, frame):
+    raise WorkerInterrupted(signum)
+
+
+def stop_worker(process):
+    # OpenCode and its children own a separate process group. Finish cleanup
+    # before releasing the slot lock, including when the caller cancels us.
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    try:
+        process.wait(timeout=3)
+    except subprocess.TimeoutExpired:
+        pass
+    # The leader may already have exited while a descendant is still alive.
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    process.wait()
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--model", choices=MODELS, default="ornith", help="Default: ornith; Nemotron remains experimental")
+    parser.add_argument("--dir", type=Path, required=True)
+    parser.add_argument("--session", help="Resume the exact worker session ID")
+    parser.add_argument("--read-only", action="store_true")
+    parser.add_argument("--timeout", type=int, default=180, help="Worker deadline in seconds (default: 180)")
+    parser.add_argument("--steps", type=int, default=12, help="OpenCode step budget (default: 12)")
+    parser.add_argument("--format", choices=["summary", "json"], default="summary", help="Compact result or original JSON events")
+    parser.add_argument("prompt", nargs="?", help="Task text; omit to read stdin")
+    args = parser.parse_args()
+    if not args.dir.is_dir():
+        parser.error("--dir must be an existing task directory")
+    if args.timeout < 1 or args.steps < 1:
+        parser.error("--timeout and --steps must be positive")
+    prompt = args.prompt if args.prompt is not None else sys.stdin.read()
+    if not prompt.strip():
+        parser.error("a nonempty task is required")
+    binary = shutil.which("opencode-baseline")
+    if not binary:
+        parser.error("opencode-baseline is required")
+    state = Path(os.environ.get("XDG_STATE_HOME", str(Path.home()/".local/state"))) / "nous-workers"
+    state.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with (state/"worker.lock").open("a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print(json.dumps({"status":"busy", "message":"Another worker on this workstation owns the inference slot; continue other work."}))
+            return 75
+        port = 8081 if args.model == "bonsai" else 8080
+        try:
+            with urllib.request.urlopen(f"http://nous:{port}/health", timeout=5) as response:
+                if response.status != 200:
+                    raise OSError(f"HTTP {response.status}")
+        except Exception as error:
+            print(json.dumps({"status":"unavailable", "model":args.model, "message":str(error)}))
+            return 69
+        run = Path(tempfile.mkdtemp(prefix="run-", dir=state))
+        permissions = {"*":"deny", "read":"allow", "glob":"allow", "grep":"allow", "list":"allow"}
+        if not args.read_only:
+            permissions["edit"] = "allow"
+        config = json.loads(os.environ.get("OPENCODE_CONFIG_CONTENT", "{}"))
+        # Pin auxiliary inference too; an inherited cloud title/compaction
+        # model must not spend subscription/API usage inside a local worker.
+        config["model"] = config["small_model"] = MODELS[args.model]
+        config["enabled_providers"] = [MODELS[args.model].split("/", 1)[0]]
+        config.setdefault("agent", {}).setdefault("compaction", {})["model"] = MODELS[args.model]
+        config["permission"] = permissions
+        config.setdefault("agent", {})["nous-worker"] = {
+            "description":"Bounded local worker", "mode":"primary", "model":MODELS[args.model],
+            "temperature":0.6, "top_p":0.95, "steps":args.steps, "permission":permissions,
+            "prompt":"Complete the bounded task using available file tools. Shell and web tools are unavailable. If a needed input is missing or truncated, report that limitation promptly instead of repeating failed reads. Do not claim tests ran unless their results were supplied. Return concise findings or changed paths and unresolved issues.",
+        }
+        config["compaction"] = {"auto":True, "prune":True, "reserved":4096}
+        env = os.environ.copy()
+        env["OPENCODE_CONFIG_CONTENT"] = json.dumps(config)
+        command = [binary,"run","--pure","--dir",str(args.dir.resolve()),"--agent","nous-worker",
+                   "--model",MODELS[args.model],"--format","json"]
+        if args.session:
+            command += ["--session",args.session]
+        command += ["--",prompt]
+        start = time.monotonic()
+        status = "completed"
+        interrupted_by = None
+        with (run/"events.jsonl").open("w") as stdout, (run/"stderr.log").open("w") as stderr:
+            process = subprocess.Popen(command, env=env, stdout=stdout, stderr=stderr, start_new_session=True)
+            previous_term = signal.signal(signal.SIGTERM, interrupt_worker)
+            previous_int = signal.getsignal(signal.SIGINT)
+            try:
+                process.wait(timeout=args.timeout)
+            except (subprocess.TimeoutExpired, KeyboardInterrupt, WorkerInterrupted) as error:
+                status = "timeout" if isinstance(error, subprocess.TimeoutExpired) else "interrupted"
+                interrupted_by = error.signum if isinstance(error, WorkerInterrupted) else signal.SIGINT
+                signal.signal(signal.SIGTERM, signal.SIG_IGN)
+                signal.signal(signal.SIGINT, signal.SIG_IGN)
+                stop_worker(process)
+            finally:
+                signal.signal(signal.SIGTERM, previous_term)
+                signal.signal(signal.SIGINT, previous_int)
+        texts, sessions, tools, errors = [], [], [], []
+        for line in (run/"events.jsonl").open():
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if event.get("sessionID"):
+                sessions.append(event["sessionID"])
+            part = event.get("part", {})
+            if event.get("type") == "text" and not part.get("synthetic"):
+                texts.append(part.get("text", ""))
+            elif event.get("type") == "tool_use":
+                tools.append(part.get("tool"))
+            elif event.get("type") == "error":
+                errors.append(event.get("error", {}))
+        if status == "completed" and (process.returncode or errors):
+            status = "error"
+        result = {"status":status, "model":MODELS[args.model], "session":sessions[-1] if sessions else args.session,
+                  "seconds":round(time.monotonic()-start, 2), "tool_calls":len(tools), "tools":sorted(set(t for t in tools if t)),
+                  "result":texts[-1][:6000] if texts else "No final text; inspect evidence and verify the task output.",
+                  "result_truncated":bool(texts and len(texts[-1]) > 6000),
+                  "evidence":str(run), "returncode":process.returncode,
+                  "verified":False}
+        (run/"summary.json").write_text(json.dumps(result, indent=2)+"\n")
+        if args.format == "json":
+            with (run/"events.jsonl").open() as stream:
+                shutil.copyfileobj(stream, sys.stdout)
+        else:
+            print(json.dumps(result))
+        return 124 if status == "timeout" else 128 + interrupted_by if status == "interrupted" else 1 if status == "error" else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

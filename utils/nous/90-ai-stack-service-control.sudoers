@@ -1,0 +1,10 @@
+# Nous inference service control. No shell, unit editing, or wildcard arguments.
+# ai-stack.sh remains an unprivileged, user-owned client of these commands.
+Cmnd_Alias NOUS_AI_SERVICES = /usr/bin/systemctl start llama.service, \
+    /usr/bin/systemctl stop llama.service, \
+    /usr/bin/systemctl restart llama.service, \
+    /usr/bin/systemctl start bonsai.service, \
+    /usr/bin/systemctl stop bonsai.service, \
+    /usr/bin/systemctl restart bonsai.service, \
+    /usr/bin/systemctl stop llama.service bonsai.service
+tux ALL=(root) NOPASSWD: NOSETENV: NOUS_AI_SERVICES

@@ -1,0 +1,52 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "autoupdate": false,
+  "share": "disabled",
+  "enabled_providers": [
+    "nous",
+    "nous-bonsai"
+  ],
+  "model": "nous/Qwen3.5-9B-Q5_K_M",
+  "provider": {
+    "nous": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Nous llama.cpp",
+      "options": {
+        "baseURL": "http://nous:8080/v1"
+      },
+      "models": {
+        "Nemotron-9B-OpenCode.Q6_K": {
+          "name": "Nous Nemotron 9B",
+          "limit": {
+            "context": 16384,
+            "output": 4096
+          }
+        },
+        "Qwen3.5-9B-Q5_K_M": {
+          "name": "Nous Qwen 3.5 9B",
+          "limit": {
+            "context": 16384,
+            "output": 4096
+          }
+        }
+      }
+    },
+    "nous-bonsai": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Nous Bonsai",
+      "options": {
+        "baseURL": "http://nous:8081/v1"
+      },
+      "models": {
+        "bonsai-2-27b": {
+          "id": "/home/tux/repos/Bonsai-demo/models/bonsai2-gguf/27B/Ternary-Bonsai-2-27B-PQ2_0.gguf",
+          "name": "Nous Bonsai 2 27B",
+          "limit": {
+            "context": 32768,
+            "output": 4096
+          }
+        }
+      }
+    }
+  }
+}

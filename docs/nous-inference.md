@@ -44,14 +44,14 @@ Its `llama`/`bonsai` commands do not persist a boot selection via
 is a boot-policy follow-up, not a reason to replace the existing manager.
 No boot policy or manager code was changed. A separate typo remains in the
 NVIDIA init unit: `After=systemd-modeuls-load.service`. Correcting the unit
-requires sudo; the integration session did not have passwordless sudo.
+requires ordinary sudo authentication; it is outside the narrow policy below.
 
 The new fleet probe accepts either active backend and checks the matching
 port. Bonsai 2 27B PQ2_0 and its Q8_0 multimodal projector are installed
 under `~/repos/Bonsai-demo/models`; together with the two router models,
 the manager counts four GGUF files (one is the projector, not a fourth LLM).
-Bonsai's service uses port 8081 and a 32K context with KV4. It was inactive
-and was not inference-tested. Switching interrupts the other backend.
+Bonsai's service uses port 8081 and a 32K context with KV4. It passed OpenCode and T3 tool-round-trip tests below. Switching interrupts
+the other backend.
 
 `~/ai-stack.sh doctor` ran successfully. In the noninteractive SSH PATH it
 reported llmfit, hf, gum, fzf and bat unavailable. The basic service manager
@@ -91,32 +91,34 @@ is the upstream reference; the installed application was also inspected.
 
 For work inside T3, use its OpenCode backend with a separate nous provider over Chat
 Completions. [OpenCode documents llama.cpp and custom providers](https://opencode.ai/docs/providers#llamacpp).
-OpenCode was not installed on this Mac and its T3 backend was disabled at
-inspection; this route is a recommendation, not an end-to-end tested setup.
-The documented configuration shape is:
+OpenCode 1.18.31 is now pinned in mise and launched through
+`~/.local/bin/opencode-baseline`. Its managed config is
+`~/.config/opencode/opencode.json`; it enables only the two local providers,
+with Qwen as the OpenCode default. T3's enabled **Nous** OpenCode instance
+uses that wrapper and offers Qwen, Nemotron and Bonsai. Cloud defaults for
+other T3 instances are unchanged; T3 title generation can still use its
+configured cloud model.
 
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "provider": {
-    "nous": {
-      "npm": "@ai-sdk/openai-compatible",
-      "name": "Nous",
-      "options": {"baseURL": "http://nous:8080/v1"},
-      "models": {
-        "Nemotron-9B-OpenCode.Q6_K": {
-          "name": "Nous Nemotron 9B",
-          "limit": {"context": 16384, "output": 4096}
-        },
-        "Qwen3.5-9B-Q5_K_M": {
-          "name": "Nous Qwen 3.5 9B",
-          "limit": {"context": 16384, "output": 4096}
-        }
-      }
-    }
-  }
-}
-```
+Select **Nous** in T3's model picker, then the desired model. The backend must
+already match: `ssh nous 'ai-stack llama'` serves Qwen/Nemotron, and
+`ssh nous 'ai-stack bonsai'` serves Bonsai. Choosing a model in T3 does not
+switch systemd services. Switching interrupts the other backend.
+
+A temporary fixture test required a real file-read tool and the correct
+unseen validation word:
+
+| Model | OpenCode result |
+| --- | --- |
+| Qwen 3.5 9B | Read tool executed; correct word returned |
+| Nemotron 9B | No tool call; announced intent and stopped |
+| Nemotron, thinking disabled | Retry still emitted no tool call |
+| Bonsai 2 27B | Read tool executed; correct word returned |
+
+Bonsai also passed an actual T3 conversation through the Nous instance:
+its activity showed the fixture read and it returned the correct word in
+16 seconds. Nemotron remains selectable for further model/template tuning,
+but is not validated for agent work. These are tool-round-trip checks,
+not sustained coding benchmarks. Bonsai was left active after testing.
 
 Keep repository tools and builds on the workstation. Start with narrow code
 edits, test generation and small experimental variants in disposable worktrees;
@@ -170,12 +172,11 @@ GPU slot is not a parallel experiment farm.
 Use local models as experimental planners/coding helpers, with Luna retained
 for harder reasoning and review until measured results justify a change.
 The OMP smoke below favors starting with Qwen; Nemotron needs further
-tool-use validation. This evaluation made no firmware edits, flashes, live
-campaign changes or cloud model calls.
+tool-use validation. This evaluation made no firmware edits, flashes or live campaign changes.
 
 ## Harness comparison after OMP tool-round-trip testing
 
-For the existing workstation fleet, prefer a lean OMP configuration first.
+For standalone workstation workers, a lean OMP configuration is also viable.
 OMP 18.1.5 is already pinned and maintained here and accepts a no-auth local
 `openai-completions` provider. Keep the 16K context explicit, initially expose
 only the tools the task needs, and disable background/title/model-role calls
@@ -212,7 +213,31 @@ It was not installed or tested here. A smaller default tool surface is useful
 for this 16K deployment, but does not establish better model accuracy.
 
 OpenCode remains the practical choice when T3 integration is the deciding
-factor. It was not tested end-to-end here. For Pokémon gameplay decisions,
+factor. It now passes the Bonsai end-to-end test above. For Pokémon gameplay decisions,
 keep using the existing bounded host experiment runtime and add the local
 provider there; a general-purpose coding harness should not replace the
 runtime's gameplay admission, effect verification and save handling.
+
+## Restricted passwordless service control
+
+The installed `/etc/sudoers.d/90-ai-stack-service-control` is root-owned,
+mode 0440. Its source is `utils/nous/90-ai-stack-service-control.sudoers`.
+It permits `tux` to run only `/usr/bin/systemctl` start, stop or restart for
+`llama.service` or `bonsai.service`, plus stopping both in that order.
+There are no wildcard arguments. `NOSETENV` is set; the user-owned manager
+itself is not authorized to run as root. Service units and systemctl remain
+root-owned. Unit editing, arbitrary services and root shells are excluded.
+
+This follows the standard [sudoers command allowlist](https://github.com/sudo-project/sudo/blob/main/docs/sudoers.man.in)
+approach. SSH authenticates the login with the existing key; sudo grants this
+limited permission to the `tux` account, not a particular SSH key. Any process
+running as tux can therefore interrupt these inference services. No password
+or private key is stored for automation, and agent forwarding is unnecessary.
+
+The user installed the initial policy with ordinary sudo authentication.
+Passwordless allowed service control was verified; `/usr/bin/true` and an
+unrelated systemctl operation were denied without authentication. Normal
+`ai-stack llama` / `ai-stack bonsai` switching can now run noninteractively.
+Broader maintenance still requires ordinary sudo. To revoke the grant, remove
+this sudoers file using authenticated sudo; keep that operation outside the
+automation allowlist.

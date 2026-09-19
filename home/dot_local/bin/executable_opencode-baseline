@@ -1,0 +1,21 @@
+#!/bin/sh
+set -eu
+
+# Resolve the applied shared mise pin outside project overrides, but keep the
+# caller's working directory when launching OpenCode.
+mise_bin=""
+for candidate in \
+  "$(command -v mise 2>/dev/null || true)" \
+  "$HOME/.local/bin/mise" \
+  "$HOME/.local/share/mise/bin/mise" \
+  /opt/homebrew/bin/mise /usr/local/bin/mise /usr/bin/mise
+do
+  if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+    mise_bin="$candidate"
+    break
+  fi
+done
+[ -n "$mise_bin" ] || { echo "mise is required for opencode-baseline." >&2; exit 127; }
+opencode_bin="$("$mise_bin" -C "$HOME" which opencode)"
+[ -x "$opencode_bin" ] || { echo "Install the shared OpenCode pin with mise install opencode." >&2; exit 127; }
+exec "$opencode_bin" "$@"

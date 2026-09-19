@@ -39,7 +39,20 @@ services were enabled. The manager switches runtime services, not boot enablemen
 was changed during integration; manual switching should be explicit because
 it interrupts inference. Also found
 `After=systemd-modeuls-load.service` misspelled in `nvidia-ai-init.service`.
-Check these settings again before proposing fixes. Sudo requires the user.
+Check these settings again before proposing fixes. Broad sudo requires the user.
+
+Normal switching is passwordless: `ssh nous 'ai-stack llama'` or
+`ssh nous 'ai-stack bonsai'`. The root-owned sudoers policy grants tux only
+exact systemctl start/stop/restart commands for those two services, plus
+stopping both. Source: `utils/nous/90-ai-stack-service-control.sudoers`.
+Do not authorize the user-writable manager itself as root. This is an
+account-level grant after SSH authentication, not a per-key sudo privilege.
+
+The MacBook T3 Nous instance uses `~/.local/bin/opencode-baseline` (mise-pinned
+OpenCode) and managed `~/.config/opencode/opencode.json`. Qwen and Bonsai
+passed real file-read tool tests; Bonsai also passed in T3. Nemotron failed
+both OpenCode attempts to call the tool. Selecting a T3 model does not switch
+the host service: select the matching backend explicitly before use.
 
 For tested harness compatibility, measured tool calls, and the Pokémon
 experiment integration plan, read

@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import tomllib
+import urllib.request
 
 
 def run(args, timeout=30):
@@ -148,6 +149,45 @@ def local_report():
             "backup_jobs": backups, "issues": issues}
 
 
+def inference_report(host):
+    """Inspect an appliance with stock commands; never deploy the workstation baseline."""
+    report = {"machine": host["id"], "role": "inference",
+              "checked_at": datetime.now(timezone.utc).isoformat(), "issues": []}
+    code, output = run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
+                        "-o", "ForwardAgent=no", host["ssh"],
+                        "uname -s; systemctl is-active llama.service; systemctl is-active bonsai.service; "
+                        "nvidia-smi --query-gpu=name,memory.total,memory.used,temperature.gpu "
+                        "--format=csv,noheader"], timeout=20)
+    lines = output.strip().splitlines()
+    report["ssh_ok"] = code == 0
+    if code != 0 or len(lines) < 4:
+        report["issues"].append("SSH or inference host inspection failed")
+        return report
+    else:
+        report.update(os=lines[0], services={"llama.service": lines[1], "bonsai.service": lines[2]}, gpu=lines[3:])
+    active = [name for name, state in report["services"].items() if state == "active"]
+    if len(active) != 1:
+        report["issues"].append("expected exactly one active inference service")
+        return report
+    base = host["inference_endpoints"][active[0]].rstrip("/")
+    report["inference_url"] = base
+    try:
+        with urllib.request.urlopen(base + "/health", timeout=8) as response:
+            health = json.load(response)
+        if health.get("status") != "ok":
+            report["issues"].append("inference health is not ok")
+        with urllib.request.urlopen(base + "/v1/models", timeout=8) as response:
+            models = json.load(response)["data"]
+        report["models"] = [{"id": model["id"],
+                             "status": model.get("status", {}).get("value", "unknown")}
+                            for model in models]
+        if not models:
+            report["issues"].append("inference model inventory is empty")
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        report["issues"].append("inference HTTP health or model inventory unavailable")
+    return report
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--fleet", action="store_true", help="Read each configured host, with bounded SSH waits")
@@ -164,6 +204,8 @@ def main():
                 return report
             if not re.fullmatch(r"(?:[a-z_][a-z0-9_-]*@)?[a-z0-9.-]+", host["ssh"]):
                 raise ValueError("Invalid SSH target")
+            if host.get("role") == "inference":
+                return inference_report(host)
             code, output = run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", host["ssh"],
                                 "~/.local/bin/decent-angl-doctor --json"], timeout=45)
             if code == 0:

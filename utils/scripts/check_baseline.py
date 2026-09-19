@@ -46,6 +46,11 @@ def check(root):
         for host in hosts:
             assert re.fullmatch(r"[a-z][a-z0-9-]*", host["id"]), "Invalid host id"
             assert re.fullmatch(r"(?:[a-z_][a-z0-9_-]*@)?[a-z0-9.-]+", host["ssh"]), "Invalid SSH target"
+            assert host.get("role", "workstation") in ("workstation", "inference"), "Invalid fleet role"
+            if host.get("role") == "inference":
+                endpoints = host.get("inference_endpoints", {})
+                assert set(endpoints) == {"llama.service", "bonsai.service"}, "Missing inference service endpoints"
+                assert all(re.fullmatch(r"https?://[a-z0-9.-]+(?::[0-9]+)?", url) for url in endpoints.values()), "Invalid inference URL"
     print(f"BASELINE pins and {count} executable syntax checks passed")
 
 

@@ -52,7 +52,7 @@ The MacBook T3 Nous instance uses `~/.local/bin/opencode-baseline` (mise-pinned
 OpenCode) and managed `~/.config/opencode/opencode.json`. Qwen and Bonsai
 passed real file-read tool tests; Bonsai also passed in T3. Nemotron initially failed tool calls, but subsequently passed a two-function
 repair with explicit reasoning/tool metadata and build/plan sampling at
-temperature 0.6, top-p 0.95. Ornith 1.5 9B is the provisional coding default;
+temperature 0.6, top-p 0.95. Ornith 1.5 9B is the first optional coding recommendation;
 Gemma 4 12B and Qwen 3.5 4B are also installed. All stock models use 16K
 context, and Bonsai retains 32K. These are small screening tests, not a
 sustained agent benchmark. Selecting a T3 model does not switch
@@ -67,3 +67,18 @@ Expanded results and established-benchmark research:
 `~/src/boilerplate/docs/nous-model-evaluation-2026-09-19.md`. DeepSeek V4.1 Flash
 is too large for practical local inference on this host. Keep the distinction
 between model screening and verified project performance.
+
+Local models are opt-in: the managed OpenCode config does not force a model,
+restrict other providers or tune global build/plan agents. `nous-worker`
+explicitly launches Ornith/Nemotron/Gemma/Bonsai with per-process settings,
+JSON events and resumable session IDs. This works from a T3 terminal-capable
+main thread as a subprocess; it is not native Codex `spawn_agent` support.
+Read `docs/nous-inference.md` for invocation and tested limits. Do not add
+automatic local delegation or change other harness defaults merely because
+these models are available.
+
+Worker readiness check: Ornith, Gemma and Bonsai passed fresh file-read/write
+tasks launched from the active T3 main thread; Ornith also passed same-session
+follow-up. Nemotron regressed to announcing a read without calling a tool,
+so it remains experimental. Prefer the three tested options for bounded
+worker tasks; this is operational readiness, not a general coding guarantee.

@@ -160,16 +160,18 @@ permanent incompatibility. A final isolated-config Ornith rerun also passed
 in 19.4 seconds. This combined change does not isolate whether
 metadata, sampling or ordinary run variance caused the improvement.
 
-Ornith is the provisional OpenCode default for bounded coding work: it passed
+Ornith is the first optional recommendation for bounded coding work: it passed
 both coding profiles and is faster than the larger passing candidates here.
 Bonsai remains an alternative with a separate backend; Gemma is available for
-comparison on the stock backend. Keep Nemotron as a now-working candidate.
+comparison on the stock backend. Nemotron passed that coding fixture, but failed the later fresh worker tool
+check; keep it experimental rather than treating that single pass as readiness.
 Qwen 4B is experimental: fastest decoding did not yield the best verified
 result. No model is established as a Luna replacement by these tests.
 
-The managed OpenCode config adds all three downloaded models, explicit
-reasoning/tool metadata, build/plan temperature 0.6 and top-p 0.95, and a 4K
-compaction reserve. Thinking stays enabled by the runtime default. Context
+The managed OpenCode config adds all three downloaded models and explicit
+reasoning/tool metadata. After the opt-in review, temperature 0.6, top-p 0.95
+and the 4K compaction reserve apply only through the explicit `nous-worker`
+launcher; no global model, provider allowlist or build/plan override remains. Thinking stays enabled by the runtime default. Context
 remains 16K for stock models and 32K for Bonsai. Workstation tools/builds stay
 off nous. Switching models within stock llama.cpp is automatic; switching
 between stock and Bonsai still uses `ai-stack` and interrupts active requests.

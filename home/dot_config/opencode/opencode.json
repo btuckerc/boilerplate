@@ -2,11 +2,6 @@
   "$schema": "https://opencode.ai/config.json",
   "autoupdate": false,
   "share": "disabled",
-  "enabled_providers": [
-    "nous",
-    "nous-bonsai"
-  ],
-  "model": "nous/Ornith-1.5-9B-Q5_K_M",
   "provider": {
     "nous": {
       "npm": "@ai-sdk/openai-compatible",
@@ -16,7 +11,7 @@
       },
       "models": {
         "Nemotron-9B-OpenCode.Q6_K": {
-          "name": "Nous Nemotron 9B",
+          "name": "Nous Nemotron 9B (experimental tools)",
           "limit": {
             "context": 16384,
             "output": 4096
@@ -81,20 +76,5 @@
         }
       }
     }
-  },
-  "agent": {
-    "build": {
-      "temperature": 0.6,
-      "top_p": 0.95
-    },
-    "plan": {
-      "temperature": 0.6,
-      "top_p": 0.95
-    }
-  },
-  "compaction": {
-    "auto": true,
-    "prune": true,
-    "reserved": 4096
   }
 }

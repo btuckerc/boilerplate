@@ -94,8 +94,8 @@ For work inside T3, use its OpenCode backend with a separate nous provider over 
 Completions. [OpenCode documents llama.cpp and custom providers](https://opencode.ai/docs/providers#llamacpp).
 OpenCode 1.18.31 is now pinned in mise and launched through
 `~/.local/bin/opencode-baseline`. Its managed config is
-`~/.config/opencode/opencode.json`; it enables only the two local providers,
-with Ornith 1.5 9B as the provisional OpenCode default. T3's enabled **Nous**
+`~/.config/opencode/opencode.json`; it registers the two local providers without restricting other providers or
+forcing a default model. T3's enabled **Nous**
 OpenCode instance uses that wrapper; its config includes Ornith, Gemma 4 12B,
 Qwen 3.5 9B/4B, Nemotron and Bonsai. Cloud defaults for
 other T3 instances are unchanged; T3 title generation can still use its
@@ -249,5 +249,53 @@ automation allowlist.
 See [the September 19 report](nous-model-evaluation-2026-09-19.md) for six-model
 screening, verified download hashes, community settings, Nemotron recovery,
 DeepSeek feasibility, and the proposed Harbor/SWE-bench/BFCL admission pilot.
-The small local tests support a provisional bounded-worker default, not a
+The small local tests support optional bounded workers, not a
 general intelligence ranking or a replacement for Luna.
+
+## Optional workers from a T3 main thread
+
+The current Codex main thread's native `spawn_agent` tool exposes cloud model
+IDs only. It cannot directly select a nous model. A main thread with terminal
+access can explicitly launch a separate OpenCode worker, collect its JSON
+events/session ID, inspect its edits, and resume the same session:
+
+```sh
+nous-worker --model ornith --dir /absolute/task-directory 'Read the task and make the bounded edit.'
+nous-worker --model ornith --dir /absolute/task-directory --session SESSION_ID 'Apply this follow-up.'
+```
+
+Supported aliases: `ornith`, `nemotron`, `gemma`, `bonsai`. `--read-only`
+disables edits. By default the worker can read/search/edit files; shell, web
+and further delegation tools are denied. These are OpenCode permissions, not
+an OS filesystem sandbox. Use a task checkout/directory and have the parent
+run required builds/tests. Project instructions still apply. Prompt text can
+come from stdin. The command neither chooses models for other sessions nor
+switches inference services; select `ai-stack bonsai` explicitly for Bonsai
+and restore `ai-stack llama` for the other three. Serialize inference work.
+
+This is a supervised subprocess worker, not a native Codex collaboration
+child or a claimed T3 subagent-tree integration. No global delegation rule
+or automatic preference for local models was added. The Nous picker remains
+an optional direct OpenCode route; existing T3 threads can retain their model.
+
+Verified from the active T3 main thread on 2026-09-19 using `nous-worker`:
+
+| Model | Fresh file-tool task | Wall time | Follow-up |
+| --- | --- | ---: | --- |
+| Ornith 1.5 9B | Pass: read input, correct grounded choice, wrote result | 8.26 s | Same session, changed input, correct revised result in 6.93 s |
+| Gemma 4 12B | Pass: read input and wrote correct result | 34.43 s | Not tested |
+| Bonsai 2 27B | Pass: read input and wrote correct result | 16.68 s | Not tested |
+| Nemotron 9B | Failed: announced read but called no tools | 54.58 s | Not tested |
+
+Each input contained a fresh nonce, stale and illegal candidates, and a cost
+tie. The parent independently checked the output file against the expected
+nonce and selected ID. This verifies real delegation/file tools, not broad
+coding quality. Earlier two-function coding tests complement these checks.
+Ornith, Gemma and Bonsai are usable optional bounded workers; Nemotron remains
+experimental despite its earlier repair success. Qwen models remain picker
+options but are not promoted into this ready-worker shortlist.
+
+Local raw evidence: `~/.local/state/nous-workers/smoke-20260919-191724/` and
+`smoke-20260919-191927/` (inputs, output files, JSON events and session IDs).
+Ornith's tested session was `ses_f440a2c81ffeuiK16M0bXuWDon`. Stock llama.cpp
+was restored after the Bonsai check.

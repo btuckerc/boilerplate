@@ -260,8 +260,8 @@ access can explicitly launch a separate OpenCode worker, collect its JSON
 events/session ID, inspect its edits, and resume the same session:
 
 ```sh
-nous-worker --model ornith --dir /absolute/task-directory 'Read the task and make the bounded edit.'
-nous-worker --model ornith --dir /absolute/task-directory --session SESSION_ID 'Apply this follow-up.'
+nous-worker --dir /absolute/task-directory 'Read the task and make the bounded edit.'
+nous-worker --dir /absolute/task-directory --session SESSION_ID 'Apply this follow-up.'
 ```
 
 Supported aliases: `ornith`, `nemotron`, `gemma`, `bonsai`. `--read-only`
@@ -274,8 +274,10 @@ switches inference services; select `ai-stack bonsai` explicitly for Bonsai
 and restore `ai-stack llama` for the other three. Serialize inference work.
 
 This is a supervised subprocess worker, not a native Codex collaboration
-child or a claimed T3 subagent-tree integration. No global delegation rule
-or automatic preference for local models was added. The Nous picker remains
+child or a claimed T3 subagent-tree integration. No global delegation quota
+is imposed. The small `local-workers` skill makes the recommendation
+discoverable across threads and permits useful bounded delegation without
+a quota. Ornith is the launcher default, not the main-thread default. The Nous picker remains
 an optional direct OpenCode route; existing T3 threads can retain their model.
 
 Verified from the active T3 main thread on 2026-09-19 using `nous-worker`:

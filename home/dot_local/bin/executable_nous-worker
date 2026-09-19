@@ -15,7 +15,7 @@ MODELS = {
 }
 
 parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument("--model", choices=MODELS, required=True, help="Explicit model choice; Nemotron tool use remains experimental")
+parser.add_argument("--model", choices=MODELS, default="ornith", help="Local worker model (default: ornith); Nemotron tool use remains experimental")
 parser.add_argument("--dir", type=Path, required=True)
 parser.add_argument("--session", help="Resume the exact worker session ID")
 parser.add_argument("--read-only", action="store_true")

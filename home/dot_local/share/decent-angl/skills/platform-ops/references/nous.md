@@ -73,9 +73,9 @@ restrict other providers or tune global build/plan agents. `nous-worker`
 explicitly launches Ornith/Nemotron/Gemma/Bonsai with per-process settings,
 JSON events and resumable session IDs. This works from a T3 terminal-capable
 main thread as a subprocess; it is not native Codex `spawn_agent` support.
-Read `docs/nous-inference.md` for invocation and tested limits. Do not add
-automatic local delegation or change other harness defaults merely because
-these models are available.
+Read `docs/nous-inference.md` for invocation and tested limits. The `local-workers` skill carries the concise cross-thread recommendation:
+use a bounded worker when useful, with Ornith as the launcher default. Do not
+change main-thread model defaults merely because local models are available.
 
 Worker readiness check: Ornith, Gemma and Bonsai passed fresh file-read/write
 tasks launched from the active T3 main thread; Ornith also passed same-session

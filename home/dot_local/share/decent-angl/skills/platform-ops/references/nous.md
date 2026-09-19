@@ -27,10 +27,11 @@ the router. Re-query `/v1/models` for current names. Both were configured for
 Serialize initial experiments and group by model to avoid repeated swaps.
 Do not infer usable context from the model's larger training context.
 
-The host manager is `/home/tux/ai-stack.sh`: use `ssh nous '~/ai-stack.sh status'`
-or `doctor`, and `ssh -t nous '~/ai-stack.sh'` for its menu. The bare
-`ai-stack` command resolves to an older `/usr/local/sbin/ai-stack`; do not
-assume they are synchronized. Use the newer script for explicit switches.
+The host manager is `/home/tux/ai-stack.sh`; `/usr/local/sbin/ai-stack` is a
+symlink to it (verified 2026-09-19). Use `ssh nous 'ai-stack status'` or
+`doctor`, and `ssh -t nous ai-stack` for its menu. Edit the home script;
+do not install a second copy. The old installed script was backed up at
+`~/.local/state/ai-stack/backups/ai-stack-installed-20260919` on nous.
 
 An alternative `bonsai.service` serves Bonsai 2 27B at port 8081 when started;
 it conflicts with `llama.service`. On inspection it was inactive but both

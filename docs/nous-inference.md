@@ -27,12 +27,16 @@ inference or load models, and is not a correctness/throughput benchmark.
 
 ## Existing AI Stack manager
 
-Use `ssh -t nous '~/ai-stack.sh'` for the existing menu, or
-`ssh nous '~/ai-stack.sh status'` / `doctor` for inspection. The newer
-`/home/tux/ai-stack.sh` (1,363 lines) has service switching, health waits,
-model browsing/downloads, benchmarks and diagnostics. The installed bare
-`ai-stack` command resolves to an older `/usr/local/sbin/ai-stack` (212 lines).
-Do not mistake the older executable for the maintained script.
+Use `ssh -t nous ai-stack` for the existing menu, or
+`ssh nous 'ai-stack status'` / `doctor` for inspection. The maintained
+`/home/tux/ai-stack.sh` has service switching, health waits, model
+browsing/downloads, benchmarks and diagnostics. On 2026-09-19 the stale
+installed copy was replaced with a symlink:
+`/usr/local/sbin/ai-stack -> /home/tux/ai-stack.sh`. Syntax, help, resolved
+path, identical contents and live status were verified. Future edits to the
+home script immediately reach the command; do not reinstall a separate copy.
+The previous executable is backed up on nous at
+`~/.local/state/ai-stack/backups/ai-stack-installed-20260919`.
 
 The manager switches with `systemctl stop/start` and waits for HTTP health.
 Its `llama`/`bonsai` commands do not persist a boot selection via
@@ -83,9 +87,9 @@ Codex adapter still launches `codex app-server`, so it inherits the failure.
 [T3 provider source](https://github.com/pingdotgg/t3code/blob/main/apps/server/src/provider/Layers/CodexProvider.ts)
 is the upstream reference; the installed application was also inspected.
 
-## Recommended coding-agent route
+## T3 coding-agent route
 
-Use T3's OpenCode backend with a separate nous provider over Chat
+For work inside T3, use its OpenCode backend with a separate nous provider over Chat
 Completions. [OpenCode documents llama.cpp and custom providers](https://opencode.ai/docs/providers#llamacpp).
 OpenCode was not installed on this Mac and its T3 backend was disabled at
 inspection; this route is a recommendation, not an end-to-end tested setup.
@@ -163,7 +167,52 @@ freshness, bounds, independent receipts and save lineage. Report failed and
 inconclusive cases. Serialize requests initially and bound each run; one
 GPU slot is not a parallel experiment farm.
 
-Use Nemotron first as an inexpensive experimental planner/coding helper,
-with Luna retained for harder reasoning and review until measured results
-justify a change. This evaluation made no firmware edits, flashes, live
+Use local models as experimental planners/coding helpers, with Luna retained
+for harder reasoning and review until measured results justify a change.
+The OMP smoke below favors starting with Qwen; Nemotron needs further
+tool-use validation. This evaluation made no firmware edits, flashes, live
 campaign changes or cloud model calls.
+
+## Harness comparison after OMP tool-round-trip testing
+
+For the existing workstation fleet, prefer a lean OMP configuration first.
+OMP 18.1.5 is already pinned and maintained here and accepts a no-auth local
+`openai-completions` provider. Keep the 16K context explicit, initially expose
+only the tools the task needs, and disable background/title/model-role calls
+that could select cloud providers during a local-only evaluation.
+
+A temporary isolated OMP agent directory was tested on 2026-09-19 with only
+`read` enabled, no skills/extensions/rules/title generation or saved session.
+The model had to read an unseen file and return its validation word:
+
+- Qwen3.5-9B-Q5_K_M: emitted the read call, consumed the actual tool result,
+  and returned the correct word. First response took 3.15 seconds including
+  model loading; the final response after the tool result took 0.19 seconds.
+- Nemotron-9B-OpenCode.Q6_K: emitted no tool call, claimed to have read the
+  file, and invented the wrong word. Process exit code was zero; the
+  behavioral test failed. The earlier forced-function smoke did not expose
+  this distinction. Do not treat transport success as agent success.
+
+This is one sample per model, not a quality ranking or sustained coding
+benchmark. No production OMP configuration was changed. The next trial
+should use Qwen with bounded read/edit/test tasks before adopting either
+model for unattended coding.
+
+[OMP model configuration](https://github.com/can1357/oh-my-pi/blob/main/docs/models.md)
+provides Chat Completions compatibility flags. The tested temporary provider
+used `auth: none`, `contextWindow: 16384`, `maxTokens: 2048`, and compatibility
+settings `supportsDeveloperRole: false`, `supportsReasoningEffort: false`,
+`supportsStore: false`, `maxTokensField: max_tokens`.
+
+[Pi](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/README.md)
+is the alternative for a minimal custom coding/experiment worker: four core
+tools, JSON/RPC modes and an embedding SDK. Its current upstream also has
+[llama.cpp router support](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/llama-cpp.md).
+It was not installed or tested here. A smaller default tool surface is useful
+for this 16K deployment, but does not establish better model accuracy.
+
+OpenCode remains the practical choice when T3 integration is the deciding
+factor. It was not tested end-to-end here. For Pokémon gameplay decisions,
+keep using the existing bounded host experiment runtime and add the local
+provider there; a general-purpose coding harness should not replace the
+runtime's gameplay admission, effect verification and save handling.

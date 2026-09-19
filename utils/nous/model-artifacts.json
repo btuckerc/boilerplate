@@ -1,0 +1,28 @@
+{
+  "date": "2026-09-19",
+  "host": "nous",
+  "models": [
+    {
+      "repository": "ggml-org/gemma-4-12B-it-GGUF",
+      "revision": "e3e681731089efaa3f0917336944ac64752db8ba",
+      "file": "gemma-4-12B-it-Q4_0.gguf",
+      "bytes": 7219673216,
+      "sha256": "3712b9bd32cae83a22f67ee7a4466d8d7a4f21646ac8a07d19bf9418e8767a70"
+    },
+    {
+      "repository": "ornith-ai/Ornith-1.5-9B-GGUF",
+      "revision": "abdd624b12ebf020b767fff532ff44fe552b28c3",
+      "file": "Ornith-1.5-9B-Q5_K_M.gguf",
+      "bytes": 6642544576,
+      "sha256": "e4d9634a3b6546a5c00a8680568fe1125f6c98c704ee51ae52ba07650fb4247d"
+    },
+    {
+      "repository": "unsloth/Qwen3.5-4B-GGUF",
+      "revision": "e87f176479d0855a907a41277aca2f8ee7a09523",
+      "file": "Qwen3.5-4B-Q5_K_M.gguf",
+      "bytes": 3143656608,
+      "sha256": "8814232b85594dcd46c50e5b8b29324a7efe9e746edbe8a3d1df3d3fce7aad39"
+    }
+  ],
+  "sha256_verified_on_host": true
+}

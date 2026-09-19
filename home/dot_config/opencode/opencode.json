@@ -6,7 +6,7 @@
     "nous",
     "nous-bonsai"
   ],
-  "model": "nous/Qwen3.5-9B-Q5_K_M",
+  "model": "nous/Ornith-1.5-9B-Q5_K_M",
   "provider": {
     "nous": {
       "npm": "@ai-sdk/openai-compatible",
@@ -20,14 +20,45 @@
           "limit": {
             "context": 16384,
             "output": 4096
-          }
+          },
+          "reasoning": true,
+          "tool_call": true
         },
         "Qwen3.5-9B-Q5_K_M": {
           "name": "Nous Qwen 3.5 9B",
           "limit": {
             "context": 16384,
             "output": 4096
-          }
+          },
+          "reasoning": true,
+          "tool_call": true
+        },
+        "Ornith-1.5-9B-Q5_K_M": {
+          "name": "Nous Ornith 1.5 9B",
+          "limit": {
+            "context": 16384,
+            "output": 4096
+          },
+          "reasoning": true,
+          "tool_call": true
+        },
+        "gemma-4-12B-it-Q4_0": {
+          "name": "Nous Gemma 4 12B",
+          "limit": {
+            "context": 16384,
+            "output": 4096
+          },
+          "reasoning": true,
+          "tool_call": true
+        },
+        "Qwen3.5-4B-Q5_K_M": {
+          "name": "Nous Qwen 3.5 4B (experimental)",
+          "limit": {
+            "context": 16384,
+            "output": 4096
+          },
+          "reasoning": true,
+          "tool_call": true
         }
       }
     },
@@ -44,9 +75,26 @@
           "limit": {
             "context": 32768,
             "output": 4096
-          }
+          },
+          "reasoning": true,
+          "tool_call": true
         }
       }
     }
+  },
+  "agent": {
+    "build": {
+      "temperature": 0.6,
+      "top_p": 0.95
+    },
+    "plan": {
+      "temperature": 0.6,
+      "top_p": 0.95
+    }
+  },
+  "compaction": {
+    "auto": true,
+    "prune": true,
+    "reserved": 4096
   }
 }

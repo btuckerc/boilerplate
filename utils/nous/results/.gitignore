@@ -1,0 +1,4 @@
+# Raw local model responses, temporary paths, and harness session logs stay local.
+*
+!.gitignore
+!summary.json

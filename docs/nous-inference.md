@@ -16,7 +16,7 @@ its existing RSA identity, without forwarding the SSH agent.
 | Service | llama.cpp b11046-60081bb2b, `llama.service`, enabled and active |
 | Network | Loopback server forwarded on port 8080 by Tailscale Serve, tailnet only |
 | API | `http://nous:8080/v1` |
-| Models | `Nemotron-9B-OpenCode.Q6_K`, `Qwen3.5-9B-Q5_K_M` |
+| Models | Nemotron 9B, Qwen 3.5 9B/4B, Ornith 1.5 9B, Gemma 4 12B (exact IDs in managed OpenCode config) |
 | Capacity | 16,384 tokens, one slot per model, one model loaded at a time |
 
 No failed systemd units were reported. SSH directory/key file permissions
@@ -48,8 +48,9 @@ requires ordinary sudo authentication; it is outside the narrow policy below.
 
 The new fleet probe accepts either active backend and checks the matching
 port. Bonsai 2 27B PQ2_0 and its Q8_0 multimodal projector are installed
-under `~/repos/Bonsai-demo/models`; together with the two router models,
-the manager counts four GGUF files (one is the projector, not a fourth LLM).
+under `~/repos/Bonsai-demo/models`; the initial manager inventory counted four
+GGUF files including a projector. Three additional stock models were installed
+during the expanded evaluation; the projector is not a separate LLM.
 Bonsai's service uses port 8081 and a 32K context with KV4. It passed OpenCode and T3 tool-round-trip tests below. Switching interrupts
 the other backend.
 
@@ -94,13 +95,14 @@ Completions. [OpenCode documents llama.cpp and custom providers](https://opencod
 OpenCode 1.18.31 is now pinned in mise and launched through
 `~/.local/bin/opencode-baseline`. Its managed config is
 `~/.config/opencode/opencode.json`; it enables only the two local providers,
-with Qwen as the OpenCode default. T3's enabled **Nous** OpenCode instance
-uses that wrapper and offers Qwen, Nemotron and Bonsai. Cloud defaults for
+with Ornith 1.5 9B as the provisional OpenCode default. T3's enabled **Nous**
+OpenCode instance uses that wrapper; its config includes Ornith, Gemma 4 12B,
+Qwen 3.5 9B/4B, Nemotron and Bonsai. Cloud defaults for
 other T3 instances are unchanged; T3 title generation can still use its
 configured cloud model.
 
 Select **Nous** in T3's model picker, then the desired model. The backend must
-already match: `ssh nous 'ai-stack llama'` serves Qwen/Nemotron, and
+already match: `ssh nous 'ai-stack llama'` serves Ornith/Gemma/Qwen/Nemotron, and
 `ssh nous 'ai-stack bonsai'` serves Bonsai. Choosing a model in T3 does not
 switch systemd services. Switching interrupts the other backend.
 
@@ -116,9 +118,9 @@ unseen validation word:
 
 Bonsai also passed an actual T3 conversation through the Nous instance:
 its activity showed the fixture read and it returned the correct word in
-16 seconds. Nemotron remains selectable for further model/template tuning,
-but is not validated for agent work. These are tool-round-trip checks,
-not sustained coding benchmarks. Bonsai was left active after testing.
+16 seconds. These initial Nemotron failures were superseded by the later community-profile
+repair test: it executed edits and passed all fixture checks. These are tool-round-trip checks,
+not sustained coding benchmarks. Stock llama.cpp was selected after the expanded evaluation.
 
 Keep repository tools and builds on the workstation. Start with narrow code
 edits, test generation and small experimental variants in disposable worktrees;
@@ -241,3 +243,11 @@ unrelated systemctl operation were denied without authentication. Normal
 Broader maintenance still requires ordinary sudo. To revoke the grant, remove
 this sudoers file using authenticated sudo; keep that operation outside the
 automation allowlist.
+
+## Expanded model and benchmark evaluation
+
+See [the September 19 report](nous-model-evaluation-2026-09-19.md) for six-model
+screening, verified download hashes, community settings, Nemotron recovery,
+DeepSeek feasibility, and the proposed Harbor/SWE-bench/BFCL admission pilot.
+The small local tests support a provisional bounded-worker default, not a
+general intelligence ranking or a replacement for Luna.

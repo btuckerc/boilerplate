@@ -50,11 +50,20 @@ account-level grant after SSH authentication, not a per-key sudo privilege.
 
 The MacBook T3 Nous instance uses `~/.local/bin/opencode-baseline` (mise-pinned
 OpenCode) and managed `~/.config/opencode/opencode.json`. Qwen and Bonsai
-passed real file-read tool tests; Bonsai also passed in T3. Nemotron failed
-both OpenCode attempts to call the tool. Selecting a T3 model does not switch
+passed real file-read tool tests; Bonsai also passed in T3. Nemotron initially failed tool calls, but subsequently passed a two-function
+repair with explicit reasoning/tool metadata and build/plan sampling at
+temperature 0.6, top-p 0.95. Ornith 1.5 9B is the provisional coding default;
+Gemma 4 12B and Qwen 3.5 4B are also installed. All stock models use 16K
+context, and Bonsai retains 32K. These are small screening tests, not a
+sustained agent benchmark. Selecting a T3 model does not switch
 the host service: select the matching backend explicitly before use.
 
 For tested harness compatibility, measured tool calls, and the Pokémon
 experiment integration plan, read
 `~/src/boilerplate/docs/nous-inference.md`. A responding `/v1/responses`
 endpoint alone does not establish Codex tool compatibility.
+
+Expanded results and established-benchmark research:
+`~/src/boilerplate/docs/nous-model-evaluation-2026-09-19.md`. DeepSeek V4.1 Flash
+is too large for practical local inference on this host. Keep the distinction
+between model screening and verified project performance.

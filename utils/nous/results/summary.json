@@ -1,0 +1,4369 @@
+{
+  "api": {
+    "bonsai-fast": {
+      "checks": 10,
+      "passed": 2,
+      "median_task_seconds": 0.7184813960047904,
+      "median_success_seconds": 1.1632377710047876,
+      "median_decode_tokens_per_second": 65.25149003041062,
+      "truncated_calls": 0,
+      "failures": [
+        {
+          "task": "intervals",
+          "repeat": 0,
+          "error": null,
+          "actual": {
+            "intervals": [
+              [
+                -3,
+                4
+              ],
+              [
+                8,
+                14
+              ],
+              [
+                15,
+                15
+              ]
+            ]
+          }
+        },
+        {
+          "task": "queue",
+          "repeat": 0,
+          "error": null,
+          "actual": {
+            "popped": [
+              "A",
+              "B",
+              "C",
+              null
+            ],
+            "remaining": []
+          }
+        },
+        {
+          "task": "schedule",
+          "repeat": 0,
+          "error": null,
+          "actual": {
+            "order": [
+              "A",
+              "B",
+              "C",
+              "D",
+              "E"
+            ],
+            "sum_completion": 25
+          }
+        },
+        {
+          "task": "evidence",
+          "repeat": 0,
+          "error": null,
+          "actual": {
+            "arrival_proven": false,
+            "next": "repeat_walk"
+          }
+        },
+        {
+          "task": "intervals",
+          "repeat": 1,
+          "error": null,
+          "actual": {
+            "intervals": [
+              [
+                -3,
+                4
+              ],
+              [
+                1,
+                14
+              ],
+              [
+                15,
+                15
+              ]
+            ]
+          }
+        },
+        {
+          "task": "queue",
+          "repeat": 1,
+          "error": null,
+          "actual": {
+            "popped": [
+              "B",
+              "C",
+              "D",
+              "E",
+              "A",
+              null,
+              null
+            ],
+            "remaining": []
+          }
+        },
+        {
+          "task": "schedule",
+          "repeat": 1,
+          "error": null,
+          "actual": {
+            "order": [
+              "A",
+              "C",
+              "B",
+              "D",
+              "E"
+            ],
+            "sum_completion": 22
+          }
+        },
+        {
+          "task": "evidence",
+          "repeat": 1,
+          "error": null,
+          "actual": {
+            "arrival_proven": false,
+            "next": "repeat_walk"
+          }
+        }
+      ]
+    },
+    "bonsai-long": {
+      "checks": 2,
+      "passed": 2,
+      "median_task_seconds": 5.052716166508617,
+      "median_success_seconds": 5.052716166508617,
+      "median_decode_tokens_per_second": 58.382039237574375,
+      "truncated_calls": 0,
+      "failures": []
+    },
+    "bonsai": {
+      "checks": 10,
+      "passed": 8,
+      "median_task_seconds": 5.592521000493434,
+      "median_success_seconds": 5.3327489375078585,
+      "median_decode_tokens_per_second": 66.24588700225321,
+      "truncated_calls": 0,
+      "failures": [
+        {
+          "task": "intervals",
+          "repeat": 0,
+          "error": null,
+          "actual": {
+            "intervals": [
+              [
+                -3,
+                6
+              ],
+              [
+                8,
+                12
+              ]
+            ]
+          }
+        },
+        {
+          "task": "intervals",
+          "repeat": 1,
+          "error": null,
+          "actual": {
+            "intervals": [
+              [
+                -3,
+                1
+              ],
+              [
+                1,
+                6
+              ],
+              [
+                8,
+                12
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    "gemma-fast": {
+      "checks": 10,
+      "passed": 4,
+      "median_task_seconds": 0.6434965005173581,
+      "median_success_seconds": 0.5571741875028238,
+      "median_decode_tokens_per_second": 71.07395619214559,
+      "truncated_calls": 0,
+      "failures": [
+        {
+          "task": "intervals",
+          "repeat": 0,
+          "error": null,
+          "actual": {
+            "intervals": [
+              [
+                -3,
+                12
+              ],
+              [
+                15,
+                15
+              ]
+            ]
+          }
+        },
+        {
+          "task": "queue",
+          "repeat": 0,
+          "error": null,
+          "actual": {
+            "popped": [
+              "A",
+              "B",
+              "C",
+              "D",
+              "null"
+            ],
+            "remaining": []
+          }
+        },
+        {
+          "task": "schedule",
+          "repeat": 0,
+          "error": "Expecting value: line 1 column 1 (char 0)",
+          "actual": null
+        },
+        {
+          "task": "intervals",
+          "repeat": 1,
+          "error": null,
+          "actual": {
+            "intervals": [
+              [
+                -3,
+                14
+              ],
+              [
+                15,
+                15
+              ]
+            ]
+          }
+        },
+        {
+          "task": "queue",
+          "repeat": 1,
+          "error": null,
+          "actual": {
+            "popped": [
+              "B",
+              "E",
+              "D",
+              "C",
+              null
+            ],
+            "remaining": []
+          }
+        },
+        {
+          "task": "schedule",
+          "repeat": 1,
+          "error": "Expecting value: line 1 column 1 (char 0)",
+          "actual": null
+        }
+      ]
+    },
+    "gemma-long": {
+      "checks": 2,
+      "passed": 2,
+      "median_task_seconds": 2.4777471454872284,
+      "median_success_seconds": 2.4777471454872284,
+      "median_decode_tokens_per_second": 66.71818581235419,
+      "truncated_calls": 0,
+      "failures": []
+    },
+    "gemma-recommended": {
+      "checks": 5,
+      "passed": 3,
+      "median_task_seconds": 8.846459958993364,
+      "median_success_seconds": 8.846459958993364,
+      "median_decode_tokens_per_second": 70.56872126541857,
+      "truncated_calls": 1,
+      "failures": [
+        {
+          "task": "schedule",
+          "repeat": 0,
+          "error": "Expecting value: line 1 column 1 (char 0)",
+          "actual": null
+        },
+        {
+          "task": "evidence",
+          "repeat": 0,
+          "error": null,
+          "actual": {
+            "arrival_proven": false,
+            "next": "repeat_walk"
+          }
+        }
+      ]
+    },
+    "gemma": {
+      "checks": 10,
+      "passed": 8,
+      "median_task_seconds": 8.593442333003622,
+      "median_success_seconds": 7.614123291496071,
+      "median_decode_tokens_per_second": 70.85419023192044,
+      "truncated_calls": 2,
+      "failures": [
+        {
+          "task": "schedule",
+          "repeat": 0,
+          "error": "Expecting value: line 1 column 1 (char 0)",
+          "actual": null
+        },
+        {
+          "task": "schedule",
+          "repeat": 1,
+          "error": "Expecting value: line 1 column 1 (char 0)",
+          "actual": null
+        }
+      ]
+    },
+    "nemotron-fast": {
+      "checks": 10,
+      "passed": 0,
+      "median_task_seconds": 0.589569958508946,
+      "median_success_seconds": null,
+      "median_decode_tokens_per_second": 84.98749090368261,
+      "truncated_calls": 0,
+      "failures": [
+        {
+          "task": "intervals",
+          "repeat": 0,
+          "error": null,
+          "actual": {
+            "intervals": [
+              [
+                -3,
+                -1
+              ],
+              [
+                1,
+                6
+              ],
+              [
+                8,
+                14
+              ],
+              [
+                15,
+                15
+              ]
+            ]
+          }
+        },
+        {
+          "task": "queue",
+          "repeat": 0,
+          "error": null,
+          "actual": {
+            "popped": [
+              null,
+              "A",
+              "B",
+              "C",
+              "D"
+            ],
+            "remaining": [
+              "E"
+            ]
+          }
+        },
+        {
+          "task": "schedule",
+          "repeat": 0,
+          "error": "Expecting value: line 1 column 1 (char 0)",
+          "actual": null
+        },
+        {
+          "task": "evidence",
+          "repeat": 0,
+          "error": null,
+          "actual": {
+            "arrival_proven": false,
+            "next": "repeat_walk"
+          }
+        },
+        {
+          "task": "tool_roundtrip",
+          "repeat": 0,
+          "error": "Expecting value: line 1 column 1 (char 0)",
+          "actual": null
+        },
+        {
+          "task": "intervals",
+          "repeat": 1,
+          "error": null,
+          "actual": {
+            "intervals": [
+              [
+                -3,
+                -1
+              ],
+              [
+                1,
+                6
+              ],
+              [
+                8,
+                14
+              ],
+              [
+                15,
+                15
+              ]
+            ]
+          }
+        },
+        {
+          "task": "queue",
+          "repeat": 1,
+          "error": null,
+          "actual": {
+            "popped": [
+              null,
+              "A",
+              "B",
+              "C"
+            ],
+            "remaining": [
+              "D"
+            ]
+          }
+        },
+        {
+          "task": "schedule",
+          "repeat": 1,
+          "error": "Expecting value: line 1 column 1 (char 0)",
+          "actual": null
+        },
+        {
+          "task": "evidence",
+          "repeat": 1,
+          "error": null,
+          "actual": {
+            "arrival_proven": false,
+            "next": "repeat_walk"
+          }
+        },
+        {
+          "task": "tool_roundtrip",
+          "repeat": 1,
+          "error": "Expected one real read_state({}) tool call",
+          "actual": null
+        }
+      ]
+    },
+    "nemotron": {
+      "checks": 10,
+      "passed": 6,
+      "median_task_seconds": 5.542534457999864,
+      "median_success_seconds": 4.390574624500005,
+      "median_decode_tokens_per_second": 84.76425160793583,
+      "truncated_calls": 3,
+      "failures": [
+        {
+          "task": "intervals",
+          "repeat": 0,
+          "error": "Expecting value: line 1 column 1 (char 0)",
+          "actual": null
+        },
+        {
+          "task": "schedule",
+          "repeat": 0,
+          "error": "Expecting value: line 1 column 1 (char 0)",
+          "actual": null
+        },
+        {
+          "task": "evidence",
+          "repeat": 0,
+          "error": null,
+          "actual": {
+            "arrival_proven": false,
+            "next": "repeat_walk"
+          }
+        },
+        {
+          "task": "schedule",
+          "repeat": 1,
+          "error": "Expecting value: line 1 column 1 (char 0)",
+          "actual": null
+        }
+      ]
+    },
+    "ornith-fast": {
+      "checks": 10,
+      "passed": 2,
+      "median_task_seconds": 0.4334538539987989,
+      "median_success_seconds": 0.5446616459958022,
+      "median_decode_tokens_per_second": 94.58376896907833,
+      "truncated_calls": 0,
+      "failures": [
+        {
+          "task": "intervals",
+          "repeat": 0,
+          "error": null,
+          "actual": {
+            "intervals": [
+              [
+                -3,
+                2
+              ],
+              [
+                4,
+                6
+              ],
+              [
+                8,
+                14
+              ],
+              [
+                15,
+                15
+              ]
+            ]
+          }
+        },
+        {
+          "task": "queue",
+          "repeat": 0,
+          "error": null,
+          "actual": {
+            "popped": [
+              null,
+              "A"
+            ],
+            "remaining": [
+              "B",
+              "C",
+              "D"
+            ]
+          }
+        },
+        {
+          "task": "schedule",
+          "repeat": 0,
+          "error": null,
+          "actual": {
+            "order": [
+              "A",
+              "B",
+              "C",
+              "D",
+              "E"
+            ],
+            "sum_completion": 25
+          }
+        },
+        {
+          "task": "evidence",
+          "repeat": 0,
+          "error": null,
+          "actual": {
+            "arrival_proven": false,
+            "next": "repeat_walk"
+          }
+        },
+        {
+          "task": "intervals",
+          "repeat": 1,
+          "error": null,
+          "actual": {
+            "intervals": [
+              [
+                -3,
+                2
+              ],
+              [
+                8,
+                14
+              ],
+              [
+                15,
+                15
+              ]
+            ]
+          }
+        },
+        {
+          "task": "queue",
+          "repeat": 1,
+          "error": null,
+          "actual": {
+            "popped": [
+              "B",
+              "C"
+            ],
+            "remaining": [
+              "D",
+              "E"
+            ]
+          }
+        },
+        {
+          "task": "schedule",
+          "repeat": 1,
+          "error": null,
+          "actual": {
+            "order": [
+              "A",
+              "B",
+              "C",
+              "D",
+              "E"
+            ],
+            "sum_completion": 25
+          }
+        },
+        {
+          "task": "evidence",
+          "repeat": 1,
+          "error": null,
+          "actual": {
+            "arrival_proven": false,
+            "next": "repeat_walk"
+          }
+        }
+      ]
+    },
+    "ornith-long": {
+      "checks": 2,
+      "passed": 2,
+      "median_task_seconds": 1.779926520990557,
+      "median_success_seconds": 1.779926520990557,
+      "median_decode_tokens_per_second": 90.19685345023845,
+      "truncated_calls": 0,
+      "failures": []
+    },
+    "ornith-recommended": {
+      "checks": 5,
+      "passed": 2,
+      "median_task_seconds": 12.465261207980802,
+      "median_success_seconds": 4.7659849994961405,
+      "median_decode_tokens_per_second": 88.67222660991361,
+      "truncated_calls": 1,
+      "failures": [
+        {
+          "task": "intervals",
+          "repeat": 0,
+          "error": "Expecting value: line 1 column 1 (char 0)",
+          "actual": null
+        },
+        {
+          "task": "queue",
+          "repeat": 0,
+          "error": "Expecting value: line 1 column 1 (char 0)",
+          "actual": null
+        },
+        {
+          "task": "schedule",
+          "repeat": 0,
+          "error": "Expecting value: line 1 column 1 (char 0)",
+          "actual": null
+        }
+      ]
+    },
+    "ornith": {
+      "checks": 10,
+      "passed": 7,
+      "median_task_seconds": 8.385690374998376,
+      "median_success_seconds": 7.536897833982948,
+      "median_decode_tokens_per_second": 94.59789915399936,
+      "truncated_calls": 3,
+      "failures": [
+        {
+          "task": "intervals",
+          "repeat": 0,
+          "error": "Expecting value: line 1 column 1 (char 0)",
+          "actual": null
+        },
+        {
+          "task": "schedule",
+          "repeat": 0,
+          "error": "Expecting value: line 1 column 1 (char 0)",
+          "actual": null
+        },
+        {
+          "task": "schedule",
+          "repeat": 1,
+          "error": "Expecting value: line 1 column 1 (char 0)",
+          "actual": null
+        }
+      ]
+    },
+    "qwen4b-fast": {
+      "checks": 10,
+      "passed": 0,
+      "median_task_seconds": 0.36033793749811593,
+      "median_success_seconds": null,
+      "median_decode_tokens_per_second": 139.42011691226037,
+      "truncated_calls": 0,
+      "failures": [
+        {
+          "task": "intervals",
+          "repeat": 0,
+          "error": null,
+          "actual": {
+            "intervals": [
+              [
+                -3,
+                1
+              ],
+              [
+                1,
+                4
+              ],
+              [
+                4,
+                6
+              ],
+              [
+                8,
+                12
+              ],
+              [
+                11,
+                14
+              ],
+              [
+                15,
+                15
+              ]
+            ]
+          }
+        },
+        {
+          "task": "queue",
+          "repeat": 0,
+          "error": null,
+          "actual": {
+            "popped": [
+              "B",
+              "A",
+              "null",
+              "null"
+            ],
+            "remaining": []
+          }
+        },
+        {
+          "task": "schedule",
+          "repeat": 0,
+          "error": null,
+          "actual": {
+            "order": [
+              "A",
+              "C",
+              "E",
+              "B",
+              "D"
+            ],
+            "sum_completion": 18
+          }
+        },
+        {
+          "task": "evidence",
+          "repeat": 0,
+          "error": null,
+          "actual": {
+            "arrival_proven": false,
+            "next": "repeat_walk"
+          }
+        },
+        {
+          "task": "tool_roundtrip",
+          "repeat": 0,
+          "error": "Expecting value: line 1 column 1 (char 0)",
+          "actual": null
+        },
+        {
+          "task": "intervals",
+          "repeat": 1,
+          "error": null,
+          "actual": {
+            "intervals": [
+              [
+                -3,
+                1
+              ],
+              [
+                1,
+                6
+              ],
+              [
+                8,
+                12
+              ],
+              [
+                11,
+                14
+              ],
+              [
+                15,
+                15
+              ]
+            ]
+          }
+        },
+        {
+          "task": "queue",
+          "repeat": 1,
+          "error": null,
+          "actual": {
+            "popped": [
+              null,
+              "A",
+              "B",
+              "C"
+            ],
+            "remaining": [
+              "E"
+            ]
+          }
+        },
+        {
+          "task": "schedule",
+          "repeat": 1,
+          "error": null,
+          "actual": {
+            "order": [
+              "A",
+              "C",
+              "D",
+              "B",
+              "E"
+            ],
+            "sum_completion": 32
+          }
+        },
+        {
+          "task": "evidence",
+          "repeat": 1,
+          "error": null,
+          "actual": {
+            "arrival_proven": false,
+            "next": "repeat_walk"
+          }
+        },
+        {
+          "task": "tool_roundtrip",
+          "repeat": 1,
+          "error": "Expecting value: line 1 column 1 (char 0)",
+          "actual": null
+        }
+      ]
+    },
+    "qwen4b-long": {
+      "checks": 2,
+      "passed": 2,
+      "median_task_seconds": 1.409934000010253,
+      "median_success_seconds": 1.409934000010253,
+      "median_decode_tokens_per_second": 130.80072180581504,
+      "truncated_calls": 0,
+      "failures": []
+    },
+    "qwen4b-recommended": {
+      "checks": 5,
+      "passed": 3,
+      "median_task_seconds": 29.97343524999451,
+      "median_success_seconds": 29.97343524999451,
+      "median_decode_tokens_per_second": 128.61418688381275,
+      "truncated_calls": 1,
+      "failures": [
+        {
+          "task": "schedule",
+          "repeat": 0,
+          "error": "Expecting value: line 1 column 1 (char 0)",
+          "actual": null
+        },
+        {
+          "task": "tool_roundtrip",
+          "repeat": 0,
+          "error": "Expecting value: line 1 column 1 (char 0)",
+          "actual": null
+        }
+      ]
+    },
+    "qwen4b": {
+      "checks": 10,
+      "passed": 1,
+      "median_task_seconds": 14.59762529200816,
+      "median_success_seconds": 14.682932499999879,
+      "median_decode_tokens_per_second": 141.4431134316476,
+      "truncated_calls": 7,
+      "failures": [
+        {
+          "task": "intervals",
+          "repeat": 0,
+          "error": "Expecting value: line 1 column 1 (char 0)",
+          "actual": null
+        },
+        {
+          "task": "schedule",
+          "repeat": 0,
+          "error": "Expecting value: line 1 column 1 (char 0)",
+          "actual": null
+        },
+        {
+          "task": "evidence",
+          "repeat": 0,
+          "error": "Expecting value: line 1 column 1 (char 0)",
+          "actual": null
+        },
+        {
+          "task": "tool_roundtrip",
+          "repeat": 0,
+          "error": "Expecting value: line 1 column 1 (char 0)",
+          "actual": null
+        },
+        {
+          "task": "intervals",
+          "repeat": 1,
+          "error": "Expecting value: line 1 column 1 (char 0)",
+          "actual": null
+        },
+        {
+          "task": "queue",
+          "repeat": 1,
+          "error": "Expecting value: line 1 column 1 (char 0)",
+          "actual": null
+        },
+        {
+          "task": "schedule",
+          "repeat": 1,
+          "error": "Expecting value: line 1 column 1 (char 0)",
+          "actual": null
+        },
+        {
+          "task": "evidence",
+          "repeat": 1,
+          "error": "Expecting value: line 1 column 1 (char 0)",
+          "actual": null
+        },
+        {
+          "task": "tool_roundtrip",
+          "repeat": 1,
+          "error": "Expecting value: line 1 column 1 (char 0)",
+          "actual": null
+        }
+      ]
+    },
+    "qwen9b-fast": {
+      "checks": 10,
+      "passed": 2,
+      "median_task_seconds": 0.5257638129987754,
+      "median_success_seconds": 0.46468664599524345,
+      "median_decode_tokens_per_second": 93.60002932507105,
+      "truncated_calls": 0,
+      "failures": [
+        {
+          "task": "intervals",
+          "repeat": 0,
+          "error": null,
+          "actual": {
+            "intervals": [
+              [
+                -3,
+                1
+              ],
+              [
+                1,
+                4
+              ],
+              [
+                4,
+                6
+              ],
+              [
+                8,
+                14
+              ],
+              [
+                15,
+                15
+              ]
+            ]
+          }
+        },
+        {
+          "task": "queue",
+          "repeat": 0,
+          "error": null,
+          "actual": {
+            "popped": [
+              "B",
+              "D",
+              "null",
+              "null"
+            ],
+            "remaining": [
+              "A"
+            ]
+          }
+        },
+        {
+          "task": "schedule",
+          "repeat": 0,
+          "error": null,
+          "actual": {
+            "order": [
+              "A",
+              "C",
+              "E",
+              "B",
+              "D"
+            ],
+            "sum_completion": 25
+          }
+        },
+        {
+          "task": "evidence",
+          "repeat": 0,
+          "error": null,
+          "actual": {
+            "arrival_proven": false,
+            "next": "repeat_walk"
+          }
+        },
+        {
+          "task": "tool_roundtrip",
+          "repeat": 0,
+          "error": "Expecting value: line 1 column 1 (char 0)",
+          "actual": null
+        },
+        {
+          "task": "intervals",
+          "repeat": 1,
+          "error": null,
+          "actual": {
+            "intervals": [
+              [
+                -3,
+                1
+              ],
+              [
+                1,
+                12
+              ],
+              [
+                15,
+                15
+              ]
+            ]
+          }
+        },
+        {
+          "task": "queue",
+          "repeat": 1,
+          "error": null,
+          "actual": {
+            "popped": [
+              "B",
+              "C",
+              "null",
+              "null"
+            ],
+            "remaining": [
+              "A",
+              "D",
+              "E"
+            ]
+          }
+        },
+        {
+          "task": "schedule",
+          "repeat": 1,
+          "error": null,
+          "actual": {
+            "order": [
+              "A",
+              "B",
+              "C",
+              "D",
+              "E"
+            ],
+            "sum_completion": 15
+          }
+        }
+      ]
+    },
+    "qwen9b-long": {
+      "checks": 2,
+      "passed": 2,
+      "median_task_seconds": 2.6384032710047904,
+      "median_success_seconds": 2.6384032710047904,
+      "median_decode_tokens_per_second": 87.75431626814928,
+      "truncated_calls": 0,
+      "failures": []
+    },
+    "qwen9b-quality": {
+      "checks": 5,
+      "passed": 3,
+      "median_task_seconds": 27.815133124997374,
+      "median_success_seconds": 27.815133124997374,
+      "median_decode_tokens_per_second": 93.53683008699716,
+      "truncated_calls": 1,
+      "failures": [
+        {
+          "task": "schedule",
+          "repeat": 0,
+          "error": "Expecting value: line 1 column 1 (char 0)",
+          "actual": null
+        },
+        {
+          "task": "tool_roundtrip",
+          "repeat": 0,
+          "error": "Expecting value: line 1 column 1 (char 0)",
+          "actual": null
+        }
+      ]
+    },
+    "qwen9b-recommended": {
+      "checks": 5,
+      "passed": 3,
+      "median_task_seconds": 35.947952709015226,
+      "median_success_seconds": 11.074721083015902,
+      "median_decode_tokens_per_second": 87.59633186937353,
+      "truncated_calls": 2,
+      "failures": [
+        {
+          "task": "intervals",
+          "repeat": 0,
+          "error": "Expecting value: line 1 column 1 (char 0)",
+          "actual": null
+        },
+        {
+          "task": "schedule",
+          "repeat": 0,
+          "error": "Expecting value: line 1 column 1 (char 0)",
+          "actual": null
+        }
+      ]
+    },
+    "qwen9b": {
+      "checks": 10,
+      "passed": 4,
+      "median_task_seconds": 22.018044271491817,
+      "median_success_seconds": 6.817070978999254,
+      "median_decode_tokens_per_second": 93.38440686366314,
+      "truncated_calls": 6,
+      "failures": [
+        {
+          "task": "intervals",
+          "repeat": 0,
+          "error": "Expecting value: line 1 column 1 (char 0)",
+          "actual": null
+        },
+        {
+          "task": "queue",
+          "repeat": 0,
+          "error": "Expecting value: line 1 column 1 (char 0)",
+          "actual": null
+        },
+        {
+          "task": "schedule",
+          "repeat": 0,
+          "error": "Expecting value: line 1 column 1 (char 0)",
+          "actual": null
+        },
+        {
+          "task": "intervals",
+          "repeat": 1,
+          "error": "Expecting value: line 1 column 1 (char 0)",
+          "actual": null
+        },
+        {
+          "task": "schedule",
+          "repeat": 1,
+          "error": "Expecting value: line 1 column 1 (char 0)",
+          "actual": null
+        },
+        {
+          "task": "evidence",
+          "repeat": 1,
+          "error": "Expecting value: line 1 column 1 (char 0)",
+          "actual": null
+        }
+      ]
+    }
+  },
+  "coding": {
+    "bonsai-coding": {
+      "seconds": 34.09747579100076,
+      "tools": [
+        "read",
+        "edit"
+      ],
+      "grade": {
+        "checks": 410,
+        "passed": 410,
+        "failures": []
+      },
+      "timeout": false,
+      "total_seconds": 34.09747579100076
+    },
+    "bonsai-community-coding": {
+      "seconds": 31.899578582990216,
+      "tools": [
+        "read",
+        "read",
+        "write"
+      ],
+      "grade": {
+        "checks": 410,
+        "passed": 410,
+        "failures": []
+      },
+      "timeout": false,
+      "total_seconds": 31.899578582990216
+    },
+    "bonsai-fast-coding": {
+      "seconds": 13.592157375009265,
+      "tools": [
+        "read",
+        "write"
+      ],
+      "grade": {
+        "checks": 410,
+        "passed": 410,
+        "failures": []
+      },
+      "timeout": false,
+      "total_seconds": 13.592157375009265
+    },
+    "gemma-coding": {
+      "seconds": 39.40038849998382,
+      "tools": [
+        "read",
+        "edit",
+        "read",
+        "edit"
+      ],
+      "grade": {
+        "checks": 410,
+        "passed": 410,
+        "failures": []
+      },
+      "timeout": false,
+      "total_seconds": 39.40038849998382
+    },
+    "gemma-community-coding": {
+      "seconds": 59.18146950000664,
+      "tools": [
+        "read",
+        "edit",
+        "edit"
+      ],
+      "grade": {
+        "checks": 410,
+        "passed": 410,
+        "failures": []
+      },
+      "timeout": false,
+      "total_seconds": 59.18146950000664
+    },
+    "gemma-fast-coding": {
+      "seconds": 10.725935583002865,
+      "tools": [
+        "read",
+        "edit"
+      ],
+      "grade": {
+        "checks": 410,
+        "passed": 296,
+        "failures": [
+          {
+            "function": "merge_windows",
+            "input": [
+              [
+                1,
+                2
+              ],
+              [
+                2,
+                3
+              ]
+            ],
+            "expected": [
+              [
+                1,
+                3
+              ]
+            ],
+            "actual": [
+              [
+                1,
+                3
+              ]
+            ],
+            "mutated": true
+          },
+          {
+            "function": "merge_windows",
+            "input": [
+              [
+                8,
+                12
+              ],
+              [
+                11,
+                14
+              ]
+            ],
+            "expected": [
+              [
+                8,
+                14
+              ]
+            ],
+            "actual": [
+              [
+                8,
+                14
+              ]
+            ],
+            "mutated": true
+          },
+          {
+            "function": "merge_windows",
+            "input": [
+              [
+                -9,
+                -8
+              ],
+              [
+                3,
+                -8
+              ],
+              [
+                7,
+                -10
+              ],
+              [
+                0,
+                8
+              ],
+              [
+                -10,
+                2
+              ],
+              [
+                -10,
+                -9
+              ],
+              [
+                5,
+                9
+              ],
+              [
+                -3,
+                7
+              ]
+            ],
+            "expected": [
+              [
+                -10,
+                9
+              ]
+            ],
+            "actual": [
+              [
+                -10,
+                9
+              ]
+            ],
+            "mutated": true
+          },
+          {
+            "function": "merge_windows",
+            "input": [
+              [
+                7,
+                7
+              ],
+              [
+                -5,
+                -6
+              ],
+              [
+                0,
+                5
+              ],
+              [
+                -7,
+                -7
+              ],
+              [
+                -8,
+                -10
+              ],
+              [
+                -10,
+                -4
+              ],
+              [
+                -2,
+                -6
+              ],
+              [
+                -8,
+                5
+              ]
+            ],
+            "expected": [
+              [
+                -10,
+                5
+              ]
+            ],
+            "actual": [
+              [
+                -10,
+                5
+              ]
+            ],
+            "mutated": true
+          },
+          {
+            "function": "merge_windows",
+            "input": [
+              [
+                -2,
+                -10
+              ],
+              [
+                3,
+                10
+              ],
+              [
+                3,
+                8
+              ],
+              [
+                6,
+                -3
+              ],
+              [
+                -7,
+                -8
+              ],
+              [
+                9,
+                -8
+              ],
+              [
+                -3,
+                -5
+              ],
+              [
+                -9,
+                4
+              ],
+              [
+                -3,
+                -5
+              ],
+              [
+                7,
+                8
+              ],
+              [
+                5,
+                3
+              ]
+            ],
+            "expected": [
+              [
+                -9,
+                10
+              ]
+            ],
+            "actual": [
+              [
+                -9,
+                10
+              ]
+            ],
+            "mutated": true
+          },
+          {
+            "function": "merge_windows",
+            "input": [
+              [
+                -7,
+                -8
+              ],
+              [
+                8,
+                9
+              ],
+              [
+                1,
+                7
+              ],
+              [
+                7,
+                -8
+              ],
+              [
+                1,
+                -8
+              ],
+              [
+                -5,
+                3
+              ]
+            ],
+            "expected": [
+              [
+                -5,
+                7
+              ],
+              [
+                8,
+                9
+              ]
+            ],
+            "actual": [
+              [
+                -5,
+                7
+              ],
+              [
+                8,
+                9
+              ]
+            ],
+            "mutated": true
+          },
+          {
+            "function": "merge_windows",
+            "input": [
+              [
+                -7,
+                10
+              ],
+              [
+                -4,
+                -1
+              ],
+              [
+                6,
+                -1
+              ],
+              [
+                -3,
+                -4
+              ],
+              [
+                -1,
+                2
+              ],
+              [
+                2,
+                4
+              ],
+              [
+                -2,
+                -8
+              ],
+              [
+                2,
+                7
+              ],
+              [
+                -10,
+                9
+              ],
+              [
+                4,
+                -10
+              ]
+            ],
+            "expected": [
+              [
+                -10,
+                10
+              ]
+            ],
+            "actual": [
+              [
+                -10,
+                10
+              ]
+            ],
+            "mutated": true
+          },
+          {
+            "function": "merge_windows",
+            "input": [
+              [
+                0,
+                0
+              ],
+              [
+                -9,
+                -8
+              ],
+              [
+                1,
+                2
+              ],
+              [
+                -3,
+                -3
+              ],
+              [
+                -9,
+                2
+              ],
+              [
+                -5,
+                2
+              ],
+              [
+                -3,
+                7
+              ],
+              [
+                -6,
+                10
+              ],
+              [
+                -2,
+                -10
+              ],
+              [
+                0,
+                7
+              ],
+              [
+                2,
+                -7
+              ],
+              [
+                -5,
+                -4
+              ],
+              [
+                -1,
+                6
+              ]
+            ],
+            "expected": [
+              [
+                -9,
+                10
+              ]
+            ],
+            "actual": [
+              [
+                -9,
+                10
+              ]
+            ],
+            "mutated": true
+          },
+          {
+            "function": "merge_windows",
+            "input": [
+              [
+                -1,
+                -5
+              ],
+              [
+                -5,
+                5
+              ],
+              [
+                -8,
+                -3
+              ],
+              [
+                -7,
+                8
+              ],
+              [
+                9,
+                2
+              ],
+              [
+                -3,
+                -7
+              ]
+            ],
+            "expected": [
+              [
+                -8,
+                8
+              ]
+            ],
+            "actual": [
+              [
+                -8,
+                8
+              ]
+            ],
+            "mutated": true
+          },
+          {
+            "function": "merge_windows",
+            "input": [
+              [
+                7,
+                1
+              ],
+              [
+                -9,
+                8
+              ],
+              [
+                -9,
+                -5
+              ]
+            ],
+            "expected": [
+              [
+                -9,
+                8
+              ]
+            ],
+            "actual": [
+              [
+                -9,
+                8
+              ]
+            ],
+            "mutated": true
+          }
+        ]
+      },
+      "timeout": false,
+      "total_seconds": 10.725935583002865
+    },
+    "nemotron-coding": {
+      "seconds": 20.86124962498434,
+      "tools": [
+        "read",
+        "glob",
+        "read",
+        "grep"
+      ],
+      "grade": {
+        "error": "min() iterable argument is empty"
+      },
+      "timeout": false,
+      "total_seconds": 20.86124962498434
+    },
+    "nemotron-community-coding": {
+      "seconds": 27.03192708399729,
+      "tools": [
+        "read",
+        "glob",
+        "read",
+        "edit",
+        "write",
+        "read"
+      ],
+      "grade": {
+        "checks": 410,
+        "passed": 410,
+        "failures": []
+      },
+      "timeout": false,
+      "total_seconds": 27.03192708399729
+    },
+    "nemotron-fast-coding": {
+      "seconds": 3.649761665990809,
+      "tools": [],
+      "grade": {
+        "error": "min() iterable argument is empty"
+      },
+      "timeout": false,
+      "total_seconds": 3.649761665990809
+    },
+    "ornith-coding": {
+      "seconds": 21.79316529200878,
+      "tools": [
+        "read",
+        "edit",
+        "edit",
+        "read"
+      ],
+      "grade": {
+        "checks": 410,
+        "passed": 410,
+        "failures": []
+      },
+      "timeout": false,
+      "total_seconds": 21.79316529200878
+    },
+    "ornith-community-coding": {
+      "seconds": 13.59142879198771,
+      "tools": [
+        "read",
+        "edit",
+        "edit",
+        "edit"
+      ],
+      "grade": {
+        "checks": 410,
+        "passed": 410,
+        "failures": []
+      },
+      "timeout": false,
+      "total_seconds": 13.59142879198771
+    },
+    "ornith-fast-coding": {
+      "seconds": 7.335585249995347,
+      "tools": [
+        "read",
+        "write"
+      ],
+      "grade": {
+        "error": "min() iterable argument is empty"
+      },
+      "timeout": false,
+      "total_seconds": 7.335585249995347
+    },
+    "ornith-isolated-community-coding": {
+      "seconds": 19.383288999990327,
+      "tools": [
+        "read",
+        "edit",
+        "read"
+      ],
+      "grade": {
+        "checks": 410,
+        "passed": 410,
+        "failures": []
+      },
+      "timeout": false,
+      "total_seconds": 19.383288999990327
+    },
+    "qwen4b-coding": {
+      "seconds": 6.598776917002397,
+      "tools": [
+        "read",
+        "write"
+      ],
+      "grade": {
+        "checks": 410,
+        "passed": 281,
+        "failures": [
+          {
+            "function": "merge_windows",
+            "input": [
+              [
+                4,
+                1
+              ],
+              [
+                2,
+                2
+              ]
+            ],
+            "expected": [],
+            "actual": [
+              [
+                2,
+                2
+              ]
+            ],
+            "mutated": false
+          },
+          {
+            "function": "merge_windows",
+            "input": [
+              [
+                -9,
+                -8
+              ],
+              [
+                3,
+                -8
+              ],
+              [
+                7,
+                -10
+              ],
+              [
+                0,
+                8
+              ],
+              [
+                -10,
+                2
+              ],
+              [
+                -10,
+                -9
+              ],
+              [
+                5,
+                9
+              ],
+              [
+                -3,
+                7
+              ]
+            ],
+            "expected": [
+              [
+                -10,
+                9
+              ]
+            ],
+            "actual": [
+              [
+                -9,
+                -8
+              ],
+              [
+                0,
+                9
+              ]
+            ],
+            "mutated": false
+          },
+          {
+            "function": "merge_windows",
+            "input": [
+              [
+                7,
+                7
+              ],
+              [
+                -5,
+                -6
+              ],
+              [
+                0,
+                5
+              ],
+              [
+                -7,
+                -7
+              ],
+              [
+                -8,
+                -10
+              ],
+              [
+                -10,
+                -4
+              ],
+              [
+                -2,
+                -6
+              ],
+              [
+                -8,
+                5
+              ]
+            ],
+            "expected": [
+              [
+                -10,
+                5
+              ]
+            ],
+            "actual": [
+              [
+                7,
+                7
+              ]
+            ],
+            "mutated": false
+          },
+          {
+            "function": "merge_windows",
+            "input": [
+              [
+                -2,
+                -10
+              ],
+              [
+                3,
+                10
+              ],
+              [
+                3,
+                8
+              ],
+              [
+                6,
+                -3
+              ],
+              [
+                -7,
+                -8
+              ],
+              [
+                9,
+                -8
+              ],
+              [
+                -3,
+                -5
+              ],
+              [
+                -9,
+                4
+              ],
+              [
+                -3,
+                -5
+              ],
+              [
+                7,
+                8
+              ],
+              [
+                5,
+                3
+              ]
+            ],
+            "expected": [
+              [
+                -9,
+                10
+              ]
+            ],
+            "actual": [
+              [
+                3,
+                10
+              ]
+            ],
+            "mutated": false
+          },
+          {
+            "function": "merge_windows",
+            "input": [
+              [
+                7,
+                -9
+              ],
+              [
+                7,
+                8
+              ],
+              [
+                -1,
+                -5
+              ],
+              [
+                -5,
+                4
+              ],
+              [
+                -9,
+                9
+              ]
+            ],
+            "expected": [
+              [
+                -9,
+                9
+              ]
+            ],
+            "actual": [
+              [
+                7,
+                9
+              ]
+            ],
+            "mutated": false
+          },
+          {
+            "function": "merge_windows",
+            "input": [
+              [
+                -7,
+                -8
+              ],
+              [
+                8,
+                9
+              ],
+              [
+                1,
+                7
+              ],
+              [
+                7,
+                -8
+              ],
+              [
+                1,
+                -8
+              ],
+              [
+                -5,
+                3
+              ]
+            ],
+            "expected": [
+              [
+                -5,
+                7
+              ],
+              [
+                8,
+                9
+              ]
+            ],
+            "actual": [
+              [
+                8,
+                9
+              ]
+            ],
+            "mutated": false
+          },
+          {
+            "function": "merge_windows",
+            "input": [
+              [
+                -1,
+                7
+              ],
+              [
+                2,
+                5
+              ],
+              [
+                -4,
+                -4
+              ],
+              [
+                -8,
+                7
+              ]
+            ],
+            "expected": [
+              [
+                -8,
+                7
+              ]
+            ],
+            "actual": [
+              [
+                -1,
+                7
+              ]
+            ],
+            "mutated": false
+          },
+          {
+            "function": "merge_windows",
+            "input": [
+              [
+                -7,
+                10
+              ],
+              [
+                -4,
+                -1
+              ],
+              [
+                6,
+                -1
+              ],
+              [
+                -3,
+                -4
+              ],
+              [
+                -1,
+                2
+              ],
+              [
+                2,
+                4
+              ],
+              [
+                -2,
+                -8
+              ],
+              [
+                2,
+                7
+              ],
+              [
+                -10,
+                9
+              ],
+              [
+                4,
+                -10
+              ]
+            ],
+            "expected": [
+              [
+                -10,
+                10
+              ]
+            ],
+            "actual": [
+              [
+                -7,
+                10
+              ]
+            ],
+            "mutated": false
+          },
+          {
+            "function": "merge_windows",
+            "input": [
+              [
+                0,
+                0
+              ],
+              [
+                -9,
+                -8
+              ],
+              [
+                1,
+                2
+              ],
+              [
+                -3,
+                -3
+              ],
+              [
+                -9,
+                2
+              ],
+              [
+                -5,
+                2
+              ],
+              [
+                -3,
+                7
+              ],
+              [
+                -6,
+                10
+              ],
+              [
+                -2,
+                -10
+              ],
+              [
+                0,
+                7
+              ],
+              [
+                2,
+                -7
+              ],
+              [
+                -5,
+                -4
+              ],
+              [
+                -1,
+                6
+              ]
+            ],
+            "expected": [
+              [
+                -9,
+                10
+              ]
+            ],
+            "actual": [
+              [
+                0,
+                0
+              ],
+              [
+                1,
+                10
+              ]
+            ],
+            "mutated": false
+          },
+          {
+            "function": "merge_windows",
+            "input": [
+              [
+                -1,
+                -5
+              ],
+              [
+                -5,
+                5
+              ],
+              [
+                -8,
+                -3
+              ],
+              [
+                -7,
+                8
+              ],
+              [
+                9,
+                2
+              ],
+              [
+                -3,
+                -7
+              ]
+            ],
+            "expected": [
+              [
+                -8,
+                8
+              ]
+            ],
+            "actual": [
+              [
+                -5,
+                8
+              ]
+            ],
+            "mutated": false
+          }
+        ]
+      },
+      "timeout": false,
+      "total_seconds": 6.598776917002397
+    },
+    "qwen4b-fast-coding": {
+      "seconds": 6.384327582985861,
+      "tools": [
+        "read",
+        "edit",
+        "edit"
+      ],
+      "grade": {
+        "checks": 410,
+        "passed": 393,
+        "failures": [
+          {
+            "function": "merge_windows",
+            "input": [
+              [
+                4,
+                1
+              ],
+              [
+                2,
+                2
+              ]
+            ],
+            "expected": [],
+            "actual": [
+              [
+                2,
+                2
+              ]
+            ],
+            "mutated": false
+          },
+          {
+            "function": "merge_windows",
+            "input": [
+              [
+                7,
+                7
+              ],
+              [
+                -5,
+                -6
+              ],
+              [
+                0,
+                5
+              ],
+              [
+                -7,
+                -7
+              ],
+              [
+                -8,
+                -10
+              ],
+              [
+                -10,
+                -4
+              ],
+              [
+                -2,
+                -6
+              ],
+              [
+                -8,
+                5
+              ]
+            ],
+            "expected": [
+              [
+                -10,
+                5
+              ]
+            ],
+            "actual": [
+              [
+                -10,
+                5
+              ],
+              [
+                7,
+                7
+              ]
+            ],
+            "mutated": false
+          },
+          {
+            "function": "merge_windows",
+            "input": [
+              [
+                0,
+                -3
+              ],
+              [
+                10,
+                -7
+              ],
+              [
+                0,
+                6
+              ],
+              [
+                -2,
+                10
+              ],
+              [
+                -1,
+                -8
+              ],
+              [
+                1,
+                3
+              ],
+              [
+                -8,
+                -8
+              ],
+              [
+                1,
+                7
+              ],
+              [
+                9,
+                6
+              ]
+            ],
+            "expected": [
+              [
+                -2,
+                10
+              ]
+            ],
+            "actual": [
+              [
+                -8,
+                -8
+              ],
+              [
+                -2,
+                10
+              ]
+            ],
+            "mutated": false
+          },
+          {
+            "function": "merge_windows",
+            "input": [
+              [
+                5,
+                4
+              ],
+              [
+                -1,
+                2
+              ],
+              [
+                8,
+                0
+              ],
+              [
+                -3,
+                -3
+              ],
+              [
+                1,
+                6
+              ],
+              [
+                4,
+                -3
+              ],
+              [
+                3,
+                9
+              ],
+              [
+                -9,
+                -4
+              ],
+              [
+                10,
+                7
+              ],
+              [
+                10,
+                0
+              ]
+            ],
+            "expected": [
+              [
+                -9,
+                -4
+              ],
+              [
+                -1,
+                9
+              ]
+            ],
+            "actual": [
+              [
+                -9,
+                -4
+              ],
+              [
+                -3,
+                -3
+              ],
+              [
+                -1,
+                9
+              ]
+            ],
+            "mutated": false
+          },
+          {
+            "function": "merge_windows",
+            "input": [
+              [
+                4,
+                5
+              ],
+              [
+                -1,
+                -1
+              ],
+              [
+                1,
+                -10
+              ],
+              [
+                0,
+                -10
+              ],
+              [
+                1,
+                1
+              ],
+              [
+                -1,
+                0
+              ],
+              [
+                10,
+                1
+              ],
+              [
+                -1,
+                -2
+              ],
+              [
+                4,
+                7
+              ],
+              [
+                -9,
+                -3
+              ],
+              [
+                7,
+                2
+              ],
+              [
+                3,
+                0
+              ],
+              [
+                7,
+                3
+              ]
+            ],
+            "expected": [
+              [
+                -9,
+                -3
+              ],
+              [
+                -1,
+                0
+              ],
+              [
+                4,
+                7
+              ]
+            ],
+            "actual": [
+              [
+                -9,
+                -3
+              ],
+              [
+                -1,
+                0
+              ],
+              [
+                1,
+                1
+              ],
+              [
+                4,
+                7
+              ]
+            ],
+            "mutated": false
+          },
+          {
+            "function": "merge_windows",
+            "input": [
+              [
+                -7,
+                -3
+              ],
+              [
+                10,
+                7
+              ],
+              [
+                2,
+                2
+              ],
+              [
+                1,
+                -2
+              ],
+              [
+                -9,
+                1
+              ],
+              [
+                8,
+                0
+              ]
+            ],
+            "expected": [
+              [
+                -9,
+                1
+              ]
+            ],
+            "actual": [
+              [
+                -9,
+                1
+              ],
+              [
+                2,
+                2
+              ]
+            ],
+            "mutated": false
+          },
+          {
+            "function": "merge_windows",
+            "input": [
+              [
+                4,
+                4
+              ],
+              [
+                0,
+                -8
+              ],
+              [
+                -4,
+                -4
+              ],
+              [
+                10,
+                -8
+              ],
+              [
+                7,
+                9
+              ],
+              [
+                7,
+                -6
+              ],
+              [
+                8,
+                6
+              ],
+              [
+                8,
+                5
+              ],
+              [
+                9,
+                6
+              ],
+              [
+                5,
+                2
+              ],
+              [
+                -3,
+                -5
+              ],
+              [
+                -1,
+                -3
+              ],
+              [
+                2,
+                -9
+              ],
+              [
+                6,
+                -3
+              ]
+            ],
+            "expected": [
+              [
+                7,
+                9
+              ]
+            ],
+            "actual": [
+              [
+                -4,
+                -4
+              ],
+              [
+                4,
+                4
+              ],
+              [
+                7,
+                9
+              ]
+            ],
+            "mutated": false
+          },
+          {
+            "function": "merge_windows",
+            "input": [
+              [
+                -4,
+                4
+              ],
+              [
+                9,
+                -1
+              ],
+              [
+                8,
+                -7
+              ],
+              [
+                -4,
+                2
+              ],
+              [
+                4,
+                -2
+              ],
+              [
+                -9,
+                -9
+              ],
+              [
+                2,
+                0
+              ],
+              [
+                -6,
+                10
+              ],
+              [
+                1,
+                -1
+              ],
+              [
+                -2,
+                -2
+              ],
+              [
+                8,
+                0
+              ],
+              [
+                0,
+                9
+              ],
+              [
+                1,
+                8
+              ]
+            ],
+            "expected": [
+              [
+                -6,
+                10
+              ]
+            ],
+            "actual": [
+              [
+                -9,
+                -9
+              ],
+              [
+                -6,
+                10
+              ]
+            ],
+            "mutated": false
+          },
+          {
+            "function": "merge_windows",
+            "input": [
+              [
+                1,
+                7
+              ],
+              [
+                -1,
+                -10
+              ],
+              [
+                3,
+                -2
+              ],
+              [
+                6,
+                -2
+              ],
+              [
+                6,
+                -9
+              ],
+              [
+                -2,
+                6
+              ],
+              [
+                -10,
+                -10
+              ],
+              [
+                -7,
+                -6
+              ],
+              [
+                3,
+                0
+              ],
+              [
+                -3,
+                5
+              ],
+              [
+                -7,
+                -7
+              ]
+            ],
+            "expected": [
+              [
+                -7,
+                -6
+              ],
+              [
+                -3,
+                7
+              ]
+            ],
+            "actual": [
+              [
+                -10,
+                -10
+              ],
+              [
+                -7,
+                -6
+              ],
+              [
+                -3,
+                7
+              ]
+            ],
+            "mutated": false
+          },
+          {
+            "function": "merge_windows",
+            "input": [
+              [
+                -10,
+                -10
+              ],
+              [
+                7,
+                -6
+              ],
+              [
+                2,
+                -1
+              ],
+              [
+                -8,
+                -8
+              ],
+              [
+                -4,
+                -2
+              ],
+              [
+                7,
+                3
+              ],
+              [
+                2,
+                -1
+              ],
+              [
+                2,
+                -8
+              ],
+              [
+                5,
+                3
+              ],
+              [
+                6,
+                8
+              ],
+              [
+                3,
+                7
+              ],
+              [
+                9,
+                8
+              ]
+            ],
+            "expected": [
+              [
+                -4,
+                -2
+              ],
+              [
+                3,
+                8
+              ]
+            ],
+            "actual": [
+              [
+                -10,
+                -10
+              ],
+              [
+                -8,
+                -8
+              ],
+              [
+                -4,
+                -2
+              ],
+              [
+                3,
+                8
+              ]
+            ],
+            "mutated": false
+          }
+        ]
+      },
+      "timeout": false,
+      "total_seconds": 6.384327582985861
+    },
+    "qwen4b-fast-feedback-coding": {
+      "seconds": 28.540404208994005,
+      "tools": [
+        "read",
+        "edit",
+        "read",
+        "edit",
+        "read",
+        "edit",
+        "read",
+        "edit",
+        "read"
+      ],
+      "grade": {
+        "checks": 410,
+        "passed": 410,
+        "failures": []
+      },
+      "timeout": false,
+      "total_seconds": 34.924731791979866
+    },
+    "qwen9b-coding": {
+      "seconds": 14.654947959003039,
+      "tools": [
+        "read",
+        "glob",
+        "read",
+        "edit",
+        "edit"
+      ],
+      "grade": {
+        "checks": 410,
+        "passed": 400,
+        "failures": [
+          {
+            "function": "choose_action",
+            "input": [
+              {
+                "id": "c",
+                "cost": 7,
+                "legal": false,
+                "observation_seq": 0
+              },
+              {
+                "id": "i",
+                "cost": 4,
+                "legal": false,
+                "observation_seq": 1
+              },
+              {
+                "id": "g",
+                "cost": 5,
+                "legal": false,
+                "observation_seq": 0
+              },
+              {
+                "id": "h",
+                "cost": 2,
+                "legal": true,
+                "observation_seq": 0
+              },
+              {
+                "id": "j",
+                "cost": 2,
+                "legal": true,
+                "observation_seq": 0
+              },
+              {
+                "id": "k",
+                "cost": 2,
+                "legal": true,
+                "observation_seq": 2
+              },
+              {
+                "id": "f",
+                "cost": 7,
+                "legal": false,
+                "observation_seq": 2
+              },
+              {
+                "id": "a",
+                "cost": 0,
+                "legal": true,
+                "observation_seq": 2
+              },
+              {
+                "id": "b",
+                "cost": 3,
+                "legal": true,
+                "observation_seq": 2
+              },
+              {
+                "id": "e",
+                "cost": 5,
+                "legal": true,
+                "observation_seq": 0
+              },
+              {
+                "id": "d",
+                "cost": 9,
+                "legal": false,
+                "observation_seq": 0
+              }
+            ],
+            "expected": "h",
+            "actual": "e",
+            "mutated": false
+          },
+          {
+            "function": "choose_action",
+            "input": [
+              {
+                "id": "i",
+                "cost": 0,
+                "legal": true,
+                "observation_seq": 0
+              },
+              {
+                "id": "h",
+                "cost": 6,
+                "legal": true,
+                "observation_seq": 0
+              },
+              {
+                "id": "f",
+                "cost": 6,
+                "legal": true,
+                "observation_seq": 0
+              },
+              {
+                "id": "e",
+                "cost": 0,
+                "legal": false,
+                "observation_seq": 1
+              },
+              {
+                "id": "b",
+                "cost": 3,
+                "legal": true,
+                "observation_seq": 1
+              },
+              {
+                "id": "c",
+                "cost": 6,
+                "legal": true,
+                "observation_seq": 2
+              },
+              {
+                "id": "d",
+                "cost": 1,
+                "legal": false,
+                "observation_seq": 0
+              },
+              {
+                "id": "g",
+                "cost": 3,
+                "legal": true,
+                "observation_seq": 2
+              },
+              {
+                "id": "a",
+                "cost": 9,
+                "legal": false,
+                "observation_seq": 0
+              },
+              {
+                "id": "j",
+                "cost": 2,
+                "legal": true,
+                "observation_seq": 0
+              }
+            ],
+            "expected": "g",
+            "actual": "c",
+            "mutated": false
+          },
+          {
+            "function": "choose_action",
+            "input": [
+              {
+                "id": "a",
+                "cost": 8,
+                "legal": false,
+                "observation_seq": 2
+              },
+              {
+                "id": "e",
+                "cost": 6,
+                "legal": false,
+                "observation_seq": 2
+              },
+              {
+                "id": "b",
+                "cost": 1,
+                "legal": false,
+                "observation_seq": 2
+              },
+              {
+                "id": "c",
+                "cost": 2,
+                "legal": true,
+                "observation_seq": 2
+              },
+              {
+                "id": "d",
+                "cost": 0,
+                "legal": true,
+                "observation_seq": 2
+              }
+            ],
+            "expected": "d",
+            "actual": "c",
+            "mutated": false
+          },
+          {
+            "function": "choose_action",
+            "input": [
+              {
+                "id": "b",
+                "cost": 4,
+                "legal": true,
+                "observation_seq": 1
+              },
+              {
+                "id": "d",
+                "cost": 6,
+                "legal": true,
+                "observation_seq": 1
+              },
+              {
+                "id": "e",
+                "cost": 1,
+                "legal": true,
+                "observation_seq": 2
+              },
+              {
+                "id": "f",
+                "cost": 2,
+                "legal": true,
+                "observation_seq": 1
+              },
+              {
+                "id": "c",
+                "cost": 0,
+                "legal": false,
+                "observation_seq": 0
+              },
+              {
+                "id": "a",
+                "cost": 2,
+                "legal": true,
+                "observation_seq": 0
+              }
+            ],
+            "expected": "f",
+            "actual": "b",
+            "mutated": false
+          },
+          {
+            "function": "choose_action",
+            "input": [
+              {
+                "id": "c",
+                "cost": 4,
+                "legal": true,
+                "observation_seq": 0
+              },
+              {
+                "id": "a",
+                "cost": 7,
+                "legal": true,
+                "observation_seq": 1
+              },
+              {
+                "id": "d",
+                "cost": 8,
+                "legal": true,
+                "observation_seq": 1
+              },
+              {
+                "id": "g",
+                "cost": 2,
+                "legal": false,
+                "observation_seq": 0
+              },
+              {
+                "id": "b",
+                "cost": 2,
+                "legal": false,
+                "observation_seq": 1
+              },
+              {
+                "id": "e",
+                "cost": 6,
+                "legal": true,
+                "observation_seq": 1
+              },
+              {
+                "id": "f",
+                "cost": 1,
+                "legal": true,
+                "observation_seq": 1
+              }
+            ],
+            "expected": "f",
+            "actual": "a",
+            "mutated": false
+          },
+          {
+            "function": "choose_action",
+            "input": [
+              {
+                "id": "k",
+                "cost": 6,
+                "legal": false,
+                "observation_seq": 2
+              },
+              {
+                "id": "d",
+                "cost": 1,
+                "legal": true,
+                "observation_seq": 2
+              },
+              {
+                "id": "a",
+                "cost": 3,
+                "legal": true,
+                "observation_seq": 0
+              },
+              {
+                "id": "j",
+                "cost": 1,
+                "legal": false,
+                "observation_seq": 0
+              },
+              {
+                "id": "b",
+                "cost": 1,
+                "legal": true,
+                "observation_seq": 1
+              },
+              {
+                "id": "f",
+                "cost": 3,
+                "legal": false,
+                "observation_seq": 0
+              },
+              {
+                "id": "c",
+                "cost": 4,
+                "legal": true,
+                "observation_seq": 2
+              },
+              {
+                "id": "h",
+                "cost": 7,
+                "legal": false,
+                "observation_seq": 0
+              },
+              {
+                "id": "e",
+                "cost": 2,
+                "legal": true,
+                "observation_seq": 2
+              },
+              {
+                "id": "g",
+                "cost": 4,
+                "legal": true,
+                "observation_seq": 0
+              },
+              {
+                "id": "i",
+                "cost": 4,
+                "legal": true,
+                "observation_seq": 1
+              }
+            ],
+            "expected": "d",
+            "actual": "c",
+            "mutated": false
+          },
+          {
+            "function": "choose_action",
+            "input": [
+              {
+                "id": "d",
+                "cost": 1,
+                "legal": true,
+                "observation_seq": 0
+              },
+              {
+                "id": "j",
+                "cost": 8,
+                "legal": true,
+                "observation_seq": 2
+              },
+              {
+                "id": "i",
+                "cost": 6,
+                "legal": true,
+                "observation_seq": 2
+              },
+              {
+                "id": "f",
+                "cost": 1,
+                "legal": false,
+                "observation_seq": 2
+              },
+              {
+                "id": "b",
+                "cost": 6,
+                "legal": false,
+                "observation_seq": 2
+              },
+              {
+                "id": "a",
+                "cost": 3,
+                "legal": true,
+                "observation_seq": 0
+              },
+              {
+                "id": "c",
+                "cost": 0,
+                "legal": true,
+                "observation_seq": 0
+              },
+              {
+                "id": "g",
+                "cost": 7,
+                "legal": false,
+                "observation_seq": 2
+              },
+              {
+                "id": "e",
+                "cost": 6,
+                "legal": false,
+                "observation_seq": 1
+              },
+              {
+                "id": "h",
+                "cost": 0,
+                "legal": true,
+                "observation_seq": 0
+              }
+            ],
+            "expected": "c",
+            "actual": "a",
+            "mutated": false
+          },
+          {
+            "function": "choose_action",
+            "input": [
+              {
+                "id": "f",
+                "cost": 2,
+                "legal": false,
+                "observation_seq": 0
+              },
+              {
+                "id": "d",
+                "cost": 0,
+                "legal": true,
+                "observation_seq": 2
+              },
+              {
+                "id": "a",
+                "cost": 8,
+                "legal": true,
+                "observation_seq": 1
+              },
+              {
+                "id": "i",
+                "cost": 9,
+                "legal": false,
+                "observation_seq": 2
+              },
+              {
+                "id": "c",
+                "cost": 0,
+                "legal": true,
+                "observation_seq": 2
+              },
+              {
+                "id": "b",
+                "cost": 1,
+                "legal": true,
+                "observation_seq": 2
+              },
+              {
+                "id": "g",
+                "cost": 6,
+                "legal": true,
+                "observation_seq": 1
+              },
+              {
+                "id": "j",
+                "cost": 0,
+                "legal": true,
+                "observation_seq": 0
+              },
+              {
+                "id": "e",
+                "cost": 1,
+                "legal": true,
+                "observation_seq": 0
+              },
+              {
+                "id": "h",
+                "cost": 9,
+                "legal": false,
+                "observation_seq": 2
+              }
+            ],
+            "expected": "c",
+            "actual": "b",
+            "mutated": false
+          },
+          {
+            "function": "choose_action",
+            "input": [
+              {
+                "id": "h",
+                "cost": 0,
+                "legal": true,
+                "observation_seq": 0
+              },
+              {
+                "id": "b",
+                "cost": 3,
+                "legal": true,
+                "observation_seq": 2
+              },
+              {
+                "id": "d",
+                "cost": 5,
+                "legal": false,
+                "observation_seq": 1
+              },
+              {
+                "id": "j",
+                "cost": 2,
+                "legal": false,
+                "observation_seq": 2
+              },
+              {
+                "id": "e",
+                "cost": 1,
+                "legal": true,
+                "observation_seq": 1
+              },
+              {
+                "id": "i",
+                "cost": 0,
+                "legal": false,
+                "observation_seq": 2
+              },
+              {
+                "id": "f",
+                "cost": 2,
+                "legal": true,
+                "observation_seq": 0
+              },
+              {
+                "id": "a",
+                "cost": 2,
+                "legal": false,
+                "observation_seq": 2
+              },
+              {
+                "id": "c",
+                "cost": 5,
+                "legal": false,
+                "observation_seq": 1
+              },
+              {
+                "id": "k",
+                "cost": 7,
+                "legal": true,
+                "observation_seq": 1
+              },
+              {
+                "id": "g",
+                "cost": 0,
+                "legal": true,
+                "observation_seq": 1
+              }
+            ],
+            "expected": "g",
+            "actual": "e",
+            "mutated": false
+          },
+          {
+            "function": "choose_action",
+            "input": [
+              {
+                "id": "a",
+                "cost": 1,
+                "legal": false,
+                "observation_seq": 0
+              },
+              {
+                "id": "c",
+                "cost": 0,
+                "legal": false,
+                "observation_seq": 1
+              },
+              {
+                "id": "g",
+                "cost": 8,
+                "legal": true,
+                "observation_seq": 1
+              },
+              {
+                "id": "j",
+                "cost": 4,
+                "legal": true,
+                "observation_seq": 0
+              },
+              {
+                "id": "i",
+                "cost": 5,
+                "legal": true,
+                "observation_seq": 2
+              },
+              {
+                "id": "d",
+                "cost": 0,
+                "legal": true,
+                "observation_seq": 2
+              },
+              {
+                "id": "f",
+                "cost": 1,
+                "legal": true,
+                "observation_seq": 1
+              },
+              {
+                "id": "h",
+                "cost": 2,
+                "legal": true,
+                "observation_seq": 2
+              },
+              {
+                "id": "e",
+                "cost": 0,
+                "legal": false,
+                "observation_seq": 1
+              },
+              {
+                "id": "k",
+                "cost": 0,
+                "legal": true,
+                "observation_seq": 0
+              },
+              {
+                "id": "b",
+                "cost": 4,
+                "legal": true,
+                "observation_seq": 1
+              }
+            ],
+            "expected": "k",
+            "actual": "j",
+            "mutated": false
+          }
+        ]
+      },
+      "timeout": false,
+      "total_seconds": 14.654947959003039
+    },
+    "qwen9b-fast-coding": {
+      "seconds": 9.474764917016728,
+      "tools": [
+        "read",
+        "edit",
+        "edit"
+      ],
+      "grade": {
+        "checks": 410,
+        "passed": 383,
+        "failures": [
+          {
+            "function": "merge_windows",
+            "input": [
+              [
+                4,
+                1
+              ],
+              [
+                2,
+                2
+              ]
+            ],
+            "expected": [],
+            "actual": [
+              [
+                2,
+                2
+              ]
+            ],
+            "mutated": false
+          },
+          {
+            "function": "merge_windows",
+            "input": [
+              [
+                7,
+                7
+              ],
+              [
+                -5,
+                -6
+              ],
+              [
+                0,
+                5
+              ],
+              [
+                -7,
+                -7
+              ],
+              [
+                -8,
+                -10
+              ],
+              [
+                -10,
+                -4
+              ],
+              [
+                -2,
+                -6
+              ],
+              [
+                -8,
+                5
+              ]
+            ],
+            "expected": [
+              [
+                -10,
+                5
+              ]
+            ],
+            "actual": [
+              [
+                -10,
+                5
+              ],
+              [
+                7,
+                7
+              ]
+            ],
+            "mutated": false
+          },
+          {
+            "function": "merge_windows",
+            "input": [
+              [
+                0,
+                -3
+              ],
+              [
+                10,
+                -7
+              ],
+              [
+                0,
+                6
+              ],
+              [
+                -2,
+                10
+              ],
+              [
+                -1,
+                -8
+              ],
+              [
+                1,
+                3
+              ],
+              [
+                -8,
+                -8
+              ],
+              [
+                1,
+                7
+              ],
+              [
+                9,
+                6
+              ]
+            ],
+            "expected": [
+              [
+                -2,
+                10
+              ]
+            ],
+            "actual": [
+              [
+                -8,
+                -8
+              ],
+              [
+                -2,
+                10
+              ]
+            ],
+            "mutated": false
+          },
+          {
+            "function": "merge_windows",
+            "input": [
+              [
+                5,
+                4
+              ],
+              [
+                -1,
+                2
+              ],
+              [
+                8,
+                0
+              ],
+              [
+                -3,
+                -3
+              ],
+              [
+                1,
+                6
+              ],
+              [
+                4,
+                -3
+              ],
+              [
+                3,
+                9
+              ],
+              [
+                -9,
+                -4
+              ],
+              [
+                10,
+                7
+              ],
+              [
+                10,
+                0
+              ]
+            ],
+            "expected": [
+              [
+                -9,
+                -4
+              ],
+              [
+                -1,
+                9
+              ]
+            ],
+            "actual": [
+              [
+                -9,
+                -4
+              ],
+              [
+                -3,
+                -3
+              ],
+              [
+                -1,
+                9
+              ]
+            ],
+            "mutated": false
+          },
+          {
+            "function": "merge_windows",
+            "input": [
+              [
+                4,
+                5
+              ],
+              [
+                -1,
+                -1
+              ],
+              [
+                1,
+                -10
+              ],
+              [
+                0,
+                -10
+              ],
+              [
+                1,
+                1
+              ],
+              [
+                -1,
+                0
+              ],
+              [
+                10,
+                1
+              ],
+              [
+                -1,
+                -2
+              ],
+              [
+                4,
+                7
+              ],
+              [
+                -9,
+                -3
+              ],
+              [
+                7,
+                2
+              ],
+              [
+                3,
+                0
+              ],
+              [
+                7,
+                3
+              ]
+            ],
+            "expected": [
+              [
+                -9,
+                -3
+              ],
+              [
+                -1,
+                0
+              ],
+              [
+                4,
+                7
+              ]
+            ],
+            "actual": [
+              [
+                -9,
+                -3
+              ],
+              [
+                -1,
+                0
+              ],
+              [
+                1,
+                1
+              ],
+              [
+                4,
+                7
+              ]
+            ],
+            "mutated": false
+          },
+          {
+            "function": "merge_windows",
+            "input": [
+              [
+                -7,
+                -3
+              ],
+              [
+                10,
+                7
+              ],
+              [
+                2,
+                2
+              ],
+              [
+                1,
+                -2
+              ],
+              [
+                -9,
+                1
+              ],
+              [
+                8,
+                0
+              ]
+            ],
+            "expected": [
+              [
+                -9,
+                1
+              ]
+            ],
+            "actual": [
+              [
+                -9,
+                1
+              ],
+              [
+                2,
+                2
+              ]
+            ],
+            "mutated": false
+          },
+          {
+            "function": "merge_windows",
+            "input": [
+              [
+                4,
+                4
+              ],
+              [
+                0,
+                -8
+              ],
+              [
+                -4,
+                -4
+              ],
+              [
+                10,
+                -8
+              ],
+              [
+                7,
+                9
+              ],
+              [
+                7,
+                -6
+              ],
+              [
+                8,
+                6
+              ],
+              [
+                8,
+                5
+              ],
+              [
+                9,
+                6
+              ],
+              [
+                5,
+                2
+              ],
+              [
+                -3,
+                -5
+              ],
+              [
+                -1,
+                -3
+              ],
+              [
+                2,
+                -9
+              ],
+              [
+                6,
+                -3
+              ]
+            ],
+            "expected": [
+              [
+                7,
+                9
+              ]
+            ],
+            "actual": [
+              [
+                -4,
+                -4
+              ],
+              [
+                4,
+                4
+              ],
+              [
+                7,
+                9
+              ]
+            ],
+            "mutated": false
+          },
+          {
+            "function": "merge_windows",
+            "input": [
+              [
+                -4,
+                4
+              ],
+              [
+                9,
+                -1
+              ],
+              [
+                8,
+                -7
+              ],
+              [
+                -4,
+                2
+              ],
+              [
+                4,
+                -2
+              ],
+              [
+                -9,
+                -9
+              ],
+              [
+                2,
+                0
+              ],
+              [
+                -6,
+                10
+              ],
+              [
+                1,
+                -1
+              ],
+              [
+                -2,
+                -2
+              ],
+              [
+                8,
+                0
+              ],
+              [
+                0,
+                9
+              ],
+              [
+                1,
+                8
+              ]
+            ],
+            "expected": [
+              [
+                -6,
+                10
+              ]
+            ],
+            "actual": [
+              [
+                -9,
+                -9
+              ],
+              [
+                -6,
+                10
+              ]
+            ],
+            "mutated": false
+          },
+          {
+            "function": "merge_windows",
+            "input": [
+              [
+                1,
+                7
+              ],
+              [
+                -1,
+                -10
+              ],
+              [
+                3,
+                -2
+              ],
+              [
+                6,
+                -2
+              ],
+              [
+                6,
+                -9
+              ],
+              [
+                -2,
+                6
+              ],
+              [
+                -10,
+                -10
+              ],
+              [
+                -7,
+                -6
+              ],
+              [
+                3,
+                0
+              ],
+              [
+                -3,
+                5
+              ],
+              [
+                -7,
+                -7
+              ]
+            ],
+            "expected": [
+              [
+                -7,
+                -6
+              ],
+              [
+                -3,
+                7
+              ]
+            ],
+            "actual": [
+              [
+                -10,
+                -10
+              ],
+              [
+                -7,
+                -6
+              ],
+              [
+                -3,
+                7
+              ]
+            ],
+            "mutated": false
+          },
+          {
+            "function": "merge_windows",
+            "input": [
+              [
+                -10,
+                -10
+              ],
+              [
+                7,
+                -6
+              ],
+              [
+                2,
+                -1
+              ],
+              [
+                -8,
+                -8
+              ],
+              [
+                -4,
+                -2
+              ],
+              [
+                7,
+                3
+              ],
+              [
+                2,
+                -1
+              ],
+              [
+                2,
+                -8
+              ],
+              [
+                5,
+                3
+              ],
+              [
+                6,
+                8
+              ],
+              [
+                3,
+                7
+              ],
+              [
+                9,
+                8
+              ]
+            ],
+            "expected": [
+              [
+                -4,
+                -2
+              ],
+              [
+                3,
+                8
+              ]
+            ],
+            "actual": [
+              [
+                -10,
+                -10
+              ],
+              [
+                -8,
+                -8
+              ],
+              [
+                -4,
+                -2
+              ],
+              [
+                3,
+                8
+              ]
+            ],
+            "mutated": false
+          }
+        ]
+      },
+      "timeout": false,
+      "total_seconds": 9.474764917016728
+    },
+    "qwen9b-feedback-coding": {
+      "seconds": 16.34408758301288,
+      "tools": [
+        "read",
+        "edit"
+      ],
+      "grade": {
+        "checks": 410,
+        "passed": 410,
+        "failures": []
+      },
+      "timeout": false,
+      "total_seconds": 30.999035542015918
+    }
+  }
+}

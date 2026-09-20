@@ -176,10 +176,36 @@ for harder reasoning and review until measured results justify a change.
 The OMP smoke below favors starting with Qwen; Nemotron needs further
 tool-use validation. This evaluation made no firmware edits, flashes or live campaign changes.
 
+## Native OMP providers and bounded task-child results
+
+OMP’s managed native providers use OpenAI Chat Completions directly:
+
+| Provider | Live path | Managed model file | Context |
+| --- | --- | --- | ---: |
+| `llama.cpp` | `http://nous:8080/v1` | `~/.omp/agent/models.yml` | 16,384 |
+| `bonsai` | `http://nous:8081/v1` | `~/.omp/agent/models.yml` | 32,768 |
+
+The chezmoi sources are `home/private_dot_omp/private_agent/private_models.yml`
+and `private_config.yml`. These providers require no OpenCode installation;
+OpenCode remains a separate, useful Nous path for Codex/T3 integration. The
+host remains inference-only, and selecting a Bonsai model does not switch the
+system service.
+
+A native OMP task child using Ornith passed a corrective precise brief in
+21.6 seconds; the parent then compiled and ran the C++ fixture successfully.
+The direct original Ornith task failed a ceil-div/OR case. A native Gemma task
+failed a `SIZE_MAX` overflow case. Therefore native local children are suitable
+for bounded mechanical or extraction work; algorithmic reasoning should remain
+with Luna/Astra pending broader evidence. Bonsai’s native Chat Completions
+path passed file-read and CSV-write checks with exact ordered values. Stock
+llama.cpp was restored afterward. These results do not establish a final
+planner/router policy. See [the OMP execution report](omp-execution-policy-2026-09-19.md)
+for the resulting default policy and subsequent classifier evaluation.
+
 ## Harness comparison after OMP tool-round-trip testing
 
 For standalone workstation workers, a lean OMP configuration is also viable.
-OMP 18.1.5 is already pinned and maintained here and accepts a no-auth local
+The initial tests used OMP 18.1.5, which accepts a no-auth local
 `openai-completions` provider. Keep the 16K context explicit, initially expose
 only the tools the task needs, and disable background/title/model-role calls
 that could select cloud providers during a local-only evaluation.
@@ -197,9 +223,9 @@ The model had to read an unseen file and return its validation word:
   this distinction. Do not treat transport success as agent success.
 
 This is one sample per model, not a quality ranking or sustained coding
-benchmark. No production OMP configuration was changed. The next trial
-should use Qwen with bounded read/edit/test tasks before adopting either
-model for unattended coding.
+benchmark. No production OMP configuration was changed during that initial test. The
+later native-child tests above used the now-pinned OMP 18.2.6 and led to a
+narrower mechanical-worker policy.
 
 [OMP model configuration](https://github.com/can1357/oh-my-pi/blob/main/docs/models.md)
 provides Chat Completions compatibility flags. The tested temporary provider

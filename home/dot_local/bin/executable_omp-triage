@@ -1,0 +1,163 @@
+#!/usr/bin/python3
+"""One-shot, decision-only OMP triage through OpenRouter Jev."""
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import os
+import shlex
+import sys
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+ENDPOINT = "https://openrouter.ai/api/alpha/decisions"
+MODEL = "typesafe/jev-1.13"
+MAX_REQUEST_CHARS = 12_000
+LABELS = (
+    "local",
+    "luna",
+    "astra",
+    "retain",
+)
+CRITERIA = {
+    LABELS[0]: "Bounded mechanical file transform or extraction using supplied text, one file, cheap exact verification. Local 9B model is weak at algorithmic reasoning, tools and large context; never use it for diagnosing unknown bugs or independent arithmetic design.",
+    LABELS[1]: "Capable coding model for ordinary implementation, tests, navigation, routine computer use and bounded debugging. Default for clear implementable work. Can use tools and run tests.",
+    LABELS[2]: "Frontier reasoning for ambiguous architecture, unexplained repeated failures, deep conflicting research or hard decisions. Higher cost; unnecessary for routine edits.",
+    LABELS[3]: "Context-dependent continuation or unclear request that cannot be safely classified from the provided text. Preserve the current model; do not guess.",
+}
+INSTRUCTIONS = "Choose the cheapest suitable execution tier for this request based only on supplied evidence. Honor an explicit model or local-only request. Do not assume missing conversation or code context. This is task triage, not permission or proof the task will succeed."
+
+
+def _env_file_key() -> str | None:
+    path = Path.home() / ".omp" / "agent" / ".env"
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name, value = line.split("=", 1)
+        if name.strip() != "OPENROUTER_API_KEY":
+            continue
+        try:
+            tokens = shlex.split(value.strip(), comments=True, posix=True)
+        except ValueError:
+            return None
+        return tokens[0] if tokens else None
+    return None
+
+
+def _key() -> str | None:
+    return os.environ.get("OPENROUTER_API_KEY") or _env_file_key()
+
+
+def _finite_unit(value: object) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("invalid numeric answer")
+    number = float(value)
+    if not math.isfinite(number) or number < 0.0 or number > 1.0:
+        raise ValueError("invalid numeric answer")
+    return number
+
+
+def _error(message: str, code: int = 1) -> int:
+    print(message, file=sys.stderr)
+    return code
+
+
+def _response(payload: dict[str, object], elapsed_ms: int) -> dict[str, object]:
+    answers = payload.get("answers")
+    if not isinstance(answers, dict):
+        raise ValueError("missing answers")
+    answer = answers.get("route")
+    if not isinstance(answer, dict):
+        raise ValueError("missing route answer")
+    choice = answer.get("choice")
+    if choice not in LABELS:
+        raise ValueError("unknown route choice")
+    probabilities_raw = answer.get("probabilities")
+    if not isinstance(probabilities_raw, dict):
+        raise ValueError("missing probabilities")
+    probabilities: dict[str, float] = {}
+    for label in LABELS:
+        if label not in probabilities_raw:
+            raise ValueError("incomplete probabilities")
+        probabilities[label] = _finite_unit(probabilities_raw[label])
+    confidence = _finite_unit(answer.get("confidence"))
+    usage = payload.get("usage")
+    cost: object = payload.get("cost", 0.0)
+    if isinstance(usage, dict) and "cost" in usage:
+        cost = usage["cost"]
+    if isinstance(cost, bool) or not isinstance(cost, (int, float)) or not math.isfinite(float(cost)) or float(cost) < 0:
+        raise ValueError("invalid cost")
+    return {
+        "choice": choice,
+        "confidence": confidence,
+        "probabilities": probabilities,
+        "elapsed_ms": elapsed_ms,
+        "cost": float(cost),
+    }
+
+
+def triage(request: str, key: str, opener=urllib.request.urlopen) -> dict[str, object]:
+    body = {
+        "model": MODEL,
+        "state": {"request": request},
+        "questions": {
+            "route": {
+                "type": "choice",
+                "instructions": INSTRUCTIONS,
+                "criteria": CRITERIA,
+            }
+        },
+    }
+    encoded = json.dumps(body, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(
+        ENDPOINT,
+        data=encoded,
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    started = time.monotonic()
+    try:
+        with opener(req, timeout=5) as response:
+            raw = response.read()
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise RuntimeError("OpenRouter Jev request failed") from exc
+    elapsed_ms = int((time.monotonic() - started) * 1000)
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("OpenRouter Jev returned invalid JSON") from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError("OpenRouter Jev returned an invalid response")
+    return _response(payload, elapsed_ms)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="One-shot decision-only OMP triage via OpenRouter Jev")
+    parser.add_argument("request", nargs="?", help="explicit request; otherwise read one request from stdin")
+    args = parser.parse_args(argv)
+    request = args.request if args.request is not None else sys.stdin.read()
+    if not request:
+        return _error("provide a request argument or stdin")
+    if len(request) > MAX_REQUEST_CHARS:
+        return _error(f"request exceeds {MAX_REQUEST_CHARS} characters")
+    key = _key()
+    if not key:
+        return _error("missing OPENROUTER_API_KEY; run omp-openrouter-env")
+    try:
+        result = triage(request, key)
+    except (RuntimeError, ValueError) as exc:
+        return _error(str(exc))
+    print(json.dumps(result, separators=(",", ":"), ensure_ascii=False))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

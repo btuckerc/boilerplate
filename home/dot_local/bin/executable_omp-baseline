@@ -376,168 +376,84 @@ require_scalar() {
   return 1
 }
 
+omp_value() {
+  omp config get "$1" --json 2>/dev/null | jq -r 'if has("value") then .value else empty end'
+}
+
+check_policy_scalar() {
+  local path="$1" expected="$2" source_config="$3" live_value source_value section key
+  if [[ "$path" == *.* ]]; then
+    section="${path%%.*}"
+    key="${path#*.}"
+    source_value="$(yaml_indented_scalar "$source_config" "$section" "$key")"
+  else
+    source_value="$(yaml_top_scalar "$source_config" "$path")"
+  fi
+  require_scalar "source $path" "$source_value" "$expected" || return 1
+  live_value="$(omp_value "$path")"
+  require_scalar "effective $path" "$live_value" "$expected" || return 1
+  return 0
+}
+
+check_effective_list() {
+  local path="$1" expected_json="$2" output
+  if output="$(omp config get "$path" --json 2>/dev/null)" &&
+    printf '%s' "$output" | jq -e --argjson expected "$expected_json" '.value == $expected' >/dev/null; then
+    printf 'CONFIG  effective %s %s\n' "$path" "$expected_json"
+    return 0
+  fi
+  printf 'CONFIG  effective %s expected %s\n' "$path" "$expected_json" >&2
+  return 1
+}
+
 check_thinking_and_loop_policy() {
-  local failures=0
-  local source_config source_models live_config live_models
-  local source_global live_global effective_global
-  local source_model_level live_model_level
-  local source_retries live_retries
-  local source_fallback live_fallback
-  local source_advisor live_advisor
-  local source_stop live_stop
-  local source_chain live_chain
-  local source_search_first live_search_first
-  local source_bash_bg live_bash_bg
-
-  source_config="$REPO_ROOT/home/private_dot_omp/private_agent/config.yml"
-  source_models="$REPO_ROOT/home/private_dot_omp/private_agent/models.yml"
+  local failures=0 source_config live_config source_models
+  source_config="$REPO_ROOT/home/private_dot_omp/private_agent/private_config.yml"
   live_config="$HOME/.omp/agent/config.yml"
-  live_models="$HOME/.omp/agent/models.yml"
+  source_models="$REPO_ROOT/home/private_dot_omp/private_agent/private_models.yml"
 
-  source_global="$(yaml_top_scalar "$source_config" defaultThinkingLevel)"
-  live_global="$(yaml_top_scalar "$live_config" defaultThinkingLevel)"
-  effective_global="$(omp config get defaultThinkingLevel --json 2>/dev/null | jq -r '.value // empty')"
-  source_model_level="$(yaml_indented_scalar "$source_models" thinking defaultLevel)"
-  live_model_level="$(yaml_indented_scalar "$live_models" thinking defaultLevel)"
-  source_retries="$(yaml_indented_scalar "$source_config" retry maxRetries)"
-  live_retries="$(yaml_indented_scalar "$live_config" retry maxRetries)"
-  source_fallback="$(yaml_indented_scalar "$source_config" retry modelFallback)"
-  live_fallback="$(yaml_indented_scalar "$live_config" retry modelFallback)"
-  source_advisor="$(yaml_indented_scalar "$source_config" advisor enabled)"
-  live_advisor="$(yaml_indented_scalar "$live_config" advisor enabled)"
-  source_stop="$(yaml_indented_scalar "$source_config" features unexpectedStopDetection)"
-  live_stop="$(yaml_indented_scalar "$live_config" features unexpectedStopDetection)"
-  source_title_replan="$(yaml_indented_scalar "$source_config" title refreshOnReplan)"
-  live_title_replan="$(yaml_indented_scalar "$live_config" title refreshOnReplan)"
-  source_midturn="$(yaml_indented_scalar "$source_config" compaction midTurnEnabled)"
-  live_midturn="$(yaml_indented_scalar "$live_config" compaction midTurnEnabled)"
-  source_idle_compact="$(yaml_indented_scalar "$source_config" compaction idleEnabled)"
-  live_idle_compact="$(yaml_indented_scalar "$live_config" compaction idleEnabled)"
-  source_compact_threshold="$(yaml_indented_scalar "$source_config" compaction thresholdTokens)"
-  live_compact_threshold="$(yaml_indented_scalar "$live_config" compaction thresholdTokens)"
-  source_async_compact="$(yaml_indented_scalar "$source_config" compaction asyncEnabled)"
-  live_async_compact="$(yaml_indented_scalar "$live_config" compaction asyncEnabled)"
-  source_method_first="$(awk '
-    $0 ~ /^[[:space:]]*methodOrder:[[:space:]]*$/ { in_list=1; next }
-    in_list && $1 == "-" { print $2; exit }
+  check_policy_scalar defaultThinkingLevel medium "$source_config" || failures=1
+  check_policy_scalar retry.modelFallback false "$source_config" || failures=1
+  check_policy_scalar task.maxConcurrency 3 "$source_config" || failures=1
+  check_policy_scalar task.maxRecursionDepth 1 "$source_config" || failures=1
+  check_policy_scalar task.eager default "$source_config" || failures=1
+  check_policy_scalar task.softRequestBudget 40 "$source_config" || failures=1
+  check_policy_scalar task.maxRuntimeMs 600000 "$source_config" || failures=1
+  check_policy_scalar compaction.thresholdTokens -1 "$source_config" || failures=1
+  check_policy_scalar compaction.thresholdPercent -1 "$source_config" || failures=1
+  check_policy_scalar compaction.midTurnEnabled true "$source_config" || failures=1
+  check_policy_scalar compaction.idleEnabled false "$source_config" || failures=1
+  check_policy_scalar compaction.asyncEnabled false "$source_config" || failures=1
+  check_policy_scalar recap.enabled false "$source_config" || failures=1
+  check_policy_scalar extendedContext false "$source_config" || failures=1
+
+  local source_roles
+  source_roles="$(awk '
+    /^modelRoles:/ { in_roles=1; next }
+    in_roles && /^[^[:space:]#]/ { exit }
+    in_roles && $1 ~ /^(default|slow|plan|vision|commit|smol|tiny|task):$/ { print $1 }
   ' "$source_config")"
-  live_method_first="$(awk '
-    $0 ~ /^[[:space:]]*methodOrder:[[:space:]]*$/ { in_list=1; next }
-    in_list && $1 == "-" { print $2; exit }
-  ' "$live_config")"
-  source_recap="$(yaml_indented_scalar "$source_config" recap enabled)"
-  live_recap="$(yaml_indented_scalar "$live_config" recap enabled)"
-
-  require_scalar "source defaultThinkingLevel" "$source_global" medium || failures=1
-  require_scalar "live defaultThinkingLevel" "$live_global" medium || failures=1
-  require_scalar "effective defaultThinkingLevel" "$effective_global" medium || failures=1
-  require_scalar "source grok-4.6 defaultLevel" "$source_model_level" medium || failures=1
-  require_scalar "live grok-4.6 defaultLevel" "$live_model_level" medium || failures=1
-
-  if [ "$source_global" = "$live_global" ] && [ "$source_model_level" = "$live_model_level" ]; then
-    printf 'CONFIG  thinking defaults agree\n'
+  if printf '%s\n' "$source_roles" | grep -q '^default:' &&
+    printf '%s\n' "$source_roles" | grep -q '^slow:' &&
+    printf '%s\n' "$source_roles" | grep -q '^plan:' &&
+    printf '%s\n' "$source_roles" | grep -q '^task:'; then
+    printf 'CONFIG  canonical model roles present\n'
   else
-    printf 'CONFIG  canonical and live thinking defaults disagree\n' >&2
+    printf 'CONFIG  canonical model roles incomplete\n' >&2
     failures=1
   fi
 
-  require_scalar "source retry.maxRetries" "$source_retries" 1 || failures=1
-  require_scalar "live retry.maxRetries" "$live_retries" 1 || failures=1
-  require_scalar "source retry.modelFallback" "$source_fallback" true || failures=1
-  require_scalar "live retry.modelFallback" "$live_fallback" true || failures=1
-  require_scalar "source advisor.enabled" "$source_advisor" false || failures=1
-  require_scalar "live advisor.enabled" "$live_advisor" false || failures=1
-  require_scalar "source unexpectedStopDetection" "$source_stop" false || failures=1
-  require_scalar "live unexpectedStopDetection" "$live_stop" false || failures=1
-  require_scalar "source title.refreshOnReplan" "$source_title_replan" false || failures=1
-  require_scalar "live title.refreshOnReplan" "$live_title_replan" false || failures=1
-  require_scalar "source compaction.midTurnEnabled" "$source_midturn" false || failures=1
-  require_scalar "live compaction.midTurnEnabled" "$live_midturn" false || failures=1
-  require_scalar "source compaction.idleEnabled" "$source_idle_compact" false || failures=1
-  require_scalar "live compaction.idleEnabled" "$live_idle_compact" false || failures=1
-  require_scalar "source compaction.thresholdTokens" "$source_compact_threshold" 180000 || failures=1
-  require_scalar "live compaction.thresholdTokens" "$live_compact_threshold" 180000 || failures=1
-  require_scalar "source compaction.asyncEnabled" "$source_async_compact" false || failures=1
-  require_scalar "live compaction.asyncEnabled" "$live_async_compact" false || failures=1
-  require_scalar "source compaction.methodOrder[0]" "$source_method_first" snapcompact || failures=1
-  require_scalar "live compaction.methodOrder[0]" "$live_method_first" snapcompact || failures=1
-  if awk '
-    $0 ~ /^[[:space:]]*methodOrder:[[:space:]]*$/ { in_list=1; next }
-    in_list && /^[^[:space:]#]/ { in_list=0 }
-    in_list && $1 == "-" { n++ }
-    END { exit !(n == 1) }
-  ' "$source_config" && awk '
-    $0 ~ /^[[:space:]]*methodOrder:[[:space:]]*$/ { in_list=1; next }
-    in_list && /^[^[:space:]#]/ { in_list=0 }
-    in_list && $1 == "-" { n++ }
-    END { exit !(n == 1) }
-  ' "$live_config"; then
-    printf 'CONFIG  compaction.methodOrder is snapcompact only\n'
+  local source_provider
+  source_provider="$(awk '
+    /^providers:/ { in_providers=1; next }
+    in_providers && /^[^[:space:]#]/ { exit }
+    in_providers && $1 ~ /^(llama\.cpp|bonsai):$/ { print $1 }
+  ' "$source_models")"
+  if printf '%s\n' "$source_provider" | grep -q '^llama.cpp:' &&
+    printf '%s\n' "$source_provider" | grep -q '^bonsai:'; then
+    printf 'CONFIG  local inference providers present\n'
   else
-    printf 'CONFIG  compaction.methodOrder expected snapcompact only\n' >&2
-    failures=1
-  fi
-  require_scalar "source recap.enabled" "$source_recap" false || failures=1
-  require_scalar "live recap.enabled" "$live_recap" false || failures=1
-
-
-  source_search_first="$(awk '
-    $0 ~ /^[[:space:]]*webSearchOrder:[[:space:]]*$/ { in_list=1; next }
-    in_list && $1 == "-" { print $2; exit }
-  ' "$source_config")"
-  live_search_first="$(awk '
-    $0 ~ /^[[:space:]]*webSearchOrder:[[:space:]]*$/ { in_list=1; next }
-    in_list && $1 == "-" { print $2; exit }
-  ' "$live_config")"
-  require_scalar "source webSearchOrder[0]" "$source_search_first" public || failures=1
-  require_scalar "live webSearchOrder[0]" "$live_search_first" public || failures=1
-  if awk '
-    $0 ~ /^[[:space:]]*webSearchExclude:[[:space:]]*$/ { in_list=1; next }
-    in_list && /^[^[:space:]#]/ { in_list=0 }
-    in_list && $2 == "google" { google=1 }
-    in_list && $2 == "ecosia" { ecosia=1 }
-    in_list && $2 == "mojeek" { mojeek=1 }
-    END { exit !(google && ecosia && mojeek) }
-  ' "$source_config" && awk '
-    $0 ~ /^[[:space:]]*webSearchExclude:[[:space:]]*$/ { in_list=1; next }
-    in_list && /^[^[:space:]#]/ { in_list=0 }
-    in_list && $2 == "google" { google=1 }
-    in_list && $2 == "ecosia" { ecosia=1 }
-    in_list && $2 == "mojeek" { mojeek=1 }
-    END { exit !(google && ecosia && mojeek) }
-  ' "$live_config"; then
-    printf 'CONFIG  webSearchExclude blocks chromium scrapers\n'
-  else
-    printf 'CONFIG  webSearchExclude missing google/ecosia/mojeek\n' >&2
-    failures=1
-  fi
-
-  source_bash_bg="$(yaml_indented_scalar "$source_config" autoBackground thresholdMs)"
-  live_bash_bg="$(yaml_indented_scalar "$live_config" autoBackground thresholdMs)"
-  require_scalar "source bash.autoBackground.thresholdMs" "$source_bash_bg" 15000 || failures=1
-  require_scalar "live bash.autoBackground.thresholdMs" "$live_bash_bg" 15000 || failures=1
-
-  source_chain="$(awk '
-    $0 ~ /^[[:space:]]*default:[[:space:]]*$/ { in_chain=1; next }
-    in_chain && $1 == "-" { print $2; exit }
-  ' "$source_config")"
-  live_chain="$(awk '
-    $0 ~ /^[[:space:]]*default:[[:space:]]*$/ { in_chain=1; next }
-    in_chain && $1 == "-" { print $2; exit }
-  ' "$live_config")"
-  require_scalar "source default fallback" "$source_chain" "google-antigravity/gemini-3.8-flash:high" || failures=1
-  require_scalar "live default fallback" "$live_chain" "google-antigravity/gemini-3.8-flash:high" || failures=1
-
-  if awk '
-    $0 ~ /^[[:space:]]*-[[:space:]]*low[[:space:]]*$/ { low=1 }
-    $0 ~ /^[[:space:]]*-[[:space:]]*medium[[:space:]]*$/ { medium=1 }
-    $0 ~ /^[[:space:]]*-[[:space:]]*high[[:space:]]*$/ { high=1 }
-    $0 ~ /^[[:space:]]*-[[:space:]]*xhigh[[:space:]]*$/ { xhigh=1 }
-    END { exit !(low && medium && high && xhigh) }
-  ' "$source_models"; then
-    printf 'CONFIG  grok efforts include low medium high xhigh\n'
-  else
-    printf 'CONFIG  grok efforts missing low/medium/high/xhigh\n' >&2
+    printf 'CONFIG  local inference providers missing\n' >&2
     failures=1
   fi
 
@@ -569,20 +485,20 @@ check_omp_config() {
 
   if output="$(omp config get modelRoles --json 2>/dev/null)" \
     && printf '%s' "$output" | jq -e '
-      .value.default == "xai-oauth/grok-4.6:medium" and
-      .value.slow == "xai-oauth/grok-4.6:xhigh" and
-      .value.plan == "xai-oauth/grok-4.6:high" and
-      .value.vision == "google-antigravity/gemini-3.8-flash:high" and
-      .value.commit == "openrouter/z-ai/glm-5.3-flash:low" and
-      .value.smol == "google-antigravity/gemini-3.8-flash" and
-      .value.tiny == "google-antigravity/gemini-3.8-flash:low" and
-      .value.task == "google-antigravity/gemini-3.8-flash"
+      (.value.default | test("^openai-codex/gpt-5\\.6-luna:medium$")) and
+      (.value.slow | test("^openai-codex/gpt-6-astra:xhigh$")) and
+      (.value.plan | test("^openai-codex/gpt-6-astra:medium$")) and
+      (.value.task | test("^openai-codex/gpt-5\\.6-luna:medium$")) and
+      (.value.smol | test("^openai-codex/gpt-5\\.6-luna:low$")) and
+      (.value.tiny | test("^openai-codex/gpt-5\\.6-luna:low$"))
     ' >/dev/null; then
     printf 'CONFIG  model roles parse\n'
   else
     printf 'CONFIG  model roles invalid\n' >&2
     failures=1
   fi
+
+  check_effective_list cycleOrder '["default","plan"]' || failures=1
 
   if output="$(omp config get skills.enablePiUser --json 2>/dev/null)" \
     && printf '%s' "$output" | jq -e '.value == true' >/dev/null \
@@ -594,39 +510,31 @@ check_omp_config() {
     failures=1
   fi
 
-  if omp auth-broker list --json 2>/dev/null | grep -q '"id":"xai-oauth"'; then
-    printf 'PROVIDER xai-oauth available\n'
+  local source_models="$REPO_ROOT/home/private_dot_omp/private_agent/private_models.yml" catalog
+  if grep -q '^  llama.cpp:' "$source_models" && grep -q '^  bonsai:' "$source_models"; then
+    printf 'CONFIG  local providers configured\n'
   else
-    printf 'PROVIDER xai-oauth missing\n' >&2
+    printf 'CONFIG  local providers missing\n' >&2
     failures=1
   fi
-  if omp models xai-oauth --json 2>/dev/null | grep -q 'grok-4.6'; then
-    printf 'MODEL   grok-4.6 discoverable\n'
-  elif grep -q 'grok-4.6' "$HOME/.omp/agent/models.yml" 2>/dev/null; then
-    printf 'MODEL   grok-4.6 configured; discovery awaits machine-local OAuth\n'
+  catalog="$(omp models llama.cpp --json 2>/dev/null || true)"
+  if printf '%s' "$catalog" | jq -e '
+      [.models[]?.id] | index("Ornith-1.5-9B-Q5_K_M")
+    ' >/dev/null; then
+    printf 'MODEL   Ornith local catalog entry\n'
+  elif grep -q 'Ornith-1.5-9B-Q5_K_M' "$source_models"; then
+    printf 'MODEL   Ornith configured; discovery unavailable\n'
   else
-    printf 'MODEL   grok-4.6 absent from discovery and portable catalog\n' >&2
+    printf 'MODEL   Ornith absent from local catalog and source\n' >&2
     failures=1
   fi
-
-  if grep -Eq '^[[:space:]]*-[[:space:]]*google-antigravity/gemini-3.8-flash[[:space:]]*$' "$REPO_ROOT/home/private_dot_omp/private_agent/config.yml"; then
-    printf 'CONFIG  gemini-3.8-flash enabled\n'
+  catalog="$(omp models bonsai --json 2>/dev/null || true)"
+  if printf '%s' "$catalog" | jq -e '.models | length > 0' >/dev/null; then
+    printf 'MODEL   Bonsai local catalog entry\n'
+  elif grep -q '^  bonsai:' "$source_models"; then
+    printf 'MODEL   Bonsai configured; discovery unavailable\n'
   else
-    printf 'CONFIG  gemini-3.8-flash missing from enabledModels\n' >&2
-    failures=1
-  fi
-  if omp models google-antigravity --json 2>/dev/null | grep -q 'gemini-3.8-flash'; then
-    printf 'MODEL   gemini-3.8-flash discoverable\n'
-  elif grep -Eq '^[[:space:]]*-[[:space:]]*google-antigravity/gemini-3.8-flash[[:space:]]*$' "$REPO_ROOT/home/private_dot_omp/private_agent/config.yml"; then
-    printf 'MODEL   gemini-3.8-flash configured; discovery awaits machine-local OAuth\n'
-  else
-    printf 'MODEL   gemini-3.8-flash absent from discovery and source config\n' >&2
-    failures=1
-  fi
-  if grep -Eq '^[[:space:]]*-[[:space:]]*openrouter/z-ai/glm-5.3[[:space:]]*$' "$REPO_ROOT/home/private_dot_omp/private_agent/config.yml"; then
-    printf 'CONFIG  glm-5.3 enabled\n'
-  else
-    printf 'CONFIG  enabledModels missing glm-5.3\n' >&2
+    printf 'MODEL   Bonsai absent from local catalog and source\n' >&2
     failures=1
   fi
 
@@ -1045,7 +953,7 @@ guard() {
   return "$status"
 }
 fleet_probe() {
-  local git_rev omp_ver gh_ver pin val oauth
+  local git_rev omp_ver gh_ver pin val provider
   git_rev="$(git -C "$HOME/src/boilerplate" rev-parse --short HEAD 2>/dev/null || printf missing)"
   omp_ver="$(omp --version 2>/dev/null || printf missing)"
   omp_ver="${omp_ver#omp/}"
@@ -1054,8 +962,9 @@ fleet_probe() {
   pin="$(sed -n 's/^# omp-version[[:space:]]*//p' "$HOME/.config/decent-angl/omp-baseline-manifest.tsv" | awk 'NR==1 { print; exit }')"
   [ -n "$pin" ] || pin=missing
   if omp-baseline validate --strict >/dev/null 2>&1; then val=ok; else val=fail; fi
-  if omp models xai-oauth --json 2>/dev/null | grep -q 'grok-4.6'; then oauth=yes; else oauth=no; fi
-  printf '%s %s %s %s %s %s\n' "$git_rev" "$omp_ver" "$gh_ver" "$pin" "$val" "$oauth"
+  provider="$(omp auth-broker list --json 2>/dev/null |
+    jq -r 'map(select(.id == "openai-codex"))[0].id // "missing"' 2>/dev/null || printf missing)"
+  printf '%s %s %s %s %s %s\n' "$git_rev" "$omp_ver" "$gh_ver" "$pin" "$val" "$provider"
 }
 
 fleet() {
@@ -1064,7 +973,7 @@ fleet() {
     omarchy) self=t14 ;;
     *) self="$(machine_id)" ;;
   esac
-  printf '%-8s %-8s %-8s %-8s %-8s %-8s %s\n' HOST GIT OMP GH PIN VALIDATE OAUTH
+  printf '%-8s %-8s %-8s %-8s %-8s %-8s %s\n' HOST GIT OMP GH PIN VALIDATE PROVIDER
   for host in t14 macbook macmini; do
     if [ "$host" = "$self" ]; then
       if line="$(fleet_probe)"; then

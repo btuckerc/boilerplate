@@ -1,0 +1,272 @@
+{
+  "revision": "f9ab0b228f0fc0f14d873dbc99038f135c2da1b2",
+  "cold_load_ms": 8611.09,
+  "rss_kb": 3025324,
+  "threads": 4,
+  "results": [
+    {
+      "case": "extract",
+      "expected": "local",
+      "answer": {
+        "type": "choice",
+        "choice": "luna",
+        "probabilities": {
+          "local": 0.3454,
+          "luna": 0.3635,
+          "astra": 0.1592,
+          "retain": 0.1319
+        },
+        "confidence": 0.066,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "ms": 326.67,
+      "input_tokens": 25,
+      "max_length": 8192,
+      "truncated": false
+    },
+    {
+      "case": "format",
+      "expected": "local",
+      "answer": {
+        "type": "choice",
+        "choice": "local",
+        "probabilities": {
+          "local": 0.4071,
+          "luna": 0.3419,
+          "astra": 0.1215,
+          "retain": 0.1295
+        },
+        "confidence": 0.0957,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "ms": 318.51,
+      "input_tokens": 23,
+      "max_length": 8192,
+      "truncated": false
+    },
+    {
+      "case": "overflow",
+      "expected": "luna",
+      "answer": {
+        "type": "choice",
+        "choice": "luna",
+        "probabilities": {
+          "local": 0.2403,
+          "luna": 0.4838,
+          "astra": 0.1458,
+          "retain": 0.1301
+        },
+        "confidence": 0.1056,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "ms": 325.61,
+      "input_tokens": 28,
+      "max_length": 8192,
+      "truncated": false
+    },
+    {
+      "case": "rename",
+      "expected": "luna",
+      "answer": {
+        "type": "choice",
+        "choice": "luna",
+        "probabilities": {
+          "local": 0.2335,
+          "luna": 0.4505,
+          "astra": 0.1666,
+          "retain": 0.1494
+        },
+        "confidence": 0.0756,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "ms": 317.82,
+      "input_tokens": 20,
+      "max_length": 8192,
+      "truncated": false
+    },
+    {
+      "case": "ui",
+      "expected": "luna",
+      "answer": {
+        "type": "choice",
+        "choice": "luna",
+        "probabilities": {
+          "local": 0.3112,
+          "luna": 0.4009,
+          "astra": 0.1333,
+          "retain": 0.1546
+        },
+        "confidence": 0.0716,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "ms": 315.78,
+      "input_tokens": 18,
+      "max_length": 8192,
+      "truncated": false
+    },
+    {
+      "case": "architecture",
+      "expected": "astra",
+      "answer": {
+        "type": "choice",
+        "choice": "luna",
+        "probabilities": {
+          "local": 0.1737,
+          "luna": 0.3329,
+          "astra": 0.2872,
+          "retain": 0.2061
+        },
+        "confidence": 0.0232,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "ms": 338.33,
+      "input_tokens": 36,
+      "max_length": 8192,
+      "truncated": false
+    },
+    {
+      "case": "diagnosis",
+      "expected": "astra",
+      "answer": {
+        "type": "choice",
+        "choice": "luna",
+        "probabilities": {
+          "local": 0.2001,
+          "luna": 0.3158,
+          "astra": 0.3061,
+          "retain": 0.178
+        },
+        "confidence": 0.0222,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "ms": 330.93,
+      "input_tokens": 31,
+      "max_length": 8192,
+      "truncated": false
+    },
+    {
+      "case": "research",
+      "expected": "astra",
+      "answer": {
+        "type": "choice",
+        "choice": "astra",
+        "probabilities": {
+          "local": 0.1818,
+          "luna": 0.2975,
+          "astra": 0.3331,
+          "retain": 0.1876
+        },
+        "confidence": 0.0257,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "ms": 315.79,
+      "input_tokens": 20,
+      "max_length": 8192,
+      "truncated": false
+    },
+    {
+      "case": "continue",
+      "expected": "retain",
+      "answer": {
+        "type": "choice",
+        "choice": "luna",
+        "probabilities": {
+          "local": 0.2202,
+          "luna": 0.3113,
+          "astra": 0.1635,
+          "retain": 0.305
+        },
+        "confidence": 0.0228,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "ms": 296.88,
+      "input_tokens": 4,
+      "max_length": 8192,
+      "truncated": false
+    },
+    {
+      "case": "steer",
+      "expected": "luna",
+      "answer": {
+        "type": "choice",
+        "choice": "luna",
+        "probabilities": {
+          "local": 0.1487,
+          "luna": 0.5997,
+          "astra": 0.124,
+          "retain": 0.1277
+        },
+        "confidence": 0.1982,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "ms": 303.11,
+      "input_tokens": 9,
+      "max_length": 8192,
+      "truncated": false
+    },
+    {
+      "case": "override",
+      "expected": "local",
+      "answer": {
+        "type": "choice",
+        "choice": "local",
+        "probabilities": {
+          "local": 0.4127,
+          "luna": 0.2736,
+          "astra": 0.1281,
+          "retain": 0.1857
+        },
+        "confidence": 0.0654,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "ms": 315.84,
+      "input_tokens": 17,
+      "max_length": 8192,
+      "truncated": false
+    },
+    {
+      "case": "ambiguous",
+      "expected": "retain",
+      "answer": {
+        "type": "choice",
+        "choice": "luna",
+        "probabilities": {
+          "local": 0.2373,
+          "luna": 0.391,
+          "astra": 0.1883,
+          "retain": 0.1833
+        },
+        "confidence": 0.0378,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "ms": 300.31,
+      "input_tokens": 6,
+      "max_length": 8192,
+      "truncated": false
+    }
+  ]
+}

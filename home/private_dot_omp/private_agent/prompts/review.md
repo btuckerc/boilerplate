@@ -1,7 +1,7 @@
 ---
 description: High-signal code review pass
 argument-hint: "[scope]"
-model: xai-oauth/grok-4.6
+model: openai-codex/gpt-6-astra
 restore: true
 ---
 Review $@ for correctness, regressions, edge cases, and missing verification.

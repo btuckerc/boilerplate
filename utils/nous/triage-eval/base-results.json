@@ -1,0 +1,250 @@
+{
+  "model": "convaiinnovations/laya",
+  "revision": "c5d78730f3493e4fe16d61507ef4b78eef7318cf",
+  "head_max_len": 256,
+  "cold_load_ms": 8281.61,
+  "rss_kb": 3062920,
+  "threads": 4,
+  "results": [
+    {
+      "case": "extract",
+      "expected": "local",
+      "answer": {
+        "type": "choice",
+        "choice": "local",
+        "probabilities": {
+          "local": 0.5526,
+          "luna": 0.3189,
+          "astra": 0.0732,
+          "retain": 0.0553
+        },
+        "confidence": 0.2472,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "ms": 327.11,
+      "error": null
+    },
+    {
+      "case": "format",
+      "expected": "local",
+      "answer": {
+        "type": "choice",
+        "choice": "local",
+        "probabilities": {
+          "local": 0.6235,
+          "luna": 0.2699,
+          "astra": 0.053,
+          "retain": 0.0536
+        },
+        "confidence": 0.3072,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "ms": 318.64,
+      "error": null
+    },
+    {
+      "case": "overflow",
+      "expected": "luna",
+      "answer": {
+        "type": "choice",
+        "choice": "luna",
+        "probabilities": {
+          "local": 0.4046,
+          "luna": 0.4885,
+          "astra": 0.0586,
+          "retain": 0.0483
+        },
+        "confidence": 0.2579,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "ms": 325.12,
+      "error": null
+    },
+    {
+      "case": "rename",
+      "expected": "luna",
+      "answer": {
+        "type": "choice",
+        "choice": "luna",
+        "probabilities": {
+          "local": 0.3571,
+          "luna": 0.5074,
+          "astra": 0.0662,
+          "retain": 0.0692
+        },
+        "confidence": 0.2234,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "ms": 314.29,
+      "error": null
+    },
+    {
+      "case": "ui",
+      "expected": "luna",
+      "answer": {
+        "type": "choice",
+        "choice": "local",
+        "probabilities": {
+          "local": 0.4375,
+          "luna": 0.4129,
+          "astra": 0.0712,
+          "retain": 0.0784
+        },
+        "confidence": 0.196,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "ms": 313.35,
+      "error": null
+    },
+    {
+      "case": "architecture",
+      "expected": "astra",
+      "answer": {
+        "type": "choice",
+        "choice": "luna",
+        "probabilities": {
+          "local": 0.2468,
+          "luna": 0.5133,
+          "astra": 0.17,
+          "retain": 0.07
+        },
+        "confidence": 0.1524,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "ms": 337.17,
+      "error": null
+    },
+    {
+      "case": "diagnosis",
+      "expected": "astra",
+      "answer": {
+        "type": "choice",
+        "choice": "luna",
+        "probabilities": {
+          "local": 0.3908,
+          "luna": 0.4211,
+          "astra": 0.1167,
+          "retain": 0.0713
+        },
+        "confidence": 0.1557,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "ms": 330.22,
+      "error": null
+    },
+    {
+      "case": "research",
+      "expected": "astra",
+      "answer": {
+        "type": "choice",
+        "choice": "luna",
+        "probabilities": {
+          "local": 0.2659,
+          "luna": 0.3119,
+          "astra": 0.3006,
+          "retain": 0.1216
+        },
+        "confidence": 0.0384,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "ms": 317.26,
+      "error": null
+    },
+    {
+      "case": "continue",
+      "expected": "retain",
+      "answer": {
+        "type": "choice",
+        "choice": "retain",
+        "probabilities": {
+          "local": 0.081,
+          "luna": 0.0634,
+          "astra": 0.0187,
+          "retain": 0.8368
+        },
+        "confidence": 0.5657,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "ms": 291.61,
+      "error": null
+    },
+    {
+      "case": "steer",
+      "expected": "luna",
+      "answer": {
+        "type": "choice",
+        "choice": "luna",
+        "probabilities": {
+          "local": 0.0634,
+          "luna": 0.8697,
+          "astra": 0.0285,
+          "retain": 0.0384
+        },
+        "confidence": 0.623,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "ms": 302.1,
+      "error": null
+    },
+    {
+      "case": "override",
+      "expected": "local",
+      "answer": {
+        "type": "choice",
+        "choice": "local",
+        "probabilities": {
+          "local": 0.6878,
+          "luna": 0.169,
+          "astra": 0.0629,
+          "retain": 0.0802
+        },
+        "confidence": 0.326,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "ms": 313.14,
+      "error": null
+    },
+    {
+      "case": "ambiguous",
+      "expected": "retain",
+      "answer": {
+        "type": "choice",
+        "choice": "luna",
+        "probabilities": {
+          "local": 0.3715,
+          "luna": 0.4014,
+          "astra": 0.1038,
+          "retain": 0.1233
+        },
+        "confidence": 0.1146,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "ms": 310.73,
+      "error": null
+    }
+  ]
+}

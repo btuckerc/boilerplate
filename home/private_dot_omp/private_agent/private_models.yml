@@ -1,0 +1,66 @@
+# Managed by chezmoi. Cloud models inherit the native catalog; roles/effort
+# live in config.yml. OpenRouter is an explicit alternative, never a fallback.
+providers:
+  openrouter:
+    modelOverrides:
+      z-ai/glm-5.3-flash:
+        reasoning: true
+        thinking:
+          mode: effort
+          defaultLevel: low
+          efforts: [low, high, max]
+        compat:
+          supportsReasoningEffort: true
+          omitReasoningEffort: false
+  llama.cpp:
+    baseUrl: http://nous:8080/v1
+    api: openai-completions
+    auth: none
+    discovery:
+      type: llama.cpp
+      timeoutMs: 1000
+    # Retain the tested worker in the picker when nous is offline. Discovery
+    # supplies experimental models without promoting them to worker defaults.
+    models:
+      - id: Ornith-1.5-9B-Q5_K_M
+        name: Nous Ornith 1.5 9B
+        reasoning: false
+        input: [text]
+        contextWindow: 16384
+        maxTokens: 2048
+        cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0}
+        compat:
+          supportsStore: false
+          supportsDeveloperRole: false
+          supportsReasoningEffort: false
+          maxTokensField: max_tokens
+    modelOverrides:
+      Ornith-1.5-9B-Q5_K_M:
+        contextWindow: 16384
+        maxTokens: 2048
+        compat:
+          maxTokensField: max_tokens
+      gemma-4-12B-it-Q4_0:
+        contextWindow: 16384
+        maxTokens: 2048
+        compat:
+          maxTokensField: max_tokens
+  bonsai:
+    baseUrl: http://nous:8081/v1
+    api: openai-completions
+    auth: none
+    # Deliberate/manual backend: shares the GPU with llama.cpp. Never switch
+    # services as a side effect of model selection or ordinary delegation.
+    models:
+      - id: /home/tux/repos/Bonsai-demo/models/bonsai2-gguf/27B/Ternary-Bonsai-2-27B-PQ2_0.gguf
+        name: Nous Bonsai 2 27B (manual backend)
+        reasoning: false
+        input: [text]
+        contextWindow: 32768
+        maxTokens: 2048
+        cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0}
+        compat:
+          supportsStore: false
+          supportsDeveloperRole: false
+          supportsReasoningEffort: false
+          maxTokensField: max_tokens

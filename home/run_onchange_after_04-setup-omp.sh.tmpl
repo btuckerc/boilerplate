@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-OMP_VERSION="18.1.5"
+OMP_VERSION="18.2.6"
 OMP_TOOL="github:can1357/oh-my-pi@${OMP_VERSION}"
 
 echo ""
@@ -39,9 +39,9 @@ fi
 
 provider_registry="$(mise x "$OMP_TOOL" -- omp auth-broker list --json)"
 case "$provider_registry" in
-    *'"id":"xai-oauth"'*) ;;
+    *'"id":"openai-codex"'*) ;;
     *)
-        echo "OMP ${OMP_VERSION} does not expose the xai-oauth provider." >&2
+        echo "OMP ${OMP_VERSION} does not expose the openai-codex provider." >&2
         exit 1
         ;;
 esac
@@ -50,4 +50,4 @@ mise x "$OMP_TOOL" -- omp config get modelRoles --json >/dev/null
 mise x "$OMP_TOOL" -- omp setup python --check --json >/dev/null
 
 echo "OMP ${OMP_VERSION} is installed and the shared config is ready."
-echo "Machine-local SuperGrok login: omp auth-broker login xai-oauth"
+echo "Machine-local Codex login: omp auth-broker login openai-codex"

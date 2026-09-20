@@ -1,5 +1,9 @@
 # T14 publish
 
+Historical snapshot. The subsequent [OMP migration and execution policy](../omp-execution-policy-2026-09-19.md)
+supersedes the OMP provider/default recommendations below. Codex/T3 settings
+remain a separate baseline.
+
 Published commit: `671144b` (`master`)
 
 The T14 policy keeps SuperGrok (`xai-oauth/grok-4.6`) as the default and uses

@@ -1,5 +1,9 @@
 # Codex usage and local-worker audit — 2026-09-19
 
+Historical snapshot. The subsequent [OMP migration and execution policy](omp-execution-policy-2026-09-19.md)
+supersedes the OMP provider/default recommendations below. Codex/T3 settings
+remain a separate baseline.
+
 Follow-up: [memory settings, harness alternatives, and computer use](codex-memory-and-harness-review-2026-09-19.md)
 records the deeper audit and distinguishes T3's saved low-effort selection from
 the shared CLI medium default.

@@ -8,6 +8,13 @@ workstations; model requests go to nous over Tailscale.
   existing `~/.ssh/id_rsa`, with agent forwarding disabled. Other clients
   install their own public key; do not copy private keys between machines.
 - API: `http://nous:8080/v1`; health: `http://nous:8080/health`.
+- OMP has native, no-auth OpenAI Chat Completions providers in the managed
+  shared files `~/.omp/agent/models.yml` and `~/.omp/agent/config.yml`
+  (chezmoi sources `private_models.yml` and `private_config.yml` under
+  `home/private_dot_omp/private_agent/`). The live `llama.cpp` provider is
+  `http://nous:8080/v1`; the manual Bonsai provider is `http://nous:8081/v1`.
+  This OMP path does not require OpenCode. It is still subject to the
+  inference-only host boundary and the one-model-at-a-time service switch.
 - Fleet inventory: `~/.config/decent-angl/fleet.json`, role `inference`.
   `decent-angl-doctor --fleet` uses stock SSH commands plus HTTP checks;
   it follows the active llama/Bonsai backend and does not expect the workstation
@@ -77,8 +84,19 @@ Read `docs/nous-inference.md` for invocation and tested limits. The `local-worke
 use a bounded worker when useful, with Ornith as the launcher default. Do not
 change main-thread model defaults merely because local models are available.
 
-Worker readiness check: Ornith, Gemma and Bonsai passed fresh file-read/write
-tasks launched from the active T3 main thread; Ornith also passed same-session
-follow-up. Nemotron regressed to announcing a read without calling a tool,
-so it remains experimental. Prefer the three tested options for bounded
-worker tasks; this is operational readiness, not a general coding guarantee.
+Worker readiness check: these results belong to the supervised OpenCode
+`nous-worker` harness and must not be conflated with native OMP task children.
+The native OMP Ornith child passed a corrective, precise-brief task in 21.6 s,
+followed by the parent’s C++ compile/run check. The direct original Ornith
+task failed a ceil-div/OR case, and native Gemma failed a `SIZE_MAX` overflow
+case. Use native local children for bounded mechanical or extraction work;
+use Luna/Astra for algorithmic reasoning and review. Bonsai separately passed
+native Chat Completions file-read and CSV-write validation with exact ordered
+values. Stock llama.cpp was restored after the Bonsai check. These are narrow
+behavioral checks, not a final routing policy or general coding guarantee.
+
+Laya has an isolated CPU evaluation environment at
+`~/.local/share/nous-triage-eval/` on nous. It is not a service or default
+router: both tested checkpoints missed important escalation cases. Keep all
+model execution on nous. Results and reproduction material are in
+`docs/omp-execution-policy-2026-09-19.md` and `utils/nous/triage-eval/`.

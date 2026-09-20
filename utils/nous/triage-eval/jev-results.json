@@ -1,0 +1,254 @@
+[
+  {
+    "case": "extract",
+    "expected": "local",
+    "answer": {
+      "type": "choice",
+      "choice": "local",
+      "probabilities": {
+        "luna": 0.02,
+        "local": 0.97,
+        "retain": 0.01,
+        "astra": 0
+      },
+      "confidence": 0.96
+    },
+    "ms": 376,
+    "usage": {
+      "input_tokens": 539,
+      "output_tokens": 46,
+      "cost": 2.2638e-05
+    }
+  },
+  {
+    "case": "format",
+    "expected": "local",
+    "answer": {
+      "type": "choice",
+      "choice": "local",
+      "probabilities": {
+        "retain": 0.02,
+        "local": 0.9,
+        "luna": 0.08,
+        "astra": 0
+      },
+      "confidence": 0.88
+    },
+    "ms": 278,
+    "usage": {
+      "input_tokens": 534,
+      "output_tokens": 46,
+      "cost": 2.2428e-05
+    }
+  },
+  {
+    "case": "overflow",
+    "expected": "luna",
+    "answer": {
+      "type": "choice",
+      "choice": "luna",
+      "probabilities": {
+        "luna": 0.95,
+        "astra": 0,
+        "local": 0.01,
+        "retain": 0.04
+      },
+      "confidence": 0.93
+    },
+    "ms": 304,
+    "usage": {
+      "input_tokens": 540,
+      "output_tokens": 47,
+      "cost": 2.268e-05
+    }
+  },
+  {
+    "case": "rename",
+    "expected": "luna",
+    "answer": {
+      "type": "choice",
+      "choice": "luna",
+      "probabilities": {
+        "local": 0.02,
+        "astra": 0,
+        "retain": 0.01,
+        "luna": 0.97
+      },
+      "confidence": 0.96
+    },
+    "ms": 326,
+    "usage": {
+      "input_tokens": 536,
+      "output_tokens": 47,
+      "cost": 2.2512e-05
+    }
+  },
+  {
+    "case": "ui",
+    "expected": "luna",
+    "answer": {
+      "type": "choice",
+      "choice": "luna",
+      "probabilities": {
+        "luna": 0.63,
+        "astra": 0,
+        "local": 0.25,
+        "retain": 0.12
+      },
+      "confidence": 0.5
+    },
+    "ms": 261,
+    "usage": {
+      "input_tokens": 534,
+      "output_tokens": 47,
+      "cost": 2.2428e-05
+    }
+  },
+  {
+    "case": "architecture",
+    "expected": "astra",
+    "answer": {
+      "type": "choice",
+      "choice": "astra",
+      "probabilities": {
+        "local": 0,
+        "retain": 0.04,
+        "astra": 0.84,
+        "luna": 0.12
+      },
+      "confidence": 0.79
+    },
+    "ms": 259,
+    "usage": {
+      "input_tokens": 546,
+      "output_tokens": 46,
+      "cost": 2.2932e-05
+    }
+  },
+  {
+    "case": "diagnosis",
+    "expected": "astra",
+    "answer": {
+      "type": "choice",
+      "choice": "astra",
+      "probabilities": {
+        "local": 0,
+        "astra": 0.95,
+        "luna": 0.03,
+        "retain": 0.02
+      },
+      "confidence": 0.93
+    },
+    "ms": 351,
+    "usage": {
+      "input_tokens": 541,
+      "output_tokens": 46,
+      "cost": 2.2722e-05
+    }
+  },
+  {
+    "case": "research",
+    "expected": "astra",
+    "answer": {
+      "type": "choice",
+      "choice": "astra",
+      "probabilities": {
+        "retain": 0.03,
+        "luna": 0.01,
+        "astra": 0.96,
+        "local": 0
+      },
+      "confidence": 0.95
+    },
+    "ms": 288,
+    "usage": {
+      "input_tokens": 534,
+      "output_tokens": 46,
+      "cost": 2.2428e-05
+    }
+  },
+  {
+    "case": "continue",
+    "expected": "retain",
+    "answer": {
+      "type": "choice",
+      "choice": "retain",
+      "probabilities": {
+        "luna": 0,
+        "retain": 1,
+        "astra": 0,
+        "local": 0
+      },
+      "confidence": 1
+    },
+    "ms": 359,
+    "usage": {
+      "input_tokens": 517,
+      "output_tokens": 46,
+      "cost": 2.1714e-05
+    }
+  },
+  {
+    "case": "steer",
+    "expected": "luna",
+    "answer": {
+      "type": "choice",
+      "choice": "luna",
+      "probabilities": {
+        "astra": 0,
+        "luna": 0.91,
+        "local": 0,
+        "retain": 0.09
+      },
+      "confidence": 0.88
+    },
+    "ms": 347,
+    "usage": {
+      "input_tokens": 522,
+      "output_tokens": 47,
+      "cost": 2.1924e-05
+    }
+  },
+  {
+    "case": "override",
+    "expected": "local",
+    "answer": {
+      "type": "choice",
+      "choice": "local",
+      "probabilities": {
+        "retain": 0,
+        "local": 1,
+        "luna": 0,
+        "astra": 0
+      },
+      "confidence": 0.99
+    },
+    "ms": 253,
+    "usage": {
+      "input_tokens": 531,
+      "output_tokens": 46,
+      "cost": 2.2302e-05
+    }
+  },
+  {
+    "case": "ambiguous",
+    "expected": "retain",
+    "answer": {
+      "type": "choice",
+      "choice": "retain",
+      "probabilities": {
+        "retain": 1,
+        "local": 0,
+        "luna": 0,
+        "astra": 0
+      },
+      "confidence": 0.99
+    },
+    "ms": 270,
+    "usage": {
+      "input_tokens": 519,
+      "output_tokens": 46,
+      "cost": 2.1798e-05
+    }
+  }
+]

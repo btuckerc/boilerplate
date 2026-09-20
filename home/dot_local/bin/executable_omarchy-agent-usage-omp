@@ -1,11 +1,11 @@
 #!/usr/bin/python3
-# omarchy:summary=Print the Oh My Pi / SuperGrok usage record as JSON
+# omarchy:summary=Print the Oh My Pi / Codex usage record as JSON
 # omarchy:args=[--force] [--limits-only]
 # omarchy:hidden=true
-"""Collect Oh My Pi SuperGrok usage into one display-ready JSON record.
+"""Collect Oh My Pi Codex usage into one display-ready JSON record.
 
 Local stats come from OMP (and compatible pi) session files that ran on
-xai-oauth or the xAI API key. Rate limits come from `omp usage --json`.
+the native OpenAI Codex subscription. Rate limits come from `omp usage --json`.
 The agents panel only ever reads the JSON this prints.
 """
 
@@ -27,8 +27,8 @@ from typing import Any
 
 AGENT_ID = "omp"
 AGENT_NAME = "Oh My Pi"
-AUTH_HELP = "Run `omp auth-broker login xai-oauth` to restore SuperGrok usage."
-XAI_PROVIDERS = {"xai-oauth", "xai"}
+AUTH_HELP = "Run `/login openai-codex` in OMP to restore Codex usage."
+CODEX_PROVIDER = "openai-codex"
 SCAN_REUSE_SECONDS = 20
 LIMITS_ONLY_REUSE_SECONDS = 900
 PROBE_MIN_INTERVAL_SECONDS = 15
@@ -211,7 +211,7 @@ def scan_sessions() -> dict[str, Any]:
               if entry.get("type") != "message" or message.get("role") != "assistant":
                 continue
               provider = str(message.get("provider") or "")
-              if provider not in XAI_PROVIDERS:
+              if provider != CODEX_PROVIDER:
                 continue
               unique_key = f"{path}:{entry.get('id') or line_number}"
               if unique_key in seen:
@@ -230,7 +230,7 @@ def scan_sessions() -> dict[str, Any]:
                 input_tokens = total
               if total <= 0:
                 continue
-              model = str(message.get("model") or "grok")
+              model = str(message.get("model") or "codex")
               day = local_date_from_timestamp(entry.get("timestamp") or message.get("timestamp"))
             except Exception:
               continue
@@ -273,7 +273,7 @@ def scan_cache_paths() -> tuple[Path, Path]:
   digest_parts = [str(root) for root in session_roots()]
   digest = hashlib.sha1("\n".join(digest_parts).encode("utf-8")).hexdigest()[:16]
   root = cache_root()
-  return root / f"omp-scan-{digest}.json", root / f"omp-scan-{digest}.lock"
+  return root / f"codex-scan-{digest}.json", root / f"codex-scan-{digest}.lock"
 
 
 def cached_scan(max_age_seconds: float) -> dict[str, Any]:
@@ -325,7 +325,7 @@ def limits_from_payload(payload: dict[str, Any]) -> tuple[list[dict[str, Any]], 
     if not isinstance(report, dict):
       continue
     provider = str(report.get("provider") or "")
-    if provider not in XAI_PROVIDERS:
+    if provider != CODEX_PROVIDER:
       continue
     for entry in report.get("limits") or []:
       if not isinstance(entry, dict):
@@ -337,15 +337,13 @@ def limits_from_payload(payload: dict[str, Any]) -> tuple[list[dict[str, Any]], 
       label = str(entry.get("label") or "Limit")
       window = entry.get("window") if isinstance(entry.get("window"), dict) else {}
       resets_at = iso_from_ms(window.get("resetsAt") or entry.get("resetsAt"))
-      if "supergrok" in label.lower():
-        tier = "SuperGrok"
       limits.append({
         "label": label,
         "title": label,
         "percent": percent,
         "resetsAt": resets_at,
       })
-  return limits, tier or ("SuperGrok" if limits else "")
+  return limits, tier or ("Codex" if limits else "")
 
 
 def probe_limits(force: bool) -> dict[str, Any]:
@@ -353,13 +351,13 @@ def probe_limits(force: bool) -> dict[str, Any]:
   if not omp:
     return {
       "ok": False,
-      "helpText": "omp not found in PATH. Install Oh My Pi, then run `omp auth-broker login xai-oauth`.",
+      "helpText": "omp not found in PATH. Install Oh My Pi, then run OMP `/login openai-codex`.",
     }
 
   if force:
     try:
       subprocess.run(
-        [omp, "usage", "invalidate", "--provider", "xai-oauth"],
+        [omp, "usage", "invalidate", "--provider", CODEX_PROVIDER],
         check=False,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -371,7 +369,7 @@ def probe_limits(force: bool) -> dict[str, Any]:
 
   try:
     completed = subprocess.run(
-      [omp, "usage", "--json", "--provider", "xai-oauth"],
+      [omp, "usage", "--json", "--provider", CODEX_PROVIDER],
       check=False,
       capture_output=True,
       text=True,
@@ -382,30 +380,30 @@ def probe_limits(force: bool) -> dict[str, Any]:
     return {
       "ok": False,
       "transport": True,
-      "helpText": "omp usage timed out. Retrying shortly. Local SuperGrok stats are still shown.",
+      "helpText": "omp usage timed out. Retrying shortly. Local Codex stats are still shown.",
     }
   except Exception as exc:
-    return {"ok": False, "helpText": f"Could not run omp usage ({exc}). Local SuperGrok stats are still shown."}
+    return {"ok": False, "helpText": f"Could not run omp usage ({exc}). Local Codex stats are still shown."}
 
   if completed.returncode != 0:
     return {
       "ok": False,
-      "helpText": "omp usage failed. Run `omp auth-broker login xai-oauth`. Local SuperGrok stats are still shown.",
+      "helpText": "omp usage failed. Run OMP `/login openai-codex`. Local Codex stats are still shown.",
     }
 
   try:
     payload = json.loads(completed.stdout)
   except Exception:
-    return {"ok": False, "helpText": "omp usage returned unreadable JSON. Local SuperGrok stats are still shown."}
+    return {"ok": False, "helpText": "omp usage returned unreadable JSON. Local Codex stats are still shown."}
 
   if not isinstance(payload, dict):
-    return {"ok": False, "helpText": "omp usage returned no SuperGrok report."}
+    return {"ok": False, "helpText": "omp usage returned no Codex report."}
 
   limits, tier = limits_from_payload(payload)
   if not limits:
     if payload.get("accountsWithoutUsage"):
       return {"ok": False, "helpText": AUTH_HELP}
-    return {"ok": False, "helpText": "omp usage returned no SuperGrok limits. Local SuperGrok stats are still shown."}
+    return {"ok": False, "helpText": "omp usage returned no Codex limits. Local Codex stats are still shown."}
   return {"ok": True, "limits": limits, "tierLabel": tier}
 
 
@@ -436,20 +434,20 @@ def usable_cached_limits(cached: dict[str, Any]) -> list[dict[str, Any]]:
 
 def collect_limits(force: bool) -> dict[str, Any]:
   result = {"limits": [], "tierLabel": "", "usageStatusText": "", "authHelpText": AUTH_HELP}
-  probe_cache = cache_root() / "omp-limits.json"
+  probe_cache = cache_root() / "codex-limits.json"
   cached = read_fresh_json(probe_cache, float("inf")) or {}
   fallback = usable_cached_limits(cached)
 
   fetched_at = number(cached.get("fetchedAtMs")) / 1000
   if fallback and not force and time.time() - fetched_at < PROBE_MIN_INTERVAL_SECONDS:
     result["limits"] = fallback
-    result["tierLabel"] = str(cached.get("tierLabel") or "SuperGrok")
+    result["tierLabel"] = str(cached.get("tierLabel") or "Codex")
     return result
 
   probe = probe_limits(force)
   if probe.get("ok"):
     result["limits"] = probe["limits"]
-    result["tierLabel"] = str(probe.get("tierLabel") or "SuperGrok")
+    result["tierLabel"] = str(probe.get("tierLabel") or "Codex")
     try:
       write_json(
         probe_cache,
@@ -467,9 +465,9 @@ def collect_limits(force: bool) -> dict[str, Any]:
     result["retryAdvised"] = True
   if fallback:
     result["limits"] = fallback
-    result["tierLabel"] = str(cached.get("tierLabel") or "SuperGrok")
+    result["tierLabel"] = str(cached.get("tierLabel") or "Codex")
   else:
-    result["usageStatusText"] = "SuperGrok limits unavailable"
+    result["usageStatusText"] = "Codex limits unavailable"
     result["authHelpText"] = str(probe.get("helpText") or AUTH_HELP)
   return result
 

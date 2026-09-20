@@ -1,15 +1,17 @@
 # kind	live_path	repo_relative_path	os
-# omp-version	18.1.5
+# omp-version	18.2.6
 # os is optional: all (default), linux, or darwin. linux-only rows stay in Git
 # but are not applied or required live on other operating systems.
 # Credentials, databases, sessions, caches, logs, and tiny-model weights are
 # deliberately absent. They remain machine-local under ~/.omp/agent.
 file	~/.config/mise/config.toml	home/dot_config/mise/config.toml
 file	~/.omp/agent/RULES.md	home/private_dot_omp/private_agent/RULES.md
-file	~/.omp/agent/config.yml	home/private_dot_omp/private_agent/config.yml
-file	~/.omp/agent/models.yml	home/private_dot_omp/private_agent/models.yml
+file	~/.omp/agent/config.yml	home/private_dot_omp/private_agent/private_config.yml
+file	~/.omp/agent/models.yml	home/private_dot_omp/private_agent/private_models.yml
 file	~/.omp/agent/agents/scout.md	home/private_dot_omp/private_agent/agents/scout.md
 file	~/.omp/agent/agents/sonic.md	home/private_dot_omp/private_agent/agents/sonic.md
+file	~/.omp/agent/agents/nous.md	home/private_dot_omp/private_agent/agents/nous.md
+file	~/.omp/agent/agents/architect.md	home/private_dot_omp/private_agent/agents/architect.md
 file	~/.omp/agent/prompts/review.md	home/private_dot_omp/private_agent/prompts/review.md
 file	~/.omp/agent/prompts/update.md	home/private_dot_omp/private_agent/prompts/update.md
 file	~/.omp/agent/themes/ghostty.json	home/private_dot_omp/private_agent/themes/ghostty.json
@@ -24,3 +26,4 @@ file	~/.omp/agent/commands/recover.md	home/private_dot_omp/private_agent/command
 file	~/.local/share/decent-angl/skills/omp-drive/SKILL.md	home/dot_local/share/decent-angl/skills/omp-drive/SKILL.md
 exec	~/.local/bin/omp-board	home/dot_local/bin/executable_omp-board
 exec	~/.local/bin/opnsense-store-secret	home/dot_local/bin/executable_opnsense-store-secret
+exec	~/.local/bin/omp-triage	home/dot_local/bin/executable_omp-triage

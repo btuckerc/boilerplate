@@ -1,5 +1,9 @@
 # Codex memory, harness choice, and computer use — 2026-09-19
 
+Historical snapshot. The subsequent [OMP migration and execution policy](omp-execution-policy-2026-09-19.md)
+supersedes the OMP provider/default recommendations below. Codex/T3 settings
+remain a separate baseline.
+
 Keep T3/Codex as the main workspace for now. OMP is the more complete alternative
 for this user's mix of coding, delegated work, browser use, and native Mac apps.
 Pi is the strongest lean-harness challenger to evaluate for coding efficiency.
@@ -15,9 +19,10 @@ searches did not establish a verifiable recent X consensus.
 ## What T3 actually changes
 
 Inspected the installed T3 0.0.40 bundle and local settings, rather than assuming
-the latest upstream behavior matches this installation. The Codex provider uses
-`codex-baseline` 0.154.0, starts `codex app-server`, retains its thread ID, and
-resumes that thread. Normal turns do not reconstruct and submit an additional
+the latest upstream behavior matches this installation. The Codex provider accepts a configured binary path and otherwise resolves
+`codex` (observed PATH fallback 0.154.0); the active T3 binary path was not
+independently observed. It starts `codex app-server`, retains its thread ID,
+and resumes that thread. Normal turns do not reconstruct and submit an additional
 full T3 transcript. Codex still owns the agent loop and context handling.
 
 T3 adds developer instructions: its Default-mode template is roughly 1,020

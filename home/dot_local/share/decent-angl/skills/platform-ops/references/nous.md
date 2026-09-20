@@ -1,8 +1,24 @@
 # Nous inference appliance
 
-`nous` is inference-only. Do not bootstrap chezmoi, shell preferences, Codex,
-OMP, or development checkouts on it. Clients and experiment runners stay on
-workstations; model requests go to nous over Tailscale.
+`nous` primarily serves inference. Tucker explicitly expanded evaluation to
+Linux workspace/session hosting on 2026-09-19. `~/repos` already links to
+`/srv/workspaces/repos` on the 678 GB Btrfs NVMe partition (about 668 GB free
+at inspection). Do not bootstrap workstation chezmoi or shell preferences.
+Keep macOS app automation and Apple builds on the Mini; evaluate Linux
+projects in independent Git clones/worktrees, not live bidirectional sync.
+
+The reversible OMP Serve pilot is isolated in
+`~/.local/share/omp-serve-pilot/`, with its fixture under
+`~/repos/omp-serve-pilot/`. Bun 1.3.11 and OMP 18.2.6 were downloaded from
+official releases with SHA256 verification. It uses only local inference,
+its own agent config/state, and native `read,write` tools. The full OMP tool
+prompt exceeded Ornith's 16K context (18,699 tokens before the task); the
+restricted worker passed a real edit, independent test, and session restore.
+This is not a general-purpose local-agent recommendation. No workstation
+credentials were copied. Cloud execution still needs independent host auth.
+See `~/src/omp-serve/README.md` and `docs/omp-workspace-hosting-2026-09-19.md`
+in the boilerplate repo before promoting the pilot. Existing inference
+repositories and service settings remain owned by the host.
 
 - SSH: `ssh tux@nous`; MacBook also has a local `ssh nous` alias using its
   existing `~/.ssh/id_rsa`, with agent forwarding disabled. Other clients
@@ -14,7 +30,7 @@ workstations; model requests go to nous over Tailscale.
   `home/private_dot_omp/private_agent/`). The live `llama.cpp` provider is
   `http://nous:8080/v1`; the manual Bonsai provider is `http://nous:8081/v1`.
   This OMP path does not require OpenCode. It is still subject to the
-  inference-only host boundary and the one-model-at-a-time service switch.
+  inference service boundary and the one-model-at-a-time service switch.
 - Fleet inventory: `~/.config/decent-angl/fleet.json`, role `inference`.
   `decent-angl-doctor --fleet` uses stock SSH commands plus HTTP checks;
   it follows the active llama/Bonsai backend and does not expect the workstation

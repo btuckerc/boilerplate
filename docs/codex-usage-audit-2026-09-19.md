@@ -1,5 +1,9 @@
 # Codex usage and local-worker audit — 2026-09-19
 
+Follow-up: [memory settings, harness alternatives, and computer use](codex-memory-and-harness-review-2026-09-19.md)
+records the deeper audit and distinguishes T3's saved low-effort selection from
+the shared CLI medium default.
+
 Keep Astra for judgment and integration, with medium as the default and xhigh
 available for demanding work. Use a fresh-brief Luna worker for broader
 execution, and Ornith on nous for bounded file tasks whose results are cheap

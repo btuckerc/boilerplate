@@ -3,6 +3,9 @@
 {{- $config = setValueAtPath "model_reasoning_effort" "medium" $config -}}
 {{- $config = setValueAtPath "service_tier" "default" $config -}}
 {{- $config = setValueAtPath "features.context_management.experimental_mode" false $config -}}
+{{- /* Keep optional background inference off, including on fresh runtime homes. */ -}}
+{{- $config = setValueAtPath "features.memories" false $config -}}
+{{- $config = setValueAtPath "desktop.ambient-suggestions-enabled" false $config -}}
 {{- $config = setValueAtPath "agents.max_concurrent_threads_per_session" 4 $config -}}
 {{- $config = setValueAtPath "agents.default_subagent_model" "gpt-5.6-luna" $config -}}
 {{- $config = setValueAtPath "agents.default_subagent_reasoning_effort" "low" $config -}}

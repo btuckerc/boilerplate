@@ -1,8 +1,8 @@
 # Managed by chezmoi. Credentials, sessions and account usage stay local.
-# Luna executes routine work; Astra is available for planning and hard decisions.
-# nous is a bounded local lane, selected by agent/task suitability.
+# Astra directs; nous implements bounded designs under parent-run checks.
+# Luna remains the generic task alias and capability/failed-repair fallback.
 modelRoles:
-  default: openai-codex/gpt-5.6-luna:medium
+  default: openai-codex/gpt-6-astra:medium
   slow: openai-codex/gpt-6-astra:xhigh
   plan: openai-codex/gpt-6-astra:medium
   vision: openai-codex/gpt-5.6-luna:medium
@@ -14,12 +14,11 @@ modelRoles:
 modelProviderOrder:
   - openai-codex
   - llama.cpp
-  - bonsai
   - openrouter
 
 cycleOrder:
   - default
-  - plan
+  - task
 
 enabledModels:
   - openai-codex/gpt-6-astra
@@ -27,7 +26,6 @@ enabledModels:
   - openai-codex/gpt-5.6-sol
   - openai-codex/gpt-5.6-terra
   - llama.cpp/*
-  - bonsai/*
   - openrouter/z-ai/glm-5.3-flash
   - openrouter/z-ai/glm-5.3
   - openrouter/moonshotai/kimi-k3
@@ -47,6 +45,8 @@ disabledProviders:
 
 includeModelInPrompt: false
 defaultThinkingLevel: medium
+# Shorter answers, not less reasoning.
+textVerbosity: low
 hideThinkingBlock: true
 omitThinking: true
 tier:
@@ -74,6 +74,9 @@ task:
   maxRecursionDepth: 1
   eager: default
   enableLsp: false
+  # Per-task choice without an extra classifier call. Omit for configured medium;
+  # coarse "med" currently maps to high on Astra/Luna, not medium.
+  enableEffort: true
   showResolvedModelBadge: true
   softRequestBudget: 40
   maxRuntimeMs: 600000
@@ -163,7 +166,7 @@ tui:
   titleState: false
 
 title:
-  # First-message titles use Luna/low through the tiny role.
+  # First-message titles use the tiny role.
   # Replan titles stay off so they do not contend with the working turn.
   refreshOnReplan: false
 
@@ -181,7 +184,7 @@ advisor:
 features:
   # OMP already detects repeated streams. Do not let a local classifier
   # independently resume a stopped turn and recreate the same work.
-  unexpectedStopDetection: false
+  unexpectedStopDetection: none
 
 providers:
   openrouterVariant: default

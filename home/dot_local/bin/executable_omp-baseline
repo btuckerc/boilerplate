@@ -447,13 +447,12 @@ check_thinking_and_loop_policy() {
   source_provider="$(awk '
     /^providers:/ { in_providers=1; next }
     in_providers && /^[^[:space:]#]/ { exit }
-    in_providers && $1 ~ /^(llama\.cpp|bonsai):$/ { print $1 }
+    in_providers && $1 ~ /^llama\.cpp:$/ { print $1 }
   ' "$source_models")"
-  if printf '%s\n' "$source_provider" | grep -q '^llama.cpp:' &&
-    printf '%s\n' "$source_provider" | grep -q '^bonsai:'; then
-    printf 'CONFIG  local inference providers present\n'
+  if printf '%s\n' "$source_provider" | grep -q '^llama.cpp:'; then
+    printf 'CONFIG  local inference provider present\n'
   else
-    printf 'CONFIG  local inference providers missing\n' >&2
+    printf 'CONFIG  local inference provider missing\n' >&2
     failures=1
   fi
 
@@ -485,7 +484,7 @@ check_omp_config() {
 
   if output="$(omp config get modelRoles --json 2>/dev/null)" \
     && printf '%s' "$output" | jq -e '
-      (.value.default | test("^openai-codex/gpt-5\\.6-luna:medium$")) and
+      (.value.default | test("^openai-codex/gpt-6-astra:medium$")) and
       (.value.slow | test("^openai-codex/gpt-6-astra:xhigh$")) and
       (.value.plan | test("^openai-codex/gpt-6-astra:medium$")) and
       (.value.task | test("^openai-codex/gpt-5\\.6-luna:medium$")) and
@@ -498,7 +497,7 @@ check_omp_config() {
     failures=1
   fi
 
-  check_effective_list cycleOrder '["default","plan"]' || failures=1
+  check_effective_list cycleOrder '["default","task"]' || failures=1
 
   if output="$(omp config get skills.enablePiUser --json 2>/dev/null)" \
     && printf '%s' "$output" | jq -e '.value == true' >/dev/null \
@@ -511,33 +510,21 @@ check_omp_config() {
   fi
 
   local source_models="$REPO_ROOT/home/private_dot_omp/private_agent/private_models.yml" catalog
-  if grep -q '^  llama.cpp:' "$source_models" && grep -q '^  bonsai:' "$source_models"; then
-    printf 'CONFIG  local providers configured\n'
+  if grep -q '^  llama.cpp:' "$source_models" && grep -q 'Qwen3.8-27B-UD-Q5_K_M' "$source_models"; then
+    printf 'CONFIG  promoted local catalog configured\n'
   else
-    printf 'CONFIG  local providers missing\n' >&2
+    printf 'CONFIG  promoted local catalog missing\n' >&2
     failures=1
   fi
   catalog="$(omp models llama.cpp --json 2>/dev/null || true)"
-  if printf '%s' "$catalog" | jq -e '
-      [.models[]?.id] | index("Ornith-1.5-9B-Q5_K_M")
-    ' >/dev/null; then
-    printf 'MODEL   Ornith local catalog entry\n'
-  elif grep -q 'Ornith-1.5-9B-Q5_K_M' "$source_models"; then
-    printf 'MODEL   Ornith configured; discovery unavailable\n'
+  if printf '%s' "$catalog" | jq -e '[.models[]?.id] | index("Qwen3.8-27B-UD-Q5_K_M")' >/dev/null; then
+    printf 'MODEL   Qwen3.8 local catalog entry\n'
+  elif grep -q 'Qwen3.8-27B-UD-Q5_K_M' "$source_models"; then
+    printf 'MODEL   Qwen3.8 configured; discovery unavailable\n'
   else
-    printf 'MODEL   Ornith absent from local catalog and source\n' >&2
+    printf 'MODEL   Qwen3.8 absent from local catalog and source\n' >&2
     failures=1
   fi
-  catalog="$(omp models bonsai --json 2>/dev/null || true)"
-  if printf '%s' "$catalog" | jq -e '.models | length > 0' >/dev/null; then
-    printf 'MODEL   Bonsai local catalog entry\n'
-  elif grep -q '^  bonsai:' "$source_models"; then
-    printf 'MODEL   Bonsai configured; discovery unavailable\n'
-  else
-    printf 'MODEL   Bonsai absent from local catalog and source\n' >&2
-    failures=1
-  fi
-
   if omp setup python --check --json >/dev/null 2>&1; then
     printf 'PYTHON  available\n'
   else
@@ -545,10 +532,8 @@ check_omp_config() {
     failures=1
   fi
   check_thinking_and_loop_policy || failures=1
-
   return "$failures"
 }
-
 
 quarantine_legacy_wrapper() {
   local wrapper backup

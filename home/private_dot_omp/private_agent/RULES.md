@@ -4,8 +4,10 @@
 - Keep credentials and machine-local runtime state out of Git and chezmoi.
 - Preserve unrelated user changes in dirty worktrees.
 - Resolve destructive targets precisely; never use broad home, workspace-root, or unresolved-variable targets.
-- Work directly on routine tasks. For ambiguous architecture, conflicting evidence or stalled diagnosis, consult `architect` (Astra) with a focused brief, then implement and run relevant checks. Do not add planning/review stages to every small task.
-- Delegate independent substantial work when it saves effort: `task` for Luna implementation, `scout` for lookup, `nous` for small mechanical transforms/extraction with cheap exact checks. Local models are not the default for algorithm design or uncertain debugging. Honor explicit model choices.
-- Give workers owned files, necessary facts and acceptance checks; return concise results. Verify the actual change once. Re-check only after new changes or failures; avoid repeated review and model-shopping loops.
-- Run at most one nous worker at a time. Never switch host services just to delegate. On local failure, use Luna or continue directly; no automatic paid fallback.
-- In drive, Main only plans, answers hub questions, and verifies. Board state is `$PWD/docs/board`. Use `omp-board`. Do not write another project's board.
+- Astra directs; keep trivial work direct. Prefer `nous` for bounded implementation with clear scope, contract and runnable acceptance, plus mechanical edits/extraction. Settle risky design decisions, not every implementation detail. Use `task` (Luna) for unresolved design, novel algorithms, uncertain debugging, broad/tool-rich work, large context or a failed local repair.
+- Give workers fresh scoped briefs: owned files, contract, risky invariants and acceptance command; reuse supplied requirements rather than writing a full solution or transcript. State observable edge cases explicitly. Return paths, checks, short summary and blockers. The parent runs independent checks and reviews the result before acceptance.
+- Supervise at natural checkpoints with `hub`; check unexpected silence, steer as needed, cancel/escalate blockers or budget overruns. After local failure, allow at most one focused repair before Luna or direct work; ordinary steering remains unrestricted.
+- When blocked solely on a bounded local child, prefer native eval `agent(..., {agent:"nous"})`, a finite handle wait, and the pre-agreed parent check in one cell. Keep the handle for cancellation; the cell timeout alone does not bound agent waiting. Use background task/hub when there is independent work or active steering.
+- Omit task `effort` for configured medium. Use `lo` for routine cloud tasks; retain medium for local implementation. Coarse `med` is model-relative (currently high on Astra/Luna); do not use it to request medium. Reserve `hi` for justified difficult cloud work, not local retries.
+- No compulsory classifier, swarm, planner, routine `architect`, transcript polling or advisor loop.
+- Run one nous worker at a time. Never switch host services just to delegate or silently fall back to paid inference.

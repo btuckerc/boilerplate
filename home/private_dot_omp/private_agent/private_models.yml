@@ -13,28 +13,41 @@ providers:
           supportsReasoningEffort: true
           omitReasoningEffort: false
   llama.cpp:
-    baseUrl: http://nous:8080/v1
+    baseUrl: http://100.83.125.83:8080/v1
     api: openai-completions
     auth: none
     discovery:
       type: llama.cpp
       timeoutMs: 1000
-    # Retain the tested worker in the picker when nous is offline. Discovery
-    # supplies experimental models without promoting them to worker defaults.
+    # Qwen is the promoted worker; discovery keeps smaller installed models
+    # available for explicit selection.
     models:
-      - id: Ornith-1.5-9B-Q5_K_M
-        name: Nous Ornith 1.5 9B
-        reasoning: false
+      - id: Qwen3.8-27B-UD-Q5_K_M
+        name: Nous Qwen 3.8 27B UD-Q5_K_M
+        reasoning: true
         input: [text]
-        contextWindow: 16384
-        maxTokens: 2048
+        contextWindow: 65536
+        maxTokens: 8192
         cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0}
+        thinking:
+          mode: effort
+          defaultLevel: medium
+          efforts: [low, medium, xhigh]
         compat:
           supportsStore: false
           supportsDeveloperRole: false
-          supportsReasoningEffort: false
+          supportsReasoningEffort: true
+          omitReasoningEffort: false
           maxTokensField: max_tokens
     modelOverrides:
+      Qwen3.8-27B-UD-Q5_K_M:
+        contextWindow: 65536
+        maxTokens: 8192
+        compat:
+          maxTokensField: max_tokens
+          # Match Qwen's thinking sampler; other clients keep server defaults.
+          extraBody:
+            min_p: 0
       Ornith-1.5-9B-Q5_K_M:
         contextWindow: 16384
         maxTokens: 2048
@@ -44,23 +57,4 @@ providers:
         contextWindow: 16384
         maxTokens: 2048
         compat:
-          maxTokensField: max_tokens
-  bonsai:
-    baseUrl: http://nous:8081/v1
-    api: openai-completions
-    auth: none
-    # Deliberate/manual backend: shares the GPU with llama.cpp. Never switch
-    # services as a side effect of model selection or ordinary delegation.
-    models:
-      - id: /home/tux/repos/Bonsai-demo/models/bonsai2-gguf/27B/Ternary-Bonsai-2-27B-PQ2_0.gguf
-        name: Nous Bonsai 2 27B (manual backend)
-        reasoning: false
-        input: [text]
-        contextWindow: 32768
-        maxTokens: 2048
-        cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0}
-        compat:
-          supportsStore: false
-          supportsDeveloperRole: false
-          supportsReasoningEffort: false
           maxTokensField: max_tokens

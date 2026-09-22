@@ -107,3 +107,39 @@ switch a runtime symlink, preserving `~/.omp/serve` and host-specific config.
 Do not duplicate editable source into an untracked installed tree again.
 Mac computer tools run where OMP runs; moving sessions to Linux does not forward
 the Mini's desktop permissions or Apple apps.
+
+## Native OMP rollout — 2026-09-22
+
+The reviewed shared baseline is now OMP 18.2.8 (`10d5afb`), retaining Astra
+medium as director, Luna medium as the generic task lane, and Qwen medium for
+bounded local work. The 18.2.7 transition removes bash `env` and changes eval
+`judge()` to return awaited answers directly; the scoped Serve/config caller
+search found no affected uses. Serve application releases were not replaced.
+
+MacBook passed strict baseline validation. Mini was reconciled with explicit
+permission: its five-file local patch and original files were backed up under
+`~/.local/state/omp-upgrade-18.2.8/`, then stashed, fast-forwarded and reapplied.
+The box composer and unrelated Tailscale endpoint edits were preserved; the
+retired Bonsai model edit remains in the backup, not the active model catalog.
+The preservation stash remains available. Its stale live validator and manifest
+were applied from canonical source before applying the new baseline.
+
+Nous uses the official SHA-verified Linux x64 18.2.8 binary via
+`~/.local/share/omp-serve-pilot/bin/omp`; the previous symlink target
+`~/.local/share/omp-serve-pilot/omp-18.2.6` remains for rollback. Mini Serve's
+launcher now pins the mise 18.2.8 binary and was restarted only after all seven
+recorded threads were idle. Both Serve HTTP health endpoints responded after
+the switch. Auth databases, tokens, sessions, workspace files and application
+release symlinks were not copied or replaced.
+
+T14 remained offline in Tailscale and SSH to `100.97.197.39` timed out.
+Its runtime upgrade is unverified; the published pin is ready for its next
+managed pull. Already-running native OMP processes retain their old binary
+until restarted.
+
+Mini subsequently passed `omp-baseline validate --strict`. Fresh native Astra
+responses through the existing broker passed on both hosts, and both binaries
+emitted RPC `ready`, negotiated protocol v2 and answered `get_state`. Nous's
+idle auth broker was restarted onto the verified 18.2.8 executable; a fresh
+authenticated Astra response passed afterward. Existing broker credentials
+were neither copied nor replaced.

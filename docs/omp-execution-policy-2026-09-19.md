@@ -174,3 +174,45 @@ MacBook configuration is applied. T14's SSH check timed out; Linux Omarchy live
 validation and remote rollout remain unverified. Mac Mini was not changed or
 validated in this migration. The published baseline is available through the
 usual `omp-baseline pull` workflow; OAuth login remains local to each machine.
+
+## 2026-09-22: OMP 18.2.8 and independent knob trials
+
+This follow-up supersedes the earlier pending draft-depth/read-summary gates;
+it does not repeat or change the automatic-routing experiment. Astra remains
+the director, with one explicit Nous worker at a time and Luna for broader work.
+
+Four knobs were tested separately before promotion:
+
+| Knob | Evidence | Decision |
+| --- | --- | --- |
+| MTP depth 2 vs 3 | Four complete, independently graded answers per arm; both 4/4. Median end-to-end 10.586s vs 9.386s; mean decode 55.48 vs 62.59 tokens/s. | Keep 3. Depth 2's higher draft acceptance did not improve throughput. |
+| Microbatch 512/1024/2048 | Two cold/warm cycles per arm, reversed order, 19,250-token prompt; all 12 answers passed. Mean native cold prefill 22.338/21.535/21.827s. | Promote 1024: 3.6% lower cold prefill than 512. No robust warm-cache gain claimed. |
+| Nous structural reads off/on | Two real files, two seeds, balanced order; 4/4 independently graded edits per arm. Aggregate duration 181.578/157.320s; input including cache 146,619/129,844 tokens; output 7,293/6,885. | Enable `readSummarize`. Summaries actually elided bodies; explicit recovery reads increased. |
+| Native shake before remote compaction | Two paired stress runs per arm, then a larger-history control; all retained the requested facts, constraints and URI. | Keep `[remote, handoff, soft]`; do not enable shake. |
+
+Structural reads reduced aggregate elapsed time 13.4% and input including cache
+11.4% in this small screen; one TypeScript seed was slower, so this is not a
+universal latency claim. Real source repositories were not modified by trials.
+
+Shake reclaimed about 4,607 tokens per stress run, but still fell through to
+remote compaction: mean 71.181s versus baseline 43.913s, with six versus four
+successful remote compactions across the two runs. The larger control reclaimed
+33,883 tokens yet still needed remote compaction: 34.605s versus 22.903s.
+Recovery reads added work. Main-model usage excludes unexposed compactor usage;
+neither those counts nor cache differences establish subscription charges.
+
+The GPU trials held Qwen3.8-27B Q5_K_M, native b11046 Vulkan, 64K context,
+q8 KV, medium reasoning and sampler settings fixed. Complete final answers,
+not truncated reasoning, were graded. Initial harness-development runs with
+an incorrect extraction oracle or short output cap were excluded.
+Each trial restored the original preset before the final promotion.
+Microbatch 1024 retained MTP depth 3 and left about 10.44 GiB VRAM free;
+no OOM or health failure was observed.
+
+Raw local evidence is under `/tmp/omp-ecosystem-upgrade/`:
+`20260922T164004Z-mtp-ubatch/`, `read-real/`, `shake/`, and
+`promotion.json`. These are machine-local experiment artifacts, not a durable
+shared storage promise. The promoted preset's SHA-256 is
+`ea1399e5f9cd9029b8e64e3e584adf22c1829b8efb5b1e3fbdf4747a29873886`;
+the original is backed up on Nous under
+`~/.local/state/omp-upgrade-18.2.8/models.ini.before-ubatch1024`.

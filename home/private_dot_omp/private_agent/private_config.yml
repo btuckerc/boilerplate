@@ -140,7 +140,6 @@ statusLine:
     - model
     - path
   rightSegments:
-    - context_pct
     - token_rate
   segmentOptions:
     model:

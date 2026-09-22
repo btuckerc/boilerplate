@@ -98,7 +98,10 @@
     "preset": "nerd",
     "overrides": {
       "context.compaction": "│",
-      "icon.auto": "│"
+      "icon.auto": "│",
+      "icon.folder": "",
+      "icon.scratchFolder": "",
+      "icon.throughput": ""
     }
   }
 }

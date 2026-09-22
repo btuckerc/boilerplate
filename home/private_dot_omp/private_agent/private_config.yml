@@ -55,6 +55,11 @@ extendedContext: false
 contextPromotion:
   enabled: false
 
+spelling:
+  typoDetection: false
+  autocomplete: false
+  autocorrect: false
+
 retry:
   enabled: true
   maxRetries: 1
@@ -129,6 +134,7 @@ statusLine:
   preset: custom
   separator: powerline
   compactThinkingLevel: true
+  transparent: true
   leftSegments:
     - hostname
     - model
@@ -147,12 +153,18 @@ statusLine:
       stripWorkPrefix: true
 
 display:
+  # Keep agent/model identity visible without the expanded live roster.
+  pinnedAgents: collapsed
   showTokenUsage: false
   cacheMissMarker: true
   hideToolActivity: true
   shimmer: disabled
   # Tokens appear as they arrive; no client-side reveal delay.
   smoothStreaming: false
+
+tui:
+  # Ghostty deliberately uses a blank fixed title; do not animate a hidden title.
+  titleState: false
 
 title:
   # First-message titles use Luna/low through the tiny role.

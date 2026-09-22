@@ -97,8 +97,8 @@
   "symbols": {
     "preset": "nerd",
     "overrides": {
-      "context.compaction": "│",
-      "icon.auto": "│",
+      "context.compaction": "|",
+      "icon.auto": "|",
       "icon.folder": "",
       "icon.scratchFolder": "",
       "icon.throughput": "",

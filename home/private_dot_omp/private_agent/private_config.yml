@@ -136,7 +136,6 @@ statusLine:
   compactThinkingLevel: true
   transparent: true
   leftSegments:
-    - hostname
     - model
     - path
   rightSegments:

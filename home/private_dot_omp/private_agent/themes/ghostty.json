@@ -101,7 +101,8 @@
       "icon.auto": "│",
       "icon.folder": "",
       "icon.scratchFolder": "",
-      "icon.throughput": ""
+      "icon.throughput": "",
+      "icon.host": ""
     }
   }
 }

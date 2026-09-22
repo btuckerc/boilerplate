@@ -95,6 +95,10 @@
     "infoBg": "sel"
   },
   "symbols": {
-    "preset": "nerd"
+    "preset": "nerd",
+    "overrides": {
+      "context.compaction": "│",
+      "icon.auto": "│"
+    }
   }
 }

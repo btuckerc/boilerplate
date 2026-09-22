@@ -132,7 +132,7 @@ symbolPreset: nerd
 
 statusLine:
   preset: custom
-  separator: powerline
+  separator: none
   compactThinkingLevel: true
   transparent: true
   leftSegments:
@@ -140,9 +140,7 @@ statusLine:
     - model
     - path
   rightSegments:
-    - token_in
-    - token_out
-    - cache_read
+    - context_pct
     - token_rate
   segmentOptions:
     model:

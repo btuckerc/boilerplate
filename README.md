@@ -394,9 +394,10 @@ Configuration: `~/.config/tmux/tmux.conf`
 
 Herdr is pinned through mise and configured at `~/.config/herdr/config.toml`.
 Run `herdr` once and keep one workspace per project folder, with one tab per
-agent (`+` in the tab bar or `Ctrl-b c`); detach with `Ctrl-b q` and running
-sessions stay attached to the local Herdr server. The shared config keeps the
-sidebar minimal: each machine lists workspace names only (no git status).
+agent (`+` in the tab bar or `Ctrl-b c`, created without a name prompt);
+detach with `Ctrl-b q` and running sessions stay attached to the local Herdr
+server. The shared config keeps the sidebar minimal: each machine lists
+workspace names only (no git status).
 Herdr 0.9.1 cannot hide the Agents panel; drag its divider down to shrink it
 (stored per client in `~/.local/state/herdr/client-shell/`). The managed OMP
 integration supplies working/blocked/idle state and native session restore.

@@ -1,6 +1,6 @@
 ---
 name: codex-config
-description: Maintain the shared Codex baseline in chezmoi. Use when changing Codex configuration, skills, bootstrap rules, or cross-machine Codex behavior.
+description: Change the shared Codex baseline in chezmoi - config.toml, model-policy, CLI pin, T3 shadow home, cross-machine runtime. Explicit requests only; not for using Codex.
 ---
 
 # Codex config
@@ -21,9 +21,9 @@ description: Maintain the shared Codex baseline in chezmoi. Use when changing Co
 - T3 Code extra accounts use an empty shadow home under `~/.codex-t3/`.
   Never copy `~/.codex` into it. Login with `codex-t3-second login`.
 - Shared Astra policy: `home/.chezmoitemplates/codex/model-policy.toml.tmpl`.
-  It manages the default model, parent reasoning effort, subagent defaults,
-  context overrides, and experimental context flag across independent runtime
-  configs. Preserve other local settings.
+  It manages the default model, parent reasoning effort, service tier, subagent
+  defaults, context overrides, and experimental context flag across independent
+  runtime configs. Preserve other local settings.
 - CLI pin: `home/dot_config/mise/config.toml`. T3 uses `codex-baseline` for
   every account. Desktop runtime versions are separate from the CLI pin.
 - Keep global `AGENTS.md` out of default context. Durable workflow lives in skills.

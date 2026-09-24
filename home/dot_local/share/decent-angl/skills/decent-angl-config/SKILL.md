@@ -1,6 +1,6 @@
 ---
 name: decent-angl-config
-description: Reconcile the shared chezmoi baseline across MacBook, Mac Mini, and T14. Use for config drift, publishing from any machine, capturing live changes, fleet rollout, or convergence checks.
+description: Sync, publish, capture, or reconcile the shared chezmoi baseline in ~/src/boilerplate across hosts. Explicit requests only; not for application repos.
 ---
 
 # Decent Angl config

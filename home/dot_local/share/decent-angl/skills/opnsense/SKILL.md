@@ -1,6 +1,6 @@
 ---
 name: opnsense
-description: Manage the home OPNsense router through its REST API, fleet SSH to clt, and LAN client inventory via opnsense-lan-clients. Use for firewall, DHCP, DNS, firmware, Tailscale on the router, visitor/device names, WAN traffic shaper, Steam vs other hosts, or traffic questions.
+description: Home OPNsense router via REST API, SSH to clt, and opnsense-lan-clients - firewall, DHCP, DNS, firmware, router Tailscale, visitor names, WAN shaper, LAN traffic. Not workstation networking.
 ---
 
 # OPNsense

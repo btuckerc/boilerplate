@@ -1,6 +1,6 @@
 ---
 name: shared-skills
-description: Add, update, validate, or distribute shared agent skills across OMP and Codex. Use for skill onboarding, invocation policy, provenance, or harness compatibility.
+description: Onboard, update, validate, or distribute shared skills across OMP and Codex, including invocation policy and provenance. Explicit requests only; not for using a skill.
 ---
 
 # Shared skills

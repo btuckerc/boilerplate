@@ -1,7 +1,8 @@
 ---
 name: omp-drive
-description: Use when the user types /drive, /board, /dispatch, /recover, /vibe, or says drive or swarm. Outline SMART tasks into the cwd board, spawn workers, answer hub questions. Main does not implement.
+description: Explicit /drive, /board, /dispatch, /recover, or /vibe mode. Outline SMART tasks into the cwd board. Main does not implement. Not for ordinary coding or ad-hoc workers.
 argument-hint: "[board|dispatch|drive|recover]"
+disable-model-invocation: true
 ---
 
 # OMP drive

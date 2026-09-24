@@ -1,6 +1,6 @@
 ---
 name: chandelier-print
-description: Operate Bambu Studio through Computer Use to continue Tucker's chandelier frame print kit, track accepted and failed pieces, print the next required plate, recover after compaction, or reset the print run. Use for chandelier print progress, bed-cleared updates, missing or broken pieces, reprints, and requests to continue the next round.
+description: Tucker's chandelier frame print kit in Bambu Studio via Computer Use - progress, bed-cleared updates, missing or broken pieces, reprints, next plate, reset. Not for other prints or continue/next in unrelated repos.
 argument-hint: "[next | status | reset | natural-language update]"
 ---
 

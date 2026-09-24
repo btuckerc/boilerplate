@@ -1,6 +1,6 @@
 ---
 name: bitwarden-secrets
-description: Keep secrets out of Git, commands, logs, and chat with the shared Bitwarden/Vaultwarden CLI boundary. Use when provisioning, rotating, materializing, or consuming a secret.
+description: Provision, rotate, materialize, or retrieve a Bitwarden/Vaultwarden item with bw-secret or bw-ensure-auth. Not for local keys, .env files, or generic secret-hygiene talk.
 ---
 
 # Bitwarden secrets

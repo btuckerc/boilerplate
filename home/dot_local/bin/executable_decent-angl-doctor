@@ -79,7 +79,7 @@ def local_report():
     pins = {}
     mise = shutil.which("mise")
     for name, key in (("codex", "codex"), ("omp", "github:can1357/oh-my-pi"),
-                      ("chezmoi", "ubi:twpayne/chezmoi"), ("restic", "aqua:restic/restic")):
+                      ("chezmoi", "chezmoi"), ("restic", "restic")):
         source, live = source_tools.get(key), live_tools.get(key)
         version_arg = "version" if name == "restic" else "--version"
         code, output = run([mise, "-C", str(user), "exec", "--", name, version_arg]) if mise else (127, "")

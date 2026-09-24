@@ -10,7 +10,7 @@ return {
     config = function()
       require("config.mise").prefer_install_dirs({
         "/node/",
-        "/ubi-tree-sitter-tree-sitter/",
+        "/tree-sitter/",
       })
 
       local treesitter = require("nvim-treesitter")

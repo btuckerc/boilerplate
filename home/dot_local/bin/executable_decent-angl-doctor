@@ -9,6 +9,7 @@ from pathlib import Path
 import platform
 import re
 import shutil
+import shlex
 import subprocess
 import sys
 import tomllib
@@ -153,18 +154,19 @@ def inference_report(host):
     """Inspect an appliance with stock commands; never deploy the workstation baseline."""
     report = {"machine": host["id"], "role": "inference",
               "checked_at": datetime.now(timezone.utc).isoformat(), "issues": []}
+    names = list(host["inference_endpoints"])
+    probe = "; ".join(["uname -s", *(f"systemctl is-active {shlex.quote(name)}" for name in names),
+                       "nvidia-smi --query-gpu=name,memory.total,memory.used,temperature.gpu "
+                       "--format=csv,noheader"])
     code, output = run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
-                        "-o", "ForwardAgent=no", host["ssh"],
-                        "uname -s; systemctl is-active llama.service; systemctl is-active bonsai.service; "
-                        "nvidia-smi --query-gpu=name,memory.total,memory.used,temperature.gpu "
-                        "--format=csv,noheader"], timeout=20)
+                        "-o", "ForwardAgent=no", host["ssh"], probe], timeout=20)
     lines = output.strip().splitlines()
     report["ssh_ok"] = code == 0
-    if code != 0 or len(lines) < 4:
+    if code != 0 or len(lines) < len(names) + 2:
         report["issues"].append("SSH or inference host inspection failed")
         return report
-    else:
-        report.update(os=lines[0], services={"llama.service": lines[1], "bonsai.service": lines[2]}, gpu=lines[3:])
+    report.update(os=lines[0], services=dict(zip(names, lines[1:1 + len(names)])),
+                  gpu=lines[1 + len(names):])
     active = [name for name, state in report["services"].items() if state == "active"]
     if len(active) != 1:
         report["issues"].append("expected exactly one active inference service")

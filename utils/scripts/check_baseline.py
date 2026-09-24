@@ -49,7 +49,8 @@ def check(root):
             assert host.get("role", "workstation") in ("workstation", "inference"), "Invalid fleet role"
             if host.get("role") == "inference":
                 endpoints = host.get("inference_endpoints", {})
-                assert set(endpoints) == {"llama.service", "bonsai.service"}, "Missing inference service endpoints"
+                assert endpoints, "Inference host needs at least one service endpoint"
+                assert all(re.fullmatch(r"[A-Za-z0-9@_.-]+\.service", name) for name in endpoints), "Invalid inference service name"
                 assert all(re.fullmatch(r"https?://[a-z0-9.-]+(?::[0-9]+)?", url) for url in endpoints.values()), "Invalid inference URL"
     print(f"BASELINE pins and {count} executable syntax checks passed")
 

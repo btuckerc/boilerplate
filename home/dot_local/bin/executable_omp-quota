@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# One line of remaining subscription headroom for routing decisions.
+# Pool percentages are remaining capacity across every authenticated account.
+set -euo pipefail
+
+omp usage --json | jq -r '
+  def pct: (. * 100 | round | tostring) + "%";
+  [
+    (.capacity // {} | to_entries[]
+      | select(.key == "anthropic" or .key == "openai-codex")
+      | "\(.key) " + ([.value[]
+          | select(.window != "extra" and (.meter // "chat") == "chat")
+          | "\(.window) \(.remainingAccounts / .accounts | pct)"] | join(" "))),
+    ([.reports[] | select(.provider == "anthropic") | (.limits // [])[]
+      | select(.id == "anthropic:7d:fable")
+      | "fable 7d \(1 - .amount.usedFraction | pct)"] | first // empty)
+  ] | join(" | ") + " remaining"'

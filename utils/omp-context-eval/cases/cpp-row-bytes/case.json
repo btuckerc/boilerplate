@@ -1,0 +1,11 @@
+{
+  "id": "cpp-row-bytes",
+  "category": "reasoning_edge_case",
+  "task": "Repair row_bytes.cpp so row_bytes(width, bits_per_pixel) returns the minimum whole byte count for a packed row. Bits must be ceil(width * bits_per_pixel / 8), avoiding intermediate overflow for representable size_t results. Reject zero bits_per_pixel by returning 0. Keep the command-line output format unchanged.",
+  "input_files": ["row_bytes.cpp", "expected.txt"],
+  "output_files": ["row_bytes.cpp"],
+  "allowed_files": ["row_bytes.cpp", "expected.txt"],
+  "allowed_tools": ["read", "edit", "write", "run", "compile"],
+  "checks": ["g++ -std=c++17 -Wall -Wextra builds cleanly", "executable output exactly equals expected.txt", "SIZE_MAX and ceil-div boundaries pass"],
+  "oracle": "python3 oracle.py"
+}

@@ -13,9 +13,10 @@ Do not run `omp update`. That command installs an unreviewed binary and fights t
 3. Run `omp-baseline check-upstream`.
 4. Read the target GitHub release notes.
 5. Run `omp-baseline upgrade --dry-run`, then `omp-baseline upgrade VERSION`.
-6. Re-read live `omp models`. Treat discovered Codex, llama.cpp, and Bonsai IDs
-   as authoritative; rewrite dead catalog IDs in `config.yml`, `models.yml`, and
-   `omp-baseline` checks. Keep OpenRouter models manual-only.
+6. Re-read live `omp models`. Treat discovered Codex and llama.cpp IDs as
+   authoritative; rewrite dead catalog IDs in `config.yml`, `models.yml`, and
+   `omp-baseline` checks. Keep OpenRouter models manual-only. Bonsai is
+   historical-only and must not be restored to the active catalog or launcher.
 7. Run `decent-angl-skills sync`. `validate` audits source and live dest; a dest `references/` file without a dest SKILL.md link fails even when source is linked.
 8. Run `omp-baseline validate --strict`. That is the commit gate. It does not roll back the pin. Unrelated dest skill drift fails it.
 9. Stop unless the user asked to publish. An uncommitted pin is local only.

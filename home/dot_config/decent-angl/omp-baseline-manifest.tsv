@@ -1,5 +1,5 @@
 # kind	live_path	repo_relative_path	os
-# omp-version	18.2.11
+# omp-version	18.3.0
 # os is optional: all (default), linux, or darwin. linux-only rows stay in Git
 # but are not applied or required live on other operating systems.
 # Credentials, databases, sessions, caches, logs, and tiny-model weights are
@@ -12,13 +12,16 @@ file	~/.omp/agent/agents/scout.md	home/private_dot_omp/private_agent/agents/scou
 file	~/.omp/agent/agents/sonic.md	home/private_dot_omp/private_agent/agents/sonic.md
 file	~/.omp/agent/agents/nous.md	home/private_dot_omp/private_agent/agents/nous.md
 file	~/.omp/agent/agents/architect.md	home/private_dot_omp/private_agent/agents/architect.md
+file	~/.omp/agent/agents/astra.md	home/private_dot_omp/private_agent/agents/astra.md
+file	~/.omp/agent/agents/fable.md	home/private_dot_omp/private_agent/agents/fable.md
+file	~/.omp/agent/agents/browser.md	home/private_dot_omp/private_agent/agents/browser.md
 file	~/.omp/agent/prompts/review.md	home/private_dot_omp/private_agent/prompts/review.md
 file	~/.omp/agent/prompts/update.md	home/private_dot_omp/private_agent/prompts/update.md
 file	~/.omp/agent/themes/ghostty.json	home/private_dot_omp/private_agent/themes/ghostty.json
+file	~/.omp/agent/extensions/herdr-omp-agent-state.ts	home/private_dot_omp/private_agent/extensions/herdr-omp-agent-state.ts
 exec	~/.local/bin/bw-secret	home/dot_local/bin/executable_bw-secret
 exec	~/.local/bin/omp-openrouter-env	home/dot_local/bin/executable_omp-openrouter-env
 file	~/.config/decent-angl/opnsense.env	home/dot_config/decent-angl/opnsense.env.tmpl
-file	~/.omp/agent/extensions/herdr-omp-agent-state.ts	home/private_dot_omp/private_agent/extensions/herdr-omp-agent-state.ts
 exec	~/.local/bin/opnsense-api	home/dot_local/bin/executable_opnsense-api
 file	~/.omp/agent/commands/board.md	home/private_dot_omp/private_agent/commands/board.md
 file	~/.omp/agent/commands/dispatch.md	home/private_dot_omp/private_agent/commands/dispatch.md
@@ -29,3 +32,4 @@ file	~/.local/share/decent-angl/skills/omp-drive/SKILL.md	home/dot_local/share/d
 exec	~/.local/bin/omp-board	home/dot_local/bin/executable_omp-board
 exec	~/.local/bin/opnsense-store-secret	home/dot_local/bin/executable_opnsense-store-secret
 exec	~/.local/bin/omp-triage	home/dot_local/bin/executable_omp-triage
+exec	~/.local/bin/omp-quota	home/dot_local/bin/executable_omp-quota

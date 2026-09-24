@@ -1,35 +1,41 @@
 # Managed by chezmoi. Credentials, sessions and account usage stay local.
-# Astra directs; nous implements bounded designs under parent-run checks.
-# Luna remains the generic task alias and capability/failed-repair fallback.
+# Claude Opus directs; nous/Luna handle bounded work under parent-run checks.
+# Astra is evidence-triggered escalation; Fable is the Anthropic-pool alternative.
 modelRoles:
-  default: openai-codex/gpt-6-astra:medium
+  default: anthropic/claude-opus-5-5:medium
   slow: openai-codex/gpt-6-astra:xhigh
   plan: openai-codex/gpt-6-astra:medium
-  vision: openai-codex/gpt-5.6-luna:medium
-  commit: openai-codex/gpt-5.6-luna:low
-  smol: openai-codex/gpt-5.6-luna:low
-  tiny: openai-codex/gpt-5.6-luna:low
-  task: openai-codex/gpt-5.6-luna:medium
+  vision: openai-codex/gpt-6-luna:medium
+  commit: openai-codex/gpt-6-luna:low
+  smol: openai-codex/gpt-6-luna:low
+  tiny: openai-codex/gpt-6-luna:low
+  task: openai-codex/gpt-6-luna:medium
+  # Scarce Anthropic weekly pool (capped at half of it); see RULES.md.
+  fable: anthropic/claude-fable-5-1:medium
+  # Keyless search only; provider-backed search stays an explicit choice.
+  web: web/public
 
 modelProviderOrder:
+  - anthropic
   - openai-codex
   - llama.cpp
   - openrouter
 
 cycleOrder:
   - default
+  - fable
   - task
 
 enabledModels:
+  - anthropic/claude-opus-5-5
+  - anthropic/claude-fable-5-1
   - openai-codex/gpt-6-astra
-  - openai-codex/gpt-5.6-luna
-  - openai-codex/gpt-5.6-sol
-  - openai-codex/gpt-5.6-terra
+  - openai-codex/gpt-6-luna
   - llama.cpp/*
   - openrouter/z-ai/glm-5.3-flash
   - openrouter/z-ai/glm-5.3
   - openrouter/moonshotai/kimi-k3
-  - openrouter/openai/gpt-5.6-luna
+  - openrouter/openai/gpt-6-luna
 
 # These are foreign configuration discovery adapters, not model providers.
 disabledProviders:
@@ -60,6 +66,8 @@ spelling:
   autocomplete: false
   autocorrect: false
 
+composer:
+  shape: box
 retry:
   enabled: true
   maxRetries: 1
@@ -68,6 +76,8 @@ retry:
   # Account rotation is native OAuth behavior. Do not silently change models
   # or turn a local job into paid cloud inference on failure.
   modelFallback: false
+  fallbackChains:
+    web: [web/startpage, web/duckduckgo]
 
 task:
   maxConcurrency: 3
@@ -75,7 +85,7 @@ task:
   eager: default
   enableLsp: false
   # Per-task choice without an extra classifier call. Omit for configured medium;
-  # coarse "med" currently maps to high on Astra/Luna, not medium.
+  # coarse "med" maps to high on every cloud model, not medium.
   enableEffort: true
   showResolvedModelBadge: true
   softRequestBudget: 40
@@ -85,6 +95,12 @@ task:
     scout: "@smol"
     task: "@task"
   prewalk: false
+  # Unrouted bundled agents; hidden to keep the task description lean.
+  disabledAgents: [reviewer, security-reviewer]
+
+todo:
+  enabled: false
+
 
 prewalk:
   enabled: false
@@ -188,19 +204,6 @@ features:
 
 providers:
   openrouterVariant: default
-  # Prefer keyless search; optional provider-backed search stays explicit.
-  webSearchOrder:
-    - public
-    - startpage
-    - duckduckgo
-  webSearchExclude:
-    - google
-    - ecosia
-    - mojeek
-  tinyModel: online
-  memoryModel: online
-  autoThinkingModel: online
-  unexpectedStopModel: online
 
 # enablePi* is the native ~/.omp/agent/skills and .omp/skills gate (legacy name).
 # Leave Codex/Claude/Agents off so foreign harness skills stay out.
@@ -231,6 +234,14 @@ startup:
   setupWizard: false
   checkUpdate: false
   changelogMode: hidden
+
+# Herdr owns agent alerts via herdr-omp-agent-state (active-tab aware);
+# OMP's own `herdr notification show` would fire a second toast and sound.
+completion:
+  notify: off
+
+ask:
+  notify: off
 
 marketplace:
   autoUpdate: off

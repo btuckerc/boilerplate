@@ -1,0 +1,11 @@
+{
+  "id": "deterministic-repo-edit",
+  "category": "mechanical_local_edit",
+  "task": "Update app.conf so the worker timeout is 250 ms and the retry count is 3. Preserve every other byte exactly, including all existing keys, comments, ordering, and the final newline. Do not create or modify any other file.",
+  "input_files": ["app.conf"],
+  "output_files": ["app.conf"],
+  "allowed_files": ["app.conf"],
+  "allowed_tools": ["read", "edit", "write"],
+  "checks": ["app.conf is byte-for-byte equal to expected/app.conf", "no file outside app.conf changed"],
+  "oracle": "python3 oracle.py"
+}

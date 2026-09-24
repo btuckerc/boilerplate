@@ -1,6 +1,6 @@
 ---
 name: omp-config
-description: Maintain the shared Oh My Pi baseline in chezmoi. Use only when the user explicitly asks for an OMP upgrade, omp-baseline change, provider or model default, auth-broker login, or OMP config.yml/models.yml rollout. Never run omp update. Not for application work or merely using a skill.
+description: Change the shared OMP baseline in chezmoi - upgrades, omp-baseline, provider/model defaults, auth-broker login, config.yml/models.yml. Explicit requests only; never run omp update.
 ---
 
 # OMP config
@@ -15,28 +15,40 @@ description: Maintain the shared Oh My Pi baseline in chezmoi. Use only when the
 
 ## Invariants
 
-- Pin OMP to the exact reviewed mise release (currently 18.2.8); do not combine
+- Pin OMP to the exact reviewed mise release (currently 18.3.0); do not combine
   the shared pin with `omp update`. Use `omp-baseline upgrade` to move the three
   pin sites together.
 - Prefer native OMP config and features. Keep native skill discovery enabled.
-- Use independent native Codex OAuth logins; never copy refresh credentials
-  from Codex homes. Account count and quota state are machine-local. The native
-  pool is session-sticky and quota-aware; use `/session pin` when needed.
-- Default routing is Astra medium as director. Prefer `nous` for bounded
-  implementation with clear scope, contract and independent acceptance checks,
-  as well as mechanical edits and extraction. Settle risky design decisions;
-  do not write a full solution. Use a fresh compact brief with owned files,
-  contract, invariants and acceptance command. Use Luna medium
-  for unresolved design, novel algorithms, uncertain debugging, broad/tool-rich
-  changes, large context or a failed focused local repair. Ordinary requirement
-  clarification and steering remains available. Use
-  `@slow:xhigh` for sustained frontier work. Routine edits do not require
-  an obligatory classifier, swarm or duplicate planning stage. Consult the
-  native `architect` agent only for an unresolved ambiguity the director cannot
-  settle.
+- Use independent native OAuth logins per machine (Codex, Anthropic); never
+  copy refresh credentials. Account count and quota state are machine-local.
+  A host without an Anthropic login cannot run the shared Opus default: run
+  `omp auth-broker login anthropic` there before `omp-baseline pull`. The
+  Codex pool is session-sticky and quota-aware; use `/session pin` when needed.
+- Default routing is Claude Opus medium as director. The director owns
+  requirements, integration and acceptance; trivial work stays direct. Prefer
+  nous for bounded work with runnable checks; use Luna medium (`task`) when
+  local capability, context or queue latency is unsuitable. Use fresh compact
+  briefs, not the full parent transcript or pre-solved implementations.
+- Escalation lanes: Astra medium (`architect` read-only, `astra`
+  implementation; both `@plan`) is the default. It matches or beats Fable on
+  vendor coding benchmarks (Opus 5.5 system card; OpenAI Astra post) and draws
+  from the Codex pool, not the director's. Fable medium (`fable`, `@fable`) is
+  used when Codex has less than 20% remaining, or as a second opinion from a
+  different model family after Astra fails. Trigger on concrete evidence:
+  unresolved high-consequence design, conflicting evidence after focused
+  investigation, or a failed check after one focused repair. The director runs
+  `omp-quota` first. `@slow` is Astra xhigh. Escalation is scoped child
+  delegation, not a parent-model switch. There is no compulsory classifier or
+  routine review.
+- Fable shares the Anthropic weekly pool with the Opus director. It can use at
+  most half of that pool and costs about 2x Opus on the real token mix, so it is not extra
+  capacity. For multi-hour frontier work, `cycleOrder` (default → fable → task)
+  lets the user make Fable the director; delegated workers still run on nous or
+  Codex. Leave `providers.anthropic.serverSideFallback` off because it would
+  silently move Fable to Opus 4.8.
 - Keep `task.enableEffort: true` for per-task choices without an extra classifier.
   Omit effort to retain configured medium; `lo` is for routine cloud work.
-  Coarse `med` currently selects high on Astra/Luna. Keep local implementation
+  Coarse `med` selects high on every cloud model. Keep local implementation
   medium; lower effort is not automatically faster. Recheck mappings against
   native discovery after catalog changes.
 - Native `llama.cpp` serves the promoted Qwen3.8-27B-UD-Q5_K_M worker
@@ -47,8 +59,8 @@ description: Maintain the shared Oh My Pi baseline in chezmoi. Use only when the
   background advisors off.
 - Native nous handles bounded implementations with explicit contracts, mechanical
   transforms and extraction under the `local-workers` acceptance protocol.
-  Keep Luna as the generic `task` alias; Astra chooses the explicit local lane
-  when eligible. Do not automatically route unresolved algorithmic work locally.
+  Keep Luna as the generic `task` alias; Sol prefers the checked local lane
+  when suitable. Uncertain design stays with Sol or Astra.
   Smaller llama.cpp models remain explicit choices. Keep the OpenCode
   `nous-worker` Codex/T3 path available with fresh briefs and its full privacy
   bounds. Bonsai is retired from the active catalog and launcher; historical
@@ -63,6 +75,16 @@ description: Maintain the shared Oh My Pi baseline in chezmoi. Use only when the
   eval spawn/wait/check path in `local-workers`, with a finite handle wait.
   Keep `blocking: false`; an eval cell timeout does not bound agent waiting.
 - Treat OMP model discovery as authoritative before changing shared model IDs.
+  Weigh any new model with `/skill:model-eval` (price, token mix, benchmarks,
+  quota) before it takes a lane.
+- Keep cloud model IDs centralized: `config.yml` roles/enabledModels, plus the
+  Anthropic 272K `contextWindow` overrides in `models.yml` (1M only through
+  `/extended-context on`). Agents, RULES and skills name model families, not
+  generations. For a generation upgrade: run `omp models`, change those IDs,
+  then run `omp-baseline validate`. It checks role families and efforts, that
+  every role model is discovered, and the Anthropic budget. Then confirm the
+  exact `provider`/`model` in a fresh `omp -p --mode json` response; a fuzzy
+  match or successful exit alone does not prove the new model.
 - Keep `private_models.yml` focused on catalog overrides plus necessary tested
   custom providers; do not remove those providers under an override-only rule.
   Retain the custom `ghostty` theme.
@@ -106,7 +128,7 @@ files. Auth, `agent.db`, `.env`, and sessions stay machine-local.
 ```sh
 omp-baseline check-upstream
 omp-baseline upgrade --dry-run
-omp-baseline upgrade            # or: omp-baseline upgrade 18.2.8
+omp-baseline upgrade            # or: omp-baseline upgrade 18.3.0
 omp --version                   # new shells; the running session stays old
 omp-baseline validate --strict  # commit gate, not a pin-install rollback
 ```
@@ -126,9 +148,9 @@ every other host: `omp-baseline pull` (reconcile + `mise install` missing pins).
 
 Rollback the pin with `omp-baseline upgrade <previous>` (same clean-pin-file
 rule). After every pin move, treat live `omp models` as authoritative before
-keeping shared model IDs. OMP 18.2.8 is the reviewed release. Its 18.2.7
-transition removed bash `env` and changed eval `judge()` to return awaited
-answers directly (no `JudgmentHandle` or judgment handles in `wait()`).
-Recheck callers before changing provider compatibility. Foreign `~/.cursor`, `~/.codex`,
-`~/.claude`, and `~/.gemini` configs are opt-in. Keep native Pi skills on.
-Never copy OAuth tokens between machines.
+keeping shared model IDs. OMP 18.3.0 is the reviewed release. It deprecates
+the `hub` tool: use `wait`, `read proc://`, `write proc://<id>/kill` and
+`write agent://<id>`; RULES and skills use those forms.
+Recheck callers before changing provider compatibility. Foreign `~/.cursor`,
+`~/.codex`, `~/.claude`, and `~/.gemini` configs are opt-in. Keep native Pi
+skills on. Never copy OAuth tokens between machines.

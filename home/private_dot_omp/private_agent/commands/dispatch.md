@@ -17,4 +17,4 @@ If empty, use `omp-board active`. If none, or the topic file is missing, stop.
 6. After a yield, run the card's proof command or write `unproven`. Re-hash, mark `done` or `blocked`, `index-upsert` the Open count, update the todo, next pending wave.
 7. Hold blocked cards. `omp-board unlock <slug>` when the wave is idle.
 
-Workers hub Main.
+Workers message Main (`agent://Main`).

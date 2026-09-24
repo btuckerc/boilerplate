@@ -1,0 +1,11 @@
+{
+  "id": "skill-on-demand",
+  "category": "read_on_demand_instructions",
+  "task": "Read SKILL.md only when needed, then inspect input.txt and write decision.json. Apply the skill's required decision rule and exact schema. Do not copy the instruction text into the output.",
+  "input_files": ["SKILL.md", "input.txt"],
+  "output_files": ["decision.json"],
+  "allowed_files": ["SKILL.md", "input.txt", "decision.json"],
+  "allowed_tools": ["read", "write", "edit"],
+  "checks": ["decision.json equals expected values", "decision contains only the required keys", "SKILL.md was available on demand"],
+  "oracle": "python3 oracle.py"
+}

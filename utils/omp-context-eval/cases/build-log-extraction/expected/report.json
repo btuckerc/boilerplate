@@ -1,0 +1,5 @@
+{
+  "first_error": "error: undefined reference to `touch_poll'",
+  "warning_count": 3,
+  "failed_targets": ["ui", "firmware"]
+}

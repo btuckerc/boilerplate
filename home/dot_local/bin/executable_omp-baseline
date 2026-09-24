@@ -118,6 +118,15 @@ machine_id() {
   esac
 }
 
+machine_role() {
+  cm data --format json 2>/dev/null |
+    jq -r --arg id "$(machine_id)" '.decentangl.machines[$id].role // empty' 2>/dev/null || true
+}
+
+# Headless agent hosts install only the agent toolchain, not the workstation's
+# language runtimes, LSPs and editors.
+AGENT_HOST_TOOLS=(github:can1357/oh-my-pi herdr chezmoi gh bun node python uv jq ripgrep fd)
+
 expected_version() {
   manifest_value omp-version
 }
@@ -484,12 +493,15 @@ check_omp_config() {
 
   if output="$(omp config get modelRoles --json 2>/dev/null)" \
     && printf '%s' "$output" | jq -e '
-      (.value.default | test("^openai-codex/gpt-6-astra:medium$")) and
-      (.value.slow | test("^openai-codex/gpt-6-astra:xhigh$")) and
-      (.value.plan | test("^openai-codex/gpt-6-astra:medium$")) and
-      (.value.task | test("^openai-codex/gpt-5\\.6-luna:medium$")) and
-      (.value.smol | test("^openai-codex/gpt-5\\.6-luna:low$")) and
-      (.value.tiny | test("^openai-codex/gpt-5\\.6-luna:low$"))
+      (.value.default | test("^anthropic/claude-opus-[0-9]+(-[0-9]+)?:medium$")) and
+      (.value.fable | test("^anthropic/claude-fable-[0-9]+(-[0-9]+)?:medium$")) and
+      (.value.slow | test("^openai-codex/gpt-[0-9]+(\\.[0-9]+)?-astra:xhigh$")) and
+      (.value.plan | test("^openai-codex/gpt-[0-9]+(\\.[0-9]+)?-astra:medium$")) and
+      (.value.task | test("^openai-codex/gpt-[0-9]+(\\.[0-9]+)?-luna:medium$")) and
+      (.value.vision == .value.task) and
+      (.value.smol | test("^openai-codex/gpt-[0-9]+(\\.[0-9]+)?-luna:low$")) and
+      (.value.commit == .value.smol) and
+      (.value.tiny == .value.smol)
     ' >/dev/null; then
     printf 'CONFIG  model roles parse\n'
   else
@@ -497,7 +509,23 @@ check_omp_config() {
     failures=1
   fi
 
-  check_effective_list cycleOrder '["default","task"]' || failures=1
+  # Every role model must resolve in live discovery, and Anthropic roles must keep
+  # the 272K normal budget; a new Opus/Fable ID without a models.yml override
+  # would silently compact near 850K again.
+  # The catalog can exceed ARG_MAX (hundreds of OpenRouter models): feed it on stdin.
+  if roles="$(omp config get modelRoles --json 2>/dev/null)" \
+    && omp models --json 2>/dev/null | jq -e --argjson roles "$roles" '
+      [.. | objects | select(.provider? and .id?) | {key: "\(.provider)/\(.id)", value: .contextWindow}] | from_entries as $windows
+      | [$roles.value | to_entries[] | .value | select(test("^(anthropic|openai-codex)/")) | sub(":[a-z]+$"; "")] | unique
+      | all(. as $m | $windows[$m] != null and (($m | startswith("anthropic/") | not) or $windows[$m] <= 272000))
+    ' >/dev/null; then
+    printf 'MODEL   role models discovered; Anthropic budget 272K\n'
+  else
+    printf 'MODEL   role model missing or Anthropic budget above 272K\n' >&2
+    failures=1
+  fi
+
+  check_effective_list cycleOrder '["default","fable","task"]' || failures=1
 
   if output="$(omp config get skills.enablePiUser --json 2>/dev/null)" \
     && printf '%s' "$output" | jq -e '.value == true' >/dev/null \
@@ -600,7 +628,11 @@ apply_local() {
       mise install "github:can1357/oh-my-pi@$pin"
     fi
     # Companion pins live in the same mise file (gh, etc.).
-    mise install
+    if [ "$(machine_role)" = agent-host ]; then
+      mise install "${AGENT_HOST_TOOLS[@]}"
+    else
+      mise install
+    fi
     mise reshim
   fi
   printf '%s' "$pin" >"$HOME/.omp/agent/last-changelog-version"

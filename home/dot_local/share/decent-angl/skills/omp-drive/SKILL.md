@@ -126,11 +126,11 @@ Cap 3 unless the project overlay sets a higher `task.maxConcurrency` and the car
 `in-flight` is not proof a worker is alive.
 
 1. `omp-board orphans <slug>`
-2. `hub list` in this session only
+2. `read proc://` in this session only
 3. Live worker: leave the card. Message it.
 4. Orphan: read the files. Mark `done` only if the work is there. Otherwise `blocked` with the stale lease in the note, then a new `pending` card. Never wipe every in-flight card.
 
-Cancel with `hub cancel` and the job ids from this session. Then run `/recover`. Cancel does not undo file writes.
+Cancel with `write proc://<id>/kill` for job ids from this session. Then run `/recover`. Cancel does not undo file writes.
 
 ## Out of scope
 

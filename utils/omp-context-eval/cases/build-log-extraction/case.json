@@ -1,0 +1,11 @@
+{
+  "id": "build-log-extraction",
+  "category": "mechanical_extraction",
+  "task": "Read build.log and write report.json. Use exactly this JSON schema: first_error (string or null), warning_count (integer), failed_targets (array of strings). Copy the first full error line verbatim, preserving its punctuation and quote characters; count warning lines; preserve failed target encounter order. Do not include timestamps or prose.",
+  "input_files": ["build.log"],
+  "output_files": ["report.json"],
+  "allowed_files": ["build.log", "report.json"],
+  "allowed_tools": ["read", "write", "edit"],
+  "checks": ["report.json parses", "report.json equals expected JSON values", "failed target order is preserved"],
+  "oracle": "python3 oracle.py"
+}

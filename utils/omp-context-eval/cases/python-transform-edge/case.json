@@ -1,0 +1,11 @@
+{
+  "id": "python-transform-edge",
+  "category": "precise_transform",
+  "task": "Implement merge_ranges(ranges) in transform.py. Treat each pair as inclusive [start,end]. Normalize reversed pairs, merge overlaps and directly adjacent ranges, return sorted lists, and leave the input untouched. Handle an empty input.",
+  "input_files": ["transform.py", "vectors.json"],
+  "output_files": ["transform.py"],
+  "allowed_files": ["transform.py", "vectors.json"],
+  "allowed_tools": ["read", "edit", "write", "run"],
+  "checks": ["oracle invokes merge_ranges on all vectors", "outputs exactly match expected", "input objects are not mutated"],
+  "oracle": "python3 oracle.py"
+}

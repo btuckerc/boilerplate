@@ -4,6 +4,8 @@
 # baseline. Published Git history is authoritative; every machine may author.
 
 set -euo pipefail
+# Byte-order collation keeps sort and comm consistent across hosts and locales.
+export LC_ALL=C
 
 REPO_ROOT="${DECENT_ANGL_REPO_ROOT:-$HOME/src/boilerplate}"
 SOURCE_LINK="${DECENT_ANGL_SOURCE_LINK:-$HOME/.local/share/chezmoi}"

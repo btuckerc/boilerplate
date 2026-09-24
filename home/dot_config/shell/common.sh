@@ -54,12 +54,10 @@ remove_path_dir() {
 
 remove_path_dir "$HOME/.local/share/omarchy/bin"
 
-for dir in "$HOME/.local/share/mise/shims" "$HOME/shims"; do
-	prepend_path_dir "$dir"
-done
+prepend_path_dir "$HOME/.local/share/mise/shims"
 prepend_path_dir "$HOME/.local/bin"
 export PATH
-unset dir path_dir path_entry path_new path_old_ifs
+unset path_dir path_entry path_new path_old_ifs
 unset -f prepend_path_dir 2>/dev/null || true
 
 # === Pager Configuration ===

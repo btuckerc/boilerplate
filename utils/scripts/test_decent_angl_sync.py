@@ -38,15 +38,23 @@ class SyncTest(unittest.TestCase):
         self.git("remote", "add", "origin", str(self.remote))
         self.git("push", "-u", "origin", "master")
         self.initial = self.git("rev-parse", "HEAD").stdout.strip()
+        # Fake `mise -C HOME exec -- chezmoi CMD ...`: source home/<p> targets $HOME/<p>.
         self.executable(self.bin / "mise", '''#!/bin/sh
 if [ "$1" = -C ]; then shift 2; fi
 shift
 shift
 shift
-case "$1" in
-  managed) python3 -c 'import json,os,sys; [sys.stdout.buffer.write(os.fsencode(n)+bytes([0])) for n in json.loads(os.environ.get("MANAGED_DIRS_JSON","[]"))]'; exit "${FAIL_MANAGED:-0}" ;;
-  apply) echo apply >> "$HOME/apply.log"; exit "${FAIL_APPLY:-0}" ;;
-  diff) exit 0 ;;
+cmd="$1"; shift
+case "$cmd" in
+  managed)
+    case "$*" in
+      *"--include dirs"*) python3 -c 'import json,os,sys; [sys.stdout.buffer.write(os.fsencode(n)+bytes([0])) for n in json.loads(os.environ.get("MANAGED_DIRS_JSON","[]"))]'; exit "${FAIL_MANAGED:-0}" ;;
+      *) printf '%s\\n' "$HOME/example" "$HOME/other" ;;
+    esac ;;
+  target-path) for p in "$@"; do [ "$p" = -- ] || printf '%s\\n' "$HOME/${p#*/home/}"; done ;;
+  apply) echo "apply $*" >> "$HOME/apply.log"; exit "${FAIL_APPLY:-0}" ;;
+  data) [ -z "$STALE_CONFIG" ] || echo "chezmoi: warning: config file template has changed, run chezmoi init to regenerate config file" >&2 ;;
+  init) echo init >> "$HOME/init.log" ;;
   *) exit 0 ;;
 esac
 ''')
@@ -115,6 +123,11 @@ esac
                 self.git("status", "--porcelain=v1").stdout,
                 (self.repo / "home/untracked").read_text())
 
+    def applied(self):
+        """Targets passed to the last apply; [] means a full apply."""
+        lines = (self.user / "apply.log").read_text().splitlines()
+        return [a for a in lines[-1].split()[1:] if not a.startswith("-") and a != "scripts,dirs"]
+
     def test_publish_preserves_staged_unstaged_and_untracked(self):
         self.outgoing()
         self.dirty()
@@ -125,7 +138,7 @@ esac
         self.assertFalse((self.user / "apply.log").exists())
         self.assertEqual(self.git("stash", "list").stdout, "")
 
-    def test_reconcile_publishes_dirty_commit_but_defers_apply(self):
+    def test_reconcile_publishes_and_holds_dirty_target(self):
         self.outgoing()
         self.dirty()
         before = self.snapshot()
@@ -133,7 +146,7 @@ esac
         self.assertEqual(before, self.snapshot())
         self.assertNotEqual(self.remote_head(), self.initial)
         self.assertTrue((self.state / "config-pending").exists())
-        self.assertFalse((self.user / "apply.log").exists())
+        self.assertEqual(self.applied(), [str(self.user / "other")])
 
     def test_guard_never_publishes_local_commits(self):
         self.outgoing()
@@ -147,7 +160,32 @@ esac
         self.run_sync("guard")
         self.assertEqual(before, self.snapshot())
         self.assertEqual(self.git("stash", "list").stdout, "")
+        self.assertNotIn(str(self.user / "example"), self.applied())
+
+    def test_shared_input_edit_defers_whole_apply(self):
+        self.write("home/.chezmoidata/fleet.yaml", "hosts: []\n")
+        self.run_sync("guard")
         self.assertFalse((self.user / "apply.log").exists())
+        self.assertIn(".chezmoidata/fleet.yaml", (self.state / "config-pending").read_text())
+
+    def test_edits_outside_chezmoi_source_converge_fully(self):
+        self.write("docs/notes.md", "draft\n")
+        result = self.run_sync("guard")
+        self.assertIn("converged", result.stdout)
+        self.assertEqual(self.applied(), [])
+        self.assertFalse((self.state / "config-pending").exists())
+
+    def test_stale_config_template_reruns_init_before_apply(self):
+        self.env["STALE_CONFIG"] = "1"
+        self.run_sync("guard")
+        self.assertTrue((self.user / "init.log").exists())
+
+    def test_dirty_config_template_is_not_rendered(self):
+        self.env["STALE_CONFIG"] = "1"
+        self.write("home/.chezmoi.toml.tmpl", "draft\n")
+        self.run_sync("guard")
+        self.assertFalse((self.user / "init.log").exists())
+        self.assertEqual(self.applied(), [])
 
     def test_guard_apply_failure_is_not_convergence(self):
         self.env["FAIL_APPLY"] = "23"
@@ -186,23 +224,34 @@ esac
         self.run_sync("guard", success=False)
         self.assertFalse((self.user / "apply.log").exists())
 
-    def peer_commit(self, text):
+    def peer_commit(self, text, name="home/example"):
         peer = self.root / "peer"
         self.command("git", "clone", str(self.remote), str(peer))
         self.command("git", "-C", str(peer), "config", "user.name", "Peer")
         self.command("git", "-C", str(peer), "config", "user.email", "peer@example.invalid")
-        (peer / "home/example").write_text(text)
+        (peer / name).write_text(text)
         self.command("git", "-C", str(peer), "add", ".")
         self.command("git", "-C", str(peer), "commit", "-m", "remote update")
         self.command("git", "-C", str(peer), "push")
 
-    def test_behind_dirty_guard_does_not_fast_forward(self):
+    def test_behind_overlapping_dirty_guard_does_not_fast_forward(self):
         self.peer_commit("remote\n")
         self.dirty()
         before = self.snapshot()
         self.run_sync("guard")
         self.assertEqual(before, self.snapshot())
         self.assertEqual(self.git("rev-parse", "HEAD").stdout.strip(), self.initial)
+        self.assertFalse((self.user / "apply.log").exists())
+        self.assertIn("home/example", (self.state / "config-pending").read_text())
+
+    def test_behind_disjoint_dirty_guard_fast_forwards_and_holds_edits(self):
+        self.peer_commit("remote\n", name="home/other")
+        self.dirty()
+        before = self.snapshot()
+        self.run_sync("guard")
+        self.assertEqual(before, self.snapshot())
+        self.assertEqual(self.git("rev-parse", "HEAD").stdout.strip(), self.remote_head())
+        self.assertEqual(self.applied(), [str(self.user / "other")])
 
     def test_behind_clean_guard_fast_forwards_and_applies(self):
         self.peer_commit("remote\n")

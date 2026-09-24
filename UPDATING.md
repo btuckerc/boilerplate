@@ -35,14 +35,20 @@ decent-angl-sync reconcile
 decent-angl-doctor
 ```
 
-Reconcile fetches, explicitly publishes local commits if needed, and applies
-only a clean checkout. It fast-forwards remote changes and refuses divergence.
-The native 15-minute guard only fetches and applies clean published history. It
-never pushes, stashes, resets, or commits. Mutation commands share a kernel lock.
-A lock collision exits 75 and can be retried later.
+Reconcile fetches, explicitly publishes local commits if needed, fast-forwards,
+and applies committed state. It refuses divergence. The native 15-minute guard
+does the same but never publishes; it never pushes, stashes, resets, or commits.
+Mutation commands share a kernel lock; a collision exits 75 and can be retried.
 
-`config-pending` in `~/.local/state/decent-angl` records deferred local work.
-`config-drift` records a failed guard operation. Expected dirty work is preserved.
+Uncommitted work never deploys. Edited sources hold back only their own
+targets; everything else applies. The whole apply defers when working edits
+overlap incoming commits or change shared inputs (`.chezmoidata`,
+`.chezmoitemplates`, `.chezmoiignore`, shared skills). A committed change to
+`.chezmoi.toml.tmpl` reruns `chezmoi init` non-interactively.
+`decent-angl-sync status` prints the next `apply=` scope.
+
+`config-pending` in `~/.local/state/decent-angl` records held or deferred work.
+`config-drift` records a failed guard operation.
 The guard logs only when its result changes. Doctor reports cached Git counts,
 source/applied/binary versions, service exits, and backup job timestamps. JSON
 output is available with `--json`; `--strict` exits nonzero when review is needed.

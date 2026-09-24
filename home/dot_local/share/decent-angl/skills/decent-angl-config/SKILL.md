@@ -19,9 +19,11 @@ commit; no mutable live filesystem silently wins.
   the index, working tree, and live files alone. Review all outgoing commits.
 - Never auto-commit, auto-stash, or reset local work. Diverged history requires
   explicit resolution. Uncommitted upgrades remain local.
-- The native guard only fast-forwards/applies a clean checkout with no local
-  commits. Dirty work defers apply. It never publishes. `reconcile` explicitly
-  publishes reviewed commits, then applies only if the checkout is clean.
+- Guard and `reconcile` fast-forward and apply committed state only. Edited
+  sources hold back their own targets; edits overlapping incoming commits or
+  touching shared inputs (`.chezmoidata`, `.chezmoitemplates`, `.chezmoiignore`,
+  shared skills) defer the whole apply. Guard never publishes; `reconcile`
+  publishes reviewed commits first.
 - `--exclude scripts` skips chezmoi `run_*` hooks. Ordinary `executable_*`
   files still deploy. Use `reconcile --with-scripts` only for reviewed hooks.
   Check the destination and PATH before diagnosing a missing wrapper.
@@ -37,9 +39,9 @@ Start with `decent-angl-sync status` or `decent-angl-doctor --fleet`. If
 hunks, inspect the staged diff, and commit intentionally. Other dirty work
 does not prevent `decent-angl-sync publish`. If
 `skills=invalid`, dest skill projections are stale or a `references/` file is
-unlinked in dest SKILL.md; `decent-angl-skills sync` then re-validate. If the
-machine is behind with dirty work, leave it deferred until that work is ready.
-`config-pending` means expected unfinished work; `config-drift` means a failed
+unlinked in dest SKILL.md; `decent-angl-skills sync` then re-validate.
+`apply=` shows what the next reconcile would do. `config-pending` means held or
+deferred unfinished work; `config-drift` means a failed
 operation. Shared mutating sync commands use a kernel lock.
 
 Capture an intentional live-file change with:

@@ -156,16 +156,13 @@ statusLine:
   transparent: true
   leftSegments:
     - model
-    - path
+    # Directory basename from extensions/cwd-basename-status.ts.
+    - status
   rightSegments:
     - token_rate
   segmentOptions:
     model:
       showThinkingLevel: true
-    path:
-      abbreviate: true
-      maxLength: 60
-      stripWorkPrefix: true
 
 display:
   # Keep agent/model identity visible without the expanded live roster.

@@ -19,6 +19,7 @@ file	~/.omp/agent/prompts/review.md	home/private_dot_omp/private_agent/prompts/r
 file	~/.omp/agent/prompts/update.md	home/private_dot_omp/private_agent/prompts/update.md
 file	~/.omp/agent/themes/ghostty.json	home/private_dot_omp/private_agent/themes/ghostty.json
 file	~/.omp/agent/extensions/herdr-omp-agent-state.ts	home/private_dot_omp/private_agent/extensions/herdr-omp-agent-state.ts
+file	~/.omp/agent/extensions/cwd-basename-status.ts	home/private_dot_omp/private_agent/extensions/cwd-basename-status.ts
 exec	~/.local/bin/bw-secret	home/dot_local/bin/executable_bw-secret
 exec	~/.local/bin/omp-openrouter-env	home/dot_local/bin/executable_omp-openrouter-env
 file	~/.config/decent-angl/opnsense.env	home/dot_config/decent-angl/opnsense.env.tmpl

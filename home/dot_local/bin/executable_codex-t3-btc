@@ -1,0 +1,21 @@
+#!/bin/sh
+set -eu
+
+# Select the fourth Codex account used by T3 Code.
+# T3 creates the shared-state overlay; never copy ~/.codex here.
+CODEX_HOME="$HOME/.codex-t3/btc"
+export CODEX_HOME
+# Keep this account's browser login isolated from the desktop Codex app.
+unset CODEX_INTERNAL_ORIGINATOR_OVERRIDE CODEX_ELECTRON_USER_DATA_PATH
+umask 077
+if [ -L "$CODEX_HOME" ]; then
+    echo "codex-t3-btc requires its own account directory." >&2
+    exit 1
+fi
+mkdir -p "$CODEX_HOME"
+chmod 700 "$CODEX_HOME"
+if [ -L "$CODEX_HOME/auth.json" ]; then
+    echo "codex-t3-btc refuses a linked login." >&2
+    exit 1
+fi
+exec "$HOME/.local/bin/codex-baseline" -c cli_auth_credentials_store=file "$@"

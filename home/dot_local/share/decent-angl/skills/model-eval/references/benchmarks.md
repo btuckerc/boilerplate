@@ -25,3 +25,15 @@ Sources:
 - [OpenAI: GPT-6 Astra](https://openai.com/index/gpt-6-astra/)
 - [Claude Fable models on your plan](https://support.claude.com/en/articles/15424964-claude-fable-models-on-your-plan):
   Fable counts against the shared weekly limit and is capped at half of it.
+
+
+## 2026-09-23: GPT-6 Luna replaces GPT-5.6 Luna
+
+OMP 18.3.0 discovers `openai-codex/gpt-6-luna` (272K, low..max). Price halves:
+$0.10/$0.50 vs $0.20/$1.20 per M, cache read $0.01 vs $0.02. OpenAI reports
+GPT-6 Luna (high) +5.4 points over GPT-5.6 Luna on AutomationBench at 58% lower
+cost per task, and DeepSWE 66.6% at max (about Opus 5 medium). Live requests
+passed on the MacBook and nous. Decision: adopt for `task`, `smol`, `tiny`,
+`commit` and `vision`; drop GPT-5.6 Sol/Luna/Terra from `enabledModels`.
+GPT-6 Sol ($2/$10) was not adopted: Opus directs and Astra escalates.
+Source: [Introducing GPT-6 Sol and Luna](https://openai.com/index/introducing-gpt-6-sol-and-luna/)

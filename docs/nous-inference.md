@@ -1,8 +1,8 @@
 # Nous: inference integration and evaluation
 
-Inspected 2026-09-19 from MacBook. Nous is an inference appliance, excluded
-from workstation bootstrap and dotfile deployment. Fleet membership is for
-health reporting. Public-key SSH to `tux@nous` was verified with
+Initial inspection 2026-09-19; active deployment updated 2026-09-21 (MacBook
+date). Nous hosts inference and isolated OMP workspaces, but remains excluded
+from workstation bootstrap and bulk dotfile deployment. Public-key SSH to `tux@nous` was verified with
 `BatchMode=yes`; the MacBook's local `ssh nous` alias selects that user and
 its existing RSA identity, without forwarding the SSH agent.
 
@@ -11,19 +11,62 @@ its existing RSA identity, without forwarding the SSH agent.
 | Item | Observed |
 | --- | --- |
 | OS / CPU | Ubuntu 26.04.1 LTS / i9-13900K |
-| RAM / GPU | 32 GB / RTX 3080, 10,240 MiB VRAM |
-| Storage | Root 21% used; model partition about 991 GB available |
+| RAM / GPU | 32 GB / Radeon AI PRO R9700, 32 GB VRAM |
+| Model storage | `/srv/models`; verified artifact identities in `utils/nous/model-artifacts.json` |
 | Service | llama.cpp b11046-60081bb2b, `llama.service`, enabled and active |
 | Network | Loopback server forwarded on port 8080 by Tailscale Serve, tailnet only |
 | API | `http://nous:8080/v1` |
-| Models | Nemotron 9B, Qwen 3.5 9B/4B, Ornith 1.5 9B, Gemma 4 12B (exact IDs in managed OpenCode config) |
-| Capacity | 16,384 tokens, one slot per model, one model loaded at a time |
+| Models | Promoted Qwen3.8-27B-UD-Q5_K_M (131,072 context / 8,192 output); smaller Nemotron, Qwen 3.5 9B/4B, Ornith 1.5 9B and Gemma 4 12B remain selectable in OpenCode; verified Gemma 4 26B A4B Q6_K and Qwen3-Coder 30B A3B Q5_K_M candidates remain router-only |
+| Capacity | One serialized model slot; Qwen3.8 uses the deployed 131,072-token preset and other models retain 16,384-token presets |
 
 No failed systemd units were reported. SSH directory/key file permissions
 were 700/600. GPU temperature was 44 C at the initial inspection.
-`decent-angl-doctor --fleet` checks SSH, the active llama/Bonsai service, GPU query, HTTP health
+
+The scalable deployment source is `utils/nous/llama.service` plus
+`utils/nous/models.ini`. The active host preset is installed at
+`/home/tux/.config/llama/models.ini`, with the Qwen artifact under
+`/srv/models`; per-model presets keep the 131,072-token Qwen/MTP settings from
+leaking into smaller 16K models. Installation of the root-owned unit is a
+one-time administrative step; ordinary client catalog edits do not perform
+service switching or upgrades.
+`decent-angl-doctor --fleet` checks SSH, the active llama service, GPU query, HTTP health
 and model inventory without installing anything on nous. It does not run
 inference or load models, and is not a correctness/throughput benchmark.
+
+Qwen3.8 uses Vulkan1, f16 KV, MTP depth 3, microbatch 1024, checkpoint
+minimum spacing 1024 (default count 32), and medium reasoning. It loads
+on service startup; other models are loaded on demand, one at a time.
+The September 22 isolated trials found a 24% branched-history latency reduction
+from checkpoint spacing, not a cold/append speedup. The deployed preset passed
+a native OMP multi-file migration, independent behavior checks, and TypeScript
+checking. See [the measured policy](omp-execution-policy-2026-09-19.md) for
+controls, rejected settings, and limitations.
+The third round promoted f16 after replicated long-context gains at 64K.
+The subsequent matched 64K/128K text-only comparison found only 0.1–0.4%
+long-prompt/generation latency cost, so production now uses 128K/f16.
+Peak usage in that comparison left 3.97 GiB free. Smaller models retain q8_0 KV.
+`RADV_DEBUG=nocompute` improved sustained generation in two balanced screens.
+It is staged in `utils/nous/llama.service`, **not yet installed in the live
+root-owned unit**: interactive sudo is required. Until that administrative
+step, the running service retains the default RADV queues.
+Promotion checks passed: native OMP file read/write here and on nous, the
+default OpenCode `nous-worker` read, and an OMP Serve conversation. All five
+retained smaller models answered API smoke requests. The gateway's Nous and
+Mini workers discover Qwen as the recommended local worker with selectable
+low/medium/xhigh effort. Existing cloud roles and conversations are unchanged.
+Bonsai is disabled and removed from active clients; its weights and historical
+results below remain. No runtime version upgrade is part of this promotion.
+
+The fourth round tested vision and larger contexts without replacing the GGUF.
+The matching, SHA-256-verified projector is retained at
+`/srv/models/Qwen3.8-27B-mmproj-F16.gguf` on Nous (upstream `mmproj-F16.gguf`).
+It is **not enabled** in the production preset or OMP catalog. API experiments
+with MTP3 passed image-plus-retrieval checks at 119,605 prompt tokens using a
+128K/f16 profile and 248,930 tokens using a 262K/q8 profile. The latter took
+717 seconds cold and left only 0.42 GiB at peak: not a general-purpose default
+or proof of large-image/full-window reliability. The matched follow-up promoted
+128K/f16 **text-only**, not the vision profile. See the measured policy for
+controls, the apples-to-apples latency comparison, and limitations.
 
 ## Existing AI Stack manager
 
@@ -38,21 +81,13 @@ home script immediately reach the command; do not reinstall a separate copy.
 The previous executable is backed up on nous at
 `~/.local/state/ai-stack/backups/ai-stack-installed-20260919`.
 
-The manager switches with `systemctl stop/start` and waits for HTTP health.
-Its `llama`/`bonsai` commands do not persist a boot selection via
-`enable/disable`. Both services were enabled with mutual conflicts. This
-is a boot-policy follow-up, not a reason to replace the existing manager.
-No boot policy or manager code was changed. A separate typo remains in the
-NVIDIA init unit: `After=systemd-modeuls-load.service`. Correcting the unit
-requires ordinary sudo authentication; it is outside the narrow policy below.
+The manager's legacy `llama`/`bonsai` commands use `systemctl stop/start`,
+not boot-policy changes. Bonsai and the old NVIDIA initialization unit are
+now disabled; do not use the legacy Bonsai switch for ordinary work.
 
-The new fleet probe accepts either active backend and checks the matching
-port. Bonsai 2 27B PQ2_0 and its Q8_0 multimodal projector are installed
-under `~/repos/Bonsai-demo/models`; the initial manager inventory counted four
-GGUF files including a projector. Three additional stock models were installed
-during the expanded evaluation; the projector is not a separate LLM.
-Bonsai's service uses port 8081 and a 32K context with KV4. It passed OpenCode and T3 tool-round-trip tests below. Switching interrupts
-the other backend.
+Bonsai weights and its projector remain under `~/repos/Bonsai-demo/models`.
+The tests below record historical availability, not a currently supported
+client route. The fleet inventory now checks only llama.cpp on port 8080.
 
 `~/ai-stack.sh doctor` ran successfully. In the noninteractive SSH PATH it
 reported llmfit, hf, gum, fzf and bat unavailable. The basic service manager
@@ -94,17 +129,14 @@ For work inside T3, use its OpenCode backend with a separate nous provider over 
 Completions. [OpenCode documents llama.cpp and custom providers](https://opencode.ai/docs/providers#llamacpp).
 OpenCode 1.18.31 is now pinned in mise and launched through
 `~/.local/bin/opencode-baseline`. Its managed config is
-`~/.config/opencode/opencode.json`; it registers the two local providers without restricting other providers or
-forcing a default model. T3's enabled **Nous**
-OpenCode instance uses that wrapper; its config includes Ornith, Gemma 4 12B,
-Qwen 3.5 9B/4B, Nemotron and Bonsai. Cloud defaults for
-other T3 instances are unchanged; T3 title generation can still use its
-configured cloud model.
+`~/.config/opencode/opencode.json`; it registers llama.cpp without restricting
+other providers or forcing a main-thread model. T3's **Nous** OpenCode instance
+uses that wrapper; its catalog includes Qwen3.8, Ornith, Gemma 4 12B,
+Qwen 3.5 9B/4B and Nemotron. Other T3 cloud defaults remain unchanged.
 
-Select **Nous** in T3's model picker, then the desired model. The backend must
-already match: `ssh nous 'ai-stack llama'` serves Ornith/Gemma/Qwen/Nemotron, and
-`ssh nous 'ai-stack bonsai'` serves Bonsai. Choosing a model in T3 does not
-switch systemd services. Switching interrupts the other backend.
+Select **Nous** in T3's model picker, then the desired model. All current
+choices use llama.cpp on 8080; choosing a model does not switch systemd
+services. Router model swaps are serialized.
 
 A temporary fixture test required a real file-read tool and the correct
 unseen validation word:
@@ -182,14 +214,12 @@ OMP’s managed native providers use OpenAI Chat Completions directly:
 
 | Provider | Live path | Managed model file | Context |
 | --- | --- | --- | ---: |
-| `llama.cpp` | `http://nous:8080/v1` | `~/.omp/agent/models.yml` | 16,384 |
-| `bonsai` | `http://nous:8081/v1` | `~/.omp/agent/models.yml` | 32,768 |
+| `llama.cpp` | `http://nous:8080/v1` | `~/.omp/agent/models.yml` | Qwen3.8: 65,536; smaller models: 16,384 |
 
 The chezmoi sources are `home/private_dot_omp/private_agent/private_models.yml`
 and `private_config.yml`. These providers require no OpenCode installation;
 OpenCode remains a separate, useful Nous path for Codex/T3 integration. The
-host remains inference-only, and selecting a Bonsai model does not switch the
-system service.
+host also runs isolated OMP workspaces. Bonsai results below are historical.
 
 A native OMP task child using Ornith passed a corrective precise brief in
 21.6 seconds; the parent then compiled and ran the C++ fixture successfully.
@@ -290,14 +320,13 @@ nous-worker --dir /absolute/task-directory 'Read the task and make the bounded e
 nous-worker --dir /absolute/task-directory --session SESSION_ID 'Apply this follow-up.'
 ```
 
-Supported aliases: `ornith`, `nemotron`, `gemma`, `bonsai`. `--read-only`
+Supported aliases: `qwen` (default), `ornith`, `nemotron`, `gemma`. `--read-only`
 disables edits. By default the worker can read/search/edit files; shell, web
 and further delegation tools are denied. These are OpenCode permissions, not
 an OS filesystem sandbox. Use a task checkout/directory and have the parent
 run required builds/tests. Project instructions still apply. Prompt text can
 come from stdin. The command neither chooses models for other sessions nor
-switches inference services; select `ai-stack bonsai` explicitly for Bonsai
-and restore `ai-stack llama` for the other three. Serialize inference work.
+switches inference services. All supported choices use llama.cpp; serialize inference work.
 
 The default output is a compact JSON summary with `verified: false` and an
 evidence path under `~/.local/state/nous-workers/`. Full events and stderr stay
@@ -314,7 +343,7 @@ This is a supervised subprocess worker, not a native Codex collaboration
 child or a claimed T3 subagent-tree integration. No global delegation quota
 is imposed. The small `local-workers` skill makes the recommendation
 discoverable across threads and permits useful bounded delegation without
-a quota. Ornith is the launcher default, not the main-thread default. The Nous picker remains
+a quota. Qwen3.8 is the launcher default, not the main-thread default. The Nous picker remains
 an optional direct OpenCode route; existing T3 threads can retain their model.
 The skill also prefers a fresh-brief Luna subagent for larger/tool-rich tasks
 or a local failure, with integration and verification kept in the parent.
@@ -333,9 +362,9 @@ Each input contained a fresh nonce, stale and illegal candidates, and a cost
 tie. The parent independently checked the output file against the expected
 nonce and selected ID. This verifies real delegation/file tools, not broad
 coding quality. Earlier two-function coding tests complement these checks.
-Ornith, Gemma and Bonsai are usable optional bounded workers; Nemotron remains
-experimental despite its earlier repair success. Qwen models remain picker
-options but are not promoted into this ready-worker shortlist.
+These September 19 results informed the original smaller-model shortlist.
+The current promotion supersedes that recommendation with Qwen3.8; they
+remain historical evidence, not a claim that Bonsai is still available.
 
 Local raw evidence: `~/.local/state/nous-workers/smoke-20260919-191724/` and
 `smoke-20260919-191927/` (inputs, output files, JSON events and session IDs).

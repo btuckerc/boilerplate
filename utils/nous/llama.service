@@ -1,0 +1,25 @@
+[Unit]
+Description=llama.cpp GGUF API Server
+After=network.target
+
+[Service]
+Type=simple
+User=tux
+Group=tux
+WorkingDirectory=/srv/models
+Environment=HOME=/home/tux
+Environment=RADV_DEBUG=nocompute
+ExecStart=/opt/llama.cpp-vulkan/bin/llama-server \
+  --models-dir /srv/models \
+  --models-preset /home/tux/.config/llama/models.ini \
+  --models-max 1 \
+  --models-autoload \
+  --host 127.0.0.1 \
+  --port 8080
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=30
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target

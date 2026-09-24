@@ -168,6 +168,37 @@ check; keep it experimental rather than treating that single pass as readiness.
 Qwen 4B is experimental: fastest decoding did not yield the best verified
 result. No model is established as a Luna replacement by these tests.
 
+### September 22 follow-up on the R9700
+
+The 32 GB Radeon host can fully offload two larger sparse candidates:
+Gemma 4 26B A4B `UD-Q6_K` (23.17 GB) and the officially named
+Qwen3-Coder 30B A3B `Q5_K_M` (21.73 GB). The latter is 30.5B total /
+3.3B active, not a 32B checkpoint. Both downloads were pinned and
+SHA-256 verified. They remain router-only candidates; the managed clients and
+Qwen3.8 default were not changed.
+
+The same five-check API screen was rerun with practical model-specific
+profiles, so tokens/sec is informative but the scores are not a controlled
+weights-only comparison:
+
+| Model / quant | API checks | Median decode tokens/s | OpenCode repair |
+| --- | ---: | ---: | --- |
+| Qwen3.8 27B Q5_K_M, thinking, 4K output | 8/10 | 60 | Pass, 26.2 s |
+| Gemma 4 26B A4B Q6_K, thinking, 4K output | 8/10 | 95 | Pass, 53.7 s |
+| Qwen3-Coder 30B A3B Q5_K_M, non-thinking | 6/10 | 134 | Pass, 17.5 s |
+
+Qwen3.8 missed the interval merge twice. Gemma exhausted its 4K reasoning
+budget on scheduling twice; a single 8K rerun passed all five checks, with the
+scheduling case taking 49.2 seconds. Qwen3-Coder missed both interval merges
+and incorrectly treated the one-worker scheduling problem as parallel work.
+All three edited the two-function OpenCode fixture successfully and passed all
+410 independent checks.
+
+Keep Qwen3.8 as the balanced default. Gemma is the stronger follow-up
+candidate when an 8K output budget and longer hard-case latency are acceptable.
+Qwen3-Coder is the fastest narrow coding candidate here, but its weaker general
+reasoning screen does not justify replacing Qwen3.8.
+
 The managed OpenCode config adds all three downloaded models and explicit
 reasoning/tool metadata. After the opt-in review, temperature 0.6, top-p 0.95
 and the 4K compaction reserve apply only through the explicit `nous-worker`

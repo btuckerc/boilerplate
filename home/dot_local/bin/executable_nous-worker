@@ -14,11 +14,12 @@ import time
 import urllib.request
 
 MODELS = {
+    "qwen": "nous/Qwen3.8-27B-UD-Q5_K_M",
     "ornith": "nous/Ornith-1.5-9B-Q5_K_M",
     "nemotron": "nous/Nemotron-9B-OpenCode.Q6_K",
     "gemma": "nous/gemma-4-12B-it-Q4_0",
-    "bonsai": "nous-bonsai/bonsai-2-27b",
 }
+
 
 
 class WorkerInterrupted(Exception):
@@ -51,7 +52,7 @@ def stop_worker(process):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model", choices=MODELS, default="ornith", help="Default: ornith; Nemotron remains experimental")
+    parser.add_argument("--model", choices=MODELS, default="qwen", help="Default: qwen; smaller models remain explicit choices")
     parser.add_argument("--dir", type=Path, required=True)
     parser.add_argument("--session", help="Resume the exact worker session ID")
     parser.add_argument("--read-only", action="store_true")
@@ -78,9 +79,9 @@ def main():
         except BlockingIOError:
             print(json.dumps({"status":"busy", "message":"Another worker on this workstation owns the inference slot; continue other work."}))
             return 75
-        port = 8081 if args.model == "bonsai" else 8080
+        port = 8080
         try:
-            with urllib.request.urlopen(f"http://nous:{port}/health", timeout=5) as response:
+            with urllib.request.urlopen(f"http://100.83.125.83:{port}/health", timeout=5) as response:
                 if response.status != 200:
                     raise OSError(f"HTTP {response.status}")
         except Exception as error:

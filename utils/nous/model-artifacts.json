@@ -1,7 +1,36 @@
 {
-  "date": "2026-09-19",
+  "date": "2026-09-22",
   "host": "nous",
   "models": [
+    {
+      "repository": "unsloth/Qwen3.8-27B-GGUF",
+      "revision": "4ca720788d1e01f1bff70c033e0d0028fd02e502",
+      "file": "Qwen3.8-27B-UD-Q5_K_M.gguf",
+      "bytes": 19771509664,
+      "sha256": "2de73110cb254cbf09b54b717578dadff12ef1194e7271527e68202f39ba4bfd"
+    },
+    {
+      "repository": "unsloth/Qwen3.8-27B-GGUF",
+      "revision": "4ca720788d1e01f1bff70c033e0d0028fd02e502",
+      "file": "Qwen3.8-27B-mmproj-F16.gguf",
+      "source_file": "mmproj-F16.gguf",
+      "bytes": 927607488,
+      "sha256": "cbb841a9ee0636b2ec172f5bb8df2ea8dfeb01e90fe7c6126581d662a0b4e43e"
+    },
+    {
+      "repository": "unsloth/gemma-4-26B-A4B-it-GGUF",
+      "revision": "c099eb48e663fd284577b04978a94ffccb261841",
+      "file": "gemma-4-26B-A4B-it-UD-Q6_K.gguf",
+      "bytes": 23172478688,
+      "sha256": "76bf3eee49cca5b076b34a4b575ecd505dabc470512b46f1207b4f9da08385f0"
+    },
+    {
+      "repository": "unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF",
+      "revision": "b17cb02dd882d5b6ab62fc777ad2995f19668350",
+      "file": "Qwen3-Coder-30B-A3B-Instruct-Q5_K_M.gguf",
+      "bytes": 21725584544,
+      "sha256": "4b78837bbec5ee248e4a5642bf608b6793721af41b92589e40c8da0bce58b907"
+    },
     {
       "repository": "ggml-org/gemma-4-12B-it-GGUF",
       "revision": "e3e681731089efaa3f0917336944ac64752db8ba",

@@ -8,28 +8,13 @@ echo "  Homebrew Packages Setup"
 echo "========================================"
 echo ""
 
+# run_once_before_01 installs Homebrew; load it for this non-login shell.
+for brew_bin in /opt/homebrew/bin/brew /usr/local/bin/brew; do
+    [ -x "$brew_bin" ] && eval "$("$brew_bin" shellenv)" && break
+done
 if ! command -v brew >/dev/null 2>&1; then
-    if [ -t 0 ]; then
-        echo "Homebrew not found (required for packages)"
-        read -p "Would you like to install Homebrew? [Y/n] " -r resp
-        if [[ ! "$resp" =~ ^[nN] ]]; then
-            echo "Installing Homebrew..."
-            /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-            
-            if [[ $(uname -m) == "arm64" ]]; then
-                eval "$(/opt/homebrew/bin/brew shellenv)"
-            else
-                eval "$(/usr/local/bin/brew shellenv)"
-            fi
-            echo "✓ Homebrew installed"
-        else
-            echo "Skipped. Install Homebrew later: https://brew.sh"
-            exit 0
-        fi
-    else
-        echo "Homebrew not found. Skipping package installation (non-interactive)"
-        exit 0
-    fi
+    echo "Homebrew not found. Skipping package installation."
+    exit 0
 fi
 
 BREWFILE="$HOME/Brewfile"
@@ -47,7 +32,7 @@ echo ""
 if [ -t 0 ]; then
     read -p "Install Homebrew packages now? [Y/n] " -r resp
     if [[ "$resp" =~ ^n ]]; then
-        echo "Skipped. Run 'brew-bundle-optional' later to install packages."
+        echo "Skipped. Run 'brew bundle --file=~/Brewfile' later to install packages."
         exit 0
     fi
 fi
@@ -55,11 +40,7 @@ fi
 echo ""
 echo "Installing Homebrew packages..."
 
-if command -v brew-bundle-optional >/dev/null 2>&1; then
-    brew-bundle-optional "$BREWFILE"
-else
-    brew bundle --file="$BREWFILE"
-fi
+brew bundle --file="$BREWFILE"
 
 echo ""
 echo "✓ Homebrew packages installed"

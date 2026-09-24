@@ -5,6 +5,8 @@ brew "bash" # Bash 4+ is needed to validate Linux fleet scripts on macOS.
 brew "btop"
 brew "cmake"
 brew "coreutils"
+brew "eza"
+brew "git"
 brew "golang-migrate"
 brew "kind"
 brew "luarocks"
@@ -14,6 +16,14 @@ brew "tree"
 brew "typst"
 brew "zsh-autosuggestions"
 brew "zsh-syntax-highlighting"
+
+# Build dependencies for mise's Ruby (ruby-build) and YJIT.
+brew "autoconf"
+brew "gmp"
+brew "libyaml"
+brew "openssl@3"
+brew "readline"
+brew "rust"
 
 cask "font-blex-mono-nerd-font"
 cask "font-meslo-lg-nerd-font"

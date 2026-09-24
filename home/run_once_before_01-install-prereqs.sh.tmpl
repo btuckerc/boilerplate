@@ -1,7 +1,8 @@
 {{- if eq .chezmoi.os "darwin" -}}
 #!/usr/bin/env bash
 # Managed by chezmoi - https://github.com/btuckerc/boilerplate
-# Install Homebrew and essential tools (macOS)
+# Install Homebrew (macOS). run_once_after_02 installs ~/Brewfile, which owns
+# every Homebrew package including mise and the Ruby build dependencies.
 
 set -euo pipefail
 
@@ -28,16 +29,6 @@ if ! command -v brew >/dev/null 2>&1; then
 else
     echo "Homebrew already installed"
 fi
-
-# Install minimal tools via Homebrew (not available in mise registry)
-echo "Installing essential tools via Homebrew..."
-brew install git eza btop mise bash
-
-# Install Ruby build dependencies
-echo "Installing Ruby build dependencies..."
-brew install openssl@3 readline libyaml gmp autoconf rust
-
-echo "Essential tools installed successfully"
 
 {{- else if eq .chezmoi.os "linux" -}}
 #!/usr/bin/env bash

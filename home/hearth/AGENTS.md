@@ -10,7 +10,11 @@ Tucker's starting point on nous for ideas, new projects and stack questions.
   the code (commands, non-standard conventions), in a few lines. No overviews.
 - Repos under `src/` are canonical; the MacBook `~/src` copies are frozen
   backups.
-- Shared config (OMP, skills, dotfiles) lives in `boilerplate/home`: apply with
-  `chezmoi apply`, verify with `omp-baseline validate`.
+- Shared config (OMP, skills, dotfiles) lives in `boilerplate/home`. A change
+  is done only when live on nous and the MacBook: `chezmoi apply`,
+  `omp-baseline validate`, commit, `git push nous`, then over `ssh mac` pull
+  from `nous`, `decent-angl-sync publish` (only the Mac has GitHub keys) and
+  `reconcile`; verify on both. Mini and T14 are optional. Mac GUI work: the
+  `mac` MCP (Peekaboo).
 - Infra questions: the `platform-ops` skill's nous reference. OMP config:
   `omp-config`. New models: `/skill:model-eval`.

@@ -30,7 +30,12 @@ installs only the agent toolchain there; the host-local
   (Codex callback port 1455).
 - `~/.omp/agent/host.yml` (via `PI_CONFIG_FILES`) disables the `computer`
   prelude: nous has no desktop. Mac computer use goes through the `mac` MCP
-  server (Peekaboo over SSH) in `~/.omp/agent/mcp.json`.
+  server (Peekaboo over SSH, background-only: menus, AX inspect, typing into
+  an existing window; Screen Recording is not granted, so no screenshots) in
+  `~/.omp/agent/mcp.json`.
+- Mac shell: `ssh mac` (host-local `~/.ssh/config`, key
+  `~/.ssh/id_ed25519_fleet`, authorized on the Mac with `from=` nous's
+  tailnet IP). nous has no GitHub credentials; the Mac publishes.
 
 OMP Serve runs from `~/.local/share/omp-serve-pilot/` using the active
 `~/.local/share/omp-serve-central/agent` profile. Preserve its cloud roles,

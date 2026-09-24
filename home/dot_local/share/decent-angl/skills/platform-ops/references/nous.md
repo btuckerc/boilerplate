@@ -30,9 +30,11 @@ installs only the agent toolchain there; the host-local
   (Codex callback port 1455).
 - `~/.omp/agent/host.yml` (via `PI_CONFIG_FILES`) disables the `computer`
   prelude: nous has no desktop. Mac computer use goes through the `mac` MCP
-  server (Peekaboo over SSH, background-only: menus, AX inspect, typing into
-  an existing window; Screen Recording is not granted, so no screenshots) in
-  `~/.omp/agent/mcp.json`.
+  server (Peekaboo over SSH, background-only) in `~/.omp/agent/mcp.json`. The
+  Mac's forced command must be `env PEEKABOO_DISABLE_TOOLS=browser peekaboo
+  mcp --bridge-socket <Peekaboo.app bridge.sock>`: the env var alone falls back
+  to an ungranted local host, and the browser tool breaks Bridge startup.
+  Peekaboo.app must be running (login item) for screenshots.
 - Mac shell: `ssh mac` (host-local `~/.ssh/config`, key
   `~/.ssh/id_ed25519_fleet`, authorized on the Mac with `from=` nous's
   tailnet IP). nous has no GitHub credentials; the Mac publishes.

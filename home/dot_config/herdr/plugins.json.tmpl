@@ -1,0 +1,99 @@
+[
+  {
+    "plugin_id": "decent-angl.tab-status",
+    "name": "Tab status",
+    "version": "0.1.0",
+    "min_herdr_version": "0.9.1",
+    "description": "Append each tab's agent state (× blocked, ◐ working, ✓ done, ○ idle) to its label",
+    "manifest_path": "{{ .chezmoi.homeDir }}/.config/herdr/plugins/tab-status/herdr-plugin.toml",
+    "plugin_root": "{{ .chezmoi.homeDir }}/.config/herdr/plugins/tab-status",
+    "enabled": true,
+    "platforms": [
+      "linux",
+      "macos"
+    ],
+    "startup": [
+      {
+        "command": [
+          "python3",
+          "tab_status.py"
+        ]
+      }
+    ],
+    "events": [
+      {
+        "on": "pane.agent_detected",
+        "command": [
+          "python3",
+          "tab_status.py"
+        ]
+      },
+      {
+        "on": "pane.agent_status_changed",
+        "command": [
+          "python3",
+          "tab_status.py"
+        ]
+      },
+      {
+        "on": "pane.closed",
+        "command": [
+          "python3",
+          "tab_status.py"
+        ]
+      },
+      {
+        "on": "pane.exited",
+        "command": [
+          "python3",
+          "tab_status.py"
+        ]
+      },
+      {
+        "on": "pane.focused",
+        "command": [
+          "python3",
+          "tab_status.py"
+        ]
+      },
+      {
+        "on": "tab.closed",
+        "command": [
+          "python3",
+          "tab_status.py"
+        ]
+      },
+      {
+        "on": "tab.created",
+        "command": [
+          "python3",
+          "tab_status.py"
+        ]
+      },
+      {
+        "on": "tab.focused",
+        "command": [
+          "python3",
+          "tab_status.py"
+        ]
+      },
+      {
+        "on": "tab.moved",
+        "command": [
+          "python3",
+          "tab_status.py"
+        ]
+      },
+      {
+        "on": "workspace.focused",
+        "command": [
+          "python3",
+          "tab_status.py"
+        ]
+      }
+    ],
+    "source": {
+      "kind": "local"
+    }
+  }
+]

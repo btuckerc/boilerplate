@@ -18,6 +18,7 @@ file	~/.omp/agent/themes/ghostty.json	home/private_dot_omp/private_agent/themes/
 exec	~/.local/bin/bw-secret	home/dot_local/bin/executable_bw-secret
 exec	~/.local/bin/omp-openrouter-env	home/dot_local/bin/executable_omp-openrouter-env
 file	~/.config/decent-angl/opnsense.env	home/dot_config/decent-angl/opnsense.env.tmpl
+file	~/.omp/agent/extensions/herdr-omp-agent-state.ts	home/private_dot_omp/private_agent/extensions/herdr-omp-agent-state.ts
 exec	~/.local/bin/opnsense-api	home/dot_local/bin/executable_opnsense-api
 file	~/.omp/agent/commands/board.md	home/private_dot_omp/private_agent/commands/board.md
 file	~/.omp/agent/commands/dispatch.md	home/private_dot_omp/private_agent/commands/dispatch.md

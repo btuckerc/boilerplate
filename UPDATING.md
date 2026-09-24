@@ -42,10 +42,16 @@ Mutation commands share a kernel lock; a collision exits 75 and can be retried.
 
 Uncommitted work never deploys. Edited sources hold back only their own
 targets; everything else applies. The whole apply defers when working edits
-overlap incoming commits or change shared inputs (`.chezmoidata`,
-`.chezmoitemplates`, `.chezmoiignore`, shared skills). A committed change to
+differ from incoming commits that change the same path, or change shared inputs
+(`.chezmoidata`, `.chezmoitemplates`, `.chezmoiignore`, shared skills). Edits
+already identical to the incoming commit (work mirrored from the publishing
+host) are restored so the fast-forward lands. A committed change to
 `.chezmoi.toml.tmpl` reruns `chezmoi init` non-interactively.
 `decent-angl-sync status` prints the next `apply=` scope.
+
+A host without a GitHub credential can fetch the public repository over HTTPS
+and push over SSH: `git remote set-url origin https://github.com/btuckerc/boilerplate.git`,
+then `git remote set-url --push origin git@github.com:btuckerc/boilerplate.git`.
 
 `config-pending` in `~/.local/state/decent-angl` records held or deferred work.
 `config-drift` records a failed guard operation.

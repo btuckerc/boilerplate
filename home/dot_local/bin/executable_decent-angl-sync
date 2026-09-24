@@ -380,8 +380,48 @@ defer_apply() {
   printf 'PENDING %s\n' "$*"
 }
 
+# Blob id a path would have if committed now, or "absent".
+worktree_blob() {
+  local path="$REPO_ROOT/$1"
+  if [[ -L "$path" ]]; then
+    printf '%s' "$(readlink "$path")" | git -C "$REPO_ROOT" hash-object --stdin
+  elif [[ -f "$path" ]]; then
+    git -C "$REPO_ROOT" hash-object -- "$1"
+  else
+    echo absent
+  fi
+}
+
+# Print overlapping paths whose working content differs from the incoming commit.
+unpublished_overlap() {
+  local path incoming
+  while IFS= read -r path; do
+    [[ -n "$path" ]] || continue
+    incoming="$(git -C "$REPO_ROOT" rev-parse -q --verify "$REMOTE/$BRANCH:$path" 2>/dev/null || echo absent)"
+    [[ "$(worktree_blob "$path")" == "$incoming" ]] || printf '%s\n' "$path"
+  done
+}
+
+# Working edits already equal to the incoming commit (for example work mirrored
+# from the host that published it) lose nothing by fast-forward. Restore them
+# to HEAD so the merge can land.
+restore_published_edits() {
+  local path count=0
+  while IFS= read -r path; do
+    [[ -n "$path" ]] || continue
+    if git -C "$REPO_ROOT" cat-file -e "HEAD:$path" 2>/dev/null; then
+      git -C "$REPO_ROOT" checkout -q HEAD -- "$path" || return 1
+    else
+      git -C "$REPO_ROOT" rm -q --cached --ignore-unmatch -- "$path" >/dev/null || return 1
+      rm -f -- "$REPO_ROOT/$path" || return 1
+    fi
+    count=$((count + 1))
+  done
+  printf 'GIT     %s working edit(s) already matched incoming commits\n' "$count"
+}
+
 reconcile() {
-  local counts ahead behind base revision overlap signature
+  local counts ahead behind base revision overlap conflicting signature
   fetch_branch || return 1
   counts="$(ahead_behind)" || return 1
   read -r ahead behind <<<"$counts"
@@ -398,13 +438,16 @@ reconcile() {
   fi
   base="$(git -C "$REPO_ROOT" rev-parse HEAD)" || return 1
   if (( behind > 0 )); then
-    # Fast-forward around working edits only when no incoming commit touches them.
+    # Fast-forward around working edits unless an incoming commit changes them
+    # to something else.
     overlap="$(comm -12 <(git -C "$REPO_ROOT" diff --no-renames --name-only HEAD "$REMOTE/$BRANCH" | sort -u) \
       <(dirty_paths))" || return 1
-    if [[ -n "$overlap" ]]; then
-      defer_apply "Working edits overlap incoming commits: $(summarize_paths <<<"$overlap")"
+    conflicting="$(unpublished_overlap <<<"$overlap")" || return 1
+    if [[ -n "$conflicting" ]]; then
+      defer_apply "Working edits overlap incoming commits: $(summarize_paths <<<"$conflicting")"
       return
     fi
+    if [[ -n "$overlap" ]]; then restore_published_edits <<<"$overlap" || return 1; fi
     git -C "$REPO_ROOT" merge --ff-only "$REMOTE/$BRANCH" || return 1
     printf 'GIT     fast-forwarded %s commit(s)\n' "$behind"
   fi

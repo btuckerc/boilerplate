@@ -253,6 +253,22 @@ esac
         self.assertEqual(self.git("rev-parse", "HEAD").stdout.strip(), self.remote_head())
         self.assertEqual(self.applied(), [str(self.user / "other")])
 
+    def test_behind_guard_settles_edits_matching_incoming(self):
+        # Work mirrored from the publishing host: identical content, one
+        # tracked edit and one new file, plus an unrelated edit to keep.
+        self.peer_commit("remote\n")
+        peer = self.root / "peer"
+        (peer / "home/new").write_text("new\n")
+        self.command("git", "-C", str(peer), "add", ".")
+        self.command("git", "-C", str(peer), "commit", "-m", "add new")
+        self.command("git", "-C", str(peer), "push")
+        self.write("home/example", "remote\n")
+        self.write("home/new", "new\n")
+        self.write("home/untracked", "keep\n")
+        self.run_sync("guard")
+        self.assertEqual(self.git("rev-parse", "HEAD").stdout.strip(), self.remote_head())
+        self.assertEqual(self.git("status", "--porcelain=v1").stdout, "?? home/untracked\n")
+
     def test_behind_clean_guard_fast_forwards_and_applies(self):
         self.peer_commit("remote\n")
         self.run_sync("guard")

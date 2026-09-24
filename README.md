@@ -45,6 +45,15 @@ owns system packages, libraries, and GUI applications listed in
 [`home/Brewfile`](home/Brewfile); do not duplicate mise tools there. Install a
 changed pin explicitly on each host with `mise install TOOL@VERSION`.
 
+## Herdr
+
+Herdr is pinned through mise and configured at `~/.config/herdr/config.toml`.
+Run `herdr` once, start each `omp` session in its own workspace or tab, and
+detach with `Ctrl-b q`; running sessions stay attached to the local Herdr
+server. The managed OMP integration supplies working/blocked/idle state and
+native session restore. Runtime sessions and saved SSH-machine profiles remain
+machine-local.
+
 ## Where things live
 
 | Path | Contents |

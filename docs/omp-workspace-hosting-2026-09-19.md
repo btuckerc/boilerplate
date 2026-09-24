@@ -108,6 +108,48 @@ Do not duplicate editable source into an untracked installed tree again.
 Mac computer tools run where OMP runs; moving sessions to Linux does not forward
 the Mini's desktop permissions or Apple apps.
 
+## Central deployment record — 2026-09-20
+
+Central UI: `http://100.83.125.83:8745/`. Nous serves the private worker on
+`127.0.0.1:8746` through enabled user units `omp-serve-pilot.service` and
+`omp-serve-hub.service`, with linger enabled. Mini serves its worker on
+`100.79.253.44:8744` through `gui/501/gg.angl.omp-serve` and redirects only
+`/` to the Nous UI; `/v1/*` remains local.
+
+The deployed release is `b1837d8-allowlist-20260920` on both hosts. The
+immutable bundle SHA256 is
+`ddd8f2ab189b2a35baab85219ce5f97494e3d53cff83ea3738f72d90f3f49563`.
+Nous roots are `/srv/workspaces/repos`, `/srv/workspaces/worktrees`, and
+`/srv/workspaces/repos/imported-20260920`; Mini roots are `/Users/admin/src`,
+`/Users/admin/.local/share/omp-serve/source`, `/Users/admin/homelab`,
+`/Users/admin/Documents/GitHub`. The historical snapshot at
+`/Volumes/E0/angl-src/imported-macbook/migration-20260920` is preserved but is
+not a configured workspace root. Existing worker
+state remains host-local; 2 Nous and 9 Mini idle threads were preserved.
+
+Same-host backups (configuration, launchers, indexes, and sessions) are under
+`~/.local/state/omp-central/20260920/backup-nous` and
+`~/.local/state/omp-central/20260920/backup-mini`. The durable rollback script
+is `/Users/tucker/.local/state/omp-central/20260920/rollback-allowlist.sh` (syntax-checked).
+With `OMP_SERVE_ROLLBACK_CONFIRM=1`, it restores the immediately previous
+central release on both hosts without deleting state. The full pre-central
+rollback is retained as `rollback-central.sh` in the same directory.
+
+Native broker/profile readiness is now wired through each host's central agent
+root and the broker at `http://100.83.125.83:8747`; both workers report the
+approved default `openai-codex/gpt-6-astra` and gateway main-provider allowlist
+`openai-codex, openrouter`. No OMP profiles, auth services, tokens, GPU
+services, or source originals were edited by this deployment.
+
+The consolidated migration manifest and verification references are retained at
+`~/.local/state/omp-central/20260920/migration-final.json`.
+
+## 2026-09-20 central source reconciliation
+
+Nous now hosts the shared Git repositories at `/srv/workspaces/git/<identity>.git`. The unified Serve catalog selects 22 Nous workspaces and seven Mac-dependent Mini workspaces; old source paths remain available to existing threads. Reviewed unfinished source was preserved as working-tree changes, without automatic commits or background folder synchronization.
+
+The current workspace map, source-preservation receipts, Git-only Mini SSH setup, deployment details, and exceptions live on Nous at `/srv/workspaces/central-consolidation/20260920/FINAL.md` and `canonical-map.json`. Shared baseline publication automation keeps its existing workflow; ordinary app repos use the named `nous` remote for shared fetch/push.
+
 ## Native OMP rollout — 2026-09-22
 
 The reviewed shared baseline is now OMP 18.2.8 (`10d5afb`), retaining Astra
@@ -143,3 +185,39 @@ emitted RPC `ready`, negotiated protocol v2 and answered `get_state`. Nous's
 idle auth broker was restarted onto the verified 18.2.8 executable; a fresh
 authenticated Astra response passed afterward. Existing broker credentials
 were neither copied nor replaced.
+
+## Nous becomes the default agent host — 2026-09-23
+
+OMP and Herdr sessions now run on nous by default; the MacBook is a client.
+Host facts and procedures live in the `platform-ops` nous reference.
+
+- **Memory.** At 128K, Qwen left 0.9 GB available with swap full. Returning
+  `ctx-size` to 65,536 (the matched-latency screen showed no speed loss)
+  restored headroom: 27.6 GB just after restart, about 3.4 GB after sustained
+  inference, with swap free. About 8.7 GB of shared memory, not charged to the
+  llama-server process, builds up again with use (likely GPU driver buffers);
+  more RAM remains the durable fix.
+- **Baseline.** chezmoi machine `nous`, role `agent-host`: an allowlist of the
+  OMP baseline, skills, mise pin, Herdr and Git config and agent helpers.
+  `omp-baseline apply` installs only the agent toolchain on that role.
+- **Auth.** The native CLI is a client of the existing broker (4 Codex
+  accounts, OpenRouter, and Anthropic after the 2026-09-23 login). Opus 5.5
+  answers from nous; `omp-baseline validate` passes there.
+- **Source.** The MacBook `~/src` is mirrored to `repos/mac-20260923/` and
+  activated by symlink: 96 entries with uncommitted work, stashes and
+  worktrees. A divergence scan found no nous-side edits since 09-20 except an
+  `omp-serve` commit the Mac already had, so no nous work was overwritten;
+  replaced copies are kept. Branches were published without force (only
+  `dictation` `main` diverged, now `mac-20260923/main`); `streamapp` and
+  `wacom` gained bare repos. About 230 GB of data (s3-amoled captures, build
+  outputs, 09-06 merge backups) is pinned on the Mac: see
+  `~/.local/state/nous-migration/PIN.md` there. Tracked captures missing on
+  nous are `skip-worktree` so commits cannot delete them.
+- **Computer use.** OMP's `computer` prelude only drives its own host, so
+  nous reaches the MacBook through a `mac` MCP server: Peekaboo 4.5.0 over
+  SSH, using a nous key the Mac restricts to `peekaboo mcp`, pinned to the
+  Peekaboo.app Bridge that holds the Screen Recording/Accessibility grants.
+  Peekaboo.app must be relaunched after granting and should launch at login.
+- **Transfer safety.** Bulk copies run only when the Mac itself has a
+  `10.77.77.x` address (a tailnet-routed LAN ping is not proof), at a 12 MB/s
+  cap after an uncapped run coincided with home Wi-Fi degrading.

@@ -1,48 +1,66 @@
-# Nous inference appliance
+# Nous agent host and inference appliance
 
-`nous` primarily serves inference. Tucker explicitly expanded evaluation to
-Linux workspace/session hosting on 2026-09-19. `~/repos` already links to
-`/srv/workspaces/repos` on the 678 GB Btrfs NVMe partition (about 668 GB free
-at inspection). Do not bootstrap workstation chezmoi or shell preferences.
-Keep macOS app automation and Apple builds on the Mini; evaluate Linux
-projects in independent Git clones/worktrees, not live bidirectional sync.
+`nous` is the default host for OMP and Herdr sessions (2026-09-23) and serves
+local inference. It is chezmoi machine `nous`, role `agent-host`: an allowlist
+applies only `~/.omp/agent`, skills, the mise pin file and hook, Herdr config,
+`.gitconfig` and the `omp-*`/`decent-angl-*`/`bw-*`/`opnsense-*` helpers. Its
+shell rc files, services and packages stay host-owned. `omp-baseline apply`
+installs only the agent toolchain there; the host-local
+`~/.config/mise/conf.d/agent-host.toml` disables the workstation tools.
 
-The reversible OMP Serve pilot is isolated in
-`~/.local/share/omp-serve-pilot/`, with its fixture under
-`~/repos/omp-serve-pilot/`. Bun 1.3.11 and OMP 18.2.6 were downloaded from
-official releases with SHA256 verification. It uses only local inference,
-its own agent config/state, and native `read,write` tools. The full OMP tool
-prompt exceeded Ornith's 16K context (18,699 tokens before the task); the
-restricted worker passed a real edit, independent test, and session restore.
-This is not a general-purpose local-agent recommendation. No workstation
-credentials were copied. Cloud execution still needs independent host auth.
-See `~/src/omp-serve/README.md` and `docs/omp-workspace-hosting-2026-09-19.md`
-in the boilerplate repo before promoting the pilot. Existing inference
-repositories and service settings remain owned by the host.
+- Home base: `~/hearth` (chezmoi `home/hearth`, agent-host only). Its
+  `AGENTS.md` holds only non-inferable instructions (where projects go, the
+  inbox, per-project `AGENTS.md` policy); overviews stay here, because context
+  files that summarize a repo raise cost without raising success
+  (arXiv 2602.11988). `inbox/` holds ideas, `bin/new-project` creates a repo
+  plus bare remote, and `src`/`git`/`boilerplate`/`evals`/`models` are
+  shortcuts. Interactive shells that start in `~` land there (host-local
+  `.bashrc`).
+- Repos: `~/src` → `/srv/workspaces/repos`. Active entries are symlinks into
+  `mac-20260923/` (the MacBook `~/src` mirror, including uncommitted work);
+  09-20 imports stay under `imported-*` and replaced real directories under
+  `.pre-mac-20260923/`. Bare repos: `/srv/workspaces/git/<name>.git`
+  (`nous` remote, local path on this host). Migration scripts and the resumable
+  transfer live in the MacBook's `~/.local/state/nous-migration/`.
+- Auth: the CLI is a broker client via host-local `~/.omp/agent/.env`
+  (`OMP_AUTH_BROKER_URL`) and `~/.omp/auth-broker.token`. The broker
+  (`omp-auth-broker.service`) stores credentials under
+  `~/.local/share/omp-serve-pilot/agent`. Add an OAuth account from the MacBook
+  with `ssh -t -L 54545:127.0.0.1:54545 nous omp-broker-login anthropic`
+  (Codex callback port 1455).
+- `~/.omp/agent/host.yml` (via `PI_CONFIG_FILES`) disables the `computer`
+  prelude: nous has no desktop. Mac computer use goes through the `mac` MCP
+  server (Peekaboo over SSH) in `~/.omp/agent/mcp.json`.
+
+OMP Serve runs from `~/.local/share/omp-serve-pilot/` using the active
+`~/.local/share/omp-serve-central/agent` profile. Preserve its cloud roles,
+independent auth and sessions. Read `~/src/omp-serve/README.md` and
+`docs/omp-workspace-hosting-2026-09-19.md` for deployment details.
 
 - SSH: `ssh tux@nous`; MacBook also has a local `ssh nous` alias using its
   existing `~/.ssh/id_rsa`, with agent forwarding disabled. Other clients
   install their own public key; do not copy private keys between machines.
 - API: `http://nous:8080/v1`; health: `http://nous:8080/health`.
-- OMP has native, no-auth OpenAI Chat Completions providers in the managed
-  shared files `~/.omp/agent/models.yml` and `~/.omp/agent/config.yml`
-  (chezmoi sources `private_models.yml` and `private_config.yml` under
-  `home/private_dot_omp/private_agent/`). The live `llama.cpp` provider is
-  `http://nous:8080/v1`; the manual Bonsai provider is `http://nous:8081/v1`.
-  This OMP path does not require OpenCode. It is still subject to the
-  inference service boundary and the one-model-at-a-time service switch.
-- Fleet inventory: `~/.config/decent-angl/fleet.json`, role `inference`.
-  `decent-angl-doctor --fleet` uses stock SSH commands plus HTTP checks;
-  it follows the active llama/Bonsai backend and does not expect the workstation
-  doctor or baseline on nous.
-- Service: `llama.service`; models: `/srv/models`; service configuration is
-  machine-local under `/etc/systemd/system`, not workstation chezmoi state.
-- Read-only inspection: `ssh tux@nous 'systemctl status llama.service;
-  nvidia-smi; systemctl --failed'`. Logs: `journalctl -u llama.service`.
+- OMP has a native, no-auth OpenAI Chat Completions `llama.cpp` provider in
+  the managed shared files `~/.omp/agent/models.yml` and
+  `~/.omp/agent/config.yml` (chezmoi sources `private_models.yml` and
+  `private_config.yml` under `home/private_dot_omp/private_agent/`). The
+  promoted Qwen3.8 profile is 65,536 context / 8,192 output with medium
+  reasoning; smaller models retain 16K presets. The provider is
+  `http://nous:8080/v1`; this path does not require OpenCode.
 
-On 2026-09-19: Ubuntu 26.04.1, i9-13900K, 32 GB RAM, RTX 3080 10 GB;
-llama.cpp b11046-60081bb2b. The API binds loopback and Tailscale Serve forwards
-8080 within the tailnet. Preserve that exposure boundary.
+- Service: `llama.service`; source preset/unit:
+  `utils/nous/models.ini` and `utils/nous/llama.service`; models:
+  `/srv/models`. Service configuration is machine-local under
+  `/etc/systemd/system`, not workstation chezmoi state.
+- Fleet inventory: `~/.config/decent-angl/fleet.json`, role `inference`.
+  `decent-angl-doctor --fleet` uses stock SSH commands plus HTTP checks and
+  does not expect the workstation doctor or baseline on nous.
+- Read-only inspection: `ssh tux@nous 'systemctl status llama.service;
+  systemctl --failed'`. Logs: `journalctl -u llama.service`.
+
+Current host hardware is an AMD Radeon R9700; preserve the existing loopback
+API and Tailscale Serve exposure boundary.
 
 `Nemotron-9B-OpenCode.Q6_K` and `Qwen3.5-9B-Q5_K_M` are available through
 the router. Re-query `/v1/models` for current names. Both were configured for
@@ -56,30 +74,20 @@ symlink to it (verified 2026-09-19). Use `ssh nous 'ai-stack status'` or
 do not install a second copy. The old installed script was backed up at
 `~/.local/state/ai-stack/backups/ai-stack-installed-20260919` on nous.
 
-An alternative `bonsai.service` serves Bonsai 2 27B at port 8081 when started;
-it conflicts with `llama.service`. On inspection it was inactive but both
-services were enabled. The manager switches runtime services, not boot enablement. No boot policy
-was changed during integration; manual switching should be explicit because
-it interrupts inference. Also found
-`After=systemd-modeuls-load.service` misspelled in `nvidia-ai-init.service`.
-Check these settings again before proposing fixes. Broad sudo requires the user.
+Bonsai is retired from the active catalog and launcher. Historical weights and
+evaluation records remain on the host/repository, but ordinary clients must
+not start or select `bonsai.service`; the active endpoint is llama.cpp on
+8080. Do not authorize new service-switching paths.
 
-Normal switching is passwordless: `ssh nous 'ai-stack llama'` or
-`ssh nous 'ai-stack bonsai'`. The root-owned sudoers policy grants tux only
-exact systemctl start/stop/restart commands for those two services, plus
-stopping both. Source: `utils/nous/90-ai-stack-service-control.sudoers`.
-Do not authorize the user-writable manager itself as root. This is an
-account-level grant after SSH authentication, not a per-key sudo privilege.
+The root-owned service-control policy remains historical host state; broad sudo
+requires the user. Preserve the existing manager rather than reinstalling it.
 
 The MacBook T3 Nous instance uses `~/.local/bin/opencode-baseline` (mise-pinned
-OpenCode) and managed `~/.config/opencode/opencode.json`. Qwen and Bonsai
-passed real file-read tool tests; Bonsai also passed in T3. Nemotron initially failed tool calls, but subsequently passed a two-function
-repair with explicit reasoning/tool metadata and build/plan sampling at
-temperature 0.6, top-p 0.95. Ornith 1.5 9B is the first optional coding recommendation;
-Gemma 4 12B and Qwen 3.5 4B are also installed. All stock models use 16K
-context, and Bonsai retains 32K. These are small screening tests, not a
-sustained agent benchmark. Selecting a T3 model does not switch
-the host service: select the matching backend explicitly before use.
+OpenCode) and managed `~/.config/opencode/opencode.json`. Qwen3.8 is the
+promoted local model (64K context / 8K output / medium reasoning); Ornith,
+Nemotron, Gemma and smaller Qwen models remain explicit 16K choices. These are
+small screening tests, not a sustained agent benchmark. Selecting a T3 model
+does not switch the host service.
 
 For tested harness compatibility, measured tool calls, and the Pokémon
 experiment integration plan, read
@@ -93,11 +101,11 @@ between model screening and verified project performance.
 
 Local models are opt-in: the managed OpenCode config does not force a model,
 restrict other providers or tune global build/plan agents. `nous-worker`
-explicitly launches Ornith/Nemotron/Gemma/Bonsai with per-process settings,
+explicitly launches Qwen3.8/Ornith/Nemotron/Gemma with per-process settings,
 JSON events and resumable session IDs. This works from a T3 terminal-capable
 main thread as a subprocess; it is not native Codex `spawn_agent` support.
 Read `docs/nous-inference.md` for invocation and tested limits. The `local-workers` skill carries the concise cross-thread recommendation:
-use a bounded worker when useful, with Ornith as the launcher default. Do not
+use a bounded worker when useful, with Qwen3.8 as the launcher default. Do not
 change main-thread model defaults merely because local models are available.
 
 Worker readiness check: these results belong to the supervised OpenCode
@@ -105,8 +113,10 @@ Worker readiness check: these results belong to the supervised OpenCode
 The native OMP Ornith child passed a corrective, precise-brief task in 21.6 s,
 followed by the parent’s C++ compile/run check. The direct original Ornith
 task failed a ceil-div/OR case, and native Gemma failed a `SIZE_MAX` overflow
-case. Use native local children for bounded mechanical or extraction work;
-use Luna/Astra for algorithmic reasoning and review. Bonsai separately passed
+case. Those older results admitted only mechanical/extraction tasks. The current
+Qwen3.8 lane also admits Astra-designed bounded implementation under the
+`local-workers` checks-and-one-repair protocol; design and review stay with
+Luna/Astra. Bonsai separately passed
 native Chat Completions file-read and CSV-write validation with exact ordered
 values. Stock llama.cpp was restored after the Bonsai check. These are narrow
 behavioral checks, not a final routing policy or general coding guarantee.

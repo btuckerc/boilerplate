@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Create a project on nous: working repo, bare repo, and the `nous` remote.
+# Usage: new-project <name>
+set -euo pipefail
+
+name="${1:-}"
+case "$name" in
+  "" | */* | .* | "~"* | *[[:space:]]*) echo "usage: new-project <name> (no slashes, spaces or leading dot)" >&2; exit 64 ;;
+esac
+repos=/srv/workspaces/repos
+dir="$repos/$name"
+bare="/srv/workspaces/git/$name.git"
+[ -e "$dir" ] && { echo "already exists: $dir" >&2; exit 1; }
+[ -e "$bare" ] && { echo "bare repo already exists: $bare" >&2; exit 1; }
+
+git init -q --bare "$bare"
+git init -q -b main "$dir"
+git -C "$dir" remote add nous "$bare"
+printf '# %s\n' "$name" >"$dir/README.md"
+echo "created $dir"
+echo "  remote nous -> $bare (push with: git push -u nous main)"

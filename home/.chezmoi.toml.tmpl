@@ -26,6 +26,8 @@
 {{-   $machineID = "macbook" -}}
 {{- else if and (eq $machineID "") (or (eq $hostKey "webweaver") (eq $hostKey "macmini")) -}}
 {{-   $machineID = "macmini" -}}
+{{- else if and (eq $machineID "") (eq $hostKey "nous") -}}
+{{-   $machineID = "nous" -}}
 {{- end -}}
 
 sourceDir = {{ .chezmoi.sourceDir | quote }}

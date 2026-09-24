@@ -124,3 +124,44 @@ Applications/Codex Third.app/**
 .local/bin/omarchy-agent-usage-openrouter
 .local/bin/omarchy-agent-usage-update
 {{- end }}
+
+{{- $machine := get .decentangl.machines (get .decentangl "machine_id" | default "") | default dict }}
+{{- if eq (get $machine "role" | default "") "agent-host" }}
+# Headless agent host (nous): only the agent toolchain. Its shell, services and
+# packages stay host-owned; no desktop stack or package/run_* hooks.
+*
+**/*
+!.omp
+!.omp/**
+!.gitconfig
+!.config
+!.config/mise
+!.config/mise/config.toml
+!.config/mise/hooks
+!.config/mise/hooks/**
+!.config/herdr
+!.config/herdr/**
+!.config/decent-angl
+!.config/decent-angl/fleet.json
+!.config/decent-angl/omp-baseline-manifest.tsv
+!.config/decent-angl/opnsense.env
+!.local
+!.local/bin
+!.local/bin/omp-*
+!.local/bin/decent-angl-doctor
+!.local/bin/decent-angl-skills
+!.local/bin/decent-angl-sync
+!.local/bin/bw-ensure-auth
+!.local/bin/bw-secret
+!.local/bin/opnsense-*
+!.local/share
+!.local/share/decent-angl
+!.local/share/decent-angl/skills
+!.local/share/decent-angl/skills/**
+# Hearth: the creative home base on the agent host.
+!hearth
+!hearth/**
+{{- else }}
+hearth
+hearth/**
+{{- end }}

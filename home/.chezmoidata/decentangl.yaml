@@ -69,3 +69,7 @@ decentangl:
       tailscale_variant: "homebrew-open-source"
       mirror_root: "~/srv/git"
       backup_root: "~/srv/backups"
+    nous:
+      role: "agent-host"
+      package_manager: "apt"
+      tailscale_variant: "linux-service"

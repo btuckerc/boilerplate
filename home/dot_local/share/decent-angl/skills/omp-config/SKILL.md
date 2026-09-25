@@ -15,7 +15,7 @@ description: Change the shared OMP baseline in chezmoi - upgrades, omp-baseline,
 
 ## Invariants
 
-- Pin OMP to the exact reviewed mise release (currently 18.3.0); do not combine
+- Pin OMP to the exact reviewed mise release (currently 18.3.1); do not combine
   the shared pin with `omp update`. Use `omp-baseline upgrade` to move the three
   pin sites together.
 - Prefer native OMP config and features. Keep native skill discovery enabled.
@@ -148,7 +148,7 @@ every other host: `omp-baseline pull` (reconcile + `mise install` missing pins).
 
 Rollback the pin with `omp-baseline upgrade <previous>` (same clean-pin-file
 rule). After every pin move, treat live `omp models` as authoritative before
-keeping shared model IDs. OMP 18.3.0 is the reviewed release. It deprecates
+keeping shared model IDs. OMP 18.3.1 is the reviewed release. 18.3.0 deprecated
 the `hub` tool: use `wait`, `read proc://`, `write proc://<id>/kill` and
 `write agent://<id>`; RULES and skills use those forms.
 Recheck callers before changing provider compatibility. Foreign `~/.cursor`,

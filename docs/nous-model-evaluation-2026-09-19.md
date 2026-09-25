@@ -214,6 +214,48 @@ long-context reasoning. Raw responses and generated code remain locally under
 `utils/nous/results/`; Git retains the aggregate `summary.json` and artifact
 manifest, not the raw transcripts.
 
+### September 25: Qwen3.8 27B GSQ-RCO IQ3_S (promoted)
+
+ISTA-DASLab's `Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf` (12.12 GB, SHA-256
+`58fd8267…c12f` matches the HF etag) was first compared with the incumbent
+`UD-Q5_K_M` on the R9700 with identical 64K/f16-KV/MTP3 presets on b11046:
+
+| Check | UD-Q5_K_M | GSQ-RCO IQ3_S |
+| --- | ---: | ---: |
+| HumanEval+ base / plus (164, medium reasoning) | 162 / 156 | 161 / 155 |
+| OMP agentic repair, 600 checks × 3 trials | 3/3 | 3/3 |
+| wikitext-2 PPL (100×512) | 6.770 | 6.869 (+1.5%) |
+| KLD vs Q5 / same top token | — | 0.055 / 89.1% |
+| llama-bench tg128 / pp2048 (t/s) | 27.4 / 1067 | 38.7 / 1137 |
+| Served decode with MTP, median t/s | 66.6 | 71.8 |
+| VRAM at 64K / 128K / 256K f16 KV (MiB) | 23851 / 28459 / spills | 16848 / 21456 / 30672 |
+
+Task scores tie within noise; the quant is measurably further from the
+original than Q5. Tucker chose to promote it, and the serving setup was then
+re-tuned from scratch. Bench harness: private llama-server per config, six
+short prompts plus eight HumanEval+ prompts at temperature 0.6, aggregate
+tokens/s, two or three interleaved repetitions (noise ±2–5%).
+
+| Change | Result | Decision |
+| --- | --- | --- |
+| llama.cpp master f805c57a2 (int8 coopmat, #27952) vs b11046 | short +5%, code +3%, prefill 935 vs 926 t/s at 26K | Adopt, pinned |
+| v0.5.0 HIP (gfx1201) | decode −3–5%, prefill 737 t/s | Reject |
+| MTP n-max 4 + p-min 0.4 vs n-max 3 | short 69.7 vs 63.5, code 80.0 vs 71.0 t/s | Adopt; n3/n5/n6 and p-min 0.2–0.5 variants were lower or within noise |
+| `RADV_DEBUG=nocompute` | +3% short and code, both reps | Adopt; graphics-queue flag equal, not additive |
+| `GGML_VK_FORCE_MMVQ`, `--poll 0` | within noise | Reject |
+| q8_0 KV | KLD 0.0047 vs f16, but decode at depth 63–65 vs 70 t/s | f16 at 128K (21.7 GB); q8 only if >128K is needed (256K q8 = 23.9 GB, retrieval correct at 192K) |
+| `load-mode none` | same speed; host RSS 12 GB → ~4–7 GB | Adopt |
+| prompt cache (`cache-ram`) | after another client's request, resume re-prefilled 2,791 new tokens in 3.7 s; with `cache-ram 0` all 19,963 in 21.4 s | Keep default 8 GiB; `ctx-checkpoints 16` bounds host RAM |
+| Power | decode runs at the 300 W cap, ~3.1 GHz; OverDrive disabled (ppfeaturemask bit 0x4000); CPU cores boost to 5.5 GHz | No throughput lever |
+| Runtime PM | idle GPU entered BACO and evicted the model to GTT/swap, so the next request was slow | udev rule `power/control=on`; `vm.swappiness 10` |
+
+Quality gate on the shipped binary and preset through the router: HumanEval+
+160 / 155 (≥159 / 153 required), OMP agentic 3/3. The 164-problem run took
+1,667 s at a median 84.2 t/s, against 2,055 s / 71.8 t/s for the first IQ3_S
+preset and 2,152 s / 66.6 t/s for Q5. Q5 stays on disk and in the router
+preset for rollback; the b11046 build stays at `/opt/llama.cpp-vulkan`.
+Flash-Next GSQ-RCO starts at 66 GB and does not fit this host.
+
 ## Established benchmarks for candidate selection
 
 Research checked September 19, 2026. A repeatable harness and independent tests

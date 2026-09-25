@@ -2,7 +2,7 @@
 name: nous
 description: Bounded implementation with clear contract and parent-run acceptance, mechanical edits, extraction or supplied-log summary. One GPU worker at a time; medium reasoning.
 tools: [read, grep, glob, edit, write, yield]
-model: ["llama.cpp/Qwen3.8-27B-UD-Q5_K_M:medium"]
+model: ["llama.cpp/Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp:medium"]
 thinkingLevel: medium
 readSummarize: true
 blocking: false

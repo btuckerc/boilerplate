@@ -13,11 +13,11 @@ its existing RSA identity, without forwarding the SSH agent.
 | OS / CPU | Ubuntu 26.04.1 LTS / i9-13900K |
 | RAM / GPU | 32 GB / Radeon AI PRO R9700, 32 GB VRAM |
 | Model storage | `/srv/models`; verified artifact identities in `utils/nous/model-artifacts.json` |
-| Service | llama.cpp b11046-60081bb2b, `llama.service`, enabled and active |
+| Service | llama.cpp master f805c57a2 Vulkan (pinned at `/opt/llama.cpp-vulkan-f805c57a2`; b11046 kept at `/opt/llama.cpp-vulkan` for rollback), `llama.service`, enabled and active |
 | Network | Loopback server forwarded on port 8080 by Tailscale Serve, tailnet only |
 | API | `http://nous:8080/v1` |
-| Models | Promoted Qwen3.8-27B-UD-Q5_K_M (131,072 context / 8,192 output); smaller Nemotron, Qwen 3.5 9B/4B, Ornith 1.5 9B and Gemma 4 12B remain selectable in OpenCode; verified Gemma 4 26B A4B Q6_K and Qwen3-Coder 30B A3B Q5_K_M candidates remain router-only |
-| Capacity | One serialized model slot; Qwen3.8 uses the deployed 131,072-token preset and other models retain 16,384-token presets |
+| Models | Promoted Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp (131,072 context / 8,192 output); the previous UD-Q5_K_M remains selectable; smaller Nemotron, Qwen 3.5 9B/4B, Ornith 1.5 9B and Gemma 4 12B remain selectable in OpenCode; verified Gemma 4 26B A4B Q6_K and Qwen3-Coder 30B A3B Q5_K_M candidates remain router-only |
+| Capacity | One serialized model slot; Qwen3.8 uses the 131,072-token preset and other models retain 16,384-token presets |
 
 No failed systemd units were reported. SSH directory/key file permissions
 were 700/600. GPU temperature was 44 C at the initial inspection.
@@ -33,31 +33,30 @@ service switching or upgrades.
 and model inventory without installing anything on nous. It does not run
 inference or load models, and is not a correctness/throughput benchmark.
 
-Qwen3.8 uses Vulkan1, f16 KV, MTP depth 3, microbatch 1024, checkpoint
-minimum spacing 1024 (default count 32), and medium reasoning. It loads
-on service startup; other models are loaded on demand, one at a time.
+Since 2026-09-25 the promoted worker is ISTA-DASLab's GSQ-RCO IQ3_S quant of
+Qwen3.8 27B (12.1 GB, with its MTP head). It uses Vulkan1, f16 KV at 131,072
+context (21.7 GB VRAM), `load-mode none` (no 12 GB host mmap of the GGUF),
+MTP `spec-draft-n-max 4` / `spec-draft-p-min 0.4`, microbatch 1024, 16 context
+checkpoints at minimum spacing 1024, the default 8 GiB prompt cache, and
+medium reasoning. It loads on service startup; other models are loaded on
+demand, one at a time. The unit sets `RADV_DEBUG=nocompute` (+3% decode).
+Host tuning: a udev rule keeps the R9700 out of BACO runtime suspend (which
+evicted the idle model from VRAM to system RAM/swap and made the next request
+slow), and `vm.swappiness = 10`. Measurements, rejected settings and rollback
+are in [the model evaluation](nous-model-evaluation-2026-09-19.md#september-25-qwen38-27b-gsq-rco-iq3_s-promoted).
 The September 22 isolated trials found a 24% branched-history latency reduction
-from checkpoint spacing, not a cold/append speedup. The deployed preset passed
-a native OMP multi-file migration, independent behavior checks, and TypeScript
-checking. See [the measured policy](omp-execution-policy-2026-09-19.md) for
-controls, rejected settings, and limitations.
-The third round promoted f16 after replicated long-context gains at 64K.
-The subsequent matched 64K/128K text-only comparison found only 0.1–0.4%
-long-prompt/generation latency cost, so production now uses 128K/f16.
-Peak usage in that comparison left 3.97 GiB free. Smaller models retain q8_0 KV.
-`RADV_DEBUG=nocompute` improved sustained generation in two balanced screens.
-It is staged in `utils/nous/llama.service`, **not yet installed in the live
-root-owned unit**: interactive sudo is required. Until that administrative
-step, the running service retains the default RADV queues.
-Promotion checks passed: native OMP file read/write here and on nous, the
+from checkpoint spacing, not a cold/append speedup. See
+[the measured policy](omp-execution-policy-2026-09-19.md) for the earlier Q5
+controls and limitations.
+The September 22 Q5 promotion checks passed: native OMP file read/write here and on nous, the
 default OpenCode `nous-worker` read, and an OMP Serve conversation. All five
 retained smaller models answered API smoke requests. The gateway's Nous and
 Mini workers discover Qwen as the recommended local worker with selectable
 low/medium/xhigh effort. Existing cloud roles and conversations are unchanged.
 Bonsai is disabled and removed from active clients; its weights and historical
-results below remain. No runtime version upgrade is part of this promotion.
+results below remain.
 
-The fourth round tested vision and larger contexts without replacing the GGUF.
+The fourth round (Q5) tested vision and larger contexts without replacing the GGUF.
 The matching, SHA-256-verified projector is retained at
 `/srv/models/Qwen3.8-27B-mmproj-F16.gguf` on Nous (upstream `mmproj-F16.gguf`).
 It is **not enabled** in the production preset or OMP catalog. API experiments
@@ -214,7 +213,7 @@ OMP’s managed native providers use OpenAI Chat Completions directly:
 
 | Provider | Live path | Managed model file | Context |
 | --- | --- | --- | ---: |
-| `llama.cpp` | `http://nous:8080/v1` | `~/.omp/agent/models.yml` | Qwen3.8: 65,536; smaller models: 16,384 |
+| `llama.cpp` | `http://nous:8080/v1` | `~/.omp/agent/models.yml` | Qwen3.8: 131,072; smaller models: 16,384 |
 
 The chezmoi sources are `home/private_dot_omp/private_agent/private_models.yml`
 and `private_config.yml`. These providers require no OpenCode installation;
@@ -296,9 +295,8 @@ The user installed the initial policy with ordinary sudo authentication.
 Passwordless allowed service control was verified; `/usr/bin/true` and an
 unrelated systemctl operation were denied without authentication. Normal
 `ai-stack llama` / `ai-stack bonsai` switching can now run noninteractively.
-Broader maintenance still requires ordinary sudo. To revoke the grant, remove
-this sudoers file using authenticated sudo; keep that operation outside the
-automation allowlist.
+Since 2026-09-25 `utils/nous/91-tux-nopasswd.sudoers` grants tux full
+passwordless sudo, which supersedes this allowlist for agents.
 
 ## Expanded model and benchmark evaluation
 

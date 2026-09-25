@@ -8,8 +8,11 @@ User=tux
 Group=tux
 WorkingDirectory=/srv/models
 Environment=HOME=/home/tux
+# RADV_DEBUG=nocompute: +3% decode on the R9700 (2026-09-25 bench, round 4).
 Environment=RADV_DEBUG=nocompute
-ExecStart=/opt/llama.cpp-vulkan/bin/llama-server \
+# Pinned llama.cpp master f805c57a2 Vulkan build; /opt/llama.cpp-vulkan
+# (b11046) is kept for rollback.
+ExecStart=/opt/llama.cpp-vulkan-f805c57a2/bin/llama-server \
   --models-dir /srv/models \
   --models-preset /home/tux/.config/llama/models.ini \
   --models-max 1 \

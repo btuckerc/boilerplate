@@ -52,14 +52,23 @@ independent auth and sessions. Read `~/src/omp-serve/README.md` and
   the managed shared files `~/.omp/agent/models.yml` and
   `~/.omp/agent/config.yml` (chezmoi sources `private_models.yml` and
   `private_config.yml` under `home/private_dot_omp/private_agent/`). The
-  promoted Qwen3.8 profile is 65,536 context / 8,192 output with medium
-  reasoning; smaller models retain 16K presets. The provider is
+  promoted Qwen3.8 profile (`Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp`, since 2026-09-25)
+  is 131,072 context / 8,192 output with medium reasoning; smaller models
+  retain 16K presets. The provider is
   `http://nous:8080/v1`; this path does not require OpenCode.
 
 - Service: `llama.service`; source preset/unit:
   `utils/nous/models.ini` and `utils/nous/llama.service`; models:
   `/srv/models`. Service configuration is machine-local under
-  `/etc/systemd/system`, not workstation chezmoi state.
+  `/etc/systemd/system`, not workstation chezmoi state. The unit runs the
+  pinned `/opt/llama.cpp-vulkan-f805c57a2` build (b11046 at
+  `/opt/llama.cpp-vulkan` is the rollback) with `RADV_DEBUG=nocompute`.
+- GPU power: `/etc/udev/rules.d/80-nous-r9700-runpm.rules` pins
+  `power/control=on` for 0000:03:00.0. Without it the R9700 enters BACO
+  runtime suspend when idle, which evicts the loaded model to system RAM/swap
+  (dmesg "SMU is resumed successfully!"). `vm.swappiness = 10` lives in
+  `/etc/sysctl.d/90-nous-inference.conf`. OverDrive/undervolt is unavailable
+  (ppfeaturemask bit 0x4000 clear); decode already runs at the 300 W cap.
 - Fleet inventory: `~/.config/decent-angl/fleet.json`, role `inference`.
   `decent-angl-doctor --fleet` uses stock SSH commands plus HTTP checks and
   does not expect the workstation doctor or baseline on nous.
@@ -90,8 +99,8 @@ The root-owned service-control policy remains historical host state; broad sudo
 requires the user. Preserve the existing manager rather than reinstalling it.
 
 The MacBook T3 Nous instance uses `~/.local/bin/opencode-baseline` (mise-pinned
-OpenCode) and managed `~/.config/opencode/opencode.json`. Qwen3.8 is the
-promoted local model (64K context / 8K output / medium reasoning); Ornith,
+OpenCode) and managed `~/.config/opencode/opencode.json`. Qwen3.8 GSQ IQ3_S is the
+promoted local model (128K context / 8K output / medium reasoning); Ornith,
 Nemotron, Gemma and smaller Qwen models remain explicit 16K choices. These are
 small screening tests, not a sustained agent benchmark. Selecting a T3 model
 does not switch the host service.

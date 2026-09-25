@@ -29,11 +29,11 @@ providers:
     # Qwen is the promoted worker; discovery keeps smaller installed models
     # available for explicit selection.
     models:
-      - id: Qwen3.8-27B-UD-Q5_K_M
-        name: Nous Qwen 3.8 27B UD-Q5_K_M
+      - id: Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp
+        name: Nous Qwen 3.8 27B GSQ-RCO IQ3_S
         reasoning: true
         input: [text]
-        contextWindow: 65536
+        contextWindow: 131072
         maxTokens: 8192
         cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0}
         thinking:
@@ -47,8 +47,8 @@ providers:
           omitReasoningEffort: false
           maxTokensField: max_tokens
     modelOverrides:
-      Qwen3.8-27B-UD-Q5_K_M:
-        contextWindow: 65536
+      Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp:
+        contextWindow: 131072
         maxTokens: 8192
         compat:
           maxTokensField: max_tokens

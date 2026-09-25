@@ -16,5 +16,7 @@ Tucker's starting point on nous for ideas, new projects and stack questions.
   from `nous`, `decent-angl-sync publish` (only the Mac has GitHub keys) and
   `reconcile`; verify on both. Mini and T14 are optional. Mac GUI work: the
   `mac` MCP (Peekaboo).
+- `sudo -n` works for anything on nous (passwordless); don't hand root steps to
+  Tucker.
 - Infra questions: the `platform-ops` skill's nous reference. OMP config:
   `omp-config`. New models: `/skill:model-eval`.

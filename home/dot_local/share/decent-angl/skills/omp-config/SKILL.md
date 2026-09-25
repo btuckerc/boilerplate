@@ -51,8 +51,8 @@ description: Change the shared OMP baseline in chezmoi - upgrades, omp-baseline,
   Coarse `med` selects high on every cloud model. Keep local implementation
   medium; lower effort is not automatically faster. Recheck mappings against
   native discovery after catalog changes.
-- Native `llama.cpp` serves the promoted Qwen3.8-27B-UD-Q5_K_M worker
-  (65,536 context / 8,192 output, medium reasoning). Keep
+- Native `llama.cpp` serves the promoted Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp worker
+  (131,072 context / 8,192 output, medium reasoning). Keep
   `retry.modelFallback: false` so local work never silently moves to cloud
   inference. Use task defaults (`eager: default`, recursion depth 1,
   40-request soft budget, 10-minute runtime cap) and keep prewalk and

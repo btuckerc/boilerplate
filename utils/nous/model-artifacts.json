@@ -1,7 +1,14 @@
 {
-  "date": "2026-09-22",
+  "date": "2026-09-25",
   "host": "nous",
   "models": [
+    {
+      "repository": "ISTA-DASLab/Qwen3.8-27B-GSQ-RCO-GGUF",
+      "revision": "d562806dbafae37109975e970aae91b43e73b440",
+      "file": "Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf",
+      "bytes": 12120016960,
+      "sha256": "58fd826723939933dc86f45b7fe04545cbc2de1c70f6fe2cdd3858c87a98c12f"
+    },
     {
       "repository": "unsloth/Qwen3.8-27B-GGUF",
       "revision": "4ca720788d1e01f1bff70c033e0d0028fd02e502",

@@ -1,0 +1,2 @@
+# /etc/sudoers.d/91-tux-nopasswd (root:root 0440), granted 2026-09-25.
+tux ALL=(ALL:ALL) NOPASSWD: ALL

@@ -67,7 +67,8 @@ independent auth and sessions. Read `~/src/omp-serve/README.md` and
   `/etc/systemd/system`, not workstation chezmoi state. The unit runs the
   pinned `/opt/llama.cpp-vulkan-f805c57a2` build (b11046 at
   `/opt/llama.cpp-vulkan` is the rollback) with `RADV_DEBUG=nocompute`.
-- Exclusive GPU experiments MUST use the host-local, root-owned helper:
+- Exclusive GPU experiments MUST use the root-owned helper (source and install
+  steps: `utils/nous/gpu-lease/`, `docs/nous-inference.md` § GPU lease):
   `llama-yield --runtime 3600 -- COMMAND [ARG...]` (from the desired working
   directory). It runs as `tux` in the singleton `llama-yield-gpu.service`,
   refuses concurrent leases or active Bonsai, orders production shutdown
@@ -77,7 +78,7 @@ independent auth and sessions. Read `~/src/omp-serve/README.md` and
   environment; HOME/USER/LOGNAME/PATH are preserved/set automatically.
   Never manually stop production for benchmarks or detach GPU work from the
   lease. `~/.local/state/gsq-eval/bench.py` enforces lease-cgroup membership.
-- During leases, host-local `llama-placeholder.service` owns loopback 8080.
+- During leases, `llama-placeholder.service` owns loopback 8080.
   Every path/method returns HTTP 503 with `Content-Type: application/json`,
   integer `Retry-After` seconds remaining and
   `{"error":{"code":503,"type":"unavailable_error","message":"nous GPU is in use by LABEL; inference resumes when it finishes, by HH:MM UTC at the latest.","resume_at":UNIX_SECONDS}}`.
@@ -92,7 +93,7 @@ independent auth and sessions. Read `~/src/omp-serve/README.md` and
   No ordering edge to the lease avoids a cleanup deadlock. The watchdog repairs
   missing placeholders for active leases and
   stops stale ones; HTTP 503 does not count as production being up.
-- Host-local `llama-watchdog.timer` checks every two minutes; after more than
+- `llama-watchdog.timer` checks every two minutes; after more than
   five inactive minutes it starts enabled llama only without an active lease
   or active/transitioning Bonsai. Both lease cleanup and watchdog respect
   disabled llama. Intentional long stops MUST use

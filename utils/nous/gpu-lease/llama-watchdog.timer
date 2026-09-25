@@ -1,0 +1,11 @@
+[Unit]
+Description=Check production inference every two minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+AccuracySec=10s
+Unit=llama-watchdog.service
+
+[Install]
+WantedBy=timers.target

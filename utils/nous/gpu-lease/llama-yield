@@ -1,0 +1,205 @@
+#!/usr/bin/python3 -I
+"""Host-local, systemd-owned exclusive GPU lease and production recovery."""
+import argparse
+import fcntl
+import json
+import math
+import os
+import re
+import socket
+import subprocess
+import sys
+import syslog
+import time
+
+UNIT = "llama-yield-gpu.service"
+PLACEHOLDER = "llama-placeholder.service"
+SELF = "/usr/local/bin/llama-yield"
+BUSY = {"active", "activating", "deactivating", "reloading", "refreshing"}
+
+
+def announce(message):
+    syslog.syslog(syslog.LOG_INFO, message)
+    try:
+        os.write(1, (message + "\n").encode())
+    except OSError:
+        pass  # The caller's pipe may have vanished; recovery must continue.
+
+
+def ctl(*args):
+    return subprocess.check_output(["/usr/bin/systemctl", *args], text=True).strip()
+
+
+def properties(unit):
+    return dict(line.split("=", 1) for line in ctl(
+        "show", unit, "-p", "ActiveState", "-p", "UnitFileState",
+        "-p", "InactiveEnterTimestampMonotonic").splitlines())
+
+
+def leases():
+    lines = ctl("list-units", "--all", "--plain", "--no-legend", "--no-pager",
+                "llama-yield-*.service").splitlines()
+    return [parts[0] for line in lines if len(parts := line.split()) >= 4 and parts[2] in BUSY]
+
+
+def placeholder_state():
+    fields = ["ActiveState", "ActiveEnterTimestampMonotonic", "RuntimeMaxUSec", "Description", "ExecStart"]
+    command = ["show", UNIT]
+    for field in fields:
+        command += ["-p", field]
+    state = dict(line.split("=", 1) for line in ctl(*command).splitlines())
+    if state["ActiveState"] != "active":
+        raise OSError("placeholder requires an active GPU lease")
+    factors = {"us": 0.000001, "ms": 0.001, "s": 1, "min": 60, "h": 3600, "d": 86400}
+    duration = state["RuntimeMaxUSec"]
+    parts = re.findall(r"([0-9]+(?:\.[0-9]+)?)(us|ms|min|s|h|d)", duration)
+    if not parts or ''.join(number + unit for number, unit in parts) != duration.replace(' ', ''):
+        raise OSError("unsupported lease runtime: " + duration)
+    runtime = sum(float(number) * factors[unit] for number, unit in parts)
+    resume = math.ceil(time.time() + int(state["ActiveEnterTimestampMonotonic"]) / 1_000_000 + runtime - time.monotonic())
+    description = state["Description"]
+    if description.startswith("GPU lease: "):
+        label = description.removeprefix("GPU lease: ")
+    else:
+        match = re.search(r"path=([^ ;]+)", state["ExecStart"])
+        if not match:
+            raise OSError("cannot identify leased command")
+        label = os.path.basename(match.group(1))
+    label = ''.join(c for c in label if c.isprintable())[:80]
+    until = time.strftime("%H:%M UTC", time.gmtime(resume))
+    message = f"{socket.gethostname()} GPU is in use by {label}; inference resumes when it finishes, by {until} at the latest."
+    os.makedirs("/run/llama-yield", mode=0o755, exist_ok=True)
+    with open("/run/llama-yield/lease.json.new", "w") as output:
+        json.dump({"message": message, "resume_at": resume}, output)
+    os.chmod("/run/llama-yield/lease.json.new", 0o644)
+    os.replace("/run/llama-yield/lease.json.new", "/run/llama-yield/lease.json")
+    return 0
+
+
+def reconcile_placeholder(args):
+    if args.dry_run:
+        return
+    state = properties(UNIT)["ActiveState"]
+    if args.restore or state not in {"active", "activating"}:
+        # No ordering edge to the lease: this synchronous stop cannot wait for
+        # our own ExecStopPost. Production additionally orders after this unit.
+        ctl("stop", PLACEHOLDER)
+    elif state == "active" and properties("llama.service")["ActiveState"] not in BUSY:
+        ctl("start", PLACEHOLDER)
+
+
+def recover(args):
+    llama, bonsai = properties("llama.service"), properties("bonsai.service")
+    if args.assume_llama_disabled:
+        llama["UnitFileState"] = "disabled"
+    if args.assume_bonsai_active:
+        bonsai["ActiveState"] = "active"
+    reason = None
+    if llama["UnitFileState"] not in {"enabled", "enabled-runtime"}:
+        reason = "llama.service is not enabled (intentional stop)"
+    elif bonsai["ActiveState"] in BUSY:
+        reason = "bonsai.service is active or transitioning"
+    elif llama["ActiveState"] in BUSY:
+        reason = "llama.service is active or transitioning"
+    elif any(unit != UNIT or not args.restore for unit in leases()):
+        reason = "a llama-yield lease is active"
+    elif not args.restore:
+        since = int(llama["InactiveEnterTimestampMonotonic"] or 0) / 1_000_000
+        if time.monotonic() - since <= 300:
+            reason = "llama.service has been inactive for at most five minutes"
+    if reason:
+        announce("llama-watchdog: skip: " + reason)
+        return 0
+    announce("llama-watchdog: " + ("would start" if args.dry_run else "starting") + " llama.service")
+    if not args.dry_run:
+        subprocess.run(["/usr/bin/systemctl", "--no-block", "start", "llama.service"], check=True)
+    return 0
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--runtime", type=int, default=3600, help="maximum runtime in seconds (1..86400)")
+    ap.add_argument("--label", help="short public lease label (default: command basename)")
+    ap.add_argument("--env", action="append", default=[], metavar="NAME=VALUE")
+    ap.add_argument("--directory", default=os.getcwd())
+    ap.add_argument("--watchdog", action="store_true")
+    ap.add_argument("--restore", action="store_true", help=argparse.SUPPRESS)
+    ap.add_argument("--placeholder-state", action="store_true", help=argparse.SUPPRESS)
+    ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--assume-bonsai-active", action="store_true", help="dry-run policy probe only")
+    ap.add_argument("--assume-llama-disabled", action="store_true", help="dry-run policy probe only")
+    ap.add_argument("command", nargs=argparse.REMAINDER)
+    args = ap.parse_args()
+    if args.placeholder_state:
+        if os.geteuid() != 0:
+            ap.error("lease state requires root")
+        return placeholder_state()
+    if (args.assume_bonsai_active or args.assume_llama_disabled) and not args.dry_run:
+        ap.error("state assumptions require --dry-run")
+    if args.watchdog or args.restore:
+        if not args.dry_run and os.geteuid() != 0:
+            ap.error("recovery requires root")
+        reconcile_placeholder(args)
+        if args.watchdog and not args.dry_run:
+            with open("/run/llama-yield.lock", "w") as lock:
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    announce("llama-watchdog: skip: a llama-yield caller holds the lease")
+                    return 0
+                return recover(args)
+        return recover(args)
+    if args.dry_run:
+        ap.error("--dry-run requires --watchdog")
+    if args.command[:1] == ["--"]:
+        args.command.pop(0)
+    if not args.command:
+        ap.error("use llama-yield [--runtime SECONDS] [--label LABEL] -- COMMAND [ARG...]")
+    if not 1 <= args.runtime <= 86400:
+        ap.error("--runtime must be between 1 and 86400 seconds")
+    if args.label is not None and (not args.label.strip() or len(args.label) > 80 or not args.label.isprintable()):
+        ap.error("--label must be 1..80 printable characters")
+    if any(not re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", value) for value in args.env):
+        ap.error("--env requires NAME=VALUE")
+    environment = {"HOME": "/home/tux", "USER": "tux", "LOGNAME": "tux",
+                   "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin")}
+    environment.update(value.split("=", 1) for value in args.env)
+    if os.geteuid() != 0:
+        options = ["--runtime", str(args.runtime), "--directory", args.directory]
+        if args.label is not None:
+            options += ["--label", args.label]
+        for key, value in environment.items():
+            options += ["--env", key + "=" + value]
+        os.execv("/usr/bin/sudo", ["sudo", "-n", SELF, *options, "--", *args.command])
+    # Held for the caller's lifetime, never by ExecStopPost. A fixed unit name
+    # is the second, systemd-atomic exclusion barrier after caller death.
+    with open("/run/llama-yield.lock", "w") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            ap.error("another llama-yield caller is running")
+        if leases():
+            ap.error("another llama-yield lease is active")
+        if properties("bonsai.service")["ActiveState"] in BUSY:
+            ap.error("bonsai.service is active; refusing to take its GPU")
+        cmd = ["/usr/bin/systemd-run", "--unit=" + UNIT, "--uid=tux", "--gid=tux",
+               "--description=GPU lease: " + (args.label or os.path.basename(args.command[0])),
+               "--collect", "--wait", "--pipe", "--service-type=exec", "--expand-environment=no",
+               "--working-directory=" + args.directory,
+               "-p", "Conflicts=llama.service", "-p", "After=llama.service",
+               "-p", "PropagatesStopTo=" + PLACEHOLDER,
+               "-p", "ExecStartPost=+/usr/bin/systemctl --no-block start " + PLACEHOLDER,
+               "-p", "ExecStopPost=+" + SELF + " --restore",
+               "-p", "RuntimeMaxSec=" + str(args.runtime), "-p", "TimeoutStopSec=15s",
+               "-p", "KillMode=control-group"]
+        for key, value in environment.items():
+            cmd += ["--setenv=" + key + "=" + value]
+        # The service (including its cleanup) belongs to PID 1, not this caller.
+        return subprocess.run([*cmd, "--", *args.command]).returncode
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except (OSError, subprocess.CalledProcessError) as exc:
+        sys.exit("llama-yield: " + str(exc))

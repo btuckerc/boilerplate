@@ -1,0 +1,8 @@
+[Unit]
+Description=Restore unintentionally stopped production inference
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/llama-yield --watchdog
+TimeoutStartSec=30s

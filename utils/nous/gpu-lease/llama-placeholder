@@ -1,0 +1,70 @@
+#!/usr/bin/python3 -I
+"""Bounded, body-free HTTP availability response for a GPU lease."""
+import json
+import math
+import selectors
+import socket
+import time
+
+with open('/run/llama-yield/lease.json') as source:
+    lease = json.load(source)
+body = json.dumps({'error': {'code': 503, 'type': 'unavailable_error',
+    'message': lease['message'], 'resume_at': lease['resume_at']}}, separators=(',', ':')).encode()
+selector = selectors.DefaultSelector()
+server = socket.socket()
+server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+server.bind(('127.0.0.1', 8080))
+server.listen(64)
+server.setblocking(False)
+selector.register(server, selectors.EVENT_READ)
+clients = {}
+
+def close(client):
+    selector.unregister(client)
+    clients.pop(client, None)
+    client.close()
+
+while True:
+    for key, events in selector.select(0.5):
+        client = key.fileobj
+        if client is server:
+            client, _ = server.accept()
+            client.setblocking(False)
+            if len(clients) >= 64:
+                client.close()
+                continue
+            clients[client] = [time.monotonic() + 2, bytearray(), None]
+            selector.register(client, selectors.EVENT_READ)
+            continue
+        state = clients[client]
+        try:
+            if events & selectors.EVENT_READ:
+                chunk = client.recv(4096 - len(state[1]))
+                if not chunk:
+                    close(client)
+                    continue
+                state[1].extend(chunk)
+                # Only the request line is needed; paths, methods and bodies are irrelevant.
+                if b'\n' not in state[1] and len(state[1]) < 4096:
+                    continue
+                retry = max(0, math.ceil(lease['resume_at'] - time.time()))
+                headers = ('HTTP/1.1 503 Service Unavailable\r\n'
+                           'Content-Type: application/json\r\n'
+                           f'Retry-After: {retry}\r\n'
+                           f'Content-Length: {len(body)}\r\n'
+                           'Connection: close\r\n\r\n').encode()
+                state[2] = memoryview(headers + body)
+                selector.modify(client, selectors.EVENT_WRITE)
+            if events & selectors.EVENT_WRITE:
+                sent = client.send(state[2])
+                state[2] = state[2][sent:]
+                if not state[2]:
+                    # FIN before close avoids a reset from unread request bodies.
+                    client.shutdown(socket.SHUT_WR)
+                    close(client)
+        except (ConnectionError, OSError):
+            close(client)
+    now = time.monotonic()
+    for client, state in list(clients.items()):
+        if now >= state[0]:
+            close(client)

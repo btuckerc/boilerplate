@@ -1,0 +1,22 @@
+[Unit]
+Description=Inference unavailable response during the GPU lease
+Conflicts=llama.service
+# The lease propagates stops to us; reverse bindings pin its transient name.
+# No ordering against the lease: its ExecStopPost synchronously stops us.
+
+[Service]
+Type=exec
+User=tux
+Group=tux
+ExecStartPre=+/usr/bin/install -d -o root -g root -m 0755 /run/llama-yield
+ExecStartPre=+/usr/local/bin/llama-yield --placeholder-state
+ExecStart=/usr/local/bin/llama-placeholder
+Restart=on-failure
+RestartSec=1s
+TimeoutStopSec=3s
+NoNewPrivileges=yes
+ProtectHome=yes
+ProtectSystem=full
+PrivateTmp=yes
+MemoryMax=48M
+TasksMax=8

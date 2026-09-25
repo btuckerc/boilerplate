@@ -298,6 +298,42 @@ unrelated systemctl operation were denied without authentication. Normal
 Since 2026-09-25 `utils/nous/91-tux-nopasswd.sudoers` grants tux full
 passwordless sudo, which supersedes this allowlist for agents.
 
+## GPU lease
+
+Benchmarks borrow the GPU with `llama-yield` instead of stopping
+`llama.service` by hand. While a lease runs, `llama-placeholder` answers every
+request on loopback 8080 with HTTP 503, `Retry-After` and a `resume_at`
+deadline; `llama-watchdog.timer` restarts production if nothing else does.
+Behavior and agent rules: `platform-ops` skill, `references/nous.md`.
+
+Sources live in `utils/nous/gpu-lease/` and mirror these root-owned paths:
+
+| Source | Installed |
+| --- | --- |
+| `llama-yield`, `llama-placeholder` | `/usr/local/bin/` (0755) |
+| `llama-placeholder.service`, `llama-watchdog.service`, `llama-watchdog.timer` | `/etc/systemd/system/` (0644) |
+| `llama.service.d/placeholder.conf`, `llama-yield-gpu.service.d/placeholder.conf` | same subdirectories of `/etc/systemd/system/` (0644) |
+
+Install or update from this checkout, only while no lease is active
+(`systemctl is-active llama-yield-gpu.service` prints `inactive`):
+
+```sh
+scp -r utils/nous/gpu-lease nous:/tmp/
+ssh nous 'cd /tmp/gpu-lease && sudo install -m 0755 llama-yield llama-placeholder /usr/local/bin/ \
+  && sudo install -m 0644 *.service *.timer /etc/systemd/system/ \
+  && sudo install -D -m 0644 llama.service.d/placeholder.conf /etc/systemd/system/llama.service.d/placeholder.conf \
+  && sudo install -D -m 0644 llama-yield-gpu.service.d/placeholder.conf /etc/systemd/system/llama-yield-gpu.service.d/placeholder.conf \
+  && sudo systemctl daemon-reload && sudo systemctl enable --now llama-watchdog.timer'
+```
+
+Check for drift (no output means the host matches the source):
+
+```sh
+cd utils/nous/gpu-lease
+for f in llama-yield llama-placeholder; do ssh nous cat /usr/local/bin/$f | diff -q - $f >/dev/null || echo "drift: $f"; done
+for f in *.service *.timer *.d/*.conf; do ssh nous cat /etc/systemd/system/$f | diff -q - $f >/dev/null || echo "drift: $f"; done
+```
+
 ## Expanded model and benchmark evaluation
 
 See [the September 19 report](nous-model-evaluation-2026-09-19.md) for six-model

@@ -922,6 +922,7 @@ After=network-online.target
 
 [Service]
 Type=oneshot
+Environment=PATH=%h/.local/bin:%h/.local/share/mise/shims:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
 ExecStart=%h/.local/bin/omp-baseline guard
 EOF
       cat >"$unit_dir/omp-baseline-guard.timer" <<'EOF'

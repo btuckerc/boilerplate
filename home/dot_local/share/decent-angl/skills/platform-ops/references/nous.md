@@ -35,6 +35,10 @@ installs only the agent toolchain there; the host-local
   mcp --bridge-socket <Peekaboo.app bridge.sock>`: the env var alone falls back
   to an ungranted local host, and the browser tool breaks Bridge startup.
   Peekaboo.app must be running (login item) for screenshots.
+- `xdg-desktop-portal{,-gtk}.service` are user-masked (host-local, not
+  chezmoi). `libwebkit2gtk-4.1-0` (Tauri builds) pulls them in, but with no
+  display the GTK backend exits and the portal times out on every D-Bus
+  activation (headless Chrome, Node CLIs). Masked, activation fails immediately.
 - Mac shell: `ssh mac` (host-local `~/.ssh/config`, key
   `~/.ssh/id_ed25519_fleet`, authorized on the Mac with `from=` nous's
   tailnet IP). nous has no GitHub credentials; the Mac publishes.

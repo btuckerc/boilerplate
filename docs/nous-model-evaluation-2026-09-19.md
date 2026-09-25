@@ -214,7 +214,7 @@ long-context reasoning. Raw responses and generated code remain locally under
 `utils/nous/results/`; Git retains the aggregate `summary.json` and artifact
 manifest, not the raw transcripts.
 
-### September 25: Qwen3.8 27B GSQ-RCO IQ3_S (promoted)
+### September 25: Qwen3.8 27B GSQ-RCO IQ3_S (superseded)
 
 ISTA-DASLab's `Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf` (12.12 GB, SHA-256
 `58fd8267…c12f` matches the HF etag) was first compared with the incumbent
@@ -255,6 +255,35 @@ Quality gate on the shipped binary and preset through the router: HumanEval+
 preset and 2,152 s / 66.6 t/s for Q5. Q5 stays on disk and in the router
 preset for rollback; the b11046 build stays at `/opt/llama.cpp-vulkan`.
 Flash-Next GSQ-RCO starts at 66 GB and does not fit this host.
+
+### September 25 (second round): UD-Q4_K_XL + DFlash2 (promoted)
+
+Research round over quants, speculative drafters and engines, on master
+f805c57a2 Vulkan with `RADV_DEBUG=nocompute`, same harness, two reps.
+KLD against unsloth Q8_0 (wikitext-2, 40×512):
+
+| Target (GB) | KLD / same top | DFlash2 n5 short / code t/s | 86K decode / prefill t/s |
+| --- | ---: | ---: | ---: |
+| GSQ-RCO IQ3_S (12.1), MTP n4 (old default) | 0.054 / 90.0% | 68.8 / 80.3 (MTP) | 60.0 / 718 |
+| GSQ-RCO IQ3_S | — | 73.5 / 92.1 | — |
+| UD-IQ4_XS (14.3) | 0.017 / 93.8% | 77.6 / 97.7 | 70.4 / 709 |
+| **UD-Q4_K_XL (17.6)** | **0.0058 / 96.7%** | **74.0 / 90.6** | **63.2 / 692** |
+| UD-Q5_K_M (19.8) | 0.0035 / 97.2% | — | — |
+| Q4_0 (16.1) | — | 60.6 / 78.6 | — |
+
+The drafter is z-lab's DFlash2 Q4_K_M GGUF (1.1 GB; Q8_0 drafter −3%).
+`spec-draft-n-max` 5 beat 4 and 6 overall on every target. Lucebox
+(`luce_server` HIP, DFlash2 block 16, sampled verify, UD-IQ4_XS) reached
+132 t/s on code but only 72 on prose, and fell to 35.6 t/s decode / 420 t/s
+prefill at 86K with 2× the re-prefill in the agentic replay; rejected for
+OMP's long-context workload.
+
+Quality gate for UD-Q4_K_XL + DFlash2 against the old default, same private
+preset: LiveCodeBench 60 (2025+, 30 medium / 30 hard, one sample, 8,192
+tokens) 31 vs 28 passed (23 vs 27 truncated), 4,016 vs 5,014 s wall;
+HumanEval+ 160 / 155 (old 160 / 155); OMP agentic 3/3; 100K retrieval
+correct. 128K f16 KV peaks at 28.2 GB. UD-IQ4_XS is the faster fallback
+(3× the KLD). The IQ3_S+MTP and Q5 presets remain for rollback.
 
 ## Established benchmarks for candidate selection
 

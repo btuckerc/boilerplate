@@ -90,6 +90,13 @@ is active. Intentional long stops require
 `sudo systemctl disable --now llama.service`; resume with
 `sudo systemctl enable --now llama.service`.
 
+Local quant/engine candidates: rank quants by KLD against a Q8_0 reference
+(`llama-perplexity --kl-divergence-base`, 40×512 wikitext chunks); HumanEval+
+no longer discriminates (IQ3_S through Q5 all 155–156/164). Quality gate is
+LCB60 (`lcb_gen.py MODEL OUT URL` + `lcb_grade.py OUT`, 2025+ medium/hard) run
+through `bench.py LABEL --short 0 --run "..."` on :18737, plus
+`bench.py --ctx 131072 --long … --replay 8` for depth and cache behavior.
+
 ## Rules of thumb
 
 - Medium effort is the default; raise it only on a measured gain. On

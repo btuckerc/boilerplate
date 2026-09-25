@@ -14,7 +14,7 @@ import time
 import urllib.request
 
 MODELS = {
-    "qwen": "nous/Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp",
+    "qwen": "nous/Qwen3.8-27B-UD-Q4_K_XL",
     "ornith": "nous/Ornith-1.5-9B-Q5_K_M",
     "nemotron": "nous/Nemotron-9B-OpenCode.Q6_K",
     "gemma": "nous/gemma-4-12B-it-Q4_0",

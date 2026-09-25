@@ -10,8 +10,8 @@
         "baseURL": "http://100.83.125.83:8080/v1"
       },
       "models": {
-        "Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp": {
-          "name": "Nous Qwen 3.8 27B GSQ-RCO IQ3_S",
+        "Qwen3.8-27B-UD-Q4_K_XL": {
+          "name": "Nous Qwen 3.8 27B UD-Q4_K_XL",
           "limit": {
             "context": 131072,
             "output": 8192

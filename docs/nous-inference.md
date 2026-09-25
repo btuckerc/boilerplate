@@ -16,7 +16,7 @@ its existing RSA identity, without forwarding the SSH agent.
 | Service | llama.cpp master f805c57a2 Vulkan (pinned at `/opt/llama.cpp-vulkan-f805c57a2`; b11046 kept at `/opt/llama.cpp-vulkan` for rollback), `llama.service`, enabled and active |
 | Network | Loopback server forwarded on port 8080 by Tailscale Serve, tailnet only |
 | API | `http://nous:8080/v1` |
-| Models | Promoted Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp (131,072 context / 8,192 output); the previous UD-Q5_K_M remains selectable; smaller Nemotron, Qwen 3.5 9B/4B, Ornith 1.5 9B and Gemma 4 12B remain selectable in OpenCode; verified Gemma 4 26B A4B Q6_K and Qwen3-Coder 30B A3B Q5_K_M candidates remain router-only |
+| Models | Promoted Qwen3.8-27B-UD-Q4_K_XL with DFlash2 drafter (131,072 context / 8,192 output); the previous GSQ-RCO IQ3_S+MTP and UD-Q5_K_M remain selectable; smaller Nemotron, Qwen 3.5 9B/4B, Ornith 1.5 9B and Gemma 4 12B remain selectable in OpenCode; verified Gemma 4 26B A4B Q6_K and Qwen3-Coder 30B A3B Q5_K_M candidates remain router-only |
 | Capacity | One serialized model slot; Qwen3.8 uses the 131,072-token preset and other models retain 16,384-token presets |
 
 No failed systemd units were reported. SSH directory/key file permissions
@@ -33,17 +33,17 @@ service switching or upgrades.
 and model inventory without installing anything on nous. It does not run
 inference or load models, and is not a correctness/throughput benchmark.
 
-Since 2026-09-25 the promoted worker is ISTA-DASLab's GSQ-RCO IQ3_S quant of
-Qwen3.8 27B (12.1 GB, with its MTP head). It uses Vulkan1, f16 KV at 131,072
-context (21.7 GB VRAM), `load-mode none` (no 12 GB host mmap of the GGUF),
-MTP `spec-draft-n-max 4` / `spec-draft-p-min 0.4`, microbatch 1024, 16 context
-checkpoints at minimum spacing 1024, the default 8 GiB prompt cache, and
-medium reasoning. It loads on service startup; other models are loaded on
+Since 2026-09-25 the promoted worker is unsloth's UD-Q4_K_XL quant of Qwen3.8
+27B (17.6 GB) with z-lab's DFlash2 Q4_K_M drafter (`spec-type draft-dflash`,
+`spec-draft-n-max 5`). It uses Vulkan1, f16 KV at 131,072 context (28.2 GB
+VRAM peak), `load-mode none` (no host mmap of the GGUF), microbatch 1024, 16
+context checkpoints at minimum spacing 1024, the default 8 GiB prompt cache,
+and medium reasoning. It loads on service startup; other models are loaded on
 demand, one at a time. The unit sets `RADV_DEBUG=nocompute` (+3% decode).
 Host tuning: a udev rule keeps the R9700 out of BACO runtime suspend (which
 evicted the idle model from VRAM to system RAM/swap and made the next request
 slow), and `vm.swappiness = 10`. Measurements, rejected settings and rollback
-are in [the model evaluation](nous-model-evaluation-2026-09-19.md#september-25-qwen38-27b-gsq-rco-iq3_s-promoted).
+are in [the model evaluation](nous-model-evaluation-2026-09-19.md#september-25-second-round-ud-q4_k_xl--dflash2-promoted).
 The September 22 isolated trials found a 24% branched-history latency reduction
 from checkpoint spacing, not a cold/append speedup. See
 [the measured policy](omp-execution-policy-2026-09-19.md) for the earlier Q5

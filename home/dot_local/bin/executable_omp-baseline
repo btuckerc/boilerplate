@@ -538,16 +538,16 @@ check_omp_config() {
   fi
 
   local source_models="$REPO_ROOT/home/private_dot_omp/private_agent/private_models.yml" catalog
-  if grep -q '^  llama.cpp:' "$source_models" && grep -q 'Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp' "$source_models"; then
+  if grep -q '^  llama.cpp:' "$source_models" && grep -q 'Qwen3.8-27B-UD-Q4_K_XL' "$source_models"; then
     printf 'CONFIG  promoted local catalog configured\n'
   else
     printf 'CONFIG  promoted local catalog missing\n' >&2
     failures=1
   fi
   catalog="$(omp models llama.cpp --json 2>/dev/null || true)"
-  if printf '%s' "$catalog" | jq -e '[.models[]?.id] | index("Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp")' >/dev/null; then
+  if printf '%s' "$catalog" | jq -e '[.models[]?.id] | index("Qwen3.8-27B-UD-Q4_K_XL")' >/dev/null; then
     printf 'MODEL   Qwen3.8 local catalog entry\n'
-  elif grep -q 'Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp' "$source_models"; then
+  elif grep -q 'Qwen3.8-27B-UD-Q4_K_XL' "$source_models"; then
     printf 'MODEL   Qwen3.8 configured; discovery unavailable\n'
   else
     printf 'MODEL   Qwen3.8 absent from local catalog and source\n' >&2

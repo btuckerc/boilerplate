@@ -163,7 +163,7 @@ Chezmoi source names `private_config.yml` / `private_models.yml` deploy to ordin
 
 The earlier Ornith/Gemma results below are historical. This admission used
 Qwen3.8-27B-UD-Q5_K_M, medium, served at 65,536 context / 8,192 output. Since
-2026-09-25 the promoted worker is the Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp quant
+2026-09-25 the promoted worker is Qwen3.8-27B-UD-Q4_K_XL with a DFlash2 drafter
 (131,072 context); see [the nous inference notes](nous-inference.md).
 The question is whether compact Astra design guidance makes a bounded local
 implementation lane useful, not whether Qwen independently equals Luna.

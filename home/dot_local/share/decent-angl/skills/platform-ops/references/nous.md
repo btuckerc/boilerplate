@@ -67,6 +67,42 @@ independent auth and sessions. Read `~/src/omp-serve/README.md` and
   `/etc/systemd/system`, not workstation chezmoi state. The unit runs the
   pinned `/opt/llama.cpp-vulkan-f805c57a2` build (b11046 at
   `/opt/llama.cpp-vulkan` is the rollback) with `RADV_DEBUG=nocompute`.
+- Exclusive GPU experiments MUST use the host-local, root-owned helper:
+  `llama-yield --runtime 3600 -- COMMAND [ARG...]` (from the desired working
+  directory). It runs as `tux` in the singleton `llama-yield-gpu.service`,
+  refuses concurrent leases or active Bonsai, orders production shutdown
+  before the command, and uses systemd `ExecStopPost` to restore production
+  after success, failure, caller death or timeout. Default runtime is one hour;
+  `--runtime` accepts 1–86400 seconds. `--env NAME=VALUE` passes additional
+  environment; HOME/USER/LOGNAME/PATH are preserved/set automatically.
+  Never manually stop production for benchmarks or detach GPU work from the
+  lease. `~/.local/state/gsq-eval/bench.py` enforces lease-cgroup membership.
+- During leases, host-local `llama-placeholder.service` owns loopback 8080.
+  Every path/method returns HTTP 503 with `Content-Type: application/json`,
+  integer `Retry-After` seconds remaining and
+  `{"error":{"code":503,"type":"unavailable_error","message":"nous GPU is in use by LABEL; inference resumes when it finishes, by HH:MM UTC at the latest.","resume_at":UNIX_SECONDS}}`.
+  The public label defaults to the command basename; `--label LABEL` overrides
+  it (1–80 printable characters, no secrets). Deadline/label come from the
+  actual lease into root-written `/run/llama-yield/lease.json`. Tailscale Serve
+  preserves this response. Benchmarks use separate ports, never 8080.
+  The lease's `PropagatesStopTo` stops the placeholder, and cleanup also
+  synchronously stops it; llama's `Conflicts`/`After` drop-in orders production
+  starts after port release. Reverse `BindsTo`/`PartOf` bindings would pin the
+  transient lease name and prevent subsequent leases, so are not used.
+  No ordering edge to the lease avoids a cleanup deadlock. The watchdog repairs
+  missing placeholders for active leases and
+  stops stale ones; HTTP 503 does not count as production being up.
+- Host-local `llama-watchdog.timer` checks every two minutes; after more than
+  five inactive minutes it starts enabled llama only without an active lease
+  or active/transitioning Bonsai. Both lease cleanup and watchdog respect
+  disabled llama. Intentional long stops MUST use
+  `sudo systemctl disable --now llama.service`; resume using
+  `sudo systemctl enable --now llama.service`. Inspect
+  `journalctl -u llama-watchdog.service -u llama-yield-gpu.service`.
+  Policy probes: `llama-yield --watchdog --dry-run --assume-bonsai-active`
+  and `llama-yield --watchdog --dry-run --assume-llama-disabled`.
+  After a lease, verify `systemctl is-active llama.service` and HTTP 200 from
+  `curl -f http://127.0.0.1:8080/v1/models`; restore starts asynchronously.
 - GPU power: `/etc/udev/rules.d/80-nous-r9700-runpm.rules` pins
   `power/control=on` for 0000:03:00.0. Without it the R9700 enters BACO
   runtime suspend when idle, which evicts the loaded model to system RAM/swap

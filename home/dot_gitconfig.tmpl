@@ -36,3 +36,8 @@
 	clean = git-lfs clean -- %f
 	smudge = git-lfs smudge -- %f
 	process = git-lfs filter-process
+
+# Machine-local settings (for example `gh auth setup-git` helpers) belong in
+# ~/.gitconfig.local, not here; a missing file is ignored.
+[include]
+	path = ~/.gitconfig.local

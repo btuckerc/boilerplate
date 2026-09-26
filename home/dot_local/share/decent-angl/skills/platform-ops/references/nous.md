@@ -22,6 +22,10 @@ installs only the agent toolchain there; the host-local
   `.pre-mac-20260923/`. Bare repos: `/srv/workspaces/git/<name>.git`
   (`nous` remote, local path on this host). Migration scripts and the resumable
   transfer live in the MacBook's `~/.local/state/nous-migration/`.
+  `nous-git-mirror.timer` (chezmoi, enabled once by hand) pushes `--mirror`
+  copies of every bare repo to the mini's `/Users/admin/srv/git` nightly at
+  04:30; there is no other backup of nous. Machine-local git settings (the gh
+  credential helper) live in `~/.gitconfig.local`.
 - Auth: the CLI is a broker client via host-local `~/.omp/agent/.env`
   (`OMP_AUTH_BROKER_URL`) and `~/.omp/auth-broker.token`. The broker
   (`omp-auth-broker.service`) stores credentials under

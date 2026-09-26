@@ -154,6 +154,11 @@ Applications/Codex Third.app/**
 !.local/bin/bw-ensure-auth
 !.local/bin/bw-secret
 !.local/bin/opnsense-*
+!.local/bin/nous-git-mirror
+!.config/systemd
+!.config/systemd/user
+!.config/systemd/user/nous-git-mirror.service
+!.config/systemd/user/nous-git-mirror.timer
 !.local/share
 !.local/share/decent-angl
 !.local/share/decent-angl/skills
@@ -164,4 +169,7 @@ Applications/Codex Third.app/**
 {{- else }}
 hearth
 hearth/**
+.local/bin/nous-git-mirror
+.config/systemd/user/nous-git-mirror.service
+.config/systemd/user/nous-git-mirror.timer
 {{- end }}

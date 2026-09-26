@@ -1,0 +1,19 @@
+#!/bin/sh
+# Mirror nous's canonical bare repos to the mini (nightly nous-git-mirror.timer).
+# `push --mirror` replicates force-pushes and deletions; it is a copy, not history.
+set -u
+dest="${NOUS_GIT_MIRROR:-mini:/Users/admin/srv/git}"
+host="${dest%%:*}"
+dir="${dest#*:}"
+rc=0
+for repo in /srv/workspaces/git/*.git; do
+    name="$(basename "$repo")"
+    if ssh -o BatchMode=yes "$host" "test -d '$dir/$name' || git init -q --bare '$dir/$name'" &&
+        git -C "$repo" push -q --mirror "$host:$dir/$name"; then
+        :
+    else
+        echo "mirror failed: $name" >&2
+        rc=1
+    fi
+done
+exit "$rc"

@@ -1,0 +1,9 @@
+[Unit]
+Description=Nightly mirror of nous canonical git repos to the mini
+
+[Timer]
+OnCalendar=*-*-* 04:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

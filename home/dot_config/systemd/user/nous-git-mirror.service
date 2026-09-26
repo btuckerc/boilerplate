@@ -1,0 +1,8 @@
+[Unit]
+Description=Mirror nous canonical git repos to the mini
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/nous-git-mirror

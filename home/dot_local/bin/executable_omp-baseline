@@ -497,9 +497,10 @@ check_omp_config() {
       (.value.fable | test("^anthropic/claude-fable-[0-9]+(-[0-9]+)?:medium$")) and
       (.value.slow | test("^openai-codex/gpt-[0-9]+(\\.[0-9]+)?-astra:xhigh$")) and
       (.value.plan | test("^openai-codex/gpt-[0-9]+(\\.[0-9]+)?-astra:medium$")) and
-      (.value.task | test("^openai-codex/gpt-[0-9]+(\\.[0-9]+)?-luna:medium$")) and
-      (.value.vision == .value.task) and
-      (.value.smol | test("^openai-codex/gpt-[0-9]+(\\.[0-9]+)?-luna:low$")) and
+      (.value.task | test("^llama\\.cpp/Qwen[^:]+:medium$")) and
+      (.value.vision | test("^openai-codex/gpt-[0-9]+(\\.[0-9]+)?-luna:medium$")) and
+      (.value.smol | test("^llama\\.cpp/Qwen[^:]+:low$")) and
+      ((.value.smol | split(":")[0]) == (.value.task | split(":")[0])) and
       (.value.commit == .value.smol) and
       (.value.tiny == .value.smol)
     ' >/dev/null; then

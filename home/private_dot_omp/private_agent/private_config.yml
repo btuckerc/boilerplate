@@ -1,15 +1,17 @@
 # Managed by chezmoi. Credentials, sessions and account usage stay local.
-# Claude Opus directs; nous/Luna handle bounded work under parent-run checks.
+# Claude Opus directs; nous (local Qwen) handles worker roles to save Codex
+# quota. Luna stays for vision and the explicit `luna` cloud-worker agent.
 # Astra is evidence-triggered escalation; Fable is the Anthropic-pool alternative.
 modelRoles:
   default: anthropic/claude-opus-5-5:medium
   slow: openai-codex/gpt-6-astra:xhigh
   plan: openai-codex/gpt-6-astra:medium
+  # The local model is text-only.
   vision: openai-codex/gpt-6-luna:medium
-  commit: openai-codex/gpt-6-luna:low
-  smol: openai-codex/gpt-6-luna:low
-  tiny: openai-codex/gpt-6-luna:low
-  task: openai-codex/gpt-6-luna:medium
+  commit: llama.cpp/Qwen3.8-27B-UD-Q4_K_XL:low
+  smol: llama.cpp/Qwen3.8-27B-UD-Q4_K_XL:low
+  tiny: llama.cpp/Qwen3.8-27B-UD-Q4_K_XL:low
+  task: llama.cpp/Qwen3.8-27B-UD-Q4_K_XL:medium
   # Scarce Anthropic weekly pool (capped at half of it); see RULES.md.
   fable: anthropic/claude-fable-5-1:medium
   # Keyless search only; provider-backed search stays an explicit choice.

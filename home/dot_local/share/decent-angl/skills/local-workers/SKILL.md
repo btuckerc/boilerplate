@@ -8,10 +8,10 @@ description: Route checkable work to nous or Luna during multi-step coding, test
 Choose routing without asking the user to pick a model. Claude Opus medium
 is the OMP director: own requirements, integration and acceptance; do trivial work directly.
 Prefer nous for bounded implementation, mechanical work, extraction and supplied-log
-summaries with clear contracts and runnable checks. Use Luna medium (`task`) when
-local capability, context or queue latency is unsuitable; `scout` for read-only
-discovery and `sonic` for mechanical cloud work. Resolve uncertainty before
-delegation without pre-solving routine implementation.
+summaries with clear contracts and runnable checks. `task`, `scout` and `sonic`
+also run on nous (Qwen) to save Codex quota; use the `luna` agent (Codex) only
+when local capability, context (>128K), images or a failed local attempt require it.
+Resolve uncertainty before delegation without pre-solving routine implementation.
 
 Use Astra medium for unresolved high-consequence design/security/concurrency
 decisions, conflicting evidence after focused investigation, or a failed check

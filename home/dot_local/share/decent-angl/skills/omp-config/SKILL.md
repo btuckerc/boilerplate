@@ -26,9 +26,11 @@ description: Change the shared OMP baseline in chezmoi - upgrades, omp-baseline,
   Codex pool is session-sticky and quota-aware; use `/session pin` when needed.
 - Default routing is Claude Opus medium as director. The director owns
   requirements, integration and acceptance; trivial work stays direct. Prefer
-  nous for bounded work with runnable checks; use Luna medium (`task`) when
-  local capability, context or queue latency is unsuitable. Use fresh compact
-  briefs, not the full parent transcript or pre-solved implementations.
+  nous for bounded work with runnable checks. The `task`, `commit`, `smol` and
+  `tiny` roles (so `task`, `scout`, `sonic`) run on nous Qwen to save Codex
+  quota; `vision` stays Luna (text-only local model). The `luna` agent is the
+  explicit Codex worker when local capability, context or images are unsuitable.
+  Use fresh compact briefs, not the full parent transcript or pre-solved implementations.
 - Escalation lanes: Astra medium (`architect` read-only, `astra`
   implementation; both `@plan`) is the default. It matches or beats Fable on
   vendor coding benchmarks (Opus 5.5 system card; OpenAI Astra post) and draws
@@ -59,8 +61,8 @@ description: Change the shared OMP baseline in chezmoi - upgrades, omp-baseline,
   background advisors off.
 - Native nous handles bounded implementations with explicit contracts, mechanical
   transforms and extraction under the `local-workers` acceptance protocol.
-  Keep Luna as the generic `task` alias; Sol prefers the checked local lane
-  when suitable. Uncertain design stays with Sol or Astra.
+  The `luna` agent is the explicit cloud worker; uncertain design stays with
+  Opus or Astra.
   Smaller llama.cpp models remain explicit choices. Keep the OpenCode
   `nous-worker` Codex/T3 path available with fresh briefs and its full privacy
   bounds. Bonsai is retired from the active catalog and launcher; historical

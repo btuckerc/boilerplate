@@ -17,8 +17,8 @@ Decide whether a candidate model earns a lane. Adoption itself follows the
 | Director | `default` | Anthropic | Opus medium |
 | Escalation | `plan` → `architect`/`astra` | Codex | Astra medium |
 | Escalation, second opinion | `fable` | Anthropic, capped at half | Fable medium |
-| Cloud worker | `task`, `smol` | Codex | Luna medium/low |
-| Local worker | `nous` | nous GPU, no quota | Qwen3.8 27B |
+| Local worker | `task`, `smol`, `tiny`, `commit`, `nous` | nous GPU, no quota | Qwen3.8 27B |
+| Cloud worker | `luna` agent, `vision` | Codex | Luna medium |
 
 A candidate must beat the incumbent for one lane on quality per unit of that
 lane's pool. Near-equal quality on a different pool can still win for

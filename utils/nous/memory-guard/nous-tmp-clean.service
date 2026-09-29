@@ -1,0 +1,9 @@
+[Unit]
+Description=Remove idle, unreferenced scratch from RAM-backed /tmp
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/nous-tmp-clean
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=5min

@@ -1,0 +1,7 @@
+# /etc/default/earlyoom on nous (source: utils/nous/memory-guard/earlyoom).
+# Act only when both available RAM and free swap are at or below 8%, i.e. just
+# before the kernel's own OOM path thrashes the host for minutes. Kill single
+# processes, preferring browsers and build/test jobs; avoid inference, remote
+# access (herdr is the phone's session server) and agent sessions unless
+# nothing else is left.
+EARLYOOM_ARGS="-m 8 -s 8 -r 0 --prefer ^(chrome|chrome_crashpad|chromium|headless_shell|pytest|clang|cc1|cc1plus|ld|rustc|node)$ --avoid ^(llama-server|sshd|tailscaled|herdr|systemd|systemd-journal|dbus-daemon|omp)$"

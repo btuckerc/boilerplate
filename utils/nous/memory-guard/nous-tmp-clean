@@ -1,0 +1,164 @@
+#!/usr/bin/python3
+"""Remove idle, unreferenced agent scratch from RAM-backed /tmp.
+
+/tmp is tmpfs on nous, so every leftover scratch tree holds RAM until
+systemd-tmpfiles' 10-day sweep. This removes top-level entries owned by
+OWNER_UID whose whole tree has not been modified for IDLE_HOURS
+(LOW_MEM_IDLE_HOURS while MemAvailable is below LOW_MEM_FRACTION of MemTotal)
+and that no running process references via cwd, root, exe, open fds,
+mappings, argv or environ. Trees containing sockets and session/runtime names
+are never touched.
+
+Usage: nous-tmp-clean [--dry-run]
+"""
+
+import os
+import shutil
+import stat
+import sys
+import time
+
+TMP = "/tmp"
+OWNER_UID = 1000
+IDLE_HOURS = 12
+LOW_MEM_IDLE_HOURS = 2
+LOW_MEM_FRACTION = 0.25
+SKIP_PREFIXES = (".", "tmux-", "ssh-", "systemd-private-", "snap-private-tmp")
+
+
+def meminfo():
+    info = {}
+    with open("/proc/meminfo") as f:
+        for line in f:
+            key, value = line.split(":", 1)
+            info[key] = int(value.split()[0])
+    return info
+
+
+def referenced_entries():
+    """Top-level /tmp names referenced by any live process."""
+    names = set()
+
+    def note(path):
+        if path.startswith("/tmp/"):
+            name = path[5:].split("/", 1)[0]
+            if name:
+                names.add(name)
+
+    def note_tokens(blob):
+        for chunk in blob.split(b"\0"):
+            for token in chunk.decode(errors="ignore").replace("=", " ").replace(":", " ").split():
+                note(token)
+
+    for pid in os.listdir("/proc"):
+        if not pid.isdigit():
+            continue
+        base = f"/proc/{pid}"
+        for link in ("cwd", "root", "exe"):
+            try:
+                note(os.readlink(f"{base}/{link}"))
+            except OSError:
+                pass
+        try:
+            for fd in os.listdir(f"{base}/fd"):
+                try:
+                    note(os.readlink(f"{base}/fd/{fd}"))
+                except OSError:
+                    pass
+        except OSError:
+            pass
+        try:
+            with open(f"{base}/maps") as f:
+                for line in f:
+                    parts = line.split(maxsplit=5)
+                    if len(parts) == 6:
+                        note(parts[5].strip())
+        except OSError:
+            pass
+        for blob_name in ("cmdline", "environ"):
+            try:
+                with open(f"{base}/{blob_name}", "rb") as f:
+                    note_tokens(f.read())
+            except OSError:
+                pass
+    return names
+
+
+def tree_state(path, tmp_dev):
+    """Return (newest mtime/ctime, bytes, has_socket_or_foreign_mount).
+
+    atime is ignored: recursive greps and this walk refresh it on strictatime
+    tmpfs, so it does not indicate use. Live use is caught by process references.
+    """
+    newest = 0.0
+    size = 0
+    unsafe = False
+    for root, dirs, files in os.walk(path):
+        try:
+            st = os.lstat(root)
+        except OSError:
+            continue
+        if st.st_dev != tmp_dev:
+            return newest, size, True
+        newest = max(newest, st.st_mtime, st.st_ctime)
+        for name in files + [d for d in dirs if os.path.islink(os.path.join(root, d))]:
+            try:
+                st = os.lstat(os.path.join(root, name))
+            except OSError:
+                continue
+            if stat.S_ISSOCK(st.st_mode) or stat.S_ISFIFO(st.st_mode):
+                unsafe = True
+            newest = max(newest, st.st_mtime, st.st_ctime)
+            size += st.st_blocks * 512
+    return newest, size, unsafe
+
+
+def main():
+    dry_run = "--dry-run" in sys.argv[1:]
+    mem = meminfo()
+    low_mem = mem["MemAvailable"] < LOW_MEM_FRACTION * mem["MemTotal"]
+    idle_seconds = (LOW_MEM_IDLE_HOURS if low_mem else IDLE_HOURS) * 3600
+    now = time.time()
+    tmp_dev = os.lstat(TMP).st_dev
+    in_use = referenced_entries()
+    removed = 0
+    freed = 0
+
+    for name in os.listdir(TMP):
+        if name.startswith(SKIP_PREFIXES) or name in in_use:
+            continue
+        path = os.path.join(TMP, name)
+        try:
+            st = os.lstat(path)
+        except OSError:
+            continue
+        if st.st_uid != OWNER_UID or st.st_dev != tmp_dev:
+            continue
+        if stat.S_ISDIR(st.st_mode):
+            newest, size, unsafe = tree_state(path, tmp_dev)
+        elif stat.S_ISREG(st.st_mode) or stat.S_ISLNK(st.st_mode):
+            newest = max(st.st_mtime, st.st_ctime)
+            size, unsafe = st.st_blocks * 512, False
+        else:
+            continue
+        if unsafe or now - newest < idle_seconds:
+            continue
+        if not dry_run:
+            try:
+                if stat.S_ISDIR(st.st_mode):
+                    shutil.rmtree(path)
+                else:
+                    os.unlink(path)
+            except OSError as exc:
+                print(f"skip {path}: {exc}", file=sys.stderr)
+                continue
+        removed += 1
+        freed += size
+        print(f"{'would remove' if dry_run else 'removed'} {path} ({size / 2**20:.1f} MiB, idle {(now - newest) / 3600:.1f} h)")
+
+    mode = "low-memory" if low_mem else "normal"
+    print(f"{mode} threshold {idle_seconds // 3600} h: {removed} entries, {freed / 2**30:.2f} GiB{' (dry run)' if dry_run else ''}")
+
+
+if __name__ == "__main__":
+    main()

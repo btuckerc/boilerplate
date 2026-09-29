@@ -114,15 +114,22 @@ independent auth and sessions. Read `~/src/omp-serve/README.md` and
   (dmesg "SMU is resumed successfully!"). `vm.swappiness = 10` lives in
   `/etc/sysctl.d/90-nous-inference.conf`. OverDrive/undervolt is unavailable
   (ppfeaturemask bit 0x4000 clear); decode already runs at the 300 W cap.
-- Memory guards (Sep 28 kernel OOM storm killed llama four times): host-owned
-  `/etc/default/earlyoom` acts at <=8% RAM and swap, prefers chrome/clang/pytest
-  and avoids llama-server, sshd, tailscaled, herdr and omp. Long agent build
-  loops belong in a capped scope (`MemoryMax`, no CPU quota), never the whole
-  herdr tree; e.g. the Emerald hill-climb session runs in transient
-  `emerald-hill-dev.scope` (16G). `omp-chrome-reaper.timer` (chezmoi) stops
-  an OMP headless Chrome after 30 min of zero tree CPU; OMP relaunches it on
-  next use (`browser.idleCloseSec` closes tabs only). Keep llama's 8 GiB
-  `cache-ram`.
+- Memory guard (after the 2026-09-28 OOM freeze: RAM-backed `/tmp` held
+  ~10 GiB of agent scratch, plus 11 agent sessions and llama's 8 GiB host
+  prompt cache): `nous-tmp-clean.timer` deletes top-level `/tmp` entries
+  owned by tux that have gone unmodified for 12 h (2 h under memory pressure)
+  and that no process references. `earlyoom` kills single processes before the
+  kernel OOM path thrashes the host, preferring chrome/pytest/compilers and
+  avoiding llama-server, sshd, tailscaled, herdr and omp. llama has
+  `OOMScoreAdjust=-500`; zswap (lzo, 20%) is on via GRUB; `tmp.mount` is
+  masked, so `/tmp` is ext4 on `/` after the next reboot. Never cap the whole
+  herdr/agent tree, shrink llama's `cache-ram` or set llama `MemorySwapMax=0`
+  (rejected: performance/capability cost). A long build loop may get its own
+  scope at ~2x measured peak `MemoryMax`, no CPU quota (Emerald hill-climb:
+  `emerald-hill-dev.scope`, 16G). `omp-chrome-reaper.timer` stops an OMP
+  headless Chrome after 30 min of zero tree CPU (`browser.idleCloseSec` closes
+  tabs only; OMP relaunches Chrome on next use). Sources and install:
+  `utils/nous/memory-guard/`, `docs/nous-inference.md` § Memory guard.
 - Fleet inventory: `~/.config/decent-angl/fleet.json`, role `inference`.
   `decent-angl-doctor --fleet` uses stock SSH commands plus HTTP checks and
   does not expect the workstation doctor or baseline on nous.

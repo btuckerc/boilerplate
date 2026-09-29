@@ -334,6 +334,75 @@ for f in llama-yield llama-placeholder; do ssh nous cat /usr/local/bin/$f | diff
 for f in *.service *.timer *.d/*.conf; do ssh nous cat /etc/systemd/system/$f | diff -q - $f >/dev/null || echo "drift: $f"; done
 ```
 
+## Memory guard
+
+On 2026-09-28 nous froze for about 20 minutes (17:52–18:12 UTC). RAM and swap
+were full: RAM-backed `/tmp` held ~10 GiB of agent scratch, 11 `omp` sessions
+held 8.6 GiB, and `llama-server` held 7.6 GiB of host prompt cache
+(`--cache-ram` defaults to 8192 MiB). The kernel OOM killer killed 32
+processes, mostly small Chrome processes, until it reached `llama-server`.
+These guards prevent a repeat without slowing inference.
+A capped `/tmp`, a smaller `cache-ram`, `MemorySwapMax=0` on llama and caps
+on the whole herdr/agent tree were rejected. Each of them either limits work or
+moves memory pressure onto agents (Astra council review, 2026-09-28). The
+2026-09-29 Sol council admitted one narrow exception: a long build loop may run
+in its own scope with `MemoryMax` at about 2x its measured peak and no CPU quota
+or swap limit, so it swaps before llama is chosen:
+
+- `nous-tmp-clean` (timer, every 15 minutes) removes top-level `/tmp` entries
+  owned by tux whose tree has not been modified for 12 h (2 h while
+  MemAvailable is below 25%). It keeps anything referenced by a live process
+  (cwd, fds, mappings, argv, environ), trees containing sockets, and
+  `tmux-`/`ssh-`/`systemd-private-`/dot entries. atime is ignored because
+  recursive greps refresh it. `nous-tmp-clean --dry-run` lists what it would remove.
+- `earlyoom` sends SIGTERM once available memory and free swap are both at or
+  below 8% (SIGKILL at 4%). It prefers chrome, pytest and compilers and avoids
+  llama-server, sshd, tailscaled, herdr and omp. Thresholds are measured against
+  earlyoom's "user mem" (MemAvailable + AnonPages, ~17.9 GiB), not total RAM.
+- `llama.service` drop-in `OOMScoreAdjust=-500`, so the kernel kills agents and
+  tools before production inference. This changes which process is killed; it
+  does not protect llama absolutely.
+- The Emerald hill-climb OMP session (pid 8331 and descendants, 7.9 GiB measured
+  eval peak) was moved live into transient `emerald-hill-dev.scope`,
+  `MemoryMax=16G`, `OOMPolicy=continue`; it ends with the session. Remove the
+  cap with `sudo systemctl set-property --runtime emerald-hill-dev.scope MemoryMax=infinity`.
+- `omp-chrome-reaper.timer` (chezmoi user timer) stops an OMP headless Chrome
+  after 30 minutes of zero CPU in its tree. OMP keeps one per session and
+  `browser.idleCloseSec` closes only tabs; OMP relaunches Chrome on next use.
+- zswap (`lzo`, `max_pool_percent=20`, shrinker on) compresses newly
+  swapped pages in RAM before they reach the 8 GiB swapfile. It is set live and
+  persisted in `/etc/default/grub.d/99-nous-zswap.cfg`. Undo it live with
+  `echo N | sudo tee /sys/module/zswap/parameters/enabled`.
+- `tmp.mount` is masked. After the next reboot, `/tmp` is ext4 on `/`: scratch
+  becomes reclaimable page cache instead of RAM-only shmem. Verify with
+  `findmnt -T /tmp`. Disk `/tmp` persists across reboots; the cleaner and
+  `tmpfiles` (10 d) age it, so watch free space on `/`.
+
+swappiness 10, the 8 GiB swapfile and llama's `--cache-ram 8192` stay as
+they are.
+
+| Source (`utils/nous/memory-guard/`) | Installed |
+| --- | --- |
+| `nous-tmp-clean` | `/usr/local/sbin/` (0755) |
+| `nous-tmp-clean.service`, `nous-tmp-clean.timer` | `/etc/systemd/system/` (0644) |
+| `earlyoom` | `/etc/default/earlyoom` (0644; package `earlyoom`) |
+| `llama.service.d/oom.conf` | `/etc/systemd/system/llama.service.d/` (0644) |
+| `99-nous-zswap.cfg` | `/etc/default/grub.d/` (0644), then `update-grub` |
+
+```sh
+scp -r utils/nous/memory-guard nous:/home/tux/memory-guard-stage
+ssh nous 'cd ~/memory-guard-stage && sudo install -m 0755 nous-tmp-clean /usr/local/sbin/ \
+  && sudo install -m 0644 nous-tmp-clean.service nous-tmp-clean.timer /etc/systemd/system/ \
+  && sudo apt-get install -y earlyoom && sudo install -m 0644 earlyoom /etc/default/earlyoom \
+  && sudo install -D -m 0644 llama.service.d/oom.conf /etc/systemd/system/llama.service.d/oom.conf \
+  && sudo install -m 0644 99-nous-zswap.cfg /etc/default/grub.d/ && sudo update-grub \
+  && sudo systemctl daemon-reload && sudo systemctl mask tmp.mount \
+  && sudo systemctl enable --now nous-tmp-clean.timer earlyoom \
+  && sudo systemctl restart earlyoom && sudo rm -r ~/memory-guard-stage'
+```
+
+Inspect: `journalctl -u nous-tmp-clean -u earlyoom`; `grep -E 'Zswap|Swap' /proc/meminfo`.
+
 ## Expanded model and benchmark evaluation
 
 See [the September 19 report](nous-model-evaluation-2026-09-19.md) for six-model

@@ -1,6 +1,6 @@
 ---
 name: fable
-description: Fable escalation for implementation or diagnosis, drawing from the Anthropic pool. Use it when Codex quota is low, or as a second opinion from a different model family after an Astra answer fails. Dispatch without an effort override.
+description: Fable second opinion from a different model family, drawing from the Anthropic pool. Use only after a Sol answer fails or on explicit request. Dispatch without an effort override.
 model: ["@fable"]
 thinkingLevel: medium
 ---

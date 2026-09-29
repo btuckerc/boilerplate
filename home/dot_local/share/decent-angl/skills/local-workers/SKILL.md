@@ -13,18 +13,18 @@ also run on nous (Qwen) to save Codex quota; use the `luna` agent (Codex) only
 when local capability, context (>128K), images or a failed local attempt require it.
 Resolve uncertainty before delegation without pre-solving routine implementation.
 
-Use Astra medium for unresolved high-consequence design/security/concurrency
+Use Sol high for unresolved high-consequence design/security/concurrency
 decisions, conflicting evidence after focused investigation, or a failed check
-after one focused repair. `architect` supplies read-only advice; `astra` owns
+after one focused repair. `architect` supplies read-only advice; `sol` owns
 a scoped difficult implementation/diagnosis. Clearly hard work may go directly
-to Astra. Missing context, credentials or tools require prerequisites, not a
+to Sol. Missing context, credentials or tools require prerequisites, not a
 larger model. Workers return blockers to the director; no recursive escalation chains.
-Fable (`fable` agent) is the escalation lane when Codex quota is low, or a
-second opinion from a different model family after Astra fails. `omp-quota`
+Astra is a manual reserve used only on request. Fable (`fable` agent) is only a
+second opinion from a different model family after Sol fails. `omp-quota`
 prints the remaining quota for both subscriptions on one line. RULES.md has
 the thresholds.
 In Codex, retain the current parent model unless explicitly configured otherwise.
-There is no compulsory classifier, routine Astra review, swarm or planner tax.
+There is no compulsory classifier, routine Sol review, swarm or planner tax.
 Native OMP escalation launches a child; it does not switch the parent's model.
 
 For native Codex Luna workers, use a fresh brief (`fork_turns="none"`,
@@ -57,7 +57,7 @@ There is no minimum word count. Prefer roughly 100–150 words when sufficient,
 not a full solution or transcript. Make observable edge cases explicit: for
 example, whether expired entries consume cache capacity. Reuse repository
 patterns. If resolving uncertainty costs more than doing the small task, stay direct.
-Use the existing Sol director; do not launch an extra Astra planner/supervisor
+Use the existing director; do not launch an extra Sol planner/supervisor
 per routine slice. Group compatible edits under one ownership boundary rather than
 delegating individual lines. While the worker runs, do useful independent
 parent work when available; avoid repeated status/reasoning turns. Dispatch
@@ -85,8 +85,8 @@ Use a roughly 150-second attempt target / 180-second supervised deadline for
 small slices; a larger budget needs a concrete task-specific reason.
 
 OMP exposes per-task `effort` without adding a classifier call. Omit it to keep
-the configured medium default. Prefer `lo` when routine cloud work is selected;
-retain medium for implementation; unresolved design belongs with Sol or Astra.
+the agent default (medium; high for `architect`/`sol`). Prefer `lo` when routine
+cloud work is selected; retain medium for implementation; unresolved design belongs with Sol.
 In a six-attempt-per-arm screen, low and medium both passed; low used 43% fewer
 output tokens. This is worker-only evidence, not a subscription-savings claim.
 `lo` maps to low on the current Sol/Astra/Luna catalog; `med` maps to high there,

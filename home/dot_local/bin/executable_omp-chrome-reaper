@@ -1,0 +1,100 @@
+#!/usr/bin/python3
+"""Stop OMP-owned headless Chrome browsers whose process tree has been idle.
+
+OMP keeps one headless Chrome per session until the session exits;
+browser.idleCloseSec only closes tabs. OMP relaunches Chrome on the next
+browser call, so stopping an idle one costs a relaunch, not work.
+Idle means the whole browser tree used no CPU for IDLE_SEC.
+"""
+from __future__ import annotations
+
+import json
+import os
+import signal
+import sys
+import time
+from pathlib import Path
+
+IDLE_SEC = int(os.environ.get("OMP_CHROME_REAPER_IDLE_SEC", "1800"))
+PUPPETEER = str(Path.home() / ".omp" / "puppeteer") + "/"
+STATE = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) / "omp-chrome-reaper.json"
+
+
+def read_stat(pid: int) -> tuple[int, int, int] | None:
+    """Return (ppid, cpu ticks, start time) for pid."""
+    try:
+        raw = Path(f"/proc/{pid}/stat").read_text()
+    except OSError:
+        return None
+    fields = raw[raw.rindex(")") + 2 :].split()
+    return int(fields[1]), int(fields[11]) + int(fields[12]), int(fields[19])
+
+
+def omp_browsers(uid: int) -> list[int]:
+    found = []
+    for entry in os.scandir("/proc"):
+        if not entry.name.isdigit():
+            continue
+        try:
+            if entry.stat().st_uid != uid or not os.readlink(f"/proc/{entry.name}/exe").startswith(PUPPETEER):
+                continue
+            # Chrome rewrites argv into one space-joined string.
+            args = Path(f"/proc/{entry.name}/cmdline").read_bytes().replace(b"\0", b" ").split()
+        except OSError:
+            continue
+        if any(a.startswith(b"--type=") for a in args):
+            continue
+        if b"--headless=new" in args and any(a.startswith(b"--user-data-dir=") and a.endswith(b"omp.browser.headless.profile") for a in args):
+            found.append(int(entry.name))
+    return found
+
+
+def tree_ticks(root: int) -> int:
+    children: dict[int, list[int]] = {}
+    ticks: dict[int, int] = {}
+    for entry in os.scandir("/proc"):
+        if entry.name.isdigit():
+            stat = read_stat(int(entry.name))
+            if stat:
+                children.setdefault(stat[0], []).append(int(entry.name))
+                ticks[int(entry.name)] = stat[1]
+    total, stack = 0, [root]
+    while stack:
+        pid = stack.pop()
+        total += ticks.get(pid, 0)
+        stack.extend(children.get(pid, ()))
+    return total
+
+
+def main() -> int:
+    now = time.time()
+    try:
+        state = json.loads(STATE.read_text())
+    except (OSError, ValueError):
+        state = {}
+    fresh = {}
+    for pid in omp_browsers(os.getuid()):
+        stat = read_stat(pid)
+        if not stat:
+            continue
+        key = f"{pid}:{stat[2]}"
+        ticks = tree_ticks(pid)
+        prev = state.get(key)
+        since = prev["since"] if prev and prev["ticks"] == ticks else now
+        if now - since >= IDLE_SEC:
+            try:
+                os.kill(pid, signal.SIGTERM)
+                print(f"stopped idle OMP headless Chrome pid {pid} (idle {int(now - since)}s)")
+            except ProcessLookupError:
+                pass
+            continue
+        fresh[key] = {"ticks": ticks, "since": since}
+    STATE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = STATE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(fresh))
+    tmp.replace(STATE)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

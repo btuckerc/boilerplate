@@ -495,8 +495,8 @@ check_omp_config() {
     && printf '%s' "$output" | jq -e '
       (.value.default | test("^anthropic/claude-opus-[0-9]+(-[0-9]+)?:medium$")) and
       (.value.fable | test("^anthropic/claude-fable-[0-9]+(-[0-9]+)?:medium$")) and
-      (.value.slow | test("^openai-codex/gpt-[0-9]+(\\.[0-9]+)?-astra:xhigh$")) and
-      (.value.plan | test("^openai-codex/gpt-[0-9]+(\\.[0-9]+)?-astra:medium$")) and
+      (.value.slow | test("^anthropic/claude-opus-[0-9]+(-[0-9]+)?:high$")) and
+      (.value.plan | test("^openai-codex/gpt-[0-9]+(\\.[0-9]+)?-sol:high$")) and
       (.value.task | test("^llama\\.cpp/Qwen[^:]+:medium$")) and
       (.value.vision | test("^openai-codex/gpt-[0-9]+(\\.[0-9]+)?-luna:medium$")) and
       (.value.smol | test("^llama\\.cpp/Qwen[^:]+:low$")) and

@@ -15,7 +15,7 @@ description: Change the shared OMP baseline in chezmoi - upgrades, omp-baseline,
 
 ## Invariants
 
-- Pin OMP to the exact reviewed mise release (currently 18.3.1); do not combine
+- Pin OMP to the exact reviewed mise release (currently 18.4.4); do not combine
   the shared pin with `omp update`. Use `omp-baseline upgrade` to move the three
   pin sites together.
 - Prefer native OMP config and features. Keep native skill discovery enabled.
@@ -31,25 +31,31 @@ description: Change the shared OMP baseline in chezmoi - upgrades, omp-baseline,
   quota; `vision` stays Luna (text-only local model). The `luna` agent is the
   explicit Codex worker when local capability, context or images are unsuitable.
   Use fresh compact briefs, not the full parent transcript or pre-solved implementations.
-- Escalation lanes: Astra medium (`architect` read-only, `astra`
-  implementation; both `@plan`) is the default. It matches or beats Fable on
-  vendor coding benchmarks (Opus 5.5 system card; OpenAI Astra post) and draws
-  from the Codex pool, not the director's. Fable medium (`fable`, `@fable`) is
-  used when Codex has less than 20% remaining, or as a second opinion from a
-  different model family after Astra fails. Trigger on concrete evidence:
-  unresolved high-consequence design, conflicting evidence after focused
-  investigation, or a failed check after one focused repair. The director runs
-  `omp-quota` first. `@slow` is Astra xhigh. Escalation is scoped child
-  delegation, not a parent-model switch. There is no compulsory classifier or
-  routine review.
+- Escalation lanes: GPT-6.1 Sol high (`architect` read-only, `sol`
+  implementation; both `@plan`) is the default. It trails GPT-6 Astra by 1–5
+  points on coding/agentic benchmarks at about 1/8 the blended token price
+  (model-eval benchmarks, 2026-09-29) and draws from the Codex pool, not the
+  director's. Both agents list `openai-codex/gpt-6-astra:high` after `@plan`
+  only so sessions still on OMP <18.4.4 (no Sol in their catalog) resolve.
+  Astra otherwise is a manual reserve; it stays in `enabledModels`. Fable
+  medium (`fable`, `@fable`) is only a second opinion from a different model
+  family after Sol fails. Trigger on concrete evidence: unresolved
+  high-consequence design, conflicting evidence after focused investigation,
+  or a failed check after one focused repair. The director runs `omp-quota`
+  first. `@slow` is Opus high. Escalation is scoped child delegation, not a
+  parent-model switch. There is no compulsory classifier or routine review.
+  "Sol high council" means several Sol-high reviewers run in parallel with
+  distinct personas/effort (`omp -p --no-session --model
+  openai-codex/gpt-6.1-sol --thinking high|xhigh --tools read,grep,glob`, stdin
+  closed).
 - Fable shares the Anthropic weekly pool with the Opus director. It can use at
-  most half of that pool and costs about 2x Opus on the real token mix, so it is not extra
-  capacity. For multi-hour frontier work, `cycleOrder` (default → fable → task)
-  lets the user make Fable the director; delegated workers still run on nous or
-  Codex. Leave `providers.anthropic.serverSideFallback` off because it would
+  most half of that pool and costs about 2x Opus on the real token mix, so it is
+  not extra capacity. `cycleOrder` (default → fable → task) is kept for manual
+  cycling. Leave `providers.anthropic.serverSideFallback` off because it would
   silently move Fable to Opus 4.8.
 - Keep `task.enableEffort: true` for per-task choices without an extra classifier.
-  Omit effort to retain configured medium; `lo` is for routine cloud work.
+  Omit effort to retain the agent default (medium; high for `architect`/`sol`);
+  `lo` is for routine cloud work.
   Coarse `med` selects high on every cloud model. Keep local implementation
   medium; lower effort is not automatically faster. Recheck mappings against
   native discovery after catalog changes.
@@ -62,7 +68,7 @@ description: Change the shared OMP baseline in chezmoi - upgrades, omp-baseline,
 - Native nous handles bounded implementations with explicit contracts, mechanical
   transforms and extraction under the `local-workers` acceptance protocol.
   The `luna` agent is the explicit cloud worker; uncertain design stays with
-  Opus or Astra.
+  Opus or Sol.
   Smaller llama.cpp models remain explicit choices. Keep the OpenCode
   `nous-worker` Codex/T3 path available with fresh briefs and its full privacy
   bounds. Bonsai is retired from the active catalog and launcher; historical
@@ -80,8 +86,13 @@ description: Change the shared OMP baseline in chezmoi - upgrades, omp-baseline,
   Weigh any new model with `/skill:model-eval` (price, token mix, benchmarks,
   quota) before it takes a lane.
 - Keep cloud model IDs centralized: `config.yml` roles/enabledModels, plus the
-  Anthropic 272K `contextWindow` overrides in `models.yml` (1M only through
-  `/extended-context on`). Agents, RULES and skills name model families, not
+  Anthropic 272K `contextWindow` overrides in `models.yml` (1M only through a
+  per-session `/extended-context on`). Keep 1M off by default: replaying 19,774
+  Opus 5.5 turns (2026-09-29) showed cache reads were 52% of API-equivalent
+  spend, and compacting near 860K instead of 232K would multiply cache-read
+  tokens 3.3x (about 2.2x total usage) while saving only about $0.35 per
+  avoided compaction. Use 1M only for a session that needs one huge working
+  set. Agents, RULES and skills name model families, not
   generations. For a generation upgrade: run `omp models`, change those IDs,
   then run `omp-baseline validate`. It checks role families and efforts, that
   every role model is discovered, and the Anthropic budget. Then confirm the
@@ -150,7 +161,8 @@ every other host: `omp-baseline pull` (reconcile + `mise install` missing pins).
 
 Rollback the pin with `omp-baseline upgrade <previous>` (same clean-pin-file
 rule). After every pin move, treat live `omp models` as authoritative before
-keeping shared model IDs. OMP 18.3.1 is the reviewed release. 18.3.0 deprecated
+keeping shared model IDs. OMP 18.4.4 is the reviewed release; it is the first
+to discover `openai-codex/gpt-6.1-sol`. 18.3.0 deprecated
 the `hub` tool: use `wait`, `read proc://`, `write proc://<id>/kill` and
 `write agent://<id>`; RULES and skills use those forms.
 Recheck callers before changing provider compatibility. Foreign `~/.cursor`,

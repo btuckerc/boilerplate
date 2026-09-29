@@ -114,6 +114,15 @@ independent auth and sessions. Read `~/src/omp-serve/README.md` and
   (dmesg "SMU is resumed successfully!"). `vm.swappiness = 10` lives in
   `/etc/sysctl.d/90-nous-inference.conf`. OverDrive/undervolt is unavailable
   (ppfeaturemask bit 0x4000 clear); decode already runs at the 300 W cap.
+- Memory guards (Sep 28 kernel OOM storm killed llama four times): host-owned
+  `/etc/default/earlyoom` acts at <=8% RAM and swap, prefers chrome/clang/pytest
+  and avoids llama-server, sshd, tailscaled, herdr and omp. Long agent build
+  loops belong in a capped scope (`MemoryMax`, no CPU quota), never the whole
+  herdr tree; e.g. the Emerald hill-climb session runs in transient
+  `emerald-hill-dev.scope` (16G). `omp-chrome-reaper.timer` (chezmoi) stops
+  an OMP headless Chrome after 30 min of zero tree CPU; OMP relaunches it on
+  next use (`browser.idleCloseSec` closes tabs only). Keep llama's 8 GiB
+  `cache-ram`.
 - Fleet inventory: `~/.config/decent-angl/fleet.json`, role `inference`.
   `decent-angl-doctor --fleet` uses stock SSH commands plus HTTP checks and
   does not expect the workstation doctor or baseline on nous.
@@ -175,9 +184,9 @@ The native OMP Ornith child passed a corrective, precise-brief task in 21.6 s,
 followed by the parent’s C++ compile/run check. The direct original Ornith
 task failed a ceil-div/OR case, and native Gemma failed a `SIZE_MAX` overflow
 case. Those older results admitted only mechanical/extraction tasks. The current
-Qwen3.8 lane also admits Astra-designed bounded implementation under the
+Qwen3.8 lane also admits director- or Sol-designed bounded implementation under the
 `local-workers` checks-and-one-repair protocol; design and review stay with
-Luna/Astra. Bonsai separately passed
+the director/Sol. Bonsai separately passed
 native Chat Completions file-read and CSV-write validation with exact ordered
 values. Stock llama.cpp was restored after the Bonsai check. These are narrow
 behavioral checks, not a final routing policy or general coding guarantee.

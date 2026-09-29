@@ -1,7 +1,7 @@
 ---
 description: Upgrade the pinned OMP release with omp-baseline, never omp update
 argument-hint: "[version]"
-model: openai-codex/gpt-6-astra
+model: openai-codex/gpt-6.1-sol
 restore: true
 ---
 Upgrade the shared OMP pin. `$1` is an exact version when given. Otherwise use GitHub latest from `omp-baseline check-upstream`.

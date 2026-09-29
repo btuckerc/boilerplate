@@ -1,5 +1,5 @@
 # kind	live_path	repo_relative_path	os
-# omp-version	18.3.1
+# omp-version	18.4.4
 # os is optional: all (default), linux, or darwin. linux-only rows stay in Git
 # but are not applied or required live on other operating systems.
 # Credentials, databases, sessions, caches, logs, and tiny-model weights are
@@ -12,7 +12,7 @@ file	~/.omp/agent/agents/scout.md	home/private_dot_omp/private_agent/agents/scou
 file	~/.omp/agent/agents/sonic.md	home/private_dot_omp/private_agent/agents/sonic.md
 file	~/.omp/agent/agents/nous.md	home/private_dot_omp/private_agent/agents/nous.md
 file	~/.omp/agent/agents/architect.md	home/private_dot_omp/private_agent/agents/architect.md
-file	~/.omp/agent/agents/astra.md	home/private_dot_omp/private_agent/agents/astra.md
+file	~/.omp/agent/agents/sol.md	home/private_dot_omp/private_agent/agents/sol.md
 file	~/.omp/agent/agents/fable.md	home/private_dot_omp/private_agent/agents/fable.md
 file	~/.omp/agent/agents/luna.md	home/private_dot_omp/private_agent/agents/luna.md
 file	~/.omp/agent/agents/browser.md	home/private_dot_omp/private_agent/agents/browser.md

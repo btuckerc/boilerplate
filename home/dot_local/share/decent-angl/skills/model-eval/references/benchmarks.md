@@ -37,3 +37,32 @@ passed on the MacBook and nous. Decision: adopt for `task`, `smol`, `tiny`,
 `commit` and `vision`; drop GPT-5.6 Sol/Luna/Terra from `enabledModels`.
 GPT-6 Sol ($2/$10) was not adopted: Opus directs and Astra escalates.
 Source: [Introducing GPT-6 Sol and Luna](https://openai.com/index/introducing-gpt-6-sol-and-luna/)
+
+## 2026-09-29: GPT-6.1 Sol vs GPT-6 Astra for escalation
+
+OMP 18.4.4 discovers `openai-codex/gpt-6.1-sol` (272K, low..max); 18.3.1 did
+not (the Codex backend hid it from older client versions). Price $2/$10, cache
+read $0.10 vs Astra $10/$50/$1. On the 14-day mix (97.3% cache reads) the blend
+is $0.161 vs $1.292 per M, about 8x cheaper per token. Codex had 32% weekly
+left at eval time. A live request returned `openai-codex`/`gpt-6.1-sol`.
+
+| Benchmark | GPT-6.1 Sol | GPT-6 Astra |
+| --- | ---: | ---: |
+| DeepSWE (BenchLM) | 71.9 | 74.1 |
+| DeepSWE v1.1 (OpenAI) | ties Astra at ~1/5 cost | - |
+| Terminal-Bench Science 0.1 | 57.0 | 64.6 (68.1 per OpenAI, max) |
+| OSWorld 2.0 (max) | Astra -2.1 at ~1/7 cost | 72.6 |
+| AutomationBench | 36.1 | 41.4 |
+| AA Intelligence Index | 51.8 | 52.7 |
+| AA-SciCode | 54.2 | 56.5 |
+
+No Terminal-Bench 4.0 or FrontierSWE numbers for 6.1 Sol yet. There is no
+GPT-6.1 Luna; GPT-6 Luna stays.
+Verdict: adopt 6.1 Sol high as the default escalation lane. It trails Astra by
+1–5 points on coding and agentic benchmarks, but by 7.6–11 on Terminal-Bench
+Science, at about 1/8 of Astra's blended token price. That is a price ratio;
+Codex quota burn per successful escalation is unmeasured. OpenAI still
+positions Astra for the hardest work.
+Sources: [Introducing GPT-6.1 Sol](https://openai.com/index/introducing-gpt-6-1-sol/),
+[BenchLM GPT-6.1 Sol](https://benchlm.ai/models/gpt-6-1-sol),
+[BenchLM GPT-6 Astra](https://benchlm.ai/models/gpt-6-astra)

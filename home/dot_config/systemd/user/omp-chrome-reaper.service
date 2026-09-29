@@ -1,0 +1,6 @@
+[Unit]
+Description=Stop idle OMP-owned headless Chrome browsers
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/omp-chrome-reaper

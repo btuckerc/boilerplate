@@ -1,7 +1,7 @@
-{{- $path := joinPath .chezmoi.homeDir ".codex-gui/second/config.toml" -}}
+{{- /* chezmoi:modify-template */ -}}
 {{- $config := dict -}}
-{{- if stat $path -}}
-{{- $config = include $path | fromToml -}}
+{{- if .chezmoi.stdin -}}
+{{- $config = .chezmoi.stdin | fromToml -}}
 {{- end -}}
 {{- /* This independent desktop keeps its explicitly selected model/effort. */ -}}
 {{- $policy := includeTemplate "codex/model-policy.toml.tmpl" $config | fromToml -}}

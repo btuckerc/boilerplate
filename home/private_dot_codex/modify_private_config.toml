@@ -1,9 +1,10 @@
-{{- $path := joinPath .chezmoi.homeDir ".codex/config.toml" -}}
+{{- /* chezmoi:modify-template */ -}}
+{{- /* Modify template: Codex rewrites this file, so merge into its current contents. */ -}}
 {{- $config := dict "model_reasoning_effort" "medium" "service_tier" "default" "commit_attribution" "" "cli_auth_credentials_store" "file" "plugins" (dict "github@openai-curated" (dict "enabled" true)) -}}
-{{- if stat $path -}}
-{{- $config = include $path | fromToml -}}
+{{- if .chezmoi.stdin -}}
+{{- $config = .chezmoi.stdin | fromToml -}}
 {{- end -}}
 {{- /* Preserve runtime settings; the TUI baseline remains chezmoi-owned. */ -}}
 {{- $tui := dict "status_line" (list "model-name" "five-hour-limit" "weekly-limit" "used-tokens" "fast-mode") "theme" "dracula" "notifications" (list "agent-turn-complete" "user-input-requested" "approval-requested" "plan-mode-prompt") "notification_condition" "unfocused" -}}
 {{- $config = setValueAtPath "tui" $tui $config -}}
-{{ template "codex/model-policy.toml.tmpl" $config }}
+{{ includeTemplate "codex/model-policy.toml.tmpl" $config }}

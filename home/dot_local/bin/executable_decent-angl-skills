@@ -188,7 +188,8 @@ audit_source() {
 }
 
 render_codex() {
-  local source="$1" destination="$2" input="$source/SKILL.md"
+  local source="$1" destination="$2" input
+  input="$source/SKILL.md"
   mkdir -p "$destination"
   (cd "$source" && find . -type f ! -path './agents/*' ! -name provenance.tsv ! -name SKILL.md -print) |
     while IFS= read -r relative; do
@@ -272,7 +273,7 @@ remove_owned_stale() {
       rm -rf "$RENDER_ROOT/codex/$old_name"
     fi
     if [ -d "$CANONICAL_ROOT/$old_name" ]; then
-      rm -rf "$CANONICAL_ROOT/$old_name"
+      rm -rf "${CANONICAL_ROOT:?}/${old_name:?}"
     fi
   done <"$STATE_FILE"
 }
@@ -321,7 +322,7 @@ sync_skills() {
 }
 
 validate_live() {
-  local failures_live=0 name source target expected explicit count=0 state_names expected_names
+  local failures_live=0 name source target expected count=0 state_names expected_names
   expected_names="$(mktemp "${TMPDIR:-/tmp}/decent-angl-skill-expected.XXXXXX")"
   state_names="$(mktemp "${TMPDIR:-/tmp}/decent-angl-skill-actual.XXXXXX")"
   trap 'rm -rf "$expected_names" "$state_names" "${expected:-}"' RETURN

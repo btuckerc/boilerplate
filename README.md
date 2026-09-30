@@ -63,7 +63,7 @@ machine-local.
 | `home/dot_config/` | XDG configuration: shell, mise, terminals, editors, and tools |
 | `home/dot_local/bin/` | Installed local commands, including `decent-angl-sync` |
 | `home/.chezmoidata/` | Fleet roles, package managers, and UI data |
-| `home/dot_codex/` | Codex configuration and baseline README |
+| `home/private_dot_codex/` | Codex configuration and baseline README |
 | `home/private_dot_omp/` | OMP configuration |
 | [`utils/`](utils) | Baseline checks and maintenance scripts |
 | [`docs/`](docs) | Reference and operational notes |
@@ -100,4 +100,4 @@ Useful verified gotchas:
 - [Shell cheatsheet](docs/reference/shell-cheatsheet.md)
 - [VS Code shortcuts](docs/reference/vscode-shortcuts.pdf)
 - [macOS development storage](docs/macos-development-storage.md)
-- [Codex baseline](home/dot_codex/README.md)
+- [Codex baseline](home/private_dot_codex/README.md)

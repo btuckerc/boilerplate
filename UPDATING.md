@@ -79,7 +79,7 @@ independent chezmoi clone.
 - Use `omp-baseline upgrade` and `omp-baseline validate --strict` for OMP.
   Never run `omp update`. Its manifest and setup hook pins must agree.
 - Use the shared Codex model policy and `codex-baseline` wrapper. Account state
-  remains local. See [the Codex baseline](home/dot_codex/README.md).
+  remains local. See [the Codex baseline](home/private_dot_codex/README.md).
 - Native OS packages belong in the Brewfile or platform prerequisites. Removing
   a declaration does not authorize uninstalling unrelated installed software.
 - Shared skills originate in `home/dot_local/share/decent-angl/skills`. Apply

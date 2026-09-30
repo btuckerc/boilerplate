@@ -100,7 +100,7 @@ description: Change the shared OMP baseline in chezmoi - upgrades, omp-baseline,
 - Keep `private_models.yml` focused on catalog overrides plus necessary tested
   custom providers; do not remove those providers under an override-only rule.
   Retain the custom `ghostty` theme.
-- User agents live in `home/private_dot_omp/private_agent/agents/`. They use
+- User agents live in `home/private_dot_omp/private_agent/private_agents/`. They use
   `@smol` / `@task` aliases where possible, with local agents explicitly
   pinned to their discovered `llama.cpp` model. Keep model-specific thinking
   settings compatible with the selected provider.

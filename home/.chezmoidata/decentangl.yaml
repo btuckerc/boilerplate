@@ -2,7 +2,7 @@ decentangl:
   defaults:
     repo_root: "~/src/boilerplate"
     chezmoi_source: "~/.local/share/chezmoi/home"
-    codex_source: "~/.local/share/chezmoi/home/dot_codex"
+    codex_source: "~/.local/share/chezmoi/home/private_dot_codex"
     codex_home: "~/.codex"
     notes_path: "~/src/decent-angl"
   secrets:

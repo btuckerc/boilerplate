@@ -1,0 +1,6 @@
+{{- /* chezmoi:modify-template */ -}}
+{{- $config := dict "cli_auth_credentials_store" "file" "model_reasoning_effort" "medium" "service_tier" "default" "personality" "pragmatic" -}}
+{{- if .chezmoi.stdin -}}
+{{- $config = .chezmoi.stdin | fromToml -}}
+{{- end -}}
+{{ includeTemplate "codex/model-policy.toml.tmpl" $config }}

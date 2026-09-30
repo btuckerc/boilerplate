@@ -4,8 +4,8 @@ This directory is the shared Codex baseline managed by chezmoi.
 
 ## Canonical Paths
 
-- Working repo: `~/src/boilerplate/home/dot_codex/`
-- Applied source: `~/.local/share/chezmoi/home/dot_codex/` (the same tree via symlink)
+- Working repo: `~/src/boilerplate/home/private_dot_codex/`
+- Applied source: `~/.local/share/chezmoi/home/private_dot_codex/` (the same tree via symlink)
 - Live config: `~/.codex/`
 
 Edit the source tree, then apply targeted files with `chezmoi`.

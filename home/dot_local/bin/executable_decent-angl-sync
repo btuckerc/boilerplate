@@ -296,7 +296,8 @@ for name in sys.stdin.buffer.read().split(bytes([0])):
 ' || return 1
   install -d -m 700 "$HOME/.omp" "$HOME/.omp/agent" \
     "$HOME/.omp/agent/agents" "$HOME/.omp/agent/commands" \
-    "$HOME/.omp/agent/prompts" "$HOME/.omp/agent/themes" || return 1
+    "$HOME/.omp/agent/extensions" "$HOME/.omp/agent/prompts" \
+    "$HOME/.omp/agent/themes" || return 1
   # No --force: chezmoi must preserve conflicting live edits for review.
   cm "${args[@]}" ${APPLY_TARGETS[@]+"${APPLY_TARGETS[@]}"} || return 1
   "$HOME/.local/bin/decent-angl-skills" sync || return 1

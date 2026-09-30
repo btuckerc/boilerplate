@@ -45,6 +45,11 @@ nvim.backup.*
 Applications/Codex Third.app
 Applications/Codex Third.app/**
 .local/bin/codex-gui-third
+.local/bin/codex-cu
+{{- range glob (joinPath .chezmoi.sourceDir "dot_local/share/decent-angl/skills/*/.macos-only") }}
+.local/share/decent-angl/skills/{{ base (dir .) }}
+.local/share/decent-angl/skills/{{ base (dir .) }}/**
+{{- end }}
 {{- else }}
 {{- if not (stat (joinPath .chezmoi.homeDir ".codex-gui/second/config.toml")) }}
 # Apply shared policy only to an already initialized second desktop runtime.
@@ -164,7 +169,13 @@ Applications/Codex Third.app/**
 !.local/share
 !.local/share/decent-angl
 !.local/share/decent-angl/skills
-!.local/share/decent-angl/skills/**
+# Excludes beat ignores: whitelist skills by name, skipping `.macos-only` ones.
+{{- range glob (joinPath .chezmoi.sourceDir "dot_local/share/decent-angl/skills/*") }}
+{{- if not (stat (joinPath . ".macos-only")) }}
+!.local/share/decent-angl/skills/{{ base . }}
+!.local/share/decent-angl/skills/{{ base . }}/**
+{{- end }}
+{{- end }}
 # Hearth: the creative home base on the agent host.
 !hearth
 !hearth/**

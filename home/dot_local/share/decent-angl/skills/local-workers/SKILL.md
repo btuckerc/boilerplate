@@ -86,8 +86,10 @@ Use a roughly 150-second attempt target / 180-second supervised deadline for
 small slices; a larger budget needs a concrete task-specific reason.
 
 OMP exposes per-task `effort` without adding a classifier call. Omit it to keep
-the agent default (medium; high for `architect`/`sol`). Prefer `lo` when routine
-cloud work is selected; retain medium for implementation; unresolved design belongs with Sol.
+the agent default (medium; high for `architect`/`sol`). On the Luna `task`
+agent, pass `lo` for read-only exploration and extraction, `med` for subtle logic
+or after one failed check, `hi` only for hard debugging or substantive review;
+unresolved design belongs with Sol.
 In a six-attempt-per-arm screen, low and medium both passed; low used 43% fewer
 output tokens. This is worker-only evidence, not a subscription-savings claim.
 `lo` maps to low on the current Sol/Astra/Luna catalog; `med` maps to high there,

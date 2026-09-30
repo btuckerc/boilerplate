@@ -146,6 +146,19 @@ discover() {
   done | sort
 }
 
+# Skills marked with a source-only `.macos-only` file (chezmoi never deploys
+# dotfiles from source) are expected live only on macOS.
+discover_host() {
+  local name
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    if [ "$(uname -s)" != Darwin ] && [ -e "$SOURCE_ROOT/$name/.macos-only" ]; then
+      continue
+    fi
+    printf '%s\n' "$name"
+  done < <(discover "$SOURCE_ROOT")
+}
+
 require_safe_roots() {
   local root
   for root in "$CANONICAL_ROOT" "$RENDER_ROOT" "$CODEX_ROOT" "$OMP_ROOT" "$STATE_DIR"; do
@@ -221,7 +234,7 @@ preflight_links() {
       current="$(readlink "$link")"
       case "$current" in "$CANONICAL_ROOT"/*|"$RENDER_ROOT"/*) ;; *) printf 'SKILL  collision %s -> %s\n' "$link" "$current" >&2; return 1 ;; esac
     done
-  done < <(discover "$SOURCE_ROOT")
+  done < <(discover_host)
 }
 
 migrate_legacy_adapters() {
@@ -241,7 +254,7 @@ migrate_legacy_adapters() {
       printf 'SKILL  collision unexpected canonical agents metadata: %s\n' "$name" >&2
       return 1
     fi
-  done < <(discover "$SOURCE_ROOT")
+  done < <(discover_host)
 }
 
 remove_owned_stale() {
@@ -273,14 +286,14 @@ sync_skills() {
   while IFS= read -r name; do
     [ -n "$name" ] || continue
     validate_skill "$CANONICAL_ROOT/$name"
-  done < <(discover "$SOURCE_ROOT")
+  done < <(discover_host)
   [ "$failures" -eq 0 ] || return 1
   preflight_links
   mkdir -p "$RENDER_ROOT/codex" "$STATE_DIR"
   names="$(mktemp "${TMPDIR:-/tmp}/decent-angl-skill-names.XXXXXX")"
   next_state="$(mktemp "${TMPDIR:-/tmp}/decent-angl-skill-state.XXXXXX")"
   trap 'rm -f "$names" "$next_state"' RETURN
-  discover "$SOURCE_ROOT" >"$names"
+  discover_host >"$names"
   remove_owned_stale "$names"
   while IFS= read -r name; do
     [ -n "$name" ] || continue
@@ -312,7 +325,7 @@ validate_live() {
   expected_names="$(mktemp "${TMPDIR:-/tmp}/decent-angl-skill-expected.XXXXXX")"
   state_names="$(mktemp "${TMPDIR:-/tmp}/decent-angl-skill-actual.XXXXXX")"
   trap 'rm -rf "$expected_names" "$state_names" "${expected:-}"' RETURN
-  discover "$SOURCE_ROOT" >"$expected_names"
+  discover_host >"$expected_names"
   if ! diff -q "$expected_names" <(discover "$CANONICAL_ROOT") >/dev/null 2>&1; then
     printf 'SKILL  canonical live inventory drift\n' >&2
     failures_live=1
@@ -346,7 +359,7 @@ validate_all() {
   while IFS= read -r name; do
     [ -n "$name" ] || continue
     validate_skill "$CANONICAL_ROOT/$name"
-  done < <(discover "$SOURCE_ROOT")
+  done < <(discover_host)
   [ "$failures" -eq 0 ] || return 1
   validate_live
 }
@@ -358,7 +371,7 @@ list_skills() {
     file="$(skill_file "$SOURCE_ROOT/$name")"
     if is_explicit "$file"; then invocation=explicit; else invocation=model; fi
     printf '%s\t%s\t%s\n' "$name" "$invocation" "$SOURCE_ROOT/$name"
-  done < <(discover "$SOURCE_ROOT")
+  done < <(discover_host)
 }
 
 import_skill() {

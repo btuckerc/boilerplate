@@ -1,0 +1,42 @@
+#!/bin/sh
+set -eu
+
+# Run one desktop task through Codex Computer Use and print Codex's final
+# message. The Computer Use service only accepts OpenAI-signed senders, so OMP
+# agents reach it through codex exec rather than connecting to it directly.
+# Usage: codex-cu [--effort low|medium|high] "task" | codex-cu --reset
+service='Codex Computer Use.app/Contents/MacOS/SkyComputerUseService'
+if [ "${1:-}" = --reset ]; then
+  pkill -f "$service" || true
+  echo "Computer Use service stopped; Codex relaunches it on next use."
+  exit 0
+fi
+effort=high
+if [ "${1:-}" = --effort ]; then
+  effort=$2
+  shift 2
+fi
+[ $# -gt 0 ] || { echo 'usage: codex-cu [--effort low|medium|high] "task" | codex-cu --reset' >&2; exit 2; }
+
+out=$(mktemp -t codex-cu)
+log=$(mktemp -t codex-cu-log)
+trap 'rm -f "$out"' EXIT
+prompt="Do this with your Computer Use tools directly; do not run shell commands or read local files. $*"
+if ! codex-baseline exec --skip-git-repo-check --ephemeral --json -C "${TMPDIR:-/tmp}" \
+  -m "${CODEX_CU_MODEL:-gpt-6.1-sol}" -c model_reasoning_effort="$effort" \
+  -o "$out" "$prompt" </dev/null >"$log" 2>&1; then
+  echo "codex-cu: codex exec failed; log: $log" >&2
+  exit 1
+fi
+# Inspect only Computer Use tool results, never commands or messages that may quote these strings.
+tool_results=$(awk '/"type":"mcp_tool_call"/' "$log")
+case $tool_results in
+*'"text":"This application session has been explicitly stopped'*)
+  echo "codex-cu: Computer Use was stopped (Esc/overlay Stop, or state left by an earlier stop). If nobody stopped it: codex-cu --reset, then retry. Log: $log" >&2
+  exit 3 ;;
+*'Computer Use was not approved to use'*)
+  echo "codex-cu: app not approved for Computer Use; approve it once in the Codex app. Log: $log" >&2
+  exit 4 ;;
+esac
+rm -f "$log"
+cat "$out"

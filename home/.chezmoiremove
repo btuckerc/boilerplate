@@ -1,2 +1,4 @@
 # Retired 2026-09-29: the astra agent became sol (GPT-6.1 Sol high).
 .omp/agent/agents/astra.md
+# Retired 2026-09-30: the task role moved to Luna, so `task` is the cloud worker.
+.omp/agent/agents/luna.md

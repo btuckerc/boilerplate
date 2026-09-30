@@ -7,10 +7,11 @@ description: Route checkable work to nous or Luna during multi-step coding, test
 
 Choose routing without asking the user to pick a model. Claude Opus medium
 is the OMP director: own requirements, integration and acceptance; do trivial work directly.
-Prefer nous for bounded implementation, mechanical work, extraction and supplied-log
-summaries with clear contracts and runnable checks. `task`, `scout` and `sonic`
-also run on nous (Qwen) to save Codex quota; use the `luna` agent (Codex) only
-when local capability, context (>128K), images or a failed local attempt require it.
+Use the `task` agent (Codex Luna, runs in parallel) as the default worker for
+bounded implementation, research, extraction, context >128K and images. Use
+`nous` (local Qwen, one request at a time) for small mechanical slices and
+supplied-log summaries with clear contracts and runnable checks when the GPU
+queue is idle; `scout` and `sonic` also run on nous.
 Resolve uncertainty before delegation without pre-solving routine implementation.
 
 Use Sol high for unresolved high-consequence design/security/concurrency

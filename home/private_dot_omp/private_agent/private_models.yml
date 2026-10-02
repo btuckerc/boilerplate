@@ -32,8 +32,8 @@ providers:
       - id: Qwen3.8-27B-UD-Q4_K_XL
         name: Nous Qwen 3.8 27B UD-Q4_K_XL
         reasoning: true
-        input: [text]
-        contextWindow: 131072
+        input: [text, image]
+        contextWindow: 163840
         maxTokens: 8192
         cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0}
         thinking:
@@ -48,7 +48,7 @@ providers:
           maxTokensField: max_tokens
     modelOverrides:
       Qwen3.8-27B-UD-Q4_K_XL:
-        contextWindow: 131072
+        contextWindow: 163840
         maxTokens: 8192
         compat:
           maxTokensField: max_tokens

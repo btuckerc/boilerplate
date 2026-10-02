@@ -353,8 +353,76 @@ pre-registered 12-problem LiveCodeBench subset (`lcb/subset12.jsonl`: every
 fifth medium and hard problem of the 60, same 8,192-token cap) it solved 5
 against the incumbent's 6, with no exclusive win and 7 truncations; the
 opt-in gate was at least 4 exclusive wins. Both models fail the speed rule,
-so RAM-offloaded models are dropped for this host. Their GGUFs remain in
-`/srv/models` (not in the router presets) and can be deleted.
+so RAM-offloaded models are dropped for this host; their GGUFs were deleted
+on October 2.
+
+### October 2: host tuning, vision, context and new models
+
+Question: what else raises speed, context, availability or capability on the
+existing hardware? Sol (architect) ranked host knobs and researched newer
+models; every option ran on the GPU under `llama-yield`, production preset
+(UD-Q4_K_XL + DFlash2 n5, 128K f16) unless stated, two interleaved repetitions
+per knob. Rule: adopt at a repeatable ≥3% gain, reject a >2% regression.
+`edit.py` is a new copy-heavy workload: three full-file rewrites with small
+changes (~6.7K output tokens). `vision.py` asks about three synthetic
+screenshots (terminal traceback, bar chart, table), alone and after a
+~95K–131K-token text prefix.
+
+| Change | Prose / code t/s | Other | Decision |
+| --- | ---: | --- | --- |
+| Baseline (system Mesa 26.0.8) | 74.6–76.0 / 90.8–92.9 | edits 89 t/s; 73K prefill 717, decode 62–65 | — |
+| CPU governor `performance` | 76.2 / 93.2 | +2% | Reject (below 3%, idle power) |
+| GPU power profile COMPUTE (5) | 73.8 / 92.4 | — | Reject |
+| Server pinned to P-cores 0-15 (quiet host) | 74.6 / 92.6 | — | Reject alone; see contention |
+| llama.cpp 5fc4f3c8 (newer master) | 72.2–74.5 / 88.3–91.3 | edits 88 | Reject (−1 to −4%; build deleted) |
+| **Mesa 26.2.3 (kisak PPA, private)** | 75.9–77.1 / 94.2–95.0 | 73K prefill **769**, decode **69** | **Adopt** |
+| `RADV_DEBUG=nocompute` on 26.2.3 | 77.0 vs 74.1 without | `RADV_QUEUE_DISABLE=compute` equal | Keep |
+| **DFlash + `ngram-mod`** (defaults 24/48/64) | 74.8–75.6 / 92.3–94.8 | edits **113–116** (+29%) | **Adopt** |
+| **Vision projector** (mmproj F16) | 74.4 / 91.3 | +1.1 GB VRAM; 6/6 images, also after 95K tokens | **Adopt** |
+| **160K f16 KV** | 74.2 / 90.5 | peak 30.25 GB; recall correct at 127K tokens (prefill 594, decode 54) | **Adopt** |
+| 192K, K f16 / V q8_0 | 77.6 / 92.0 | peak 29.5 GB; recall correct at 156K, decode 49 | Not needed |
+
+Combined production candidate (Mesa 26.2.3, 160K f16, vision, DFlash +
+ngram-mod): prose 76.2, code 97.7, edits 124 t/s (+39%); 73K prefill 780 /
+decode 69.0, 127K prefill 665 / decode 73.7; vision 6/6 including at 131K
+tokens; VRAM idle 31.1, peak 31.4 of 32.6 GB. LiveCodeBench subset12: 6/12,
+the same problems as the incumbent. Promoted. Mesa 26.2.3 shows only the
+R9700 (as `Vulkan0`) and needs its newer libdrm; it is extracted to
+`/opt/mesa-26.2` for llama alone (`utils/nous/mesa/`).
+
+Models (Sol's top downloads), DFlash2 drafter, LCB60 at the 8,192-token cap:
+
+| Model | Prose / code t/s | 73K decode | Edits | VRAM peak | LCB60 | Tokens | vs incumbent |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| Incumbent UD-Q4_K_XL | 75.9 / 92.9 | 62–65 | 89 | 28.1 GB | 31 | 303K | — |
+| ByteShape Qwen3.8-27B IQ4_XS-3.84bpw (13.1 GB) | 72.5 / 92.2 | 60.9 | 84 | 24.1 GB | 25 | 322K | 3 wins / 9 losses |
+| Swift 1.5 Qwen3.8-27B Q4_K_M (17.4 GB fine-tune) | 73.9 / 94.2 | 69.8 | 85 | 28.1 GB | 29 | 321K | 2 wins / 4 losses |
+
+Neither beat the incumbent. Swift's claimed shorter reasoning did not show
+here (more tokens, more truncations), and ByteShape's smaller footprint cost
+quality. Both GGUFs were deleted. Agention's AP-Q4_K_XL (publisher KLD
+0.0083 vs 0.0087, no coding evidence) was not downloaded.
+
+Host CPU contention. Rounds 18–19 lost ~35% decode while other sessions ran
+Swift builds (load average ~21). Reproduced with busy loops on all 32 CPUs:
+prose 46–55 t/s (−30 to −40%), once 17. `CPUWeight=1000` (47.5–48.3) and
+`nice -10` (47.8–48.6) do not help. P-cores still ran at 4.3–4.6 GHz, so it
+is not clock or power throttling; the server's threads lose time on shared
+cores. Keeping the load off the server's CPUs restores speed: server on
+CPUs 8-11 with the load on the other 28, 75.1–75.2 / 91.4–91.8 (−2 to −3%);
+on 8-9 only, 71.5–74.1 / 84.4–93.2. Pinning costs nothing on a quiet host
+(76.8–76.9 vs 76.7–77.1). sysstat shows sustained load average above 8 on
+2 of the last 9 days.
+Adopted: `llama.slice` owns CPUs 8-11; `system.slice` and `user.slice` get
+0-7,12-31 (`utils/nous/cpu-reserve/`). Other work loses 4 of 32 threads,
+including the 5.8 GHz pair.
+
+Availability. A lease whose command was a multi-line `bash -c` broke
+`llama-yield --placeholder-state` (systemd property parsing), so the 503
+placeholder was down during such leases; fixed and verified (HTTP 503 with
+`resume_at` during round 18). Router `--no-models-autoload` was not adopted:
+since September 26 production loaded no model other than Qwen, and
+`sleep-idle-seconds` already defaults to disabled.
 
 ## Established benchmarks for candidate selection
 

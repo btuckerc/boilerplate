@@ -61,7 +61,8 @@ independent auth and sessions. Read `~/src/omp-serve/README.md` and
   `~/.omp/agent/config.yml` (chezmoi sources `private_models.yml` and
   `private_config.yml` under `home/private_dot_omp/private_agent/`). The
   promoted Qwen3.8 profile (`Qwen3.8-27B-UD-Q4_K_XL`, since 2026-09-25)
-  is 131,072 context / 8,192 output with medium reasoning; smaller models
+  is 163,840 context / 8,192 output with text and image input and medium
+  reasoning (since 2026-10-02); smaller models
   retain 16K presets. The provider is
   `http://nous:8080/v1`; this path does not require OpenCode.
 
@@ -70,7 +71,14 @@ independent auth and sessions. Read `~/src/omp-serve/README.md` and
   `/srv/models`. Service configuration is machine-local under
   `/etc/systemd/system`, not workstation chezmoi state. The unit runs the
   pinned `/opt/llama.cpp-vulkan-f805c57a2` build (b11046 at
-  `/opt/llama.cpp-vulkan` is the rollback) with `RADV_DEBUG=nocompute`.
+  `/opt/llama.cpp-vulkan` is the rollback) with `RADV_DEBUG=nocompute` on a
+  private Mesa 26.2.3 RADV (`/opt/mesa-26.2`, drop-in
+  `llama.service.d/mesa.conf`; source `utils/nous/mesa/`). Under that Mesa the
+  R9700 is `Vulkan0`; benchmarks without the drop-in's environment still see
+  it as `Vulkan1` behind the iGPU.
+- CPUs 8-11 belong to `llama.slice` (production llama only); `system.slice`
+  and `user.slice`, including GPU leases and agents, run on 0-7,12-31
+  (`utils/nous/cpu-reserve/`). Do not widen them without measuring decode under load.
 - Exclusive GPU experiments MUST use the root-owned helper (source and install
   steps: `utils/nous/gpu-lease/`, `docs/nous-inference.md` § GPU lease):
   `llama-yield --runtime 3600 -- COMMAND [ARG...]` (from the desired working

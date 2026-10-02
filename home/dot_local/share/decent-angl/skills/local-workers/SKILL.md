@@ -41,8 +41,8 @@ ask for the result via `write`/`yield`; the parent runs checks because the
 worker may not have the required verification command or tool.
 
 `nous-worker` defaults to the promoted **Qwen3.8-27B-UD-Q4_K_XL** on the
-serial nous llama.cpp service (131,072 context / 8,192 output, medium
-reasoning). **Ornith**, **Nemotron** and **Gemma** remain explicit smaller or
+serial nous llama.cpp service (163,840 context / 8,192 output, text and
+image input, medium reasoning). **Ornith**, **Nemotron** and **Gemma** remain explicit smaller or
 experimental choices at their 16K profiles. Bonsai is retired from the active
 launcher and catalog; historical evaluation records and host weights are
 unchanged. They are supervised workers, not replacements for the director's

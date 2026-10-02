@@ -60,7 +60,7 @@ description: Change the shared OMP baseline in chezmoi - upgrades, omp-baseline,
   medium; lower effort is not automatically faster. Recheck mappings against
   native discovery after catalog changes.
 - Native `llama.cpp` serves the promoted Qwen3.8-27B-UD-Q4_K_XL worker
-  (131,072 context / 8,192 output, medium reasoning). Keep
+  (163,840 context / 8,192 output, text and image input, medium reasoning). Keep
   `retry.modelFallback: false` so local work never silently moves to cloud
   inference. Use task defaults (`eager: default`, recursion depth 1,
   40-request soft budget, 10-minute runtime cap) and keep prewalk and

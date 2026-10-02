@@ -13,11 +13,11 @@ its existing RSA identity, without forwarding the SSH agent.
 | OS / CPU | Ubuntu 26.04.1 LTS / i9-13900K |
 | RAM / GPU | 128 GB DDR5-5600 (2×64 GB, since 2026-10-01; was 32 GB) / Radeon AI PRO R9700, 32 GB VRAM |
 | Model storage | `/srv/models`; verified artifact identities in `utils/nous/model-artifacts.json` |
-| Service | llama.cpp master f805c57a2 Vulkan (pinned at `/opt/llama.cpp-vulkan-f805c57a2`; b11046 kept at `/opt/llama.cpp-vulkan` for rollback), `llama.service`, enabled and active |
+| Service | llama.cpp master f805c57a2 Vulkan (pinned at `/opt/llama.cpp-vulkan-f805c57a2`; b11046 kept at `/opt/llama.cpp-vulkan` for rollback) on a private Mesa 26.2.3 RADV (`/opt/mesa-26.2`; system Mesa stays 26.0.8), `llama.service`, enabled and active |
 | Network | Loopback server forwarded on port 8080 by Tailscale Serve, tailnet only |
 | API | `http://nous:8080/v1` |
-| Models | Promoted Qwen3.8-27B-UD-Q4_K_XL with DFlash2 drafter (131,072 context / 8,192 output); the previous GSQ-RCO IQ3_S+MTP and UD-Q5_K_M remain selectable; smaller Nemotron, Qwen 3.5 9B/4B, Ornith 1.5 9B and Gemma 4 12B remain selectable in OpenCode; verified Gemma 4 26B A4B Q6_K and Qwen3-Coder 30B A3B Q5_K_M candidates remain router-only |
-| Capacity | One serialized model slot (parallel slots measured and rejected 2026-10-01); 48 GiB host prompt cache lets alternating conversations resume without re-prefill; Qwen3.8 uses the 131,072-token preset and other models retain 16,384-token presets |
+| Models | Promoted Qwen3.8-27B-UD-Q4_K_XL with DFlash2 drafter plus n-gram drafting and image input (163,840 context / 8,192 output); the previous GSQ-RCO IQ3_S+MTP and UD-Q5_K_M remain selectable; smaller Nemotron, Qwen 3.5 9B/4B, Ornith 1.5 9B and Gemma 4 12B remain selectable in OpenCode; verified Gemma 4 26B A4B Q6_K and Qwen3-Coder 30B A3B Q5_K_M candidates remain router-only |
+| Capacity | One serialized model slot (parallel slots measured and rejected 2026-10-01); 48 GiB host prompt cache lets alternating conversations resume without re-prefill; Qwen3.8 uses the 163,840-token preset and other models retain 16,384-token presets |
 
 No failed systemd units were reported. SSH directory/key file permissions
 were 700/600. GPU temperature was 44 C at the initial inspection.
@@ -25,7 +25,7 @@ were 700/600. GPU temperature was 44 C at the initial inspection.
 The scalable deployment source is `utils/nous/llama.service` plus
 `utils/nous/models.ini`. The active host preset is installed at
 `/home/tux/.config/llama/models.ini`, with the Qwen artifact under
-`/srv/models`; per-model presets keep the 131,072-token Qwen/MTP settings from
+`/srv/models`; per-model presets keep the large Qwen/MTP settings from
 leaking into smaller 16K models. Installation of the root-owned unit is a
 one-time administrative step; ordinary client catalog edits do not perform
 service switching or upgrades.
@@ -34,16 +34,25 @@ and model inventory without installing anything on nous. It does not run
 inference or load models, and is not a correctness/throughput benchmark.
 
 Since 2026-09-25 the promoted worker is unsloth's UD-Q4_K_XL quant of Qwen3.8
-27B (17.6 GB) with z-lab's DFlash2 Q4_K_M drafter (`spec-type draft-dflash`,
-`spec-draft-n-max 5`). It uses Vulkan1, f16 KV at 131,072 context (28.2 GB
-VRAM peak), `load-mode none` (no host mmap of the GGUF), microbatch 1024, 16
-context checkpoints at minimum spacing 1024, a 48 GiB host prompt cache (`cache-ram 49152`, since 2026-10-01),
-and medium reasoning. It loads on service startup; other models are loaded on
-demand, one at a time. The unit sets `RADV_DEBUG=nocompute` (+3% decode).
+27B (17.6 GB) with z-lab's DFlash2 Q4_K_M drafter (`spec-draft-n-max 5`).
+Since 2026-10-02 it also drafts from n-gram repeats (`spec-type
+draft-dflash,ngram-mod`; +30-40% on copy-heavy code rewrites), reads images
+(`mmproj` = `/srv/models/Qwen3.8-27B-mmproj-F16.gguf`) and runs on Mesa
+26.2.3 (prefill +7%, deep decode +6-11%) with 163,840 f16 KV context. That
+setup peaks at 31.4 of 32.6 GB VRAM. Other settings: `load-mode none` (no host
+mmap of the GGUF), microbatch 1024, 16 context checkpoints at minimum spacing
+1024, a 48 GiB host prompt cache (`cache-ram 49152`, since 2026-10-01) and
+medium reasoning. It loads on service startup; other models are loaded on
+demand, one at a time. The unit sets `RADV_DEBUG=nocompute` (+3% decode; still
+effective on 26.2.3, which prefers the equivalent `RADV_QUEUE_DISABLE=compute`).
+Mesa 26.2.3 shows only the R9700, so presets use `Vulkan0` (on system Mesa the
+R9700 is `Vulkan1` behind the iGPU).
 Host tuning: a udev rule keeps the R9700 out of BACO runtime suspend (which
 evicted the idle model from VRAM to system RAM/swap and made the next request
-slow), and `vm.swappiness = 10`. Measurements, rejected settings and rollback
-are in [the model evaluation](nous-model-evaluation-2026-09-19.md#september-25-second-round-ud-q4_k_xl--dflash2-promoted).
+slow), `vm.swappiness = 10`, and CPUs 8-11 reserved for llama (host load on
+its CPUs cost 30-40% decode; see § CPU reservation). Measurements, rejected settings and rollback
+are in [the model evaluation](nous-model-evaluation-2026-09-19.md#september-25-second-round-ud-q4_k_xl--dflash2-promoted)
+and its [October 2 host and model round](nous-model-evaluation-2026-09-19.md#october-2-host-tuning-vision-context-and-new-models).
 The September 22 isolated trials found a 24% branched-history latency reduction
 from checkpoint spacing, not a cold/append speedup. See
 [the measured policy](omp-execution-policy-2026-09-19.md) for the earlier Q5
@@ -57,15 +66,11 @@ Bonsai is disabled and removed from active clients; its weights and historical
 results below remain.
 
 The fourth round (Q5) tested vision and larger contexts without replacing the GGUF.
-The matching, SHA-256-verified projector is retained at
-`/srv/models/Qwen3.8-27B-mmproj-F16.gguf` on Nous (upstream `mmproj-F16.gguf`).
-It is **not enabled** in the production preset or OMP catalog. API experiments
-with MTP3 passed image-plus-retrieval checks at 119,605 prompt tokens using a
-128K/f16 profile and 248,930 tokens using a 262K/q8 profile. The latter took
-717 seconds cold and left only 0.42 GiB at peak: not a general-purpose default
-or proof of large-image/full-window reliability. The matched follow-up promoted
-128K/f16 **text-only**, not the vision profile. See the measured policy for
-controls, the apples-to-apples latency comparison, and limitations.
+The matching, SHA-256-verified projector is
+`/srv/models/Qwen3.8-27B-mmproj-F16.gguf` (upstream `mmproj-F16.gguf`). It has
+been **enabled** since 2026-10-02: with DFlash it read a terminal screenshot, a
+bar chart and a table correctly, both alone and after 131K tokens of text. The
+OMP catalog declares image input; OpenCode declares image attachments.
 
 ## Existing AI Stack manager
 
@@ -213,7 +218,7 @@ OMP’s managed native providers use OpenAI Chat Completions directly:
 
 | Provider | Live path | Managed model file | Context |
 | --- | --- | --- | ---: |
-| `llama.cpp` | `http://nous:8080/v1` | `~/.omp/agent/models.yml` | Qwen3.8: 131,072; smaller models: 16,384 |
+| `llama.cpp` | `http://nous:8080/v1` | `~/.omp/agent/models.yml` | Qwen3.8: 163,840 (text and image); smaller models: 16,384 |
 
 The chezmoi sources are `home/private_dot_omp/private_agent/private_models.yml`
 and `private_config.yml`. These providers require no OpenCode installation;
@@ -333,6 +338,53 @@ cd utils/nous/gpu-lease
 for f in llama-yield llama-placeholder; do ssh nous cat /usr/local/bin/$f | diff -q - $f >/dev/null || echo "drift: $f"; done
 for f in *.service *.timer *.d/*.conf; do ssh nous cat /etc/systemd/system/$f | diff -q - $f >/dev/null || echo "drift: $f"; done
 ```
+
+## Private Mesa for llama
+
+`llama.service` alone runs Mesa 26.2.3 RADV from the kisak-mesa PPA; the rest
+of nous keeps Ubuntu's 26.0.8. The `.deb`s are extracted, not installed, to
+`/opt/mesa-26.2` (copies kept in `/opt/mesa-26.2/debs`, since the PPA drops
+superseded builds). A drop-in points the Vulkan loader at that RADV and its
+newer libdrm (system libdrm 2.4.131 fails RADV initialization). Only the R9700
+is then visible, as `Vulkan0`.
+
+| Source (`utils/nous/mesa/`) | Installed |
+| --- | --- |
+| `install-mesa` | run once; extracts and verifies the three pinned `.deb`s |
+| `llama.service.d/mesa.conf` | `/etc/systemd/system/llama.service.d/` (0644) |
+
+```sh
+ssh nous 'cd ~/src/boilerplate/utils/nous/mesa && ./install-mesa \
+  && sudo install -D -m 0644 llama.service.d/mesa.conf /etc/systemd/system/llama.service.d/mesa.conf \
+  && sudo systemctl daemon-reload && sudo systemctl restart llama'
+```
+
+Rollback: remove the drop-in, set `Vulkan1` again in `models.ini`, reload and
+restart llama.
+
+## CPU reservation
+
+`llama.service` runs in `llama.slice`, which owns CPUs 8-11 (P-cores 4-5);
+`system.slice` and `user.slice` are limited to 0-7,12-31, so agents, builds
+and GPU-lease benchmarks never share llama's CPUs. Busy loops on every other
+CPU left decode within 2-3%; unreserved it fell 30-40% (`CPUWeight` and
+`nice` did not help).
+
+| Source (`utils/nous/cpu-reserve/`) | Installed |
+| --- | --- |
+| `llama.slice` | `/etc/systemd/system/` (0644) |
+| `llama.service.d/cpu.conf` | `/etc/systemd/system/llama.service.d/` (0644) |
+| `slice.d/cpu-reserve.conf` | `/etc/systemd/system/system.slice.d/` and `user.slice.d/` (0644) |
+
+```sh
+ssh nous 'cd ~/src/boilerplate/utils/nous/cpu-reserve && sudo install -m 0644 llama.slice /etc/systemd/system/ \
+  && sudo install -D -m 0644 llama.service.d/cpu.conf /etc/systemd/system/llama.service.d/cpu.conf \
+  && for s in system user; do sudo install -D -m 0644 slice.d/cpu-reserve.conf /etc/systemd/system/$s.slice.d/cpu-reserve.conf; done \
+  && sudo systemctl daemon-reload && sudo systemctl restart llama'
+```
+
+Check: `cat /sys/fs/cgroup/{system,user,llama}.slice/cpuset.cpus.effective`.
+Rollback: delete the three drop-ins and `llama.slice`, reload, restart llama.
 
 ## Memory guard
 

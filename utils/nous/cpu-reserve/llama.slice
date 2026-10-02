@@ -1,0 +1,9 @@
+[Unit]
+Description=Production inference with reserved CPUs
+Before=slices.target
+
+[Slice]
+# CPUs 8-11 (P-cores 4-5, the 5.8 GHz pair) belong to llama alone; system.slice and
+# user.slice exclude them. Under full host load decode stayed within 2-3% (unreserved:
+# -30 to -40%); CPUWeight and nice did not help (2026-10-02, rounds 21-25).
+AllowedCPUs=8-11

@@ -1,0 +1,24 @@
+#!/bin/sh
+# Install the kisak-mesa PPA RADV 26.2.3 into /opt/mesa-26.2 without touching system Mesa.
+# Only llama.service uses it (llama.service.d/mesa.conf). Extracted debs, not apt: nothing else on nous changes.
+# The PPA drops superseded builds, so the debs are kept in /opt/mesa-26.2/debs; reinstall from there.
+set -eu
+prefix=/opt/mesa-26.2
+pool=https://ppa.launchpadcontent.net/kisak/kisak-mesa/ubuntu/pool/main
+sudo mkdir -p "$prefix/debs"
+cd "$prefix/debs"
+while read -r sha path; do
+  f=${path##*/}
+  [ -f "$f" ] || sudo curl -fsSLo "$f" "$pool/$path"
+  echo "$sha  $f" | sha256sum -c -
+  sudo dpkg-deb -x "$f" "$prefix"
+done <<'EOF'
+8e6f30a694346d197531414157b9eadd1034888b06dcbcfdd00ebb5179790bb0 m/mesa/mesa-vulkan-drivers_26.2.3~kisak1~r_amd64.deb
+29cf6982198cab405c1b14b2703e094e7e093663a1389875b492704f692fdbfa libd/libdrm/libdrm-amdgpu1_2.4.134-3~kisak~r_amd64.deb
+3c46f9f9919cc76d1080cf81d4dc312e4d06be896fcd36aa790c0323ab202599 libd/libdrm/libdrm2_2.4.134-3~kisak~r_amd64.deb
+EOF
+# The packaged ICD names a bare library; point it at the private copy.
+sudo sed -i "s|\"library_path\": \".*\"|\"library_path\": \"$prefix/usr/lib/x86_64-linux-gnu/libvulkan_radeon.so\"|" \
+  "$prefix/usr/share/vulkan/icd.d/radeon_icd.json"
+VK_DRIVER_FILES=$prefix/usr/share/vulkan/icd.d/radeon_icd.json LD_LIBRARY_PATH=$prefix/usr/lib/x86_64-linux-gnu \
+  vulkaninfo --summary 2>/dev/null | grep -E 'deviceName|driverInfo'

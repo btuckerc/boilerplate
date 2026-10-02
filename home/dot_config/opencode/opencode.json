@@ -13,8 +13,13 @@
         "Qwen3.8-27B-UD-Q4_K_XL": {
           "name": "Nous Qwen 3.8 27B UD-Q4_K_XL",
           "limit": {
-            "context": 131072,
+            "context": 163840,
             "output": 8192
+          },
+          "attachment": true,
+          "modalities": {
+            "input": ["text", "image"],
+            "output": ["text"]
           },
           "reasoning": true,
           "tool_call": true

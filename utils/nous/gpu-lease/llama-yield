@@ -43,11 +43,9 @@ def leases():
 
 
 def placeholder_state():
+    # One query per property: ExecStart of a multi-line `bash -c` lease spans several lines.
     fields = ["ActiveState", "ActiveEnterTimestampMonotonic", "RuntimeMaxUSec", "Description", "ExecStart"]
-    command = ["show", UNIT]
-    for field in fields:
-        command += ["-p", field]
-    state = dict(line.split("=", 1) for line in ctl(*command).splitlines())
+    state = {field: ctl("show", UNIT, "-p", field, "--value") for field in fields}
     if state["ActiveState"] != "active":
         raise OSError("placeholder requires an active GPU lease")
     factors = {"us": 0.000001, "ms": 0.001, "s": 1, "min": 60, "h": 3600, "d": 86400}

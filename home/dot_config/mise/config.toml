@@ -36,6 +36,8 @@ tmux = "3.7c"
 gh = "2.101.0"
 restic = "0.19.1"
 "npm:@bitwarden/cli" = "2026.9.0"
+# Cloudflare CLI (beta); needs Node at runtime, not Bun.
+"npm:cf" = "1.0.0-beta.10"
 # The registry default for neovim is a vfox plugin; aqua uses release binaries.
 "aqua:neovim/neovim" = "0.12.5"
 

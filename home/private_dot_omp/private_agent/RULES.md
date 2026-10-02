@@ -14,3 +14,4 @@
 - Task `effort` (on cloud models `med` means high and `hi` means max): omit it for ordinary implementation (agent default: medium, or high for `architect`/`sol`; always omit for `browser`). On `task` (Luna), pass `lo` for read-only exploration, extraction and summaries; `med` for subtle logic or after one failed check; `hi` only for hard debugging or substantive review. Local `nous` stays at its default.
 - No compulsory classifier, swarm, planner, routine review, transcript polling or advisor loop. Delegate only when the gain outweighs dispatch and verification cost.
 - nous serves one request at a time; parallel local children queue on the GPU. Never switch host services to delegate or silently fall back to paid inference.
+- When interacting with Cloudflare, use the `cf` CLI unless the project has a Wrangler configuration file.

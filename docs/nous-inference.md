@@ -11,13 +11,13 @@ its existing RSA identity, without forwarding the SSH agent.
 | Item | Observed |
 | --- | --- |
 | OS / CPU | Ubuntu 26.04.1 LTS / i9-13900K |
-| RAM / GPU | 32 GB / Radeon AI PRO R9700, 32 GB VRAM |
+| RAM / GPU | 128 GB DDR5-5600 (2×64 GB, since 2026-10-01; was 32 GB) / Radeon AI PRO R9700, 32 GB VRAM |
 | Model storage | `/srv/models`; verified artifact identities in `utils/nous/model-artifacts.json` |
 | Service | llama.cpp master f805c57a2 Vulkan (pinned at `/opt/llama.cpp-vulkan-f805c57a2`; b11046 kept at `/opt/llama.cpp-vulkan` for rollback), `llama.service`, enabled and active |
 | Network | Loopback server forwarded on port 8080 by Tailscale Serve, tailnet only |
 | API | `http://nous:8080/v1` |
 | Models | Promoted Qwen3.8-27B-UD-Q4_K_XL with DFlash2 drafter (131,072 context / 8,192 output); the previous GSQ-RCO IQ3_S+MTP and UD-Q5_K_M remain selectable; smaller Nemotron, Qwen 3.5 9B/4B, Ornith 1.5 9B and Gemma 4 12B remain selectable in OpenCode; verified Gemma 4 26B A4B Q6_K and Qwen3-Coder 30B A3B Q5_K_M candidates remain router-only |
-| Capacity | One serialized model slot; Qwen3.8 uses the 131,072-token preset and other models retain 16,384-token presets |
+| Capacity | One serialized model slot (parallel slots measured and rejected 2026-10-01); 48 GiB host prompt cache lets alternating conversations resume without re-prefill; Qwen3.8 uses the 131,072-token preset and other models retain 16,384-token presets |
 
 No failed systemd units were reported. SSH directory/key file permissions
 were 700/600. GPU temperature was 44 C at the initial inspection.
@@ -37,7 +37,7 @@ Since 2026-09-25 the promoted worker is unsloth's UD-Q4_K_XL quant of Qwen3.8
 27B (17.6 GB) with z-lab's DFlash2 Q4_K_M drafter (`spec-type draft-dflash`,
 `spec-draft-n-max 5`). It uses Vulkan1, f16 KV at 131,072 context (28.2 GB
 VRAM peak), `load-mode none` (no host mmap of the GGUF), microbatch 1024, 16
-context checkpoints at minimum spacing 1024, the default 8 GiB prompt cache,
+context checkpoints at minimum spacing 1024, a 48 GiB host prompt cache (`cache-ram 49152`, since 2026-10-01),
 and medium reasoning. It loads on service startup; other models are loaded on
 demand, one at a time. The unit sets `RADV_DEBUG=nocompute` (+3% decode).
 Host tuning: a udev rule keeps the R9700 out of BACO runtime suspend (which
@@ -355,10 +355,11 @@ or swap limit, so it swaps before llama is chosen:
   (cwd, fds, mappings, argv, environ), trees containing sockets, and
   `tmux-`/`ssh-`/`systemd-private-`/dot entries. atime is ignored because
   recursive greps refresh it. `nous-tmp-clean --dry-run` lists what it would remove.
-- `earlyoom` sends SIGTERM once available memory and free swap are both at or
-  below 8% (SIGKILL at 4%). It prefers chrome, pytest and compilers and avoids
-  llama-server, sshd, tailscaled, herdr and omp. Thresholds are measured against
-  earlyoom's "user mem" (MemAvailable + AnonPages, ~17.9 GiB), not total RAM.
+- `earlyoom` sends SIGTERM once available memory is at or below 5% and free
+  swap at or below 10% (SIGKILL at 3% / 5%). It prefers chrome, pytest and
+  compilers and avoids llama-server, sshd, tailscaled, herdr and omp.
+  Thresholds are measured against earlyoom's "user mem" (~120 GiB since the
+  2026-10-01 upgrade to 128 GB), so SIGTERM fires near 6 GiB available.
 - `llama.service` drop-in `OOMScoreAdjust=-500`, so the kernel kills agents and
   tools before production inference. This changes which process is killed; it
   does not protect llama absolutely.
@@ -369,17 +370,21 @@ or swap limit, so it swaps before llama is chosen:
 - `omp-chrome-reaper.timer` (chezmoi user timer) stops an OMP headless Chrome
   after 30 minutes of zero CPU in its tree. OMP keeps one per session and
   `browser.idleCloseSec` closes only tabs; OMP relaunches Chrome on next use.
-- zswap (`lzo`, `max_pool_percent=20`, shrinker on) compresses newly
-  swapped pages in RAM before they reach the 8 GiB swapfile. It is set live and
-  persisted in `/etc/default/grub.d/99-nous-zswap.cfg`. Undo it live with
-  `echo N | sudo tee /sys/module/zswap/parameters/enabled`.
+- Swap is a 32 GiB swapfile at `/srv/models/.swap/swapfile` (xfs, fstab
+  `nofail`, `x-systemd.requires-mounts-for=/srv/models`); the former 8 GiB
+  `/swap.img` on the space-constrained root was removed on 2026-10-01. The
+  `.swap` directory must stay world-readable (0755): the llama router walks
+  `--models-dir` recursively and refuses to start on an unreadable directory.
+  zswap (`lzo`, `max_pool_percent=10`, shrinker on) compresses newly swapped
+  pages in RAM first. It is persisted in `/etc/default/grub.d/99-nous-zswap.cfg`.
+  Undo it live with `echo N | sudo tee /sys/module/zswap/parameters/enabled`.
 - `tmp.mount` is masked. After the next reboot, `/tmp` is ext4 on `/`: scratch
   becomes reclaimable page cache instead of RAM-only shmem. Verify with
   `findmnt -T /tmp`. Disk `/tmp` persists across reboots; the cleaner and
   `tmpfiles` (10 d) age it, so watch free space on `/`.
 
-swappiness 10, the 8 GiB swapfile and llama's `--cache-ram 8192` stay as
-they are.
+swappiness stays 10. Since the 128 GB upgrade llama's prompt cache is 48 GiB
+(`cache-ram = 49152`, measured in the model evaluation, October 1).
 
 | Source (`utils/nous/memory-guard/`) | Installed |
 | --- | --- |

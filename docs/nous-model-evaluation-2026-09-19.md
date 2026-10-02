@@ -285,6 +285,77 @@ HumanEval+ 160 / 155 (old 160 / 155); OMP agentic 3/3; 100K retrieval
 correct. 128K f16 KV peaks at 28.2 GB. UD-IQ4_XS is the faster fallback
 (3× the KLD). The IQ3_S+MTP and Q5 presets remain for rollback.
 
+### October 1: 128 GB RAM — concurrent agents and the host prompt cache
+
+RAM went from 32 GB to 128 GB (2×64 GB DDR5-5600); VRAM is unchanged, so
+the question was whether more than one chat can run at once. Harness:
+`conc.py` under `bench.py` (production preset, private server): four agent
+sessions of three turns on distinct ~20K-token documents (each turn re-sends
+the conversation), then eight HumanEval+ prompts, with C client threads
+against `--parallel P`. One repetition per row.
+
+| Server | C | Agents makespan | t/s per stream | Prefilled / cached tokens | Code aggregate t/s |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| P1, cache-ram 8 GiB (old production) | 1 | 247 s | 71 | 71K / 138K | 91 |
+| P1, cache-ram 8 GiB | 4 | 389 s | 69 | 192K / 17K | 91 |
+| **P1, cache-ram 32 GiB** | 4 | **254 s** | 71 | 71K / 138K | 92 |
+| P2 unified 128K pool, f16 (after a C=2 run on the same documents) | 4 | 252 s | 31 | 53K / 155K | 81 |
+| P4 unified 128K pool, f16 | 4 | 221 s | 22 | 70K / 138K | 107 |
+| P4 unified, no speculation | 4 | 228 s | 18 | 70K / 138K | 65 |
+| P4 unified 256K pool, q8_0 | 4 | 247 s | 19 | 71K / 138K | 102 |
+| P2 split 2×128K, q8_0, cache 32 GiB | 4 | 280 s | 31 | 71K / 138K | 85 |
+| P2 split 2×128K, q8_0, cache 32 GiB | 1 | 251 s | 64 | 69K / 136K | 91 |
+| P4 unified f16, cache 32 GiB | 1 | 248 s | 70 | 71K / 138K | 90 |
+
+- The old 8 GiB prompt cache could not hold four interleaved conversations
+  (each ~20K tokens of f16 KV plus 16 recurrent-state checkpoints), so
+  interleaved agents re-prefilled 2.7× the tokens and took 57% longer than
+  running them back to back. 32 GiB removes the penalty. Production now uses
+  `cache-ram = 49152`; at ~8.5 GiB per 100K-token conversation
+  ([INFERENCE] from 64 KiB/token f16 KV plus ~145 MiB per checkpoint) it keeps
+  about five long or a dozen mid-sized conversations.
+- Parallel slots barely raise throughput on this GPU: DFlash speculation
+  already fills the batch, so P4 gains 13% agent makespan / 17% code
+  aggregate while each stream drops to ~22 t/s. Speculation still pays at P4
+  (no-spec code aggregate 65 vs 107 t/s).
+- A unified KV pool is not admission control. Four 40K-token sessions in a
+  128K pool returned HTTP 500 "Context size has been exceeded." to **every**
+  active request (llama.cpp f805c57a2 `server-context.cpp` releases all active
+  slots when decode fails at batch size 1). OMP agents routinely exceed 32K,
+  so P2/P4 unified is unsafe for them.
+- Two guaranteed 128K slots need q8_0 KV (256K total, 29.9 GB VRAM peak): two
+  100K-token conversations ran concurrently without error, but single-stream
+  decode fell 10% (64 vs 71 t/s) and 86K-depth decode 18% (51.7 vs 63.0 t/s),
+  and four clients finished later than one slot (280 vs 254 s).
+
+Decision: keep one slot and enlarge the prompt cache. Concurrent chats queue
+for the GPU but no longer pay for re-prefill when they alternate. Revisit
+parallel slots only with an admission proxy that bounds summed context, or
+with more VRAM.
+
+### October 1–2: models offloaded to system RAM (rejected)
+
+128 GB allows MoE models larger than VRAM, with experts in RAM
+(`--fit on --fit-target 1536`, f16 KV 128K, no speculation, same harness).
+Pass rule: close to the incumbent's 74 / 91 t/s decode and ~690 t/s prefill,
+or a clear quality win.
+
+| Model (GGUF, size) | Decode short / code t/s | Prefill @28K / @73K t/s | 73K-depth decode |
+| --- | ---: | ---: | ---: |
+| Incumbent Qwen3.8-27B UD-Q4_K_XL + DFlash2 (GPU only) | 74 / 91 | ~690 | 63 |
+| Qwen3.8-Flash-Next UD-IQ4_XS (93.7 GB, 125B/6B active) | 21.6 / 21.8 | 226 / 219 | 16 |
+| Qwen3-Coder-Next UD-Q4_K_XL (49.6 GB, 80B/3B active) | 42.9 / 43.3 | 434 / 408 | 38 |
+
+Flash-Next tuning did not change the picture: ubatch 4096 doubled prefill
+(443 t/s) but lowered decode to 19; 16 or 24 threads, `load-mode none`,
+`--lazy-mode off` and `--no-op-offload` were equal or worse. On a
+pre-registered 12-problem LiveCodeBench subset (`lcb/subset12.jsonl`: every
+fifth medium and hard problem of the 60, same 8,192-token cap) it solved 5
+against the incumbent's 6, with no exclusive win and 7 truncations; the
+opt-in gate was at least 4 exclusive wins. Both models fail the speed rule,
+so RAM-offloaded models are dropped for this host. Their GGUFs remain in
+`/srv/models` (not in the router presets) and can be deleted.
+
 ## Established benchmarks for candidate selection
 
 Research checked September 19, 2026. A repeatable harness and independent tests

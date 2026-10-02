@@ -114,15 +114,20 @@ independent auth and sessions. Read `~/src/omp-serve/README.md` and
   (dmesg "SMU is resumed successfully!"). `vm.swappiness = 10` lives in
   `/etc/sysctl.d/90-nous-inference.conf`. OverDrive/undervolt is unavailable
   (ppfeaturemask bit 0x4000 clear); decode already runs at the 300 W cap.
-- Memory guard (after the 2026-09-28 OOM freeze: RAM-backed `/tmp` held
-  ~10 GiB of agent scratch, plus 11 agent sessions and llama's 8 GiB host
-  prompt cache): `nous-tmp-clean.timer` deletes top-level `/tmp` entries
+- Memory (128 GB DDR5 since 2026-10-01; was 32 GB). Guard added after the
+  2026-09-28 OOM freeze (RAM-backed `/tmp` held ~10 GiB of agent scratch, plus
+  11 agent sessions and llama's then 8 GiB host prompt cache):
+  `nous-tmp-clean.timer` deletes top-level `/tmp` entries
   owned by tux that have gone unmodified for 12 h (2 h under memory pressure)
-  and that no process references. `earlyoom` kills single processes before the
-  kernel OOM path thrashes the host, preferring chrome/pytest/compilers and
-  avoiding llama-server, sshd, tailscaled, herdr and omp. llama has
-  `OOMScoreAdjust=-500`; zswap (lzo, 20%) is on via GRUB; `tmp.mount` is
-  masked, so `/tmp` is ext4 on `/` after the next reboot. Never cap the whole
+  and that no process references. `earlyoom` (`-m 5,3 -s 10,5`) kills single
+  processes before the kernel OOM path thrashes the host, preferring
+  chrome/pytest/compilers and avoiding llama-server, sshd, tailscaled, herdr
+  and omp. llama has `OOMScoreAdjust=-500` and a 48 GiB prompt cache
+  (`cache-ram 49152`: alternating conversations resume without re-prefill);
+  swap is a 32 GiB swapfile at `/srv/models/.swap/swapfile` (keep that
+  directory 0755: the llama router walks `/srv/models` and fails to start on
+  an unreadable subdirectory); zswap (lzo, 10%) is on via GRUB; `tmp.mount` is
+  masked, so `/tmp` is ext4 on `/`. Never cap the whole
   herdr/agent tree, shrink llama's `cache-ram` or set llama `MemorySwapMax=0`
   (rejected: performance/capability cost). A long build loop may get its own
   scope at ~2x measured peak `MemoryMax`, no CPU quota (Emerald hill-climb:

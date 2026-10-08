@@ -5,7 +5,7 @@ description: Route checkable work to nous or Luna during multi-step coding, test
 
 # Local workers
 
-Choose routing without asking the user to pick a model. Claude Opus medium
+Choose routing without asking the user to pick a model. Claude Opus high
 is the OMP director: own requirements, integration and acceptance; do trivial work directly.
 Use the `task` agent (Codex Luna, runs in parallel) as the default worker for
 bounded implementation, research, extraction, context >128K and images. Use

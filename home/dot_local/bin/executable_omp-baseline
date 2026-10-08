@@ -421,7 +421,7 @@ check_thinking_and_loop_policy() {
   live_config="$HOME/.omp/agent/config.yml"
   source_models="$REPO_ROOT/home/private_dot_omp/private_agent/private_models.yml"
 
-  check_policy_scalar defaultThinkingLevel medium "$source_config" || failures=1
+  check_policy_scalar defaultThinkingLevel high "$source_config" || failures=1
   check_policy_scalar retry.modelFallback false "$source_config" || failures=1
   check_policy_scalar task.maxConcurrency 3 "$source_config" || failures=1
   check_policy_scalar task.maxRecursionDepth 1 "$source_config" || failures=1
@@ -493,7 +493,7 @@ check_omp_config() {
 
   if output="$(omp config get modelRoles --json 2>/dev/null)" \
     && printf '%s' "$output" | jq -e '
-      (.value.default | test("^anthropic/claude-opus-[0-9]+(-[0-9]+)?:medium$")) and
+      (.value.default | test("^anthropic/claude-opus-[0-9]+(-[0-9]+)?:high$")) and
       (.value.fable | test("^anthropic/claude-fable-[0-9]+(-[0-9]+)?:medium$")) and
       (.value.slow | test("^anthropic/claude-opus-[0-9]+(-[0-9]+)?:high$")) and
       (.value.plan | test("^openai-codex/gpt-[0-9]+(\\.[0-9]+)?-sol:high$")) and

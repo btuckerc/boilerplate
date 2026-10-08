@@ -14,7 +14,7 @@ Decide whether a candidate model earns a lane. Adoption itself follows the
 
 | Lane | Role/agent | Pool | Current |
 | --- | --- | --- | --- |
-| Director | `default` | Anthropic | Opus medium |
+| Director | `default` | Anthropic | Opus high |
 | Escalation | `plan` → `architect`/`sol` | Codex | GPT-6.1 Sol high |
 | Sustained frontier | `slow` | Anthropic | Opus high |
 | Escalation, second opinion | `fable` | Anthropic, capped at half | Fable medium (after Sol fails) |
@@ -100,8 +100,9 @@ through `bench.py LABEL --short 0 --run "..."` on :18737, plus
 
 ## Rules of thumb
 
-- Medium effort is the default; raise it only on a measured gain. On
-  CursorBench, Opus 5.5 high scored +3.5 points for about +33% cost per task.
+- Medium effort is the default for workers; raise it only on a measured gain.
+  On CursorBench, Opus 5.5 high scored +3.5 points for about +33% cost per
+  task. The director runs Opus high because the Anthropic pool had headroom.
 - Local first: a nous model that passes the worker's contracts costs no
   subscription quota.
 - One lane per model family per pool is enough. Do not add a lane that no rule

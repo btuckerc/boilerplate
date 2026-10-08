@@ -24,7 +24,11 @@ description: Change the shared OMP baseline in chezmoi - upgrades, omp-baseline,
   A host without an Anthropic login cannot run the shared Opus default: run
   `omp auth-broker login anthropic` there before `omp-baseline pull`. The
   Codex pool is session-sticky and quota-aware; use `/session pin` when needed.
-- Default routing is Claude Opus medium as director. The director owns
+- Default routing is Claude Opus high as director (raised from medium on
+  2026-10-08: weekly Anthropic use was ~19% on medium; high costs ~1.7–2.8x
+  per prompt through more tool calls, not longer thinking). Drop back to
+  medium for the week if `omp-quota` shows <40% Anthropic 7d left before
+  day 5 of the window. The director owns
   requirements, integration and acceptance; trivial work stays direct. The
   `task` role (so the `task` agent) runs on Codex Luna medium, like `vision`,
   because local queuing stalled parallel children. The `commit`, `smol` and

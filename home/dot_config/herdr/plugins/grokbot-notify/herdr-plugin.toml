@@ -1,0 +1,10 @@
+id = "decent-angl.grokbot-notify"
+name = "Grok Bot notify"
+version = "0.1.0"
+min_herdr_version = "0.9.1"
+description = "POST to a Grok Bot webhook when a gb-* agent settles to done or blocked"
+platforms = ["linux", "macos"]
+
+[[events]]
+on = "pane.agent_status_changed"
+command = ["python3", "notify.py"]

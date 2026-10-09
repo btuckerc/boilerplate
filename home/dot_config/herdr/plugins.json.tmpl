@@ -1,5 +1,31 @@
 [
   {
+    "plugin_id": "decent-angl.grokbot-notify",
+    "name": "Grok Bot notify",
+    "version": "0.1.0",
+    "min_herdr_version": "0.9.1",
+    "description": "POST to a Grok Bot webhook when a gb-* agent settles to done or blocked",
+    "manifest_path": "{{ .chezmoi.homeDir }}/.config/herdr/plugins/grokbot-notify/herdr-plugin.toml",
+    "plugin_root": "{{ .chezmoi.homeDir }}/.config/herdr/plugins/grokbot-notify",
+    "enabled": true,
+    "platforms": [
+      "linux",
+      "macos"
+    ],
+    "events": [
+      {
+        "on": "pane.agent_status_changed",
+        "command": [
+          "python3",
+          "notify.py"
+        ]
+      }
+    ],
+    "source": {
+      "kind": "local"
+    }
+  },
+  {
     "plugin_id": "decent-angl.tab-status",
     "name": "Tab status",
     "version": "0.1.0",

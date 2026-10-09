@@ -1,7 +1,15 @@
 {
-  "date": "2026-09-25",
+  "date": "2026-10-09",
   "host": "nous",
   "models": [
+    {
+      "repository": "0bserverx/Qwen3.8-27B-Heretic-Abliterated-Uncensored-GGUF",
+      "revision": "ab8d7bd81d03117501e4da60cccdff4c80f0eea0",
+      "file": "Qwen3.8-27B-RVN-Heretic-Q4_K_M-mtp.gguf",
+      "source_file": "RVN-Q4_K_M-multilingual-mtp.gguf",
+      "bytes": 16998720992,
+      "sha256": "8b20771570e85d1988aa3d1574698370a8b79f746eb02b96f25bf05c48f14b95"
+    },
     {
       "repository": "unsloth/Qwen3.8-27B-GGUF",
       "revision": "4ca720788d1e01f1bff70c033e0d0028fd02e502",

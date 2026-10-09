@@ -1,0 +1,182 @@
+# Managed by chezmoi. `omp-local` (omp --profile local): every role runs on
+# the local Heretic Qwen on nous. No cloud provider has credentials or is
+# enabled here, so nothing in this profile can reach paid inference.
+modelRoles:
+  default: llama.cpp/Qwen3.8-27B-RVN-Heretic-Q4_K_M:medium
+  slow: llama.cpp/Qwen3.8-27B-RVN-Heretic-Q4_K_M:xhigh
+  plan: llama.cpp/Qwen3.8-27B-RVN-Heretic-Q4_K_M:xhigh
+  vision: llama.cpp/Qwen3.8-27B-RVN-Heretic-Q4_K_M:medium
+  task: llama.cpp/Qwen3.8-27B-RVN-Heretic-Q4_K_M:medium
+  commit: llama.cpp/Qwen3.8-27B-RVN-Heretic-Q4_K_M:low
+  smol: llama.cpp/Qwen3.8-27B-RVN-Heretic-Q4_K_M:low
+  tiny: llama.cpp/Qwen3.8-27B-RVN-Heretic-Q4_K_M:low
+  web: web/public
+
+enabledModels:
+  - llama.cpp/*
+
+# Foreign discovery adapters plus every cloud model provider.
+disabledProviders:
+  - codex
+  - opencode
+  - claude
+  - gemini
+  - github
+  - cursor
+  - agents
+  - lm-studio
+  - ollama
+  - anthropic
+  - openai-codex
+  - openai
+  - openrouter
+
+includeModelInPrompt: false
+defaultThinkingLevel: medium
+textVerbosity: low
+hideThinkingBlock: true
+omitThinking: true
+
+spelling:
+  typoDetection: false
+  autocomplete: false
+  autocorrect: false
+
+composer:
+  shape: box
+retry:
+  enabled: true
+  maxRetries: 1
+  baseDelayMs: 2000
+  maxDelayMs: 60000
+  modelFallback: false
+  fallbackChains:
+    web: [web/startpage, web/duckduckgo]
+
+task:
+  # One llama.cpp slot: children interleave on the GPU rather than run in
+  # parallel; the 48 GiB prompt cache keeps two of them from re-prefilling.
+  maxConcurrency: 2
+  maxRecursionDepth: 1
+  eager: default
+  enableLsp: false
+  enableEffort: false
+  showResolvedModelBadge: true
+  softRequestBudget: 40
+  maxRuntimeMs: 1200000
+  prewalk: false
+  disabledAgents: [reviewer, security-reviewer]
+
+todo:
+  enabled: false
+prewalk:
+  enabled: false
+lsp:
+  enabled: true
+  lazy: true
+tools:
+  approvalMode: yolo
+  intentTracing: false
+  xdev: true
+  xdevDocs: catalog
+astGrep:
+  enabled: true
+bash:
+  autoBackground:
+    enabled: true
+    thresholdMs: 15000
+
+compaction:
+  enabled: true
+  methodOrder:
+    - handoff
+    - soft
+  asyncEnabled: false
+  thresholdTokens: -1
+  thresholdPercent: -1
+  midTurnEnabled: true
+  keepRecentTokens: 8000
+  autoContinue: true
+  dropUseless: true
+  supersedeReads: true
+  idleEnabled: false
+recap:
+  enabled: false
+
+theme:
+  dark: ghostty
+symbolPreset: nerd
+
+statusLine:
+  preset: custom
+  separator: none
+  compactThinkingLevel: true
+  transparent: true
+  leftSegments:
+    - model
+    - status
+  rightSegments:
+    - token_rate
+  segmentOptions:
+    model:
+      showThinkingLevel: true
+
+display:
+  pinnedAgents: collapsed
+  showTokenUsage: false
+  cacheMissMarker: true
+  hideToolActivity: true
+  shimmer: disabled
+  smoothStreaming: false
+
+tui:
+  titleState: false
+title:
+  refreshOnReplan: false
+terminal:
+  showProgress: false
+
+advisor:
+  enabled: false
+features:
+  unexpectedStopDetection: none
+
+skills:
+  enableCodexUser: false
+  enableClaudeUser: false
+  enableClaudeProject: false
+  enablePiUser: true
+  enablePiProject: true
+  enableAgentsUser: false
+  enableAgentsProject: false
+
+commands:
+  enableClaudeUser: false
+  enableClaudeProject: false
+  enableOpencodeUser: false
+  enableOpencodeProject: false
+
+bashInterceptor:
+  enabled: true
+secrets:
+  enabled: true
+
+startup:
+  quiet: true
+  showSplash: false
+  setupWizard: false
+  checkUpdate: false
+  changelogMode: hidden
+
+# Herdr owns agent alerts via the shared herdr-omp-agent-state extension.
+completion:
+  notify: off
+ask:
+  notify: off
+
+marketplace:
+  autoUpdate: off
+memory:
+  backend: off
+dev:
+  autoqaConsent: denied

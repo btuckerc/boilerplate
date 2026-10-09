@@ -1,0 +1,6 @@
+#!/bin/sh
+# OMP with every role on the local Heretic Qwen (profile ~/.omp/profiles/local).
+# Drop the default profile's broker/overlay settings when started from inside
+# another OMP session; this profile needs no credentials.
+unset OMP_AUTH_BROKER_URL PI_AUTH_BROKER_URL OMP_AUTH_BROKER_TOKEN PI_AUTH_BROKER_TOKEN PI_CONFIG_FILES
+exec omp --profile local "$@"

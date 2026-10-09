@@ -16,7 +16,7 @@ its existing RSA identity, without forwarding the SSH agent.
 | Service | llama.cpp master f805c57a2 Vulkan (pinned at `/opt/llama.cpp-vulkan-f805c57a2`; b11046 kept at `/opt/llama.cpp-vulkan` for rollback) on a private Mesa 26.2.3 RADV (`/opt/mesa-26.2`; system Mesa stays 26.0.8), `llama.service`, enabled and active |
 | Network | Loopback server forwarded on port 8080 by Tailscale Serve, tailnet only |
 | API | `http://nous:8080/v1` |
-| Models | Promoted Qwen3.8-27B-UD-Q4_K_XL with DFlash2 drafter plus n-gram drafting and image input (163,840 context / 8,192 output); the previous GSQ-RCO IQ3_S+MTP and UD-Q5_K_M remain selectable; smaller Nemotron, Qwen 3.5 9B/4B, Ornith 1.5 9B and Gemma 4 12B remain selectable in OpenCode; verified Gemma 4 26B A4B Q6_K and Qwen3-Coder 30B A3B Q5_K_M candidates remain router-only |
+| Models | Promoted Qwen3.8-27B-RVN-Heretic-Q4_K_M (Heretic abliteration, since 2026-10-09) with DFlash2 drafter plus n-gram drafting and image input (163,840 context / 8,192 output); the previous stock UD-Q4_K_XL, GSQ-RCO IQ3_S+MTP and UD-Q5_K_M remain selectable; smaller Nemotron, Qwen 3.5 9B/4B, Ornith 1.5 9B and Gemma 4 12B remain selectable in OpenCode; verified Gemma 4 26B A4B Q6_K and Qwen3-Coder 30B A3B Q5_K_M candidates remain router-only |
 | Capacity | One serialized model slot (parallel slots measured and rejected 2026-10-01); 48 GiB host prompt cache lets alternating conversations resume without re-prefill; Qwen3.8 uses the 163,840-token preset and other models retain 16,384-token presets |
 
 No failed systemd units were reported. SSH directory/key file permissions
@@ -33,7 +33,7 @@ service switching or upgrades.
 and model inventory without installing anything on nous. It does not run
 inference or load models, and is not a correctness/throughput benchmark.
 
-Since 2026-09-25 the promoted worker is unsloth's UD-Q4_K_XL quant of Qwen3.8
+From 2026-09-25 to 2026-10-09 the promoted worker was unsloth's UD-Q4_K_XL quant of Qwen3.8
 27B (17.6 GB) with z-lab's DFlash2 Q4_K_M drafter (`spec-draft-n-max 5`).
 Since 2026-10-02 it also drafts from n-gram repeats (`spec-type
 draft-dflash,ngram-mod`; +30-40% on copy-heavy code rewrites), reads images
@@ -235,6 +235,41 @@ path passed file-read and CSV-write checks with exact ordered values. Stock
 llama.cpp was restored afterward. These results do not establish a final
 planner/router policy. See [the OMP execution report](omp-execution-policy-2026-09-19.md)
 for the resulting default policy and subsequent classifier evaluation.
+
+## Promoted Heretic worker and `omp-local` (2026-10-09)
+
+`omp-local` runs OMP under the `local` profile
+(`home/private_dot_omp/private_profiles/local/`, applied to
+`~/.omp/profiles/local/agent`). Every role (default, task, smol, commit, plan,
+slow, vision) is `llama.cpp/Qwen3.8-27B-RVN-Heretic-Q4_K_M`; `anthropic`,
+`openai-codex`, `openai` and `openrouter` are disabled and the profile has no
+credentials, so nothing in it reaches paid inference. The launcher clears the
+default profile's broker and overlay variables when started from inside
+another OMP session. Skills, extensions (Herdr state) and themes are symlinks
+to the default profile; `RULES.md` is its own. Start it in any Herdr pane.
+
+The model is 0bserverx's `RVN-Q4_K_M-multilingual-mtp.gguf`
+(sha256 `8b207715…48f14b95`, 17.0 GB): a Heretic ARA abliteration of
+Qwen3.8-27B whose card reports KL ≈ 0.0085 and 0–1/100 harmful-prompt refusals
+(stock 3/100). The refusal figures are the card's, not measured here. Its
+router preset (`utils/nous/models.ini`) copies the stock worker's settings,
+including the stock-trained DFlash drafter and the base vision projector. It
+replaced the stock worker on 2026-10-09 for every local role (`nous`, `scout`,
+`sonic`, smol/commit/tiny, `nous-worker`); the stock preset is the rollback.
+
+Gate through the production router (`~/.local/state/gsq-eval/gate-rvn.sh`):
+
+| Check | RVN Heretic | Stock UD-Q4_K_XL |
+| --- | ---: | ---: |
+| HumanEval+ base / plus (164) | 161 / 154 | 160 / 155 |
+| OMP agentic repair, 600 checks × 3 | 3/3 | 3/3 |
+| LCB12 (pre-registered subset) | 5/12 (6 truncated) | 6/12 (5 truncated) |
+| HumanEval+ median decode | 101.5 t/s | 96.7 t/s |
+
+The single LCB12 difference is one hard problem (`abc388_e`). Capability is at
+parity within this harness's noise, and DFlash drafting still accepts well.
+Because both lanes share one model, `omp-local` and the default profile's
+local roles no longer force weight reloads on the one-model router.
 
 ## Harness comparison after OMP tool-round-trip testing
 

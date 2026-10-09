@@ -63,8 +63,9 @@ description: Change the shared OMP baseline in chezmoi - upgrades, omp-baseline,
   Coarse `med` selects high on every cloud model. Keep local implementation
   medium; lower effort is not automatically faster. Recheck mappings against
   native discovery after catalog changes.
-- Native `llama.cpp` serves the promoted Qwen3.8-27B-UD-Q4_K_XL worker
-  (163,840 context / 8,192 output, text and image input, medium reasoning). Keep
+- Native `llama.cpp` serves the promoted worker, the Heretic-abliterated
+  Qwen3.8-27B-RVN-Heretic-Q4_K_M since 2026-10-09 (stock UD-Q4_K_XL is the
+  rollback preset; 163,840 context / 8,192 output, text and image input, medium reasoning). Keep
   `retry.modelFallback: false` so local work never silently moves to cloud
   inference. Use task defaults (`eager: default`, recursion depth 1,
   40-request soft budget, 10-minute runtime cap) and keep prewalk and
@@ -77,6 +78,12 @@ description: Change the shared OMP baseline in chezmoi - upgrades, omp-baseline,
   bounds. Bonsai is retired from the active catalog and launcher; historical
   records and host weights remain untouched. All inference stays on nous or
   cloud; do not add Mac background inference or model downloads.
+- `omp-local` (`omp --profile local`, source
+  `home/private_dot_omp/private_profiles/local/`) is Tucker's fully local lane:
+  every role runs on the promoted Heretic Qwen, every cloud provider is
+  disabled, and it has its own short `RULES.md`; skills, extensions and themes
+  are symlinked from the default profile. Keep its `models.yml` llama.cpp block
+  in step with the default one. Cloud sessions do not route work to it.
 - Keep local child agents background-capable for native steering. At natural
   model/tool boundaries, the director may send one failed-check repair, then
   cancel/escalate a remaining failure or budget overrun; ordinary clarification

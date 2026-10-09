@@ -4,16 +4,21 @@ Hook for pane.agent_status_changed. Fires on the event's own `done` or
 `blocked` status (herdr's `done` = completed work not yet seen; startup and
 restore idles never report it). One POST per transition, deduped on
 completion_seq, falling back to state_change_seq (herdr 0.9.1 exposes only
-the latter). Config: ~/.config/herdr-grokbot/webhook.env; missing = no-op.
+the latter). Sends a short email (subject `herdr <agent> <status>`, JSON
+body) over SMTP. Config: ~/.config/herdr-grokbot/mail.env with SMTP_HOST,
+SMTP_PORT (465 = implicit TLS, else STARTTLS when offered), SMTP_USER,
+SMTP_PASS, MAIL_FROM, MAIL_TO. Missing file or keys: quiet no-op.
 """
 
 import fcntl
 import json
 import os
+import smtplib
 import subprocess
+from email.message import EmailMessage
 
 ENV_FILE = os.path.expanduser(
-    os.environ.get("HERDR_GROKBOT_ENV", "~/.config/herdr-grokbot/webhook.env")
+    os.environ.get("HERDR_GROKBOT_ENV", "~/.config/herdr-grokbot/mail.env")
 )
 HERDR = os.environ.get("HERDR_BIN_PATH", "herdr")
 PREFIX = "gb-"
@@ -54,8 +59,7 @@ def main():
         return
     pane = find(event, "pane_id")
     env = load_env()
-    url, key = env.get("GROKBOT_WEBHOOK_URL"), env.get("GROKBOT_WEBHOOK_KEY")
-    if not (pane and url and key):
+    if not pane or not all(env.get(k) for k in ("SMTP_HOST", "MAIL_FROM", "MAIL_TO")):
         return
     got = subprocess.run([HERDR, "agent", "get", pane], capture_output=True, text=True)
     if got.returncode:
@@ -78,24 +82,39 @@ def main():
                     return
         except FileNotFoundError:
             pass
-        body = json.dumps({
+        msg = EmailMessage()
+        msg["Subject"] = f"herdr {name} {status}"
+        msg["From"], msg["To"] = env["MAIL_FROM"], env["MAIL_TO"]
+        msg.set_content(json.dumps({
             "agent": name,
             "status": status,
             "workspace": agent.get("workspace_id"),
             "tab": agent.get("tab_id"),
             "completion_seq": seq,
-        })
-        # Key goes via curl's stdin config, never argv or logs.
-        cfg = f'header = "Authorization: Bearer {key}"\n'
-        r = subprocess.run(
-            ["curl", "-sS", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "5",
-             "-K", "-", "-H", "Content-Type: application/json", "--data", body, url],
-            input=cfg, capture_output=True, text=True,
-        )
-        if r.stdout.startswith("2"):
-            with open(mark, "w") as f:
-                f.write(tag)
-        print(f"{name} {tag} -> HTTP {r.stdout or 'err'}")
+        }, indent=1))  # short lines keep the body 7bit, not quoted-printable
+        try:
+            send(env, msg)
+        except Exception as e:  # never echo credentials, only the error type
+            print(f"{name} {tag} -> send failed: {type(e).__name__}")
+            return
+        with open(mark, "w") as f:
+            f.write(tag)
+        print(f"{name} {tag} -> sent")
+
+
+def send(env, msg):
+    host, port = env["SMTP_HOST"], int(env.get("SMTP_PORT") or 465)
+    if port == 465:
+        smtp = smtplib.SMTP_SSL(host, port, timeout=10)
+    else:
+        smtp = smtplib.SMTP(host, port, timeout=10)
+        smtp.ehlo()
+        if smtp.has_extn("starttls"):
+            smtp.starttls()
+    with smtp:
+        if env.get("SMTP_USER"):
+            smtp.login(env["SMTP_USER"], env.get("SMTP_PASS", ""))
+        smtp.send_message(msg)
 
 
 if __name__ == "__main__":

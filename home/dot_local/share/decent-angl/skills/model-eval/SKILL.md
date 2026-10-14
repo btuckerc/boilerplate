@@ -15,7 +15,7 @@ Decide whether a candidate model earns a lane. Adoption itself follows the
 | Lane | Role/agent | Pool | Current |
 | --- | --- | --- | --- |
 | Director | `default` | Anthropic | Opus high |
-| Escalation | `plan` → `architect`/`sol` | Codex | GPT-6.1 Sol high |
+| Escalation | `plan` → `architect`/`sol` | Codex | GPT-6.1 Sol (`architect` xhigh, `sol` high) |
 | Sustained frontier | `slow` | Anthropic | Opus high |
 | Escalation, second opinion | `fable` | Anthropic, capped at half | Fable medium (after Sol fails) |
 | Local worker | `nous`, `smol`, `tiny`, `commit` | nous GPU, no quota | Qwen3.8 27B |

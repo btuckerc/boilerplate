@@ -35,12 +35,13 @@ description: Change the shared OMP baseline in chezmoi - upgrades, omp-baseline,
   `tiny` roles (so `scout`, `sonic`) and the explicitly pinned `nous` agent run
   on nous Qwen to save Codex quota.
   Use fresh compact briefs, not the full parent transcript or pre-solved implementations.
-- Escalation lanes: GPT-6.1 Sol high (`architect` read-only, `sol`
-  implementation; both `@plan`) is the default. It trails GPT-6 Astra by 1–5
+- Escalation lanes: GPT-6.1 Sol (`architect` read-only at xhigh, `sol`
+  implementation at high; both `@plan`) is the default. It trails GPT-6 Astra by 1–5
   points on coding/agentic benchmarks at about 1/8 the blended token price
   (model-eval benchmarks, 2026-09-29) and draws from the Codex pool, not the
-  director's. Both agents list `openai-codex/gpt-6-astra:high` after `@plan`
-  only so sessions still on OMP <18.4.4 (no Sol in their catalog) resolve.
+  director's. Both agents list `openai-codex/gpt-6-astra` after `@plan`
+  (architect at xhigh, sol at high) only so sessions still on OMP <18.4.4
+  (no Sol in their catalog) resolve.
   Astra otherwise is a manual reserve; it stays in `enabledModels`. Fable
   medium (`fable`, `@fable`) is only a second opinion from a different model
   family after Sol fails. Trigger on concrete evidence: unresolved
@@ -48,18 +49,23 @@ description: Change the shared OMP baseline in chezmoi - upgrades, omp-baseline,
   or a failed check after one focused repair. The director runs `omp-quota`
   first. `@slow` is Opus high. Escalation is scoped child delegation, not a
   parent-model switch. There is no compulsory classifier or routine review.
-  "Sol high council" means several Sol-high reviewers run in parallel with
-  distinct personas/effort (`omp -p --no-session --model
-  openai-codex/gpt-6.1-sol --thinking high|xhigh --tools read,grep,glob`, stdin
-  closed).
+  The "Sol xhigh council" (the Sol high council until 2026-10-14) is
+  `architect` at xhigh: its model is `@plan:xhigh`, because the `plan` role's
+  `:high` suffix beats a frontmatter `thinkingLevel`. Ad-hoc Sol reviewer
+  invocations also use xhigh (`omp -p --no-session --model
+  openai-codex/gpt-6.1-sol --thinking xhigh --tools read,grep,glob`, stdin
+  closed) and follow the RULES one-Sol-reviewer-per-decision limit. Codex
+  quota per xhigh council decision is unmeasured; the price ratios above are
+  per token.
 - Fable shares the Anthropic weekly pool with the Opus director. It can use at
   most half of that pool and costs about 2x Opus on the real token mix, so it is
   not extra capacity. `cycleOrder` (default → fable → task) is kept for manual
   cycling. Leave `providers.anthropic.serverSideFallback` off because it would
   silently move Fable to Opus 4.8.
 - Keep `task.enableEffort: true` for per-task choices without an extra classifier.
-  Omit effort to retain the agent default (medium; high for `architect`/`sol`);
-  `lo` is for routine cloud work.
+  Omit effort to retain the agent default (medium; high for `sol`, xhigh for
+  `architect`). Always omit it for `architect`: a task `effort: med` was
+  observed to drop it to high. `lo` is for routine cloud work.
   Coarse `med` selects high on every cloud model. Keep local implementation
   medium; lower effort is not automatically faster. Recheck mappings against
   native discovery after catalog changes.

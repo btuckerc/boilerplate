@@ -1,7 +1,7 @@
 # Managed by chezmoi. Credentials, sessions and account usage stay local.
 # Claude Opus directs; the `task` worker runs on Codex Luna (parallel, no GPU
 # queue); nous (local Heretic Qwen) keeps the `nous` agent and the smol/commit/tiny roles.
-# Sol high is evidence-triggered escalation; Opus high directs and is also
+# Sol is evidence-triggered escalation (`architect` xhigh, `sol` high); Opus high directs and is also
 # @slow; Astra is a manual reserve; Fable is the different-family second opinion.
 modelRoles:
   default: anthropic/claude-opus-5-5:high
@@ -88,8 +88,9 @@ task:
   maxRecursionDepth: 1
   eager: default
   enableLsp: false
-  # Per-task choice without an extra classifier call. Omit for configured medium;
-  # coarse "med" maps to high on every cloud model, not medium.
+  # Per-task choice without an extra classifier call. Omit for the agent default
+  # (medium; sol high, architect xhigh); coarse "med" maps to high on every cloud
+  # model, so it lowers architect.
   enableEffort: true
   showResolvedModelBadge: true
   softRequestBudget: 40

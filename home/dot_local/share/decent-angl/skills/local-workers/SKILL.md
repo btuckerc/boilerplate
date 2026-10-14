@@ -14,9 +14,9 @@ supplied-log summaries with clear contracts and runnable checks when the GPU
 queue is idle; `scout` and `sonic` also run on nous.
 Resolve uncertainty before delegation without pre-solving routine implementation.
 
-Use Sol high for unresolved high-consequence design/security/concurrency
+Use Sol for unresolved high-consequence design/security/concurrency
 decisions, conflicting evidence after focused investigation, or a failed check
-after one focused repair. `architect` supplies read-only advice; `sol` owns
+after one focused repair. `architect` (xhigh) supplies read-only advice; `sol` (high) owns
 a scoped difficult implementation/diagnosis. Clearly hard work may go directly
 to Sol. Missing context, credentials or tools require prerequisites, not a
 larger model. Workers return blockers to the director; no recursive escalation chains.
@@ -86,7 +86,8 @@ Use a roughly 150-second attempt target / 180-second supervised deadline for
 small slices; a larger budget needs a concrete task-specific reason.
 
 OMP exposes per-task `effort` without adding a classifier call. Omit it to keep
-the agent default (medium; high for `architect`/`sol`). On the Luna `task`
+the agent default (medium; high for `sol`, xhigh for `architect`, which should
+always omit it since `med` drops it to high). On the Luna `task`
 agent, pass `lo` for read-only exploration and extraction, `med` for subtle logic
 or after one failed check, `hi` only for hard debugging or substantive review;
 unresolved design belongs with Sol.

@@ -19,4 +19,5 @@ Tucker's starting point on nous for ideas, new projects and stack questions.
 - `sudo -n` works for anything on nous (passwordless); don't hand root steps to
   Tucker.
 - Infra questions: the `platform-ops` skill's nous reference. OMP config:
-  `omp-config`. New models: `/skill:model-eval`.
+  `omp-config`. Cloudflare: the `cloudflare` skill (`cf` CLI). New models:
+  `/skill:model-eval`.

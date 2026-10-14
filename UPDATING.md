@@ -77,7 +77,20 @@ independent chezmoi clone.
 - Choose and test exact mise pins in `home/dot_config/mise/config.toml`.
   Check upstream release notes and backend metadata before choosing a version.
 - Use `omp-baseline upgrade` and `omp-baseline validate --strict` for OMP.
-  Never run `omp update`. Its manifest and setup hook pins must agree.
+  Never run `omp update`. Its manifest and setup hook pins must agree. Validate
+  is read-only and includes the `omp-agent-policy` agent check against native
+  `omp models --json` and `omp config list --json` evidence; its mirror is
+  pinned to one OMP version, so an upgrade re-verifies it first. It certifies
+  static policy for a fresh depth-1 dispatch and defers the serving model (auth
+  fallback) and MCP proxies to `omp-agent-smoke`. An unreviewed `OMP_*`/`PI_*`
+  variable, launch-dir dotenv key, MCP or settings source fails closed. Its
+  native probes run in a scratch HOME under a shell jail (bwrap on Linux,
+  sandbox-exec on macOS) so no `!command` config value or stored key executes;
+  a missing jail, or a `!command` value in any settings layer or models file,
+  fails validate. The smoke proves each MCP proxy's server from the prompt's
+  route or inventory label, not from a name prefix. A new or edited OMP
+  extension needs its sha256 reviewed into the checker's `REVIEWED_EXTENSIONS`.
+  `omp-baseline repair` fixes runtime permissions.
 - Use the shared Codex model policy and `codex-baseline` wrapper. Account state
   remains local. See [the Codex baseline](home/private_dot_codex/README.md).
 - Native OS packages belong in the Brewfile or platform prerequisites. Removing

@@ -1,0 +1,377 @@
+#!/usr/bin/env bun
+// Real-dispatch smoke for custom OMP agents. Paid: it spawns every selected agent once through a fresh
+// `omp -p` dispatcher. Never call it from validate, guards or hooks.
+//
+// For each agent it checks what omp-agent-policy certifies statically and what it defers to runtime: the task
+// result (agentSource, resolvedModelIdentity, resolvedThinkingLevel, resolvedModelIsFallback) and the child
+// session JSONL (session_init.agent/tools, model_change, thinking_level_change, and the provider/model of every
+// serving assistant message, which auth fallback could change). session_init.tools holds the child's enabled
+// tools minus a write the explicit list did not grant (task/executor.ts:4146-4166), plus one mcp__<server>_*
+// proxy per MCP tool (:3865-3869). Non-MCP tools must equal the predicted callable set (without the xd://
+// device-only write), give or take the predicted conditional tools, so no tool outside the grant is enabled;
+// MCP proxies must come from exactly the predicted runtime-deferred servers, by native minting from the raw
+// tool names of the system prompt's MCP routes (see mcpOwnership).
+import { createHash } from "node:crypto";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+
+const USAGE = `usage: omp-agent-smoke [--agents a,b,...] [--project-agents DIR] [--keep] [--timeout SEC]
+  --agents          agents to spawn (default: every contract agent the checker resolves)
+  --project-agents  copy *.md from DIR into the scratch project's .omp/agents (isolated-candidate run)
+  --keep            keep the scratch directory (it is always kept on failure)
+  --timeout         dispatcher timeout in seconds (default 900)`;
+
+// The agent dir every omp subprocess here (catalog, settings and dispatch) uses: the native default
+// (utils/src/dirs.ts). The checker is pointed at the same dir and fails closed on the keys that would
+// relocate it (PI_CODING_AGENT_DIR, PI_CONFIG_DIR, OMP_PROFILE/PI_PROFILE, from the environment or a
+// dotenv file), so the checked root is the dispatched root.
+const AGENT_DIR = path.join(os.homedir(), ".omp", "agent");
+
+const CONTRACT_AGENTS = ["architect", "auditor", "sol", "browser", "nous", "scout", "sonic", "task", "fable"];
+
+interface Prediction {
+	name: string;
+	source: string;
+	path: string;
+	declared: string[] | null;
+	callable: string[];
+	conditional: string[];
+	mcp: string[];
+	model: string | null;
+	thinking: string | null;
+	disabled?: boolean;
+}
+
+interface TaskResult {
+	id: string;
+	agent: string;
+	agentSource?: string;
+	exitCode?: number;
+	aborted?: boolean;
+	error?: string;
+	durationMs?: number;
+	resolvedModelIdentity?: string;
+	resolvedThinkingLevel?: string;
+	resolvedModelIsFallback?: boolean;
+}
+
+function parseArgs(argv: string[]) {
+	const opts = {
+		agents: undefined as string[] | undefined,
+		projectAgents: undefined as string | undefined,
+		keep: false,
+		timeoutSec: 900,
+	};
+	for (let i = 0; i < argv.length; i++) {
+		const a = argv[i];
+		const next = () => {
+			const v = argv[++i];
+			if (v === undefined) usage(`${a} needs a value`);
+			return v;
+		};
+		if (a === "--agents") opts.agents = next().split(",").map(s => s.trim()).filter(Boolean);
+		else if (a === "--project-agents") opts.projectAgents = path.resolve(next());
+		else if (a === "--keep") opts.keep = true;
+		else if (a === "--timeout") opts.timeoutSec = Number(next());
+		else if (a === "-h" || a === "--help") {
+			console.log(USAGE);
+			process.exit(0);
+		} else usage(`unknown argument ${a}`);
+	}
+	if (!Number.isFinite(opts.timeoutSec) || opts.timeoutSec <= 0) usage("--timeout must be a positive number");
+	return opts;
+}
+
+function usage(msg: string): never {
+	console.error(`omp-agent-smoke: ${msg}\n${USAGE}`);
+	process.exit(2);
+}
+
+function run(cmd: string[], cwd: string, timeoutSec = 120) {
+	const p = Bun.spawnSync(cmd, { cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe", timeout: timeoutSec * 1000 });
+	return { code: p.exitCode ?? -1, stdout: p.stdout.toString(), stderr: p.stderr.toString() };
+}
+
+function checkerPath(): string {
+	const sibling = path.join(path.dirname(fs.realpathSync(process.argv[1])), "omp-agent-policy");
+	if (fs.existsSync(sibling)) return sibling;
+	const repoCopy = path.join(path.dirname(fs.realpathSync(process.argv[1])), "executable_omp-agent-policy");
+	if (fs.existsSync(repoCopy)) return repoCopy;
+	return "omp-agent-policy";
+}
+
+function agentTaskName(agent: string): string {
+	return `Smoke${agent.replace(/(^|[^a-zA-Z0-9]+)([a-zA-Z0-9])/g, (_, __, c: string) => c.toUpperCase())}`.slice(0, 32);
+}
+
+function findFile(dir: string, name: string): string | undefined {
+	for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+		const p = path.join(dir, ent.name);
+		if (ent.isDirectory()) {
+			const hit = findFile(p, name);
+			if (hit) return hit;
+		} else if (ent.name === name) return p;
+	}
+	return undefined;
+}
+
+function readJsonl(file: string): any[] {
+	return fs
+		.readFileSync(file, "utf8")
+		.split("\n")
+		.filter(l => l.trim().startsWith("{"))
+		.map(l => JSON.parse(l));
+}
+
+const bare = (identity: string | undefined) => identity?.split(/[\s@]/)[0];
+
+/** mcp/tool-bridge.ts:390-400 sanitizeMCPToolNamePart with digits kept (the current mint). */
+function mcpPart(value: string, fallback: string): string {
+	const s = value.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/_+/g, "_").replace(/^_+|_+$/g, "");
+	return s.length > 0 ? s : fallback;
+}
+
+/**
+ * createMCPToolName (mcp/tool-bridge.ts:410-465): the proxy name SERVER mints for raw tool TOOL, and
+ * whether the mint lost information. A name alone is lossy: one server's sanitized name can prefix
+ * another's (`mac` vs `mac_evil`), raw names differing only in case or punctuation sanitize alike, a
+ * stripped `<server>_` tool prefix (`mac_x_y` on `mac_x` and on `mac` both give `mcp__mac_x_y`) and the
+ * 64-character hash cap hide where the server part ends.
+ */
+function mcpMint(server: string, tool: string): { name: string; lossy: boolean } {
+	const s = mcpPart(server, "server");
+	const t = mcpPart(tool, "tool");
+	const stripped = t.startsWith(`${s}_`);
+	const full = `mcp__${s}_${stripped ? t.slice(s.length + 1) : t}`;
+	if (full.length <= 64) return { name: full, lossy: stripped };
+	const hash = Bun.hash(full).toString(36).slice(0, 8);
+	return { name: `${full.slice(0, 64 - hash.length - 1)}_${hash}`, lossy: true };
+}
+
+/**
+ * Ownership of the child's MCP proxies (session_init.tools `mcp__*` plus every xd:// MCP route) by
+ * predicted server. Native ownership is mcpServerName (mcp/manager.ts:930-936), which the session
+ * JSONL does not record. The system prompt names each proxy's source in one of two forms:
+ *  - an xd://-mounted proxy is an MCP Tool Routes line `- "<raw tool>" → \`xd://<name>\``
+ *    (prompts/system/mcp-xdev-guidance.md from session/session-tools.ts:196-221; JSON-quoted);
+ *  - a top-level proxy is a Tool Inventory line `- <raw server>/<raw tool>: \`<name>\``
+ *    (prompts/system/system-prompt.md:59-63, label from mcp/tool-bridge.ts:679,808 kept by the task
+ *    proxy, task/executor.ts:939-946).
+ * An inventory line owns the proxy for the predicted server it names, if that server mints the name.
+ * A route owns it for the one predicted server that mints the name from that raw tool without loss;
+ * a server outside the prediction can then mint it only under the same sanitized name (`MAC` and
+ * `mac`), one native namespace that no route separates. omp-agent-policy lists every server of the
+ * MCP sources it mirrors, so two such names are both predicted and ambiguous here, and it fails
+ * closed on sources it does not mirror. A proxy with no source line, owned by no predicted server,
+ * or by several or lossily, fails.
+ */
+export function mcpOwnership(servers: string[], sessionTools: string[], systemPrompt: unknown): string[] {
+	const text = Array.isArray(systemPrompt) ? systemPrompt.join("\n") : typeof systemPrompt === "string" ? systemPrompt : "";
+	const sources = new Map<string, { owners: string[]; lossy: boolean }[]>();
+	const note = (name: string, owners: string[], lossy = false) => sources.set(name, [...(sources.get(name) ?? []), { owners, lossy }]);
+	for (const m of text.matchAll(/^- ("(?:[^"\\\n]|\\.)*") → `xd:\/\/([^`\n]+)`/gm)) {
+		let tool: unknown;
+		try {
+			tool = JSON.parse(m[1]);
+		} catch {}
+		const mints = typeof tool === "string" ? servers.map(server => ({ server, ...mcpMint(server, tool) })).filter(x => x.name === m[2]) : [];
+		note(m[2], mints.map(x => x.server), mints.some(x => x.lossy));
+	}
+	for (const m of text.matchAll(/^- (.+): `(mcp__[^`\n]+)`$/gm)) {
+		const owners = servers.filter(s => m[1].startsWith(`${s}/`) && mcpMint(s, m[1].slice(s.length + 1)).name === m[2]);
+		// A `/` in the tool part could equally end a longer server name.
+		note(m[2], owners, owners.some(s => m[1].slice(s.length + 1).includes("/")));
+	}
+	const proxies = [...new Set([...sessionTools.filter(t => t.startsWith("mcp__")), ...sources.keys()])].sort();
+	const fails: string[] = [];
+	const owned = new Set<string>();
+	const unsourced: string[] = [];
+	const stray: string[] = [];
+	const ambiguous: string[] = [];
+	for (const name of proxies) {
+		const found = sources.get(name) ?? [];
+		const owners = new Set(found.flatMap(f => f.owners));
+		if (!found.length) unsourced.push(name);
+		else if (found.some(f => f.owners.length === 0)) stray.push(name);
+		else if (found.some(f => f.owners.length > 1 || f.lossy) || owners.size > 1) ambiguous.push(name);
+		else owned.add([...owners][0]);
+	}
+	if (unsourced.length) fails.push(`MCP tools with no route or inventory label, owner unproven [${unsourced.join(", ")}]`);
+	if (stray.length) fails.push(`unpredicted MCP tools [${stray.join(", ")}]`);
+	if (ambiguous.length) fails.push(`MCP tools with ambiguous owner [${ambiguous.join(", ")}]`);
+	const absent = servers.filter(s => !owned.has(s));
+	if (absent.length) fails.push(`predicted MCP servers with no tools [${absent.join(", ")}]`);
+	return fails;
+}
+
+/** Compare one spawned child against its prediction; returns failure reasons (empty = pass). */
+function checkChild(pred: Prediction, result: TaskResult | undefined, sessionsDir: string): string[] {
+	if (!result) return ["no task result for this agent"];
+	const fails: string[] = [];
+	if (result.exitCode !== 0 || result.aborted) fails.push(`child exit ${result.exitCode} aborted=${!!result.aborted} ${result.error ?? ""}`.trim());
+	if (result.agentSource !== pred.source) fails.push(`source ${result.agentSource} predicted ${pred.source}`);
+	if (result.resolvedModelIsFallback) fails.push("task result reports a fallback model");
+	if (bare(result.resolvedModelIdentity) !== pred.model) fails.push(`result model ${result.resolvedModelIdentity} predicted ${pred.model}`);
+	if (result.resolvedThinkingLevel !== pred.thinking) fails.push(`result thinking ${result.resolvedThinkingLevel} predicted ${pred.thinking}`);
+
+	const file = findFile(sessionsDir, `${result.id}.jsonl`);
+	if (!file) return [...fails, `child session ${result.id}.jsonl not found`];
+	const entries = readJsonl(file);
+	const init = entries.find(e => e.type === "session_init");
+	if (init?.agent !== pred.name) fails.push(`session_init.agent ${init?.agent}`);
+	const sessionTools: string[] = init?.tools ?? [];
+	const ownTools = sessionTools.filter(t => !t.startsWith("mcp__"));
+	const expected = pred.callable.filter(t => !t.startsWith("mcp:") && t !== "write(xd-devices-only)");
+	const optional = pred.conditional.map(c => c.split(" ")[0]);
+	const missing = expected.filter(t => !ownTools.includes(t));
+	const extra = ownTools.filter(t => !expected.includes(t) && !optional.includes(t));
+	if (missing.length || extra.length) {
+		fails.push(`session_init.tools [${ownTools.join(", ")}] predicted [${expected.join(", ")}] conditional [${optional.join(", ")}]`);
+	}
+	fails.push(...mcpOwnership(pred.mcp, sessionTools, init?.systemPrompt));
+	const modelChanges = entries.filter(e => e.type === "model_change");
+	if (modelChanges.some(e => e.resolvedModelIsFallback)) fails.push("model_change reports a fallback model");
+	const lastModel = modelChanges.at(-1)?.model;
+	if (lastModel !== pred.model) fails.push(`model_change ${lastModel} predicted ${pred.model}`);
+	const lastThinking = entries.filter(e => e.type === "thinking_level_change").at(-1)?.thinkingLevel;
+	if (lastThinking !== pred.thinking) fails.push(`thinking_level_change ${lastThinking} predicted ${pred.thinking}`);
+	const serving = entries
+		.filter(e => e.type === "message" && e.message?.role === "assistant" && e.message.stopReason !== "aborted")
+		.map(e => `${e.message.provider}/${e.message.model}`);
+	if (serving.length === 0) fails.push("no serving assistant message");
+	for (const m of new Set(serving)) if (m !== pred.model) fails.push(`assistant served by ${m} predicted ${pred.model}`);
+	return fails;
+}
+
+function main() {
+	const opts = parseArgs(process.argv.slice(2));
+	const work = fs.mkdtempSync(path.join(os.tmpdir(), "omp-agent-smoke."));
+	const projectDir = path.join(work, ".omp");
+	fs.mkdirSync(projectDir, { recursive: true });
+	// Blocking task calls: with async jobs, `omp -p` exits before background children finish.
+	fs.writeFileSync(path.join(projectDir, "config.yml"), "async:\n  enabled: false\n");
+	if (opts.projectAgents) {
+		const dest = path.join(projectDir, "agents");
+		fs.mkdirSync(dest);
+		for (const f of fs.readdirSync(opts.projectAgents).filter(f => f.endsWith(".md"))) {
+			fs.copyFileSync(path.join(opts.projectAgents, f), path.join(dest, f));
+		}
+	}
+	let failed = false;
+	const fail = (msg: string) => {
+		failed = true;
+		console.log(msg);
+	};
+
+	try {
+		// Every probe's status is checked before its output is used.
+		const versionRun = run(["omp", "--version"], work);
+		if (versionRun.code !== 0 || !/^omp\/\S+$/.test(versionRun.stdout.trim())) {
+			throw new Error(`omp --version exit ${versionRun.code}: ${(versionRun.stdout + versionRun.stderr).trim()}`);
+		}
+		const version = versionRun.stdout.trim().slice("omp/".length);
+		// omp-agent-policy --catalog evidence: the native catalog (extensions off), its stderr, where a rejected
+		// models.yml is reported, every effective setting (`omp config list --json`, compared with the checker's
+		// merge), and the version, profile and models.yml it covered.
+		const catalogFile = path.join(work, "catalog.json");
+		const catalog = run(["omp", "models", "--json", "--no-extensions"], work);
+		if (catalog.code !== 0) throw new Error(`omp models --json exit ${catalog.code}: ${catalog.stderr.trim()}`);
+		const settings = run(["omp", "config", "list", "--json"], work);
+		if (settings.code !== 0) throw new Error(`omp config list --json exit ${settings.code}: ${settings.stderr.trim()}`);
+		const modelsFile = path.join(AGENT_DIR, "models.yml");
+		const modelsYml = fs.existsSync(modelsFile) ? fs.readFileSync(modelsFile, "utf8") : null;
+		fs.writeFileSync(
+			catalogFile,
+			JSON.stringify({
+				...JSON.parse(catalog.stdout),
+				settings: JSON.parse(settings.stdout),
+				ompVersion: version,
+				profile: "default",
+				modelsYml,
+				stderr: catalog.stderr + settings.stderr,
+			}),
+		);
+		const settingsHash = createHash("sha256").update(settings.stdout).digest("hex").slice(0, 16);
+
+		const checker = run(
+			[checkerPath(), "--live", AGENT_DIR, "--omp-version", version, "--cwd", work, "--catalog", catalogFile, "--json"],
+			work,
+		);
+		if (checker.code !== 0 && checker.code !== 1) {
+			throw new Error(`omp-agent-policy exit ${checker.code}: ${checker.stderr.trim()}`);
+		}
+		const report = JSON.parse(checker.stdout) as { agents: Prediction[]; errors: string[] };
+		// The checker exits 1 exactly when it reports errors; any other pairing is a broken run.
+		if (checker.code !== (report.errors.length ? 1 : 0)) {
+			throw new Error(`omp-agent-policy exit ${checker.code} with ${report.errors.length} reported errors`);
+		}
+		// An isolated-candidate run shadows the user agents on purpose: provenance errors that name a copied
+		// file are expected there. Model, effort and tool contract errors stay fatal.
+		const copied = opts.projectAgents ? path.join(fs.realpathSync(projectDir), "agents") + path.sep : undefined;
+		const expected = (e: string) => {
+			const m = e.match(/^(?:SHADOW \S+ project|MISSING \S+ expected user definition; effective project) (\S+)/);
+			return !!copied && !!m && fs.realpathSync(m[1]).startsWith(copied);
+		};
+		for (const e of report.errors) {
+			if (expected(e)) console.log(`EXPECTED ${e}`);
+			else fail(`POLICY ${e}`);
+		}
+
+		const preds = new Map(report.agents.map(a => [a.name, a]));
+		const selected = opts.agents ?? CONTRACT_AGENTS.filter(a => preds.has(a) && !preds.get(a)!.disabled);
+		for (const a of selected) if (!preds.has(a)) throw new Error(`agent ${a} is not resolved by omp-agent-policy`);
+
+		const tasks = selected.map(agent => ({
+			name: agentTaskName(agent),
+			agent,
+			task: "Finish immediately: call yield with the smallest valid result (a one-word summary). Use no other tool.",
+			solutionSpace: "none: identity smoke",
+		}));
+		const prompt =
+			`Call the task tool exactly once with context "omp-agent-smoke identity check" and exactly this tasks array, ` +
+			`then reply DONE. Call no other tool.\n${JSON.stringify(tasks)}`;
+		const sessionsDir = path.join(work, "sessions");
+		const started = Date.now();
+		const dispatch = run(
+			["omp", "-p", "--mode", "json", "--session-dir", sessionsDir, prompt],
+			work,
+			opts.timeoutSec,
+		);
+		fs.writeFileSync(path.join(work, "dispatch.jsonl"), dispatch.stdout);
+		fs.writeFileSync(path.join(work, "dispatch.err"), dispatch.stderr);
+		if (dispatch.code !== 0) fail(`DISPATCH omp -p exit ${dispatch.code}`);
+
+		const events = dispatch.stdout
+			.split("\n")
+			.filter(l => l.startsWith("{"))
+			.map(l => JSON.parse(l));
+		const results: TaskResult[] = events
+			.filter(e => e.type === "tool_execution_end" && e.toolName === "task")
+			.flatMap(e => e.result?.details?.results ?? []);
+		if (results.length === 0) fail("DISPATCH no completed task results (dispatcher did not call task)");
+
+		for (const agent of selected) {
+			const pred = preds.get(agent)!;
+			const result = results.find(r => r.agent === agent);
+			const fails = checkChild(pred, result, sessionsDir);
+			if (fails.length) fail(`SMOKE ${agent} FAIL ${fails.join("; ")}`);
+			else
+				console.log(
+					`SMOKE ${agent} ok model=${pred.model} thinking=${pred.thinking} source=${pred.source} ` +
+						`tools=[${pred.callable.join(", ")}] mcp=[${pred.mcp.join(", ")}] ms=${result?.durationMs ?? "?"}`,
+				);
+		}
+		console.log(
+			`DISPATCH ${selected.length} agents in ${Math.round((Date.now() - started) / 1000)}s omp ${version} depth-1 settings=${settingsHash}`,
+		);
+	} catch (e) {
+		fail(`ERROR ${e instanceof Error ? e.message : String(e)}`);
+	}
+
+	if (failed || opts.keep) console.log(`kept ${work}`);
+	else fs.rmSync(work, { recursive: true, force: true });
+	process.exit(failed ? 1 : 0);
+}
+
+if (import.meta.main) main();

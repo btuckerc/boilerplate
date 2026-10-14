@@ -120,7 +120,25 @@ description: Change the shared OMP baseline in chezmoi - upgrades, omp-baseline,
 - User agents live in `home/private_dot_omp/private_agent/private_agents/`. They use
   `@smol` / `@task` aliases where possible, with local agents explicitly
   pinned to their discovered `llama.cpp` model. Keep model-specific thinking
-  settings compatible with the selected provider.
+  settings compatible with the selected provider. A selector suffix outranks
+  `thinkingLevel`, and a bare `@default` inherits the parent's suffix: write the
+  effort into the selector (`@default:medium`). `omp-baseline validate` runs
+  `omp-agent-policy`, which resolves every agent's model, effort and tools
+  against the pinned OMP version and native `omp models --json` and
+  `omp config list --json` evidence (`--root .` alone leaves contract efforts
+  and the settings merge UNVERIFIED). It certifies static policy for a fresh
+  depth-1 dispatch; the serving model (auth fallback) and MCP proxy names are
+  runtime-deferred to `omp-agent-smoke` (paid), which checks them with real
+  spawns and proves each proxy's server from the prompt's route or inventory
+  label. It fails closed on hooks, custom tools and extensions not in its
+  `REVIEWED_EXTENSIONS` digests, on unmirrored `OMP_*`/`PI_*` variables,
+  launch-dir dotenv keys, settings and MCP sources, and when a contract agent
+  arms prewalk, retry model fallback or Code Mode, or takes its model only from
+  the parent. Validate runs its native probes in a scratch HOME under a shell
+  jail (bwrap on Linux, sandbox-exec on macOS), so `!command` config values and
+  stored keys never execute; it fails when the jail is unavailable or any
+  settings layer or models file holds a `!command` value. A new OMP version
+  needs the checker mirror re-verified first.
 
 ## Workflow
 
@@ -129,7 +147,8 @@ description: Change the shared OMP baseline in chezmoi - upgrades, omp-baseline,
 3. Apply targeted files; run `mise install` and `mise reshim` when the pin moves.
 4. Validate parsed config, native Codex provider/model discovery, local-provider
    discovery, Python setup, and native skill discovery in a new OMP session.
-5. Run `omp-baseline validate --strict`. Commit and publish only when the user
+5. Run `omp-baseline validate --strict`. Validate only observes; `omp-baseline
+   repair` (or apply) fixes runtime permissions. Commit and publish only when the user
    asks. An uncommitted pin is local only. The native guard defers dirty source
    files and never publishes or stashes them; scheduled apply leaves those files
    untouched. After publish, other hosts run `omp-baseline pull`.

@@ -1,0 +1,1313 @@
+#!/usr/bin/env bun
+// omp-agent-policy: offline, version-pinned mirror of how OMP dispatches task agents.
+//
+// Resolves every agent's effective definition, model, thinking level and tools exactly as the pinned OMP
+// release would, then checks the default-profile contracts. Cited paths are in the upstream tree
+// packages/ at the pinned tag (coding-agent/src unless another package is named). Anything the mirror
+// cannot reproduce fails closed (UNSUPPORTED/MODEL/VERSION) instead of being guessed. Real dispatch is
+// confirmed separately by omp-agent-smoke.
+import { createHash } from "node:crypto";
+import { parseEnv } from "node:util";
+import type { Dirent } from "node:fs";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+
+const MIRRORED_OMP = ["18.4.4"];
+const USAGE = `usage: omp-agent-policy (--root REPO | --live AGENT_DIR --omp-version VER) [options]
+  --root REPO            chezmoi source tree; no HOME or cwd reads
+  --live AGENT_DIR       deployed agent dir (e.g. ~/.omp/agent)
+  --omp-version VER      runtime version (live mode)
+  --cwd DIR              live mode: project discovery start (default: process cwd)
+  --project-agents DIR   root mode: project agents dir to test shadowing
+  --config FILE          settings overlay, repeatable, later wins
+  --catalog FILE         native evidence from omp-baseline: \`omp models --json\` (availability, disabled
+                         providers, thinking ladders) with its stderr, omp version, profile and models.yml;
+                         without it models.yml defaults are unused and contract clamping is UNVERIFIED
+  --profile default|local  contracts apply to default only (root mode)
+  --parent PATTERN       parent session model pattern (default: the default role)
+  --effort lo|med|hi     simulate caller effort (needs --catalog)
+  --dispatch default|restricted  predict runtime tool grants (default) or declared tools only
+  --json                 one JSON report on stdout`;
+
+// catalog/src/effort.ts THINKING_EFFORTS
+const EFFORTS = ["minimal", "low", "medium", "high", "xhigh", "max"];
+// tui/src/thinking.ts THINKING_LEVEL_BY_SELECTOR
+const SELECTORS = ["inherit", "off", ...EFFORTS];
+// tui/src/overlays/model-browser.ts:64 MODEL_ROLE_IDS
+const ROLE_IDS = new Set(["default", "smol", "slow", "vision", "plan", "commit", "tiny", "memory", "task", "advisor", "image", "web", "speech", "dictation", "judge"]);
+// config/model-resolver.ts:1121-1125
+const ROLE_CONFIGURED_FALLBACK: Record<string, { role: string; configuredOnly: boolean }> = {
+	advisor: { role: "slow", configuredOnly: true },
+	memory: { role: "tiny", configuredOnly: false },
+	tiny: { role: "smol", configuredOnly: false },
+};
+
+/** Default-profile contracts. `model` is an exact id or, with a leading ^, a regex. */
+const CONTRACTS: Record<string, { model: string; thinking: string; tools?: string[]; source: string; optional?: boolean }> = {
+	architect: { model: "openai-codex/gpt-6.1-sol", thinking: "xhigh", tools: ["read", "grep", "glob", "web_search", "yield"], source: "user" },
+	auditor: { model: "openai-codex/gpt-6.1-sol", thinking: "xhigh", tools: ["read", "grep", "glob", "web_search", "yield"], source: "user", optional: true },
+	sol: { model: "openai-codex/gpt-6.1-sol", thinking: "high", source: "user" },
+	browser: { model: "^anthropic/claude-opus-", thinking: "medium", tools: ["eval", "yield"], source: "user" },
+	nous: { model: "^llama\\.cpp/", thinking: "medium", tools: ["read", "grep", "glob", "edit", "write", "yield"], source: "user" },
+	scout: { model: "^llama\\.cpp/", thinking: "low", tools: ["read", "grep", "glob", "web_search", "yield"], source: "user" },
+	sonic: { model: "^llama\\.cpp/", thinking: "low", source: "user" },
+	task: { model: "openai-codex/gpt-6-luna", thinking: "medium", source: "bundled" },
+	fable: { model: "^anthropic/claude-fable-", thinking: "medium", source: "user" },
+};
+
+interface Agent {
+	name: string;
+	tools?: string[];
+	model?: string[];
+	thinking?: string;
+	/** discovery/helpers.ts:338-356 parseAgentFields: "*" or names; inferred "*" when tools include task. */
+	spawns?: string[] | "*";
+	/** discovery/helpers.ts:370-375: true (default target) or a target pattern. */
+	prewalk?: boolean | string;
+	source: "project" | "user" | "bundled";
+	file: string;
+}
+
+// task/agents.ts:44-73 plus prompts/agents/{scout,reviewer,security-reviewer}.md frontmatter.
+const BUNDLED: Agent[] = [
+	{ name: "scout", tools: ["read", "find", "grep", "glob", "web_search", "yield"], model: ["@smol"], thinking: "medium", source: "bundled", file: "<bundled>" },
+	{ name: "reviewer", tools: ["read", "find", "grep", "glob", "bash", "lsp", "web_search", "ast_grep", "yield"], spawns: ["scout"], model: ["@slow"], source: "bundled", file: "<bundled>" },
+	{ name: "security-reviewer", tools: ["read", "find", "grep", "glob", "lsp", "ast_grep", "yield"], source: "bundled", file: "<bundled>" },
+	{ name: "task", model: ["@task"], thinking: "auto", spawns: "*", source: "bundled", file: "<bundled>" },
+	{ name: "sonic", model: ["@smol"], thinking: "medium", source: "bundled", file: "<bundled>" },
+];
+
+// tools/index.ts:563-594 BUILTIN_TOOLS in registry order; tools/builtin-names.ts adds the hidden yield, goal, think.
+const BUILTIN_TOOLS = [
+	"read", "security_scan", "bash", "edit", "ast_grep", "ast_edit", "ask", "debug", "ida", "eval", "github", "glob", "grep",
+	"find", "lsp", "checkpoint", "rewind", "context_notes", "new_context", "task", "wait", "todo", "web_search", "write",
+	"memory_edit", "retain", "recall", "reflect", "learn", "manage_skill",
+];
+const CANONICAL_TOOLS = new Set([...BUILTIN_TOOLS, "yield", "goal", "think"]);
+// sdk.ts:1284 SESSION_MANAGED_BUILTIN_TOOL_NAMES: activated even when an explicit tool list omits them.
+const SESSION_MANAGED = ["manage_skill", "learn", "context_notes", "new_context"];
+
+/**
+ * Extension modules reviewed for omp 18.4.4, by sha256. Each only listens to session, agent and tool-execution
+ * events (status line, herdr pane state) and returns nothing: no tools, commands, providers, model or thinking
+ * changes and no tool-call interception, so it cannot change a child's model, thinking or tool set. Native
+ * extensions load in every session and subagent (extensibility/extensions/loader.ts:555-661, sdk.ts:3939-3948),
+ * so any other module fails closed. Re-review on any content change and on every MIRRORED_OMP bump.
+ */
+const REVIEWED_EXTENSIONS: Record<string, string> = {
+	"4f1383723945fa2b8e202578590c574c8fedb07f72e52e3699866c471d821188": "cwd-basename-status.ts",
+	"e3c650752bb9c2eb8bc1eecc9ce845c27434f6b7331af161353dd06ca6de48b7": "herdr-omp-agent-state.ts",
+};
+
+const errors: string[] = [];
+
+type Options = Map<string, string[]>;
+const MULTI = new Set(["--config"]);
+const VALUED = new Set(["--root", "--live", "--omp-version", "--cwd", "--project-agents", "--config", "--catalog", "--profile", "--parent", "--effort", "--dispatch"]);
+
+function usage(message: string): never {
+	throw new UsageError(`${message}\n${USAGE}`);
+}
+class UsageError extends Error {}
+
+function parseOptions(argv: string[]): Options {
+	const opts: Options = new Map();
+	for (let i = 0; i < argv.length; i++) {
+		const key = argv[i];
+		if (key === "--json") opts.set(key, ["1"]);
+		else if (key === "-h" || key === "--help") {
+			console.log(USAGE);
+			process.exit(0);
+		} else if (VALUED.has(key)) {
+			const value = argv[++i];
+			if (value === undefined) usage(`${key} needs a value`);
+			if (opts.has(key) && !MULTI.has(key)) usage(`${key} given twice`);
+			opts.set(key, [...(opts.get(key) ?? []), value]);
+		} else if (key === "--native") usage("UNSUPPORTED --native parity is not implemented; compare with omp-agent-smoke");
+		else usage(`unknown argument ${key}`);
+	}
+	const one = (k: string) => opts.get(k)?.[0];
+	if (!!one("--root") === !!one("--live")) usage("give exactly one of --root or --live");
+	if (one("--live") && !one("--omp-version")) usage("--live needs --omp-version");
+	if (one("--root") && (one("--cwd") || one("--omp-version"))) usage("--cwd and --omp-version are live-mode options");
+	if (one("--live") && (one("--project-agents") || one("--profile"))) usage("--project-agents and --profile are root-mode options");
+	for (const [k, allowed] of [["--profile", ["default", "local"]], ["--effort", ["lo", "med", "hi"]], ["--dispatch", ["default", "restricted"]]] as const) {
+		const v = one(k);
+		if (v !== undefined && !(allowed as readonly string[]).includes(v)) usage(`${k} must be one of ${allowed.join("|")}`);
+	}
+	return opts;
+}
+
+// ---------------------------------------------------------------- settings
+
+/** config/settings.ts #deepMerge: objects merge recursively, arrays and scalars replace, undefined skipped. */
+function deepMerge(base: any, overlay: any): any {
+	const out: any = { ...base };
+	for (const [k, v] of Object.entries(overlay ?? {})) {
+		if (v === undefined) continue;
+		const prev = out[k];
+		const bothObjects = v && typeof v === "object" && !Array.isArray(v) && prev && typeof prev === "object" && !Array.isArray(prev);
+		out[k] = bothObjects ? deepMerge(prev, v) : v;
+	}
+	return out;
+}
+
+/**
+ * A settings or models.yml value starting with "!" is a shell command native runs for its value
+ * (config/resolve-config-value.ts:22-24,104-105: auth.broker.url/token, provider apiKey and headers).
+ * omp-baseline runs its native probes where no command can start, so evidence for such a file would be
+ * computed without the value: every settings layer and models file read here fails closed on one instead.
+ */
+function readSettingsFile(file: string): any {
+	const text = fs.readFileSync(file, "utf8");
+	let data: any;
+	try {
+		data = file.endsWith(".json") ? JSON.parse(text) : Bun.YAML.parse(text);
+	} catch (e) {
+		usage(`cannot parse settings ${file}: ${e}`);
+	}
+	const walk = (v: unknown, at: string) => {
+		if (typeof v === "string" && v.startsWith("!")) errors.push(`UNSUPPORTED ${file}: ${at || "(root)"} is command-backed (validate runs no config command)`);
+		else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) walk(x, at ? `${at}.${k}` : k);
+	};
+	walk(data, "");
+	return data && typeof data === "object" && !Array.isArray(data) ? data : {};
+}
+
+const isDir = (p: string) => {
+	try {
+		return fs.statSync(p).isDirectory();
+	} catch {
+		return false;
+	}
+};
+const nonEmptyDir = (p: string) => isDir(p) && fs.readdirSync(p).length > 0;
+
+/** Schema defaults for the keys this mirror reads (config/settings schema at the pinned tag). */
+const DEFAULTS = {
+	modelRoles: {},
+	task: { agentModelOverrides: {}, disabledAgents: [], maxEffort: "max" },
+	disabledProviders: [],
+	extensions: [],
+};
+
+// ---------------------------------------------------------------- environment
+
+/** Keys the mirror applies; each is cited where it is read. */
+const MIRRORED_ENV = new Set(["PI_CONFIG_FILES", "PI_SMOL_MODEL", "PI_SLOW_MODEL", "PI_PLAN_MODEL", "PI_PY", "PI_JS"]);
+/**
+ * Verified not to reach agent discovery, model, thinking or tools at the pinned tag: the eval-kernel plumbing a
+ * session exports to its child shells (eval/executor-base.ts:306-355, read only by eval/py/prelude.py) and the
+ * auth-broker endpoint (ai/src/auth-broker/discover.ts:324-361, credentials only). Every other OMP_/PI_ key in
+ * the effective environment fails closed, including the relocation keys PI_CONFIG_DIR, PI_CODING_AGENT_DIR,
+ * OMP_PROFILE and PI_PROFILE (utils/src/dirs.ts:43-110,306-315,453-500).
+ */
+const INERT_ENV = new Set([
+	"PI_ARTIFACTS_DIR", "PI_EVAL_LOCAL_ROOTS", "PI_SESSION_FILE", "PI_TOOL_BRIDGE_URL", "PI_TOOL_BRIDGE_TOKEN", "PI_TOOL_BRIDGE_SESSION",
+	"OMP_AUTH_BROKER_URL", "OMP_AUTH_BROKER_TOKEN", "PI_AUTH_BROKER_URL", "PI_AUTH_BROKER_TOKEN",
+]);
+/** Non-prefixed keys that move what OMP reads: claude config (config/claude-paths.ts:10-17) and XDG state (utils/src/dirs.ts:318-424). */
+const PATH_ENV = /^(CLAUDE_CONFIG_DIR|XDG_[A-Z]+_HOME)$/;
+
+/** Live mode: the environment an ordinary launch sees after OMP's dotenv layer; root mode reads no host env. */
+let ENV: Record<string, string | undefined> = {};
+
+/** utils/src/env.ts:265-285 parseEnvFile: whole-file parse, valid names and NUL-free values, then OMP_ -> PI_. */
+function parseEnvFile(file: string): Record<string, string> {
+	const out: Record<string, string> = {};
+	try {
+		for (const [k, v] of Object.entries(parseEnv(fs.readFileSync(file, "utf8")))) {
+			if (v !== undefined && /^[A-Za-z_][A-Za-z0-9_]*$/.test(k) && !v.includes("\0")) out[k] = v;
+		}
+	} catch {
+		return {};
+	}
+	for (const k of Object.keys(out)) if (k.startsWith("OMP_")) out[`PI_${k.slice(4)}`] = out[k];
+	return out;
+}
+
+/**
+ * utils/src/env.ts:287-315: after process env, dotenv files fill keys whose value is unset or empty, project
+ * <cwd>/.env first, then <agentDir>/.env, <configRoot>/.env and ~/.env. Bun itself loads <cwd>/.env,
+ * .env.local and .env.<NODE_ENV|development>[.local] into the environment before OMP runs, with its own grammar
+ * (env.ts:110-113), so a launch-dir dotenv file that sets a key OMP or this mirror reads fails closed instead.
+ * Bun also loads them for this checker, so the checker's own cwd is screened the same way.
+ */
+function effectiveEnv(agentDir: string, cwds: string[]): Record<string, string | undefined> {
+	const env: Record<string, string | undefined> = { ...process.env };
+	const mode = process.env.NODE_ENV || "development";
+	for (const dir of new Set(cwds)) {
+		for (const name of [".env", ".env.local", `.env.${mode}`, `.env.${mode}.local`]) {
+			const file = path.join(dir, name);
+			if (kindOf(file) !== "file") continue;
+			const text = fs.readFileSync(file, "utf8");
+			const keys = new Set([...Object.keys(parseEnvFile(file)), ...[...text.matchAll(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/gm)].map(m => m[1])]);
+			for (const k of keys) if (/^(OMP|PI)_/.test(k) || PATH_ENV.test(k)) errors.push(`UNSUPPORTED dotenv ${file} sets ${k} (launch-dir dotenv not mirrored)`);
+		}
+	}
+	for (const file of [path.join(agentDir, ".env"), path.join(path.dirname(agentDir), ".env"), path.join(os.homedir(), ".env")]) {
+		for (const [k, v] of Object.entries(parseEnvFile(file))) if (!env[k]) env[k] = v;
+	}
+	for (const k of Object.keys(env).sort()) {
+		if (/^(OMP|PI)_/.test(k) && !MIRRORED_ENV.has(k) && !INERT_ENV.has(k)) errors.push(`UNSUPPORTED env ${k} is set (not mirrored)`);
+	}
+	return env;
+}
+
+/** config/registry.ts:519-532,624-625 with utils/src/env.ts:472-487: a boolean setting's env override. */
+function envFlag(name: string): boolean | undefined {
+	const raw = ENV[name];
+	if (raw === undefined || raw === "") return undefined;
+	return ["1", "Y", "y", "TRUE", "true", "YES", "yes", "ON", "on"].includes(raw);
+}
+
+function loadSettings(opts: Options, agentDir: string, live: boolean): any {
+	let settings: any = {};
+	const cwd = path.resolve(opts.get("--cwd")?.[0] ?? process.cwd());
+	// settings.ts:2224-2236: the first of config.yml, config.yaml (utils/src/dirs.ts:31 MAIN_CONFIG_FILENAMES).
+	const names = live ? ["config.yml", "config.yaml"] : ["private_config.yml"];
+	const base = names.map(n => path.join(agentDir, n)).find(f => fs.existsSync(f));
+	if (base) settings = readSettingsFile(base);
+	else if (!live && fs.existsSync(path.join(agentDir, "private_config.yml.tmpl"))) errors.push(`TEMPLATE unsupported ${path.join(agentDir, "private_config.yml.tmpl")}`);
+	else if (live && ["settings.json", "agent.db"].some(n => fs.existsSync(path.join(agentDir, n))))
+		errors.push(`UNSUPPORTED ${agentDir} has no config.yml; legacy settings.json/agent.db migration (settings.ts:2386-2445) not mirrored`);
+	if (live) {
+		// discovery/builtin.ts:58-74,855-903: project items come only from <cwd>/.omp (no walk-up), settings.json
+		// before config.yml; settings.ts:2293-2316 merges them over the global config.
+		const projectDir = path.join(cwd, ".omp");
+		if (nonEmptyDir(projectDir)) {
+			let project: any = {};
+			for (const name of ["settings.json", "config.yml"]) {
+				const file = path.join(projectDir, name);
+				if (fs.existsSync(file)) project = deepMerge(project, readSettingsFile(file));
+			}
+			// settings.ts:273-283 projectLayerForMerge: a project role that is not a string or string list is cleared.
+			if (project.modelRoles && typeof project.modelRoles === "object" && !Array.isArray(project.modelRoles)) {
+				const valid = (v: unknown) => typeof v === "string" || (Array.isArray(v) && v.every(e => typeof e === "string"));
+				project.modelRoles = Object.fromEntries(Object.entries(project.modelRoles).filter(([, v]) => valid(v)));
+			}
+			settings = deepMerge(settings, project);
+		}
+		// Other settings providers (discovery/claude.ts:634, cursor.ts:217, gemini.ts:367, codex.ts:592,
+		// opencode.ts:539) are not mirrored: fail closed when one is enabled and has a project file.
+		const disabled: string[] = settings.disabledProviders ?? [];
+		const foreign: [string, string][] = [
+			["claude", ".claude/settings.json"],
+			["cursor", ".cursor/settings.json"],
+			["gemini", ".gemini/settings.json"],
+			["codex", ".codex/config.toml"],
+			["opencode", "opencode.json"],
+			["opencode", "opencode.jsonc"],
+			["opencode", ".opencode"],
+		];
+		for (const [provider, rel] of foreign) {
+			if (!disabled.includes(provider) && fs.existsSync(path.join(cwd, rel))) errors.push(`UNSUPPORTED project settings ${path.join(cwd, rel)} (provider ${provider} not mirrored)`);
+		}
+	}
+	// settings.ts:658-660,2340-2349,3719-3723: PI_CONFIG_FILES then --config overlay the project layer; a
+	// missing overlay is a hard runtime error. ENV is empty in root mode, so source runs take no host overlay.
+	const overlays = (ENV.PI_CONFIG_FILES ?? "").split(path.delimiter).filter(Boolean);
+	for (const raw of [...overlays, ...(opts.get("--config") ?? [])]) {
+		const file = path.resolve(cwd, raw.replace(/^~(?=$|\/)/, os.homedir()));
+		if (!fs.existsSync(file)) errors.push(`CONFIG overlay missing ${file}`);
+		else settings = deepMerge(settings, readSettingsFile(file));
+	}
+	// config/settings.ts:477-505: path-scoped rows resolve against the launch cwd; not mirrored.
+	for (const id of ["enabledModels", "enabledProviders", "disabledProviders"]) {
+		const v = settings[id];
+		if (v !== undefined && (!Array.isArray(v) || v.some(e => typeof e !== "string"))) errors.push(`UNSUPPORTED settings ${id} has path-scoped or non-string rows (not mirrored)`);
+	}
+	return deepMerge(DEFAULTS, settings);
+}
+
+/** config/settings.ts getModelRole: a string, or an array joined with ",". */
+function getModelRole(settings: any, role: string): string | undefined {
+	const v = settings.modelRoles?.[role];
+	const s = Array.isArray(v) ? v.join(",") : typeof v === "string" ? v : undefined;
+	return s?.trim() || undefined;
+}
+
+// ---------------------------------------------------------------- frontmatter and discovery
+
+/** utils/src/frontmatter.ts:126-205 at level warn with repair. Invalid YAML fails closed (runtime line-parses it). */
+function readFrontmatter(file: string): Record<string, unknown> | undefined {
+	const text = fs.readFileSync(file, "utf8").replace(/\r\n?/g, "\n").replace(/<!--[\s\S]*?-->/g, "");
+	if (!text.startsWith("---")) return {};
+	const end = text.indexOf("\n---", 3);
+	if (end === -1) return {};
+	let loaded: unknown;
+	try {
+		loaded = Bun.YAML.parse(text.slice(4, end).replaceAll("\t", "  "));
+	} catch {
+		errors.push(`UNSUPPORTED frontmatter ${file}: invalid YAML (runtime repairs or line-parses it; not mirrored)`);
+		return undefined;
+	}
+	if (!loaded || typeof loaded !== "object" || Array.isArray(loaded)) return {};
+	return camelKeys(loaded) as Record<string, unknown>;
+}
+
+function camelKeys(v: unknown): unknown {
+	if (Array.isArray(v)) return v.map(camelKeys);
+	if (!v || typeof v !== "object") return v;
+	return Object.fromEntries(Object.entries(v).map(([k, x]) => [k.replace(/-([a-z])/g, (_, c) => c.toUpperCase()), camelKeys(x)]));
+}
+
+/**
+ * discovery/helpers.ts:183-208 parseCSV/parseArrayOrCSV: an array keeps its string items as written, a
+ * string is split on "," and trimmed; undefined (no list) when nothing is left, so `tools: [42]` or
+ * `tools: ""` grants the default tool set like an absent field (only a literal `[]` is an empty list).
+ */
+function arrayOrCsv(v: unknown): string[] | undefined {
+	const items = Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : typeof v === "string" ? v.split(",").map(x => x.trim()).filter(Boolean) : undefined;
+	return items?.length ? items : undefined;
+}
+
+/** tui/src/thinking.ts:67-93 getOwnSelector: exact, or a unique prefix of at least two characters. */
+function parseSelector(value: string, choices: string[]): string | undefined {
+	if (choices.includes(value)) return value;
+	if (value.length < 2) return undefined;
+	const hits = choices.filter(c => c.startsWith(value));
+	return hits.length === 1 ? hits[0] : undefined;
+}
+
+/** discovery/helpers.ts:311-398 parseAgentFields; undefined when the runtime would skip the file. */
+function parseAgent(file: string, source: Agent["source"]): Agent | undefined {
+	const fm = readFrontmatter(file);
+	if (!fm) return undefined;
+	const name = typeof fm.name === "string" ? fm.name : undefined;
+	const description = typeof fm.description === "string" ? fm.description : undefined;
+	if (!name || !description) {
+		errors.push(`MALFORMED ${file} skipped: name and description are required`);
+		return undefined;
+	}
+	if (["main", "sub"].includes(name.trim().toLowerCase())) {
+		errors.push(`MALFORMED ${file} skipped: reserved agent name ${name}`);
+		return undefined;
+	}
+	let tools = Array.isArray(fm.tools) && fm.tools.length === 0 ? [] : arrayOrCsv(fm.tools);
+	if (tools) {
+		// tools/builtin-names.ts normalizeToolNames: lowercase canonical names, search -> grep, dedupe.
+		tools = [...new Set(tools.map(t => (t.toLowerCase() === "search" ? "grep" : CANONICAL_TOOLS.has(t.toLowerCase()) ? t.toLowerCase() : t)))];
+		if (!tools.includes("yield")) tools.push("yield");
+	}
+	const rawThinking = typeof fm.thinkingLevel === "string" ? fm.thinkingLevel : typeof fm.thinking === "string" ? fm.thinking : undefined;
+	// tui/src/thinking.ts:207 parseConfiguredThinkingLevel
+	const thinking = rawThinking === undefined ? undefined : rawThinking === "auto" ? "auto" : parseSelector(rawThinking, SELECTORS);
+	if (rawThinking !== undefined && thinking === undefined) errors.push(`UNSUPPORTED ${file}: thinking level ${rawThinking} is ignored by the runtime`);
+	const model = arrayOrCsv(fm.model);
+	let spawns: string[] | "*" | undefined = fm.spawns === "*" || (typeof fm.spawns === "string" && fm.spawns.trim() === "*") ? "*" : arrayOrCsv(fm.spawns);
+	if (spawns === undefined && tools?.includes("task")) spawns = "*";
+	// discovery/helpers.ts:164-172,370-375: true/false (also as text), or a target pattern.
+	const p = fm.prewalk;
+	const flag = typeof p === "boolean" ? p : typeof p === "string" && ["true", "false"].includes(p.trim().toLowerCase()) ? p.trim().toLowerCase() === "true" : undefined;
+	const prewalk = flag ?? (typeof p === "string" && p.trim() ? p.trim() : undefined);
+	return { name, tools, model: model?.length ? model : undefined, thinking, spawns, prewalk, source, file };
+}
+
+function agentFiles(dir: string): string[] {
+	let entries: Dirent[];
+	try {
+		entries = fs.readdirSync(dir, { withFileTypes: true });
+	} catch {
+		return [];
+	}
+	return entries
+		.filter(e => e.isFile() || e.isSymbolicLink())
+		.map(e => e.name)
+		.filter(n => n.endsWith(".md") || n.endsWith(".md.tmpl"))
+		.sort((a, b) => a.localeCompare(b))
+		.map(n => path.join(dir, n));
+}
+
+/** config.ts:218-247 findAllNearestProjectConfigDirs for the .omp base: nearest <dir>/.omp/agents walking up. */
+function nearestProjectAgents(cwd: string): string | undefined {
+	for (let dir = path.resolve(cwd); ; dir = path.dirname(dir)) {
+		if (isDir(path.join(dir, ".omp", "agents"))) return path.join(dir, ".omp", "agents");
+		if (path.dirname(dir) === dir) return undefined;
+	}
+}
+
+/**
+ * Live mode: extension packages (omp-extension-roots.ts:283-340) and plugin registries
+ * (discovery/helpers.ts:1040-1074,1154-1284) can contribute agents (task/discovery.ts:113-155), and installed
+ * plugins contribute extensions and custom tools whatever disabledProviders says
+ * (extensibility/plugins/loader.ts:229-270, extensions/loader.ts:636-639, custom-tools/loader.ts:271-274).
+ * Their roots are not mirrored, so any present source fails closed. utils/src/dirs.ts:350-386,644-649 moves
+ * plugins under $XDG_DATA_HOME/omp (Linux and macOS) when that exists. The registries feed claude-plugins and,
+ * independently of that provider's toggle, agent-plugins (discovery/agent-plugins.ts:55-82), so they are
+ * screened whatever disabledProviders says.
+ */
+function failClosedOnPluginRoots(cwd: string): void {
+	const home = os.homedir();
+	const pluginDirs = [path.join(home, ".omp", "plugins")];
+	if ((process.platform === "linux" || process.platform === "darwin") && ENV.XDG_DATA_HOME) pluginDirs.push(path.join(ENV.XDG_DATA_HOME, "omp", "plugins"));
+	// resolveActiveProjectRegistryPath: nearest .omp/ dir below home, else nearest .git anchor.
+	const anchor = (marker: string) => {
+		for (let dir = path.resolve(cwd); dir !== home; dir = path.dirname(dir)) {
+			if (fs.existsSync(path.join(dir, marker)) && (marker !== ".omp" || isDir(path.join(dir, marker)))) return dir;
+			if (path.dirname(dir) === dir) return undefined;
+		}
+	};
+	const project = anchor(".omp") ?? anchor(".git");
+	if (project) pluginDirs.push(path.join(project, ".omp", "plugins"));
+	const candidates = pluginDirs.flatMap(d => [path.join(d, "node_modules"), path.join(d, "installed_plugins.json")]);
+	candidates.push(path.join(claudeDir(), "plugins", "installed_plugins.json"));
+	for (const p of candidates) if (fs.existsSync(p)) errors.push(`UNSUPPORTED agent root ${p} (extension/plugin agents not mirrored)`);
+}
+
+/** config/claude-paths.ts:10-17: trimmed CLAUDE_CONFIG_DIR, else ~/.claude. */
+const claudeDir = () => (ENV.CLAUDE_CONFIG_DIR?.trim() ? path.resolve(ENV.CLAUDE_CONFIG_DIR.trim()) : path.join(os.homedir(), ".claude"));
+
+// ---------------------------------------------------------------- code surfaces
+
+const entriesOf = (dir: string): Dirent[] => {
+	try {
+		return fs.readdirSync(dir, { withFileTypes: true });
+	} catch {
+		return [];
+	}
+};
+/** What a path is after following symlinks, like the native loaders' stat. */
+const kindOf = (p: string) => {
+	try {
+		const s = fs.statSync(p);
+		return s.isDirectory() ? "dir" : s.isFile() ? "file" : "other";
+	} catch {
+		return "missing";
+	}
+};
+const HOOK_FILE = /\.(ts|js)$/; // extensions/loader.ts:522 isExtensionFile
+const TOOL_FILE = /\.(ts|js|mjs|cjs)$/; // custom-tools/loader.ts:261
+
+/**
+ * A native extensions dir (discovery/helpers.ts:836-916): direct *.ts/*.js files, or packages in subdirectories.
+ * `source` reads it as a chezmoi source dir: entries map to their target names and must deploy as stored.
+ */
+function checkExtensionsDir(dir: string, source = false): void {
+	for (const e of entriesOf(dir)) {
+		const p = path.join(dir, e.name);
+		const kind = kindOf(p);
+		const target = source ? chezmoiTarget(e.name) : { name: e.name, opaque: false };
+		if (kind === "dir") errors.push(`UNSUPPORTED extension package ${p} (not mirrored)`);
+		else if (kind !== "file" || !HOOK_FILE.test(target.name)) continue;
+		else if (target.opaque) errors.push(`UNSUPPORTED source ${p} (chezmoi template, symlink or script not mirrored)`);
+		else {
+			const digest = createHash("sha256").update(fs.readFileSync(p)).digest("hex");
+			if (!REVIEWED_EXTENSIONS[digest]) errors.push(`UNSUPPORTED extension ${p} sha256 ${digest} is not a reviewed module`);
+		}
+	}
+}
+
+/** Hooks and custom tools: every module, or any subdirectory (tool packages), fails closed. */
+function flagCode(dir: string, file: RegExp, what: string): void {
+	for (const e of entriesOf(dir)) {
+		const p = path.join(dir, e.name);
+		const kind = kindOf(p);
+		if (kind === "dir" || (kind === "file" && file.test(e.name))) errors.push(`UNSUPPORTED ${what} ${p} (not mirrored)`);
+	}
+}
+
+/** discovery/builtin.ts:508-529: a config dir's settings.json `extensions` list loads more modules. */
+function checkSettingsJson(file: string): void {
+	if (kindOf(file) !== "file") return;
+	let data: any;
+	try {
+		data = JSON.parse(fs.readFileSync(file, "utf8"));
+	} catch {
+		return; // tryParseJson: unparseable settings.json contributes nothing
+	}
+	if (Array.isArray(data?.extensions) && data.extensions.length) errors.push(`UNSUPPORTED extensions configured in ${file}: ${data.extensions.join(", ")}`);
+}
+
+/**
+ * Code a child session loads beyond the built-in tools: native extension modules and settings.json lists
+ * (discovery/builtin.ts:469-567), hooks loaded as extensions (extensions/loader.ts:617-629 over builtin.ts:680-728,
+ * claude.ts:377-426, codex.ts:401-452) and custom tools (custom-tools/loader.ts:239-282 over builtin.ts:739-844,
+ * claude.ts:428-470, codex.ts:454-500). Subagents inherit them (sdk.ts:648-672) and their tools join even an
+ * explicit tool list (sdk.ts:3937-3950). Roots are over-approximated: provider toggles are ignored.
+ */
+function checkLiveCode(settings: any, agentDir: string, cwd: string): void {
+	const home = os.homedir();
+	const native = [agentDir];
+	if (nonEmptyDir(path.join(cwd, ".omp"))) native.push(path.join(cwd, ".omp"));
+	for (const d of native) {
+		checkExtensionsDir(path.join(d, "extensions"));
+		checkSettingsJson(path.join(d, "settings.json"));
+		for (const kind of ["pre", "post"]) flagCode(path.join(d, "hooks", kind), HOOK_FILE, "hook");
+		flagCode(path.join(d, "tools"), TOOL_FILE, "custom tool");
+	}
+	for (const d of [claudeDir(), path.join(cwd, ".claude")]) {
+		for (const kind of ["pre", "post"]) flagCode(path.join(d, "hooks", kind), HOOK_FILE, "hook");
+		flagCode(path.join(d, "tools"), TOOL_FILE, "custom tool");
+	}
+	for (const d of [path.join(home, ".codex"), path.join(cwd, ".codex")]) {
+		flagCode(path.join(d, "hooks"), HOOK_FILE, "hook");
+		flagCode(path.join(d, "tools"), TOOL_FILE, "custom tool");
+	}
+	checkConfiguredExtensions(settings);
+}
+
+/** extensions/loader.ts:641-658: the merged `extensions` setting adds explicit module paths. */
+function checkConfiguredExtensions(settings: any): void {
+	if (Array.isArray(settings.extensions) && settings.extensions.length) errors.push(`UNSUPPORTED extensions configured: ${settings.extensions.join(", ")}`);
+}
+
+/** A chezmoi source name's target name, and whether chezmoi deploys something other than this entry as-is. */
+function chezmoiTarget(name: string) {
+	let n = name;
+	let opaque = n.endsWith(".tmpl");
+	if (opaque) n = n.slice(0, -5);
+	let symlink = false;
+	for (let m; (m = n.match(/^(after|before|create|empty|encrypted|exact|executable|external|modify|once|onchange|private|readonly|remove|run|symlink)_/)); ) {
+		if (m[1] === "symlink") symlink = true;
+		if (["create", "encrypted", "external", "modify", "remove", "run", "symlink"].includes(m[1])) opaque = true;
+		n = n.slice(m[0].length);
+	}
+	if (n.startsWith("literal_")) n = n.slice(8);
+	else if (n.startsWith("dot_")) n = `.${n.slice(4)}`;
+	return { name: n, opaque, symlink, template: name.endsWith(".tmpl") };
+}
+
+/**
+ * Root mode: the same native surfaces in a chezmoi source agent dir; any template, symlink or script entry there
+ * fails closed. The local profile's symlink_extensions.tmpl links the default profile's extensions dir, which is
+ * checked in its place.
+ */
+function checkSourceCode(settings: any, agentDir: string, defaultAgentDir: string): void {
+	const scan = (dir: string, onlyExtensions: boolean) => {
+		for (const e of entriesOf(dir)) {
+			const t = chezmoiTarget(e.name);
+			const p = path.join(dir, e.name);
+			if (t.name === "extensions") {
+				const linksDefault =
+					t.symlink && t.template && dir !== defaultAgentDir && fs.readFileSync(p, "utf8").trim() === "{{ .chezmoi.homeDir }}/.omp/agent/extensions";
+				if (linksDefault) scan(defaultAgentDir, true);
+				else if (t.opaque) errors.push(`UNSUPPORTED source ${p} (chezmoi template, symlink or script not mirrored)`);
+				else checkExtensionsDir(p, true);
+			} else if (onlyExtensions) continue;
+			else if (t.name === "hooks" || t.name === "tools") {
+				if (t.opaque || kindOf(p) !== "dir" || nonEmptyDir(p)) errors.push(`UNSUPPORTED source ${p} (${t.name} not mirrored)`);
+			} else if (t.name === "settings.json") {
+				if (t.opaque) errors.push(`UNSUPPORTED source ${p} (chezmoi template, symlink or script not mirrored)`);
+				else checkSettingsJson(p);
+			}
+		}
+	};
+	scan(agentDir, false);
+	checkConfiguredExtensions(settings);
+}
+
+/** task/discovery.ts:86-177: project, user, (plugins), bundled; first definition of a name wins. */
+function discover(dirs: { dir: string; source: Agent["source"] }[]): Agent[] {
+	const found = new Map<string, Agent>();
+	for (const { dir, source } of dirs) {
+		for (const file of agentFiles(dir)) {
+			if (file.endsWith(".tmpl")) {
+				errors.push(`TEMPLATE unsupported ${file}`);
+				continue;
+			}
+			const agent = parseAgent(file, source);
+			if (!agent) continue;
+			const prev = found.get(agent.name);
+			if (prev) {
+				if (prev.source !== agent.source) errors.push(`SHADOW ${agent.name} ${prev.source} ${prev.file} shadows ${agent.source} ${agent.file}`);
+				continue;
+			}
+			found.set(agent.name, agent);
+		}
+	}
+	for (const agent of BUNDLED) if (!found.has(agent.name)) found.set(agent.name, agent);
+	return [...found.values()];
+}
+
+// ---------------------------------------------------------------- model selection
+
+/** tui/src/overlays/model-selector.ts:23-53 with MAX_THINKING_SUFFIX_OPTIONS (max and auto allowed). */
+function splitSuffix(pattern: string, minColon = -1): { base: string; level?: string } {
+	const at = pattern.lastIndexOf(":");
+	if (at <= minColon) return { base: pattern };
+	const raw = pattern.slice(at + 1);
+	const level = raw === "auto" ? "auto" : parseSelector(raw, SELECTORS);
+	return level ? { base: pattern.slice(0, at), level } : { base: pattern };
+}
+
+/** model-resolver.ts:1040-1043 */
+function rolePrefixLength(v: string): number | undefined {
+	if (v === "*" || v.startsWith("*:")) return 0;
+	if (v.startsWith("@")) return 1;
+	if (v.startsWith("pi/")) return 3;
+	return undefined;
+}
+
+/** model-resolver.ts:1045-1053: only prefixed selectors are role aliases. */
+function roleAlias(v: string, settings: any): string | undefined {
+	const n = v.trim();
+	const len = rolePrefixLength(n);
+	if (len === undefined) return undefined;
+	const candidate = n === "*" ? "default" : n.slice(len);
+	return ROLE_IDS.has(candidate) || getModelRole(settings, candidate) !== undefined ? candidate : undefined;
+}
+
+const patternList = (v: string | string[] | undefined) => (v === undefined ? [] : (Array.isArray(v) ? v : [v]).flatMap(p => p.split(",")).map(p => p.trim()).filter(Boolean));
+
+/** model-resolver.ts:1131-1136: priority.json defaults are not mirrored; reaching them fails closed. */
+function priorityDefaults(role: string): string[] {
+	if (ROLE_IDS.has(role)) errors.push(`MODEL role ${role} falls back to priority.json defaults (not mirrored)`);
+	return [];
+}
+
+/** model-resolver.ts:1139-1170 */
+function resolveNested(value: string, outerRole: string, settings: any, visited: Set<string>): string[] {
+	const out: string[] = [];
+	for (const pattern of patternList(value)) {
+		const { base, level } = splitSuffix(pattern, rolePrefixLength(pattern) ?? 3);
+		const alias = roleAlias(base, settings);
+		if (!alias) out.push(pattern);
+		else if (visited.has(alias)) out.push(...priorityDefaults(outerRole).map(p => (level ? `${p}:${level}` : p)));
+		else out.push(...(resolveRolePattern(pattern, settings, new Set(visited)) ?? []));
+	}
+	return out;
+}
+
+/** model-resolver.ts:1183-1226 */
+function resolveRolePattern(value: string, settings: any, visited = new Set<string>()): string[] | undefined {
+	const normalized = value.trim();
+	if (!normalized) return undefined;
+	const { base, level } = splitSuffix(normalized, rolePrefixLength(normalized) ?? 3);
+	const role = roleAlias(base, settings);
+	if (!role) return [normalized];
+	if (visited.has(role)) return undefined;
+	visited.add(role);
+	const configured = getModelRole(settings, role);
+	const fb = ROLE_CONFIGURED_FALLBACK[role];
+	const fallback =
+		configured || !fb || (fb.configuredOnly && !getModelRole(settings, fb.role)) ? undefined : resolveRolePattern(`@${fb.role}`, settings, new Set(visited));
+	let resolved: string[];
+	if (configured) resolved = resolveNested(configured, role, settings, visited);
+	else if (fallback) resolved = fallback;
+	else if (ROLE_IDS.has(role) && (role === "smol" || role === "slow") && getModelRole(settings, "default"))
+		resolved = resolveNested(getModelRole(settings, "default")!, role, settings, visited); // :1172-1181
+	else resolved = [];
+	if (resolved.length === 0) resolved = priorityDefaults(role);
+	if (resolved.length === 0) return undefined;
+	return level ? resolved.map(p => `${p}:${level}`) : resolved;
+}
+
+/** model-resolver.ts:1241-1250 */
+const resolvePatterns = (v: string | string[] | undefined, settings: any) => patternList(v).flatMap(p => resolveRolePattern(p, settings) ?? []);
+
+/** model-resolver.ts:1084-1093 */
+const INHERITS = new Set(["default", "@default", "*", "pi/default", "@task", "pi/task"]);
+
+/** model-resolver.ts:1266-1298 (requestModel is a per-call override; not modelled). */
+function candidatePatterns(agent: Agent, settings: any, parent: string): { patterns: string[]; via: string } {
+	const override = resolvePatterns(settings.task.agentModelOverrides?.[agent.name], settings);
+	if (override.length) return { patterns: override, via: "override" };
+	const declared = patternList(agent.model);
+	const configured = resolvePatterns(agent.model, settings);
+	const single = declared.length === 1 ? declared[0] : undefined;
+	if (configured.length && (single === "@task" || single === "pi/task" || !(single && INHERITS.has(single)))) return { patterns: configured, via: "agent" };
+	return { patterns: resolvePatterns(parent || getModelRole(settings, "default"), settings), via: "parent" };
+}
+
+/**
+ * task/executor.ts:3831-3841 with config/model-resolver.ts:1342-1354 and task/prewalk.ts: the prewalk target
+ * pattern, or undefined when the child keeps its model. task.agentPrewalk decides first ("off"/"false" wins,
+ * "on"/"true" takes the agent's own target or @smol, anything else is the target); then the agent's `prewalk`;
+ * the bundled task agent follows task.prewalk.
+ */
+function prewalkPattern(agent: Agent, settings: any): string | undefined {
+	const own = typeof agent.prewalk === "string" && agent.prewalk.trim() ? agent.prewalk.trim() : undefined;
+	const fallback = agent.prewalk ?? (gate(settings, "task.prewalk") === true && agent.source === "bundled" && agent.name === "task" ? true : undefined);
+	const raw = gate(settings, "task.agentPrewalk")?.[agent.name];
+	const override = typeof raw === "string" ? raw.trim() : undefined;
+	if (override) {
+		const lowered = override.toLowerCase();
+		if (lowered === "off" || lowered === "false") return undefined;
+		if (lowered === "on" || lowered === "true") return own ?? "@smol";
+		return override;
+	}
+	if (fallback === true) return "@smol";
+	return typeof fallback === "string" && fallback.trim() ? fallback.trim() : undefined;
+}
+
+interface Match {
+	model: string;
+	level?: string;
+	explicit: boolean;
+	warning?: string;
+}
+
+/** model-resolver.ts:902-985 restricted to exact provider/id matches; fuzzy matching fails closed. */
+function matchPattern(pattern: string, catalog: any[] | undefined): Match | "fuzzy" | undefined {
+	const exact = (p: string) => (catalog ? catalog.some(m => `${m.provider}/${m.id}` === p) : /^[^/\s:]+\/[^\s:]+$/.test(p));
+	if (exact(pattern)) return { model: pattern, explicit: false };
+	const { base, level } = splitSuffix(pattern);
+	if (level) {
+		const inner = matchPattern(base, catalog);
+		if (inner && inner !== "fuzzy") return inner.warning ? inner : { model: inner.model, level, explicit: true };
+		return inner;
+	}
+	const colon = pattern.lastIndexOf(":");
+	if (colon !== -1) {
+		const inner = matchPattern(pattern.slice(0, colon), catalog);
+		if (inner && inner !== "fuzzy") return { model: inner.model, explicit: false, warning: `invalid thinking suffix in ${pattern}` };
+	}
+	return "fuzzy";
+}
+
+// ---------------------------------------------------------------- thinking and grants
+
+const modelOf = (catalog: any[] | undefined, id: string | undefined) => catalog?.find(m => `${m.provider}/${m.id}` === id);
+/** catalog/src/model-thinking.ts:23-28 getSupportedEfforts: the declared order, unfiltered. */
+const ladderOf = (m: any): string[] => (m?.reasoning ? (m.thinking ?? []) : []);
+
+/** catalog/src/model-thinking.ts:35-65 clampThinkingLevelForModel for a model present in the catalog. */
+function clampLevel(level: string, m: any): string | undefined {
+	if (!m.reasoning) return undefined;
+	const levels = ladderOf(m);
+	if (levels.includes(level)) return level;
+	const requested = EFFORTS.indexOf(level);
+	if (requested === -1) return undefined;
+	// The native loop stops at the first effort above the request, so an unsorted ladder clamps as declared.
+	let clamped: string | undefined;
+	for (const effort of levels) {
+		if (EFFORTS.indexOf(effort) > requested) break;
+		clamped = effort;
+	}
+	return clamped ?? levels[0];
+}
+
+/**
+ * --catalog evidence, written by omp-baseline or omp-agent-smoke from native runs in the configuration being
+ * checked: `omp models --json` (cli/models-cli.ts:222-232) with its stderr, `omp config list --json`
+ * (cli/config-cli.ts:200-221: every setting's effective value after Settings.init, i.e. migrations, the
+ * config.yaml fallback, project null-role clearing, path-scoped rows, overlays and env overrides), and the omp
+ * version, profile and models.yml covered. Native loading rejects an invalid models.yml whole
+ * (config/model-registry.ts:1516-1528) and the JSON listing reports that only on stderr, so the evidence, not a
+ * schema mirror, decides whether models.yml supplies any default. Evidence for another version, profile or
+ * models.yml is rejected; evidence whose settings disagree with this mirror fails per setting (compareSettings).
+ */
+function loadCatalog(file: string, version: string | undefined, profile: string, modelsFile: string, disabled: string[]) {
+	const reject = (msg: string) => {
+		errors.push(`CATALOG ${file} ${msg}`);
+		return { catalog: undefined, modelsValid: false, native: undefined };
+	};
+	let ev: any;
+	try {
+		ev = JSON.parse(fs.readFileSync(file, "utf8"));
+	} catch (e) {
+		return reject(`unreadable: ${e}`);
+	}
+	if (!ev || !Array.isArray(ev.models) || typeof ev.ompVersion !== "string" || typeof ev.profile !== "string" || typeof ev.stderr !== "string" || !(typeof ev.modelsYml === "string" || ev.modelsYml === null) || !ev.settings || typeof ev.settings !== "object")
+		return reject("is not native catalog evidence (models, settings, ompVersion, profile, modelsYml, stderr)");
+	if (ev.ompVersion !== version) return reject(`was captured on omp ${ev.ompVersion}, checking ${version ?? "an unknown version"}`);
+	if (ev.profile !== profile) return reject(`was captured for profile ${ev.profile}, checking ${profile}`);
+	const current = fs.existsSync(modelsFile) ? fs.readFileSync(modelsFile, "utf8") : null;
+	if (ev.modelsYml !== current) return reject(`was captured from a different ${modelsFile}`);
+	const rejected = ev.stderr.match(/models\.yml validation failed[^\n]*\n?([^\n]*)/);
+	if (rejected) errors.push(`MODELS ${modelsFile} rejected by native loading, custom models and overrides discarded: ${rejected[1].trim()}`);
+	return { catalog: ev.models.filter((m: any) => !disabled.includes(m.provider)) as any[], modelsValid: !rejected, native: ev.settings as Record<string, any> };
+}
+
+/** Canonical JSON: object keys sorted, so equal settings compare equal whatever their file order. */
+const canon = (v: unknown): string =>
+	JSON.stringify(v, (_, x) => (x && typeof x === "object" && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => a.localeCompare(b))) : x));
+
+/** modelRoles as getModelRole reads them: strings, lists joined with ",", trimmed; others dropped. */
+const roleMap = (v: any) =>
+	Object.fromEntries(Object.keys(v && typeof v === "object" ? v : {}).flatMap(r => {
+		const s = getModelRole({ modelRoles: v }, r);
+		return s ? [[r, s]] : [];
+	}));
+
+/**
+ * Every setting this mirror reads must equal the native effective value, compared before the PI_*_MODEL role
+ * overrides that only main.ts:1854-1863 applies (`config list` never does). A mismatch means a settings input
+ * the mirror does not model, so the run fails instead of trusting either side.
+ */
+function compareSettings(settings: any, native: Record<string, any>): void {
+	const ids = [...Object.keys(GATE_DEFAULTS), "modelRoles", "task.agentModelOverrides", "task.disabledAgents", "task.maxEffort", "disabledProviders", "extensions"];
+	for (const id of ids) {
+		if (!native[id] || !("value" in native[id])) {
+			errors.push(`SETTINGS ${id} missing from native evidence`);
+			continue;
+		}
+		const mine = id === "modelRoles" ? roleMap(settings.modelRoles) : gate(settings, id);
+		const theirs = id === "modelRoles" ? roleMap(native[id].value) : native[id].value;
+		if (canon(mine) !== canon(theirs)) errors.push(`SETTINGS ${id} mirror ${canon(mine)} native ${canon(theirs)}`);
+	}
+}
+
+/**
+ * thinking.defaultLevel from models.yml. config/model-patch.ts:271,320-323: a modelOverride's thinking
+ * replaces the custom model's thinking object whole, so its own defaultLevel (or none) is what counts.
+ * `omp models --json` omits it and discovered providers (e.g. openai-codex) set it at runtime.
+ */
+function modelDefaultLevel(models: any, id: string | undefined): string | undefined {
+	if (!id) return undefined;
+	const slash = id.indexOf("/");
+	const provider = models?.providers?.[id.slice(0, slash)];
+	const modelId = id.slice(slash + 1);
+	const override = provider?.modelOverrides?.[modelId];
+	const custom = Array.isArray(provider?.models) ? provider.models.find((m: any) => m?.id === modelId) : undefined;
+	const thinking = override?.thinking !== undefined ? override.thinking : custom?.thinking;
+	const level = thinking?.defaultLevel;
+	return typeof level === "string" ? level : undefined;
+}
+
+/** tui/src/thinking.ts:287-321 resolveTaskEffortLevel */
+function taskEffort(agent: string, m: any, effort: string, ceiling: string): string | undefined {
+	const supported = m ? ladderOf(m) : EFFORTS;
+	if (!supported.length) return undefined;
+	const pick = effort === "lo" ? supported[0] : effort === "hi" ? supported.at(-1)! : supported[(supported.length - 1) >> 1];
+	const cap = supported.findLast(l => EFFORTS.indexOf(l) <= EFFORTS.indexOf(ceiling));
+	if (cap === undefined) {
+		errors.push(`EFFORT ${agent} has no supported effort at or below task.maxEffort=${ceiling}`);
+		return undefined;
+	}
+	return EFFORTS.indexOf(pick) > EFFORTS.indexOf(cap) ? cap : pick;
+}
+
+/**
+ * task/executor.ts:3800-3818, then sdk.ts:1952-1971 (a subagent's model is explicit, so the default role's
+ * selector is skipped: selected model's thinking.defaultLevel, then defaultThinkingLevel) and
+ * tui/src/thinking.ts:122-133 resolveThinkingLevelForModel.
+ */
+function resolveThinking(agent: Agent, match: Match | undefined, settings: any, models: any, catalog: any[] | undefined, effort?: string) {
+	const m = modelOf(catalog, match?.model);
+	if (effort) {
+		if (!catalog) errors.push(`UNVERIFIED ${agent.name} effort mapping needs --catalog`);
+		else {
+			const level = taskEffort(agent.name, m, effort, settings.task.maxEffort ?? "max");
+			if (level) return { level, layer: "caller-effort", clamp: "catalog" };
+		}
+	}
+	let level: string;
+	let layer: string;
+	if (match?.explicit) [level, layer] = [match.level!, "selector-suffix"];
+	else if (agent.thinking) [level, layer] = [agent.thinking, "frontmatter"];
+	else {
+		const fallback = modelDefaultLevel(models, match?.model);
+		if (!fallback) {
+			// The global default applies only when the model has no defaultLevel, which is not knowable offline.
+			errors.push(`UNVERIFIED ${agent.name} thinking falls to the model default of ${match?.model ?? "an unresolved model"}; no thinking.defaultLevel in a natively validated models.yml`);
+			return { level: null, layer: "model-default", clamp: "unverified" };
+		}
+		[level, layer] = [fallback, "model-default"];
+	}
+	if (level === "auto" || level === "inherit") return { level, layer, clamp: "runtime" };
+	if (level === "off") return { level, layer, clamp: "none" };
+	// Without catalog evidence the clamp is unknown (a models.yml override can narrow any ladder); main fails
+	// contract agents on it. Native passes the request through only for a model the registry lacks (:39-41).
+	if (!m) return { level, layer, clamp: "unverified" };
+	return { level: clampLevel(level, m) ?? "off", layer, clamp: "catalog" };
+}
+
+/**
+ * Schema defaults (each register() at the pinned tag) of the settings this mirror reads beyond DEFAULTS: tool
+ * gates, provider toggles, and the runtime branches that fail closed (prewalk, retry model fallback, Code Mode).
+ */
+const GATE_DEFAULTS: Record<string, unknown> = {
+	"todo.enabled": true, "glob.enabled": true, "grep.enabled": true, "astGrep.enabled": false, "astEdit.enabled": true,
+	"find.enabled": "auto", "debug.enabled": true, "launch.enabled": true, "checkpoint.enabled": false, "github.enabled": false,
+	"web_search.enabled": true, "security.enabled": false, "ask.enabled": true, "async.enabled": true, "tools.xdev": true,
+	"lsp.enabled": true, "task.enableLsp": false, "bash.enabled": true, "ida.enabled": true, "goal.enabled": true,
+	externalThinking: false, "autolearn.enabled": false, "task.maxRecursionDepth": 2, "memory.backend": "off",
+	"compaction.experimentalContextManagement": false, "eval.py": true, "eval.js": true,
+	enabledProviders: [], "task.prewalk": false, "task.agentPrewalk": {}, "retry.enabled": true, "retry.modelFallback": true,
+	"retry.usageAwareFallback": false, "providers.openai-codex.codeMode": "off",
+};
+/** Setting env overrides the mirror applies (eval/settings.ts:12,25); no other read setting declares one. */
+const SETTING_ENV: Record<string, string> = { "eval.py": "PI_PY", "eval.js": "PI_JS" };
+
+/** Effective value: env override, then the merged layers (null counts as unset, settings.ts:470-475), then default. */
+function gate(settings: any, id: string): any {
+	const env = SETTING_ENV[id] ? envFlag(SETTING_ENV[id]) : undefined;
+	if (env !== undefined) return env;
+	let v = settings;
+	for (const k of id.split(".")) v = v && typeof v === "object" ? v[k] : undefined;
+	return v === undefined || v === null ? GATE_DEFAULTS[id] : v;
+}
+
+/**
+ * Tools a depth-1 child of a top-level session can call. task/executor.ts:3562-3610 builds the list,
+ * tools/index.ts:628-815 resolveBuiltinToolPlan auto-includes and gates it, :860-942 createTools drops
+ * factories that return null and adds the xd:// write transport. A gate that depends on runtime state
+ * (installed binaries, judge role, model support, prewalk) is reported as conditional, never as callable.
+ */
+function grants(agent: Agent, settings: any, restricted: boolean, mcpServers: string[]) {
+	const on = (id: string) => gate(settings, id) === true;
+	const maxDepth = Number(gate(settings, "task.maxRecursionDepth"));
+	const canSpawn = (depth: number) => maxDepth < 0 || depth < maxDepth; // task/types.ts:222
+	const childDepth = 1;
+	const atMax = maxDepth >= 0 && childDepth >= maxDepth;
+	let names = agent.tools ? [...agent.tools] : undefined;
+	if (names && agent.spawns !== undefined && !names.includes("task") && !atMax) names.push("task");
+	if (atMax && names) names = names.filter(t => t !== "task");
+	if (names?.includes("exec")) {
+		names = names.filter(t => t !== "exec");
+		if (on("eval.py") || on("eval.js")) names.push("eval");
+		names = [...new Set([...names, "bash"])];
+	}
+	if (names && !restricted && !names.includes("wait") && (names.includes("task") || names.includes("bash"))) names.push("wait");
+
+	// executor.ts passes `names` as the session's explicit toolNames; `requested` is the createTools plan.
+	const requested = restricted ? [...(names ?? [])] : names && [...names];
+	const backend = gate(settings, "memory.backend");
+	const contextNotes = on("compaction.experimentalContextManagement");
+	if (requested && on("checkpoint.enabled")) {
+		if (requested.includes("checkpoint") && !requested.includes("rewind")) requested.push("rewind");
+		else if (requested.includes("rewind") && !requested.includes("checkpoint")) requested.push("checkpoint");
+	}
+	if (requested && !restricted) {
+		const add = (t: string) => !requested.includes(t) && requested.push(t);
+		if (contextNotes && requested.includes("read") && requested.includes("grep")) ["context_notes", "new_context"].forEach(add);
+		if (requested.includes("grep") && on("astGrep.enabled")) add("ast_grep");
+		if (requested.includes("edit") && on("astEdit.enabled")) add("ast_edit");
+		if (["hindsight", "mnemopi"].includes(backend)) ["recall", "retain", "reflect"].forEach(add);
+		if (backend === "mnemopi") add("memory_edit");
+		if (on("externalThinking")) add("think");
+		// Goal mode and autolearn auto-includes apply only to an active goal or taskDepth 0.
+	}
+	// executor.ts:3952 requireYieldTool
+	if (requested && !requested.includes("yield")) requested.push("yield");
+
+	// tools/index.ts:740-802 isToolAllowed plus each factory's createIf; a string is a runtime condition.
+	const lazyEval = !on("eval.js") && on("eval.py");
+	const allowed = (name: string): boolean | string => {
+		switch (name) {
+			case "goal":
+				return on("goal.enabled") && !restricted ? "goal state of the child session" : false;
+			case "lsp":
+				return on("task.enableLsp") && on("lsp.enabled"); // task/index.ts:807 child enableLsp
+			case "bash":
+				return on("bash.enabled");
+			case "eval":
+				return on("eval.js") || (lazyEval ? "python kernel preflight" : false);
+			case "debug":
+				return on("debug.enabled");
+			case "ida":
+				return on("ida.enabled") ? "IDA install located" : false;
+			case "todo":
+				return on("todo.enabled") ? "prewalk armed" : false; // children require yield
+			case "glob":
+				return on("glob.enabled");
+			case "grep":
+				return on("grep.enabled");
+			case "find": {
+				const mode = gate(settings, "find.enabled"); // tools/jfind/index.ts:46-50
+				return mode === "auto" ? "native judge role" : mode === "on";
+			}
+			case "github":
+				return on("github.enabled") ? "gh available" : false;
+			case "ast_grep":
+				return on("astGrep.enabled");
+			case "ast_edit":
+				return on("astEdit.enabled");
+			case "web_search":
+				return on("web_search.enabled");
+			case "security_scan":
+				return on("security.enabled");
+			case "think":
+				return on("externalThinking") ? "model supports external thinking" : false;
+			case "ask":
+				return false; // ask.ts:580: children run with hasUI false (executor.ts:3994)
+			case "context_notes":
+			case "new_context":
+				return contextNotes ? "experimental context session" : false;
+			case "checkpoint":
+			case "rewind":
+				return on("checkpoint.enabled") && requested !== undefined;
+			case "wait": // irc/messaging.ts:17-21: enabled at depth 1 when the parent can spawn
+				return on("async.enabled") || canSpawn(0) || on("launch.enabled");
+			case "retain":
+			case "recall":
+			case "reflect":
+				return backend === "mnemopi" || (backend === "hindsight" ? "hindsight configured" : false);
+			case "memory_edit":
+				return backend === "mnemopi";
+			case "manage_skill":
+				return on("autolearn.enabled") && requested !== undefined;
+			case "learn":
+				if (!on("autolearn.enabled") || requested === undefined) return false;
+				return ["mnemopi", "local"].includes(backend) || (backend === "hindsight" ? "hindsight configured" : false);
+			case "task":
+				return canSpawn(childDepth);
+			default:
+				return true;
+		}
+	};
+	// `registered` is the createTools registry; `callable` is the session's active set.
+	const registered: string[] = [];
+	const conditional: string[] = [];
+	const add = (t: string) => !registered.includes(t) && registered.push(t);
+	for (const name of requested ?? [...BUILTIN_TOOLS, "think", "yield"]) {
+		if (!CANONICAL_TOOLS.has(name)) {
+			errors.push(`UNSUPPORTED ${agent.name} tool ${name} is not built in (custom and extension tools are not mirrored)`);
+			continue;
+		}
+		const verdict = allowed(name);
+		if (verdict === true) add(name);
+		else if (verdict) conditional.push(name);
+	}
+	// :872-899 device-only write (xd:// devices, no filesystem writes) when read is granted without write;
+	// :918-933 then a deferrable tool (ast_edit) gets a full write only if no write exists yet.
+	const deviceWrite =
+		!restricted && on("tools.xdev") && requested !== undefined && registered.includes("read") && !registered.includes("write");
+	if (!restricted && !deviceWrite && registered.includes("ast_edit") && !registered.includes("write")) add("write");
+	// sdk.ts:3876-3923: an explicit list activates only the requested names plus yield, the session-managed
+	// force-includes (sdk.ts:1284, unrestricted only) and the checkpoint/rewind pair; other registry
+	// auto-includes stay inactive. Without a list every registered tool is active. goal never starts active.
+	let active = (n: string) => n !== "goal";
+	if (names !== undefined) {
+		const explicit = new Set([...names, "yield"]);
+		if (!restricted) for (const n of SESSION_MANAGED) explicit.add(n);
+		if (registered.includes("checkpoint") && !explicit.has("rewind")) explicit.add("rewind");
+		else if (registered.includes("rewind") && !explicit.has("checkpoint")) explicit.add("checkpoint");
+		active = n => n !== "goal" && explicit.has(n);
+	}
+	const callable = registered.filter(active);
+	if (deviceWrite) callable.push("write(xd-devices-only)");
+	const reasons = conditional.filter(active).map(n => `${n} (${allowed(n)})`);
+	// executor.ts:3865-3868: unless restricted, children get proxies for whatever tools the parent's MCP manager
+	// holds at dispatch (executor.ts:939-950), named from each server's tools/list, so they are never certified.
+	return { declared: agent.tools ? [...agent.tools] : null, callable, conditional: reasons, mcp: restricted ? [] : mcpServers };
+}
+
+const FOREIGN_USER = new Set(["cursor", "codex", "claude", "claude-plugins", "gemini", "opencode", "windsurf", "github"]);
+
+/**
+ * MCP servers a fresh session may connect: a superset, reported as runtime-deferred. Native files
+ * (discovery/builtin.ts:212-229) <cwd>/.omp/{mcp.json,.mcp.json} then <agentDir>/{mcp.json,.mcp.json}, minus the
+ * user file's disabledServers and `enabled: false` rows it does not force on (mcp/config.ts:103-175); project
+ * gating, semantic dedupe and the Exa/browser filters only shrink it. Other providers' MCP files are not
+ * mirrored and fail closed when their provider would read them (capability/index.ts:302-315,347-369; user
+ * files of foreign providers are opt-in through enabledProviders).
+ */
+function mcpServers(settings: any, agentDir: string, cwd: string): string[] {
+	const disabled = new Set<string>(settings.disabledProviders);
+	const enabled = new Set<string>(gate(settings, "enabledProviders"));
+	const userOn = (id: string) =>
+		!disabled.has(id) &&
+		(!FOREIGN_USER.has(id) || enabled.has(id) || enabled.has("*") || enabled.has("all") || (id === "claude" && !!ENV.CLAUDE_CONFIG_DIR?.trim()));
+	const home = os.homedir();
+	const foreign: [string, string, boolean][] = [
+		["claude", path.join(ENV.CLAUDE_CONFIG_DIR?.trim() ? claudeDir() : home, ".claude.json"), true],
+		["claude", path.join(claudeDir(), "mcp.json"), true],
+		["claude", path.join(cwd, ".claude", ".mcp.json"), false],
+		["claude", path.join(cwd, ".claude", "mcp.json"), false],
+		["codex", path.join(home, ".codex", "config.toml"), true],
+		["codex", path.join(cwd, ".codex", "config.toml"), false],
+		["gemini", path.join(home, ".gemini", "settings.json"), true],
+		["gemini", path.join(cwd, ".gemini", "settings.json"), false],
+		["cursor", path.join(home, ".cursor", "mcp.json"), true],
+		["cursor", path.join(cwd, ".cursor", "mcp.json"), false],
+		["windsurf", path.join(home, ".codeium", "windsurf", "mcp_config.json"), true],
+		["windsurf", path.join(cwd, ".windsurf", "mcp_config.json"), false],
+		["vscode", path.join(cwd, ".vscode", "mcp.json"), false],
+		["mcp-json", path.join(cwd, "mcp.json"), false],
+		["mcp-json", path.join(cwd, ".mcp.json"), false],
+	];
+	for (const name of ["opencode.json", "opencode.jsonc"]) {
+		foreign.push(["opencode", path.join(home, ".config", "opencode", name), true]);
+		foreign.push(["opencode", path.join(cwd, name), false]);
+		foreign.push(["opencode", path.join(cwd, ".opencode", name), false]);
+	}
+	for (const [id, file, user] of foreign) {
+		if ((user ? userOn(id) : !disabled.has(id)) && fs.existsSync(file)) errors.push(`UNSUPPORTED mcp source ${file} (provider ${id} not mirrored)`);
+	}
+	const names = new Set<string>();
+	if (disabled.has("native")) return [];
+	let lists: any = {};
+	try {
+		lists = JSON.parse(fs.readFileSync(path.join(agentDir, "mcp.json"), "utf8")) ?? {};
+	} catch {}
+	const off = new Set<string>(Array.isArray(lists.disabledServers) ? lists.disabledServers : []);
+	const forced = new Set<string>(Array.isArray(lists.enabledServers) ? lists.enabledServers : []);
+	for (const file of [path.join(cwd, ".omp", "mcp.json"), path.join(cwd, ".omp", ".mcp.json"), path.join(agentDir, "mcp.json"), path.join(agentDir, ".mcp.json")]) {
+		let cfg: any;
+		try {
+			cfg = JSON.parse(fs.readFileSync(file, "utf8"));
+		} catch {
+			continue;
+		}
+		for (const [name, s] of Object.entries<any>(cfg?.mcpServers ?? {})) {
+			if (!off.has(name) && (s?.enabled !== false || forced.has(name))) names.add(name);
+		}
+	}
+	return [...names].sort();
+}
+
+/** config/prompt-templates.ts:118-137 keeps description; extensibility/slash-commands.ts:31-91 adds argument-hint. */
+function checkInert(agentDir: string, live: boolean): void {
+	const kinds: [string, string, Set<string>][] = [
+		["prompts", live ? "prompts" : "private_prompts", new Set(["description"])],
+		["commands", live ? "commands" : "private_commands", new Set(["description", "argumentHint"])],
+	];
+	for (const [kind, sub, consumed] of kinds) {
+		for (const file of agentFiles(path.join(agentDir, sub))) {
+			if (!file.endsWith(".md")) continue;
+			const fm = readFrontmatter(file);
+			for (const key of Object.keys(fm ?? {})) {
+				if (!consumed.has(key)) errors.push(`INERT ${file} key ${key.replace(/[A-Z]/g, c => `-${c.toLowerCase()}`)} not consumed by ${kind} loader`);
+			}
+		}
+	}
+}
+
+// ---------------------------------------------------------------- main
+
+function main(): number {
+	const opts = parseOptions(process.argv.slice(2));
+	const one = (k: string) => opts.get(k)?.[0];
+	const root = one("--root");
+	const live = one("--live") ? path.resolve(one("--live")!) : undefined;
+	// Live: <home>/.omp/agent is the default profile; <home>/.omp/profiles/<name>/agent is <name>. Any other
+	// shape would silently skip the default-profile contracts, so it is a usage error.
+	let profile = one("--profile") ?? "default";
+	if (live) {
+		const parent = path.dirname(live);
+		if (path.basename(live) !== "agent") usage(`--live must be <home>/.omp/agent or <home>/.omp/profiles/<name>/agent: ${live}`);
+		else if (path.basename(parent) === ".omp") profile = "default";
+		else if (path.basename(path.dirname(parent)) === "profiles" && path.basename(path.dirname(path.dirname(parent))) === ".omp") profile = path.basename(parent);
+		else usage(`--live must be <home>/.omp/agent or <home>/.omp/profiles/<name>/agent: ${live}`);
+	}
+	const agentDir = root
+		? path.join(path.resolve(root), profile === "local" ? "home/private_dot_omp/private_profiles/local/private_agent" : "home/private_dot_omp/private_agent")
+		: live!;
+	const cwd = path.resolve(one("--cwd") ?? process.cwd());
+	if (live) ENV = effectiveEnv(agentDir, [cwd, process.cwd()]);
+
+	let version = one("--omp-version")?.replace(/^omp\//, "");
+	if (root) {
+		const manifest = path.join(root, "home/dot_config/decent-angl/omp-baseline-manifest.tsv");
+		version = fs.existsSync(manifest) ? fs.readFileSync(manifest, "utf8").match(/^# omp-version\s+(\S+)/m)?.[1] : undefined;
+	}
+	if (!version) errors.push("VERSION omp version unavailable");
+	else if (!MIRRORED_OMP.includes(version)) errors.push(`VERSION mirror not verified for omp ${version}`);
+
+	const settings = loadSettings(opts, agentDir, !!live);
+	const disabled: string[] = settings.disabledProviders;
+	// config/model-registry.ts:434: custom models and modelOverrides come from <agentDir>/models.yml.
+	const modelsFile = path.join(agentDir, live ? "models.yml" : "private_models.yml");
+	if (!live && fs.existsSync(`${modelsFile}.tmpl`)) errors.push(`TEMPLATE unsupported ${modelsFile}.tmpl`);
+	const catalogFile = one("--catalog");
+	const { catalog, modelsValid, native } = catalogFile
+		? loadCatalog(catalogFile, version, profile, modelsFile, disabled)
+		: { catalog: undefined, modelsValid: false, native: undefined };
+	if (native) compareSettings(settings, native);
+	else if (!catalogFile) errors.push("UNVERIFIED settings merge not confirmed: needs native evidence (--catalog)");
+	const models = modelsValid && fs.existsSync(modelsFile) ? readSettingsFile(modelsFile) : {};
+	// main.ts:1854-1863 with settings.ts:1782-1791: non-empty PI_SMOL/SLOW/PLAN_MODEL replace those roles.
+	for (const role of ["smol", "slow", "plan"]) {
+		const v = ENV[`PI_${role.toUpperCase()}_MODEL`];
+		if (v) settings.modelRoles = { ...settings.modelRoles, [role]: v };
+	}
+	// session/code-mode.ts: Code Mode re-presents a Codex child's tools through eval; not mirrored.
+	if (gate(settings, "providers.openai-codex.codeMode") !== "off") errors.push(`UNSUPPORTED providers.openai-codex.codeMode=${gate(settings, "providers.openai-codex.codeMode")} (Code Mode tool presentation not mirrored)`);
+	// session/turn-recovery.ts:1796,1851: on provider errors a retrying child may switch models.
+	const retrySwitches = gate(settings, "retry.enabled") !== false && (gate(settings, "retry.modelFallback") !== false || gate(settings, "retry.usageAwareFallback") === true);
+
+	const dirs: { dir: string; source: Agent["source"] }[] = [];
+	if (root) {
+		if (one("--project-agents")) dirs.push({ dir: path.resolve(one("--project-agents")!), source: "project" });
+		dirs.push({ dir: path.join(agentDir, "private_agents"), source: "user" });
+		checkSourceCode(settings, agentDir, path.join(path.resolve(root), "home/private_dot_omp/private_agent"));
+	} else {
+		const project = nearestProjectAgents(cwd);
+		if (project) dirs.push({ dir: project, source: "project" });
+		dirs.push({ dir: path.join(agentDir, "agents"), source: "user" });
+		failClosedOnPluginRoots(cwd);
+		checkLiveCode(settings, agentDir, cwd);
+	}
+	const agents = discover(dirs);
+	const byName = new Map(agents.map(a => [a.name, a]));
+	const parent = one("--parent") ?? getModelRole(settings, "default") ?? "";
+	const restricted = one("--dispatch") === "restricted";
+	const mcp = live ? mcpServers(settings, agentDir, cwd) : [];
+	const contracts = profile === "default" ? CONTRACTS : {};
+
+	for (const [name, c] of Object.entries(contracts)) {
+		const a = byName.get(name);
+		if (!a && !c.optional) errors.push(`MISSING ${name} expected ${c.source} definition; effective none`);
+		else if (a && a.source !== c.source) errors.push(`MISSING ${name} expected ${c.source} definition; effective ${a.source} ${a.file}`);
+	}
+
+	const reports = agents.map(agent => {
+		const { patterns, via } = candidatePatterns(agent, settings, parent);
+		let match: Match | undefined;
+		let pattern: string | undefined;
+		for (const p of patterns) {
+			const r = matchPattern(p, catalog);
+			if (r === "fuzzy") {
+				errors.push(`MODEL ${agent.name} pattern ${p} needs fuzzy matching (not mirrored)`);
+				break;
+			}
+			if (r) {
+				[match, pattern] = [r, p];
+				break;
+			}
+		}
+		const thinking = resolveThinking(agent, match, settings, models, catalog, one("--effort"));
+		const tools = grants(agent, settings, restricted, mcp);
+		const prewalk = prewalkPattern(agent, settings);
+		const c = contracts[agent.name];
+		if (c) {
+			const model = match?.model ?? "";
+			if (c.model.startsWith("^") ? !new RegExp(c.model).test(model) : c.model !== model) errors.push(`MODEL ${agent.name} expected ${c.model} resolved ${match?.model ?? "none"} via ${via}`);
+			else if (via === "parent") errors.push(`MODEL ${agent.name} resolves only through the parent session model (not fixed by policy)`);
+			if (c.thinking !== thinking.level) errors.push(`EFFORT ${agent.name} expected ${c.thinking} resolved ${thinking.level} via ${thinking.layer} (${pattern ?? "none"})`);
+			else if (thinking.clamp === "unverified" && thinking.level !== null)
+				errors.push(`UNVERIFIED ${agent.name} thinking ${thinking.level} unclamped: ${model || "the model"} needs native catalog evidence (--catalog)`);
+			if (c.tools && JSON.stringify(agent.tools ?? null) !== JSON.stringify(c.tools)) errors.push(`TOOLS ${agent.name} declared [${(agent.tools ?? ["<all>"]).join(", ")}] expected [${c.tools.join(", ")}]`);
+			if (prewalk) errors.push(`RUNTIME ${agent.name} prewalk armed (${prewalk}): hands off model and thinking at the first edit`);
+			if (retrySwitches) errors.push(`RUNTIME ${agent.name} retry may switch models (retry.modelFallback/usageAwareFallback)`);
+		}
+		return {
+			name: agent.name,
+			source: agent.source,
+			path: agent.file,
+			declared: tools.declared,
+			callable: tools.callable,
+			conditional: tools.conditional,
+			model: match?.model ?? null,
+			modelVia: via,
+			pattern: pattern ?? null,
+			thinking: thinking.level,
+			thinkingLayer: thinking.layer,
+			clamp: thinking.clamp,
+			auth: "runtime-deferred",
+			prewalk: prewalk ?? null,
+			mcp: tools.mcp,
+			disabled: settings.task.disabledAgents.includes(agent.name),
+		};
+	});
+	checkInert(agentDir, !!live);
+
+	// The static policy is certified only for a fresh depth-1 task dispatch from an ordinary top-level session;
+	// the serving model (auth fallback, model-resolver.ts:1669-1691) and MCP proxy names are runtime-deferred to
+	// omp-agent-smoke, which checks both against this prediction.
+	const deferredMcp = reports.filter(r => r.mcp.length).length;
+	const summary = `POLICY static ${errors.length ? `FAIL (${errors.length})` : "certified"} for depth-1 dispatch; runtime-deferred to omp-agent-smoke: serving model of ${reports.length} agents (auth fallback)${deferredMcp ? `, MCP proxies [${mcp.join(", ")}] for ${deferredMcp} agents` : ""}`;
+	if (opts.has("--json")) console.log(JSON.stringify({ ompVersion: version ?? null, profile, agents: reports, errors, summary }, null, 2));
+	else {
+		for (const r of reports) {
+			console.log(`AGENT ${r.name} ${r.model ?? "none"}:${r.thinking} via ${r.thinkingLayer} source=${r.source} ${r.path}${r.disabled ? " (disabled)" : ""} serving=runtime-deferred`);
+			const conditional = r.conditional.length ? ` conditional [${r.conditional.join(", ")}]` : "";
+			const proxies = r.mcp.length ? ` mcp-proxies runtime-deferred [${r.mcp.join(", ")}]` : "";
+			console.log(`GRANTS ${r.name} declared [${(r.declared ?? ["<all>"]).join(", ")}] callable [${r.callable.join(", ")}]${conditional}${proxies}`);
+		}
+		console.log(summary);
+		for (const e of errors) console.error(e);
+	}
+	return errors.length ? 1 : 0;
+}
+
+try {
+	process.exitCode = main();
+} catch (e) {
+	console.error(e instanceof UsageError ? e.message : `omp-agent-policy: internal error: ${e instanceof Error ? e.stack : e}`);
+	process.exitCode = 2;
+}

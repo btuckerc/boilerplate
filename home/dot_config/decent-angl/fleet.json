@@ -1,6 +1,6 @@
 {
   "hosts": [
-    {"id": "macbook", "ssh": "tucker@macbook"},
+    {"id": "macbook", "ssh": "mac"},
     {"id": "macmini", "ssh": "admin@macmini"},
     {"id": "omarchy", "ssh": "t14"},
     {"id": "nous", "ssh": "tux@nous", "role": "inference",

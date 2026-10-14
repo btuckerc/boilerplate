@@ -15,14 +15,18 @@ LOG_FILE="$STATE_DIR/omp-baseline.log"
 LOCK_DIR="$STATE_DIR/omp-baseline.lock"
 STRICT=false
 OMP_GITHUB_REPO="can1357/oh-my-pi"
+# Probed once at startup: errexit aborts the run if uname fails.
+HOST_OS="$(uname -s)"
 
 usage() {
   cat <<'EOF'
-Usage: omp-baseline <status|validate|apply|pull|check-upstream|upgrade|guard|install-guard|fleet> [options]
+Usage: omp-baseline <status|validate|repair|apply|pull|check-upstream|upgrade|guard|install-guard|fleet> [options]
 
   status          Compare repo, chezmoi source, rendered live files, and version.
-  validate        Run status plus coverage, secret-boundary, and OMP parser checks.
-  apply           Apply the local published source, install its exact pin, validate.
+  validate        Run status plus coverage, secret-boundary, agent-policy, and OMP parser
+                  checks. Observational: never changes files or modes.
+  repair          Restore private runtime modes (and btrfs NOCOW), then validate.
+  apply           Apply the local published source, install its exact pin, repair, validate.
   pull            Reconcile the complete published baseline, then validate OMP.
   check-upstream  Compare the published pin to GitHub latest. Write omp-upstream.
   upgrade [VER]   Move the three pin sites to VER or GitHub latest, install, check OMP.
@@ -69,6 +73,30 @@ cm() {
   fi
 }
 
+# Bun runs the agent-policy checker. Unattended guards lack the interactive
+# PATH, so resolve it through mise first, like cm().
+bun_run() {
+  local candidate
+  for candidate in \
+    "$(command -v mise 2>/dev/null || true)" \
+    "$HOME/.local/bin/mise" \
+    "$HOME/.local/share/mise/bin/mise" \
+    /opt/homebrew/bin/mise \
+    /usr/local/bin/mise \
+    /usr/bin/mise; do
+    if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+      "$candidate" exec -- bun "$@"
+      return
+    fi
+  done
+  if command -v bun >/dev/null 2>&1; then
+    bun "$@"
+  else
+    printf 'bun is unavailable in the unattended environment\n' >&2
+    return 127
+  fi
+}
+
 expand_home() {
   case "$1" in
     "~") printf '%s\n' "$HOME" ;;
@@ -77,14 +105,235 @@ expand_home() {
   esac
 }
 
+# Native omp probes (config get, models, setup) run Settings.init, which hardens
+# agent-dir modes, opens agent.db and quarantines a malformed project
+# .omp/config.yml in its cwd; every run writes logs and natives under ~/.omp.
+# validate must not change live state, so probes run from an empty scratch cwd
+# with HOME moved to a private scratch copy of the files they read. The copy
+# can hold credentials: validate removes it on exit.
+PROBE_ROOT=""
+PROBE_HOME=""
+PROBE_JAIL=()
+# Variables that relocate OMP state (utils/src/dirs.ts; env.ts also maps OMP_*
+# to PI_* when it loads a dotenv file). Probes drop them from the environment,
+# and a copied dotenv file that sets one would point a probe back at live state.
+PROBE_DIR_KEYS='(OMP|PI)_[A-Z0-9_]*(DIR|PROFILE|DB|CACHE)|XDG_[A-Z]+_HOME'
+
+# Print the lines of $1 that match the ERE $2, without a filter process.
+match_lines() {
+  local line
+  while IFS= read -r line; do
+    if [[ $line =~ $2 ]]; then
+      printf '%s\n' "$line"
+    fi
+  done <<<"$1"
+}
+
+probe_copy_env() {
+  [ -f "$1" ] || return 0
+  local rc=0
+  grep -Eq "^[[:space:]]*(export[[:space:]]+)?($PROBE_DIR_KEYS)[[:space:]]*=" "$1" || rc=$?
+  case "$rc" in
+    0)
+      printf 'PROBE   %s sets an OMP directory or profile variable; isolated probes cannot honour it\n' "$1" >&2
+      return 1
+      ;;
+    1) ;;
+    *)
+      printf 'PROBE   probe failed (grep exit %s) on %s\n' "$rc" "$1" >&2
+      return 1
+      ;;
+  esac
+  cp -p "$1" "$2"
+}
+
+# Native omp runs a config value that starts with "!" as `/bin/sh -c` and uses
+# its stdout (config/resolve-config-value.ts:104-105,116-145): models.yml
+# apiKey and headers, auth.broker.url/token in config.yml and stored api_key
+# credentials, including broker-held ones. validate must run none of them, so
+# every probe runs where /bin/sh cannot start: bwrap with a stub bound over the
+# shell on Linux, a sandbox-exec profile denying it on macOS. The jail is
+# proven before use: /bin/sh must fail inside it and true must run.
+probe_jail() {
+  local sh_real bash_path bash_real
+  case "$HOST_OS" in
+    Linux)
+      sh_real="$(readlink -f /bin/sh)" || return 1
+      bash_path="$(command -v bash)" || return 1
+      bash_real="$(readlink -f "$bash_path")" || return 1
+      if ! command -v bwrap >/dev/null 2>&1 || [ "$bash_real" = "$sh_real" ]; then
+        printf 'PROBE   no shell jail: bwrap missing or /bin/sh is bash\n' >&2
+        return 1
+      fi
+      printf '#!%s\nexit 126\n' "$bash_path" >"$PROBE_ROOT/noshell" && chmod 700 "$PROBE_ROOT/noshell" || return 1
+      PROBE_JAIL=(bwrap --dev-bind / / --ro-bind "$PROBE_ROOT/noshell" "$sh_real" --die-with-parent --)
+      ;;
+    Darwin)
+      PROBE_JAIL=(sandbox-exec -p '(version 1)(allow default)(deny process-exec (literal "/bin/sh"))')
+      ;;
+    *)
+      printf 'PROBE   no shell jail for %s\n' "$HOST_OS" >&2
+      return 1
+      ;;
+  esac
+  if ! "${PROBE_JAIL[@]}" true >/dev/null 2>&1 ||
+    "${PROBE_JAIL[@]}" /bin/sh -c : >/dev/null 2>&1; then
+    printf 'PROBE   shell jail failed its self-test (%s)\n' "${PROBE_JAIL[0]}" >&2
+    PROBE_JAIL=()
+    return 1
+  fi
+}
+
+# The jail turns a command-backed value into a missing one, so a probe of a
+# config holding one would report results computed without it. The models and
+# config files copied for a probe that hold such a value fail closed instead
+# (parsed as native does, Bun YAML and JSONC; an unparsable file holding "!"
+# fails too); omp-agent-policy fails closed the same way on every settings
+# layer it mirrors (project files and PI_CONFIG_FILES/--config overlays).
+# Stored credentials are not screened: the jail alone covers them.
+probe_screen() {
+  local rc=0
+  bun_run -e '
+    let bad = 0;
+    const walk = (file, v, at) => {
+      if (typeof v === "string" && v.startsWith("!")) {
+        console.error(`PROBE   ${file}: ${at || "(root)"} is command-backed; validate runs no config command`);
+        bad = 1;
+      } else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) walk(file, x, at ? `${at}.${k}` : k);
+    };
+    for (const file of process.argv.slice(1)) {
+      let text;
+      try { text = require("fs").readFileSync(file, "utf8"); } catch { continue; }
+      let data;
+      try { data = file.endsWith(".json") ? Bun.JSONC.parse(text) : Bun.YAML.parse(text); }
+      catch {
+        if (text.includes("!")) { console.error(`PROBE   ${file}: unparsable and holds "!"; validate runs no config command`); bad = 1; }
+        continue;
+      }
+      walk(file, data, "");
+    }
+    process.exit(bad);
+  ' "$@" || rc=$?
+  [ "$rc" -le 1 ] || printf 'PROBE   config screen failed (bun exit %s)\n' "$rc" >&2
+  return "$rc"
+}
+
+probe_home() {
+  [ -z "$PROBE_HOME" ] || return 0
+  local live="$HOME/.omp" xdg file rel dir
+  for xdg in "${XDG_DATA_HOME:-}" "${XDG_STATE_HOME:-}" "${XDG_CACHE_HOME:-}"; do
+    if [ -n "$xdg" ] && [ -e "$xdg/omp" ]; then
+      printf 'PROBE   %s/omp holds OMP state; isolated probes do not cover XDG layouts\n' "$xdg" >&2
+      return 1
+    fi
+  done
+  PROBE_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/omp-baseline-probe.XXXXXX")" || return 1
+  case "$PROBE_ROOT" in
+    /*) ;;
+    *)
+      printf 'PROBE   scratch root %s is not absolute\n' "$PROBE_ROOT" >&2
+      cleanup_probe_home
+      return 1
+      ;;
+  esac
+  # Project discovery walks every ancestor of the probe cwd.
+  dir="$PROBE_ROOT"
+  while [ "$dir" != / ]; do
+    dir="${dir%/*}"
+    dir="${dir:-/}"
+    if [ -e "$dir/.omp" ]; then
+      printf 'PROBE   %s/.omp would act as project config for isolated probes\n' "${dir%/}" >&2
+      cleanup_probe_home
+      return 1
+    fi
+  done
+  PROBE_HOME="$PROBE_ROOT/home"
+  if ! mkdir -m 700 "$PROBE_ROOT/cwd" "$PROBE_HOME" "$PROBE_HOME/.omp" "$PROBE_HOME/.omp/agent" ||
+    { [ -f "$live/auth-broker.token" ] && ! cp -p "$live/auth-broker.token" "$PROBE_HOME/.omp/"; } ||
+    ! probe_copy_env "$HOME/.env" "$PROBE_HOME/.env" ||
+    ! probe_copy_env "$live/.env" "$PROBE_HOME/.omp/.env" ||
+    ! probe_copy_env "$live/agent/.env" "$PROBE_HOME/.omp/agent/.env"; then
+    printf 'PROBE   scratch HOME setup failed\n' >&2
+    cleanup_probe_home
+    return 1
+  fi
+  for file in "$live/agent"/*.yml "$live/agent"/*.yaml "$live/agent"/*.json \
+    "$live/agent"/agent.db* "$live/agent"/models.db*; do
+    [ -f "$file" ] || continue
+    if ! cp -p "$file" "$PROBE_HOME/.omp/agent/"; then
+      printf 'PROBE   copy failed %s\n' "$file" >&2
+      cleanup_probe_home
+      return 1
+    fi
+  done
+  if ! probe_jail || ! probe_screen "$live/agent"/models.{yml,yaml,json} "$live/agent"/config.{yml,yaml}; then
+    cleanup_probe_home
+    return 1
+  fi
+  if [ -d "$live/python-env" ] && ! ln -s "$live/python-env" "$PROBE_HOME/.omp/python-env"; then
+    printf 'PROBE   scratch HOME setup failed (python-env)\n' >&2
+    cleanup_probe_home
+    return 1
+  fi
+  # mise shims (python, omp) find their tools through HOME.
+  for rel in .config/mise .local/share/mise .local/state/mise; do
+    [ -e "$HOME/$rel" ] || continue
+    if ! mkdir -p "$PROBE_HOME/${rel%/*}" || ! ln -s "$HOME/$rel" "$PROBE_HOME/$rel"; then
+      printf 'PROBE   scratch HOME setup failed (%s)\n' "$rel" >&2
+      cleanup_probe_home
+      return 1
+    fi
+  done
+}
+
+cleanup_probe_home() {
+  case "$PROBE_ROOT" in
+    "${TMPDIR:-/tmp}"/omp-baseline-probe.?*) rm -rf "$PROBE_ROOT" ;;
+  esac
+  PROBE_ROOT=""
+  PROBE_HOME=""
+  PROBE_JAIL=()
+}
+
+# omp in the shell jail (probe_jail) from the scratch cwd (PROBE_CWD if set)
+# against the scratch HOME, default profile, with PI_CONFIG_FILES resolved
+# against the real HOME and cwd. A set PI_CONFIG_FILES that names no file (":")
+# is passed as ":", which keeps a copied dotenv file from filling it
+# (utils/src/env.ts:300-306 fills only unset or empty keys). Callers run it in
+# command substitutions, so validate prepares PROBE_HOME first.
+omp_probe() {
+  if [ -z "$PROBE_HOME" ] || [ "${#PROBE_JAIL[@]}" -eq 0 ]; then
+    printf 'PROBE   scratch HOME or shell jail not prepared\n' >&2
+    return 1
+  fi
+  local overlays="" entry name
+  local -a vars=(HOME="$PROBE_HOME") unset=()
+  for name in $(compgen -e); do
+    if [[ $name =~ ^($PROBE_DIR_KEYS)$ ]]; then
+      unset+=(-u "$name")
+    fi
+  done
+  if [ -n "${PI_CONFIG_FILES:-}" ]; then
+    while IFS= read -r -d : entry; do
+      [ -n "$entry" ] || continue
+      entry="$(expand_home "$entry")"
+      case "$entry" in /*) ;; *) entry="$PWD/$entry" ;; esac
+      overlays="${overlays:+$overlays:}$entry"
+    done <<<"$PI_CONFIG_FILES:"
+    vars+=(PI_CONFIG_FILES="${overlays:-:}")
+  fi
+  (cd "${PROBE_CWD:-$PROBE_ROOT/cwd}" && env ${unset[@]+"${unset[@]}"} "${vars[@]}" "${PROBE_JAIL[@]}" omp "$@")
+}
+
+# 0 in scope, 1 out of scope, 2 unknown scope.
 os_in_scope() {
   case "${1:-all}" in
     ""|all) return 0 ;;
-    linux) [ "$(uname -s)" = Linux ] ;;
-    darwin) [ "$(uname -s)" = Darwin ] ;;
+    linux) [ "$HOST_OS" = Linux ] ;;
+    darwin) [ "$HOST_OS" = Darwin ] ;;
     *)
       printf 'MANIFEST unknown os scope %s\n' "$1" >&2
-      return 1
+      return 2
       ;;
   esac
 }
@@ -98,8 +347,11 @@ iter_manifest() {
   done <"$MANIFEST"
 }
 
+# The first value only; reading all of it (no `| head`) keeps sed's status.
 manifest_value() {
-  sed -n "s/^# $1[[:space:]]*//p" "$MANIFEST" | head -n 1
+  local out
+  out="$(sed -n "s/^# $1[[:space:]]*//p" "$MANIFEST")" || return 1
+  printf '%s\n' "${out%%$'\n'*}"
 }
 
 machine_id() {
@@ -150,7 +402,7 @@ EOF
 portable_paths() {
   iter_manifest | while IFS=$'\t' read -r _kind _live repo_rel _os_scope; do
     printf '%s\n' "$repo_rel"
-  done
+  done || return 1
   printf '%s\n' home/private_dot_omp/private_agent/.chezmoiignore
   portable_support_paths
 }
@@ -160,27 +412,40 @@ git_tracked() {
 }
 
 check_manifest_status() {
-  local failures=0 kind live_path repo_rel repo_path mirror_path diff_output pin actual
+  local failures=0 kind live_path repo_rel repo_path mirror_path diff_output pin actual rows upstream version_rc=0
 
-  if [ ! -r "$MANIFEST" ]; then
-    printf 'MANIFEST missing %s\n' "$MANIFEST" >&2
+  if [ ! -r "$MANIFEST" ] || ! rows="$(iter_manifest)"; then
+    printf 'MANIFEST missing or unreadable %s\n' "$MANIFEST" >&2
     return 1
   fi
 
-  pin="$(expected_version)"
-  actual="$(omp --version 2>/dev/null || true)"
-  if [ "$actual" = "omp/$pin" ]; then
+  # Every probe's own status counts, not just its stdout: a failing omp that
+  # prints the pinned version is still a failed probe.
+  if ! pin="$(expected_version)" || [ -z "$pin" ]; then
+    printf 'VERSION manifest omp-version unreadable %s\n' "$MANIFEST" >&2
+    failures=1
+  fi
+  actual="$(omp --version 2>/dev/null)" || version_rc=$?
+  if [ "$version_rc" -ne 0 ]; then
+    printf 'VERSION probe failed (omp --version exit %s)\n' "$version_rc" >&2
+    failures=1
+  elif [ "$actual" = "omp/$pin" ]; then
     printf 'VERSION %s\n' "$actual"
   else
     printf 'VERSION expected omp/%s, found %s\n' "$pin" "${actual:-missing}" >&2
     failures=1
   fi
   if [ -s "$UPSTREAM_MARKER" ]; then
-    printf 'UPSTREAM %s\n' "$(tr '\n' ' ' <"$UPSTREAM_MARKER")"
+    if upstream="$(<"$UPSTREAM_MARKER")"; then
+      printf 'UPSTREAM %s\n' "${upstream//$'\n'/ }"
+    else
+      printf 'UPSTREAM probe failed (read %s)\n' "$UPSTREAM_MARKER" >&2
+      failures=1
+    fi
   fi
 
-
   while IFS=$'\t' read -r kind live_path repo_rel os_scope; do
+    [ -n "$kind" ] || continue
     repo_path="$REPO_ROOT/$repo_rel"
     mirror_path="$CHEZMOI_ROOT/$repo_rel"
 
@@ -194,12 +459,22 @@ check_manifest_status() {
       failures=1
       continue
     fi
-    if ! cmp -s "$repo_path" "$mirror_path"; then
+    local cmp_rc=0 scope_rc=0
+    cmp -s "$repo_path" "$mirror_path" || cmp_rc=$?
+    if [ "$cmp_rc" -gt 1 ]; then
+      printf 'SOURCE  probe failed (cmp exit %s) %s\n' "$cmp_rc" "$repo_rel" >&2
+      failures=1
+      continue
+    elif [ "$cmp_rc" -ne 0 ]; then
       printf 'SOURCE  drift %s\n' "$repo_rel" >&2
       failures=1
       continue
     fi
-    if ! os_in_scope "$os_scope"; then
+    os_in_scope "$os_scope" || scope_rc=$?
+    if [ "$scope_rc" -gt 1 ]; then
+      failures=1
+      continue
+    elif [ "$scope_rc" -ne 0 ]; then
       printf 'SKIP    %s (%s-only)\n' "$live_path" "$os_scope"
       continue
     fi
@@ -220,8 +495,14 @@ check_manifest_status() {
         ;;
     esac
 
-    diff_output="$(cm diff "$live_path" 2>/dev/null || true)"
-    if [ -n "$diff_output" ]; then
+    # A failed probe is not a clean diff: empty stdout from a failed chezmoi
+    # must never print OK.
+    local diff_rc=0
+    diff_output="$(cm diff "$live_path" 2>/dev/null)" || diff_rc=$?
+    if [ "$diff_rc" -ne 0 ]; then
+      printf 'LIVE    probe failed (chezmoi diff exit %s) %s\n' "$diff_rc" "$live_path" >&2
+      failures=1
+    elif [ -n "$diff_output" ]; then
       printf 'LIVE    drift %s\n' "$live_path" >&2
       failures=1
     else
@@ -232,29 +513,29 @@ check_manifest_status() {
       printf 'MODE    not executable %s\n' "$live_path" >&2
       failures=1
     fi
-  done < <(iter_manifest)
+  done <<<"$rows"
 
   return "$failures"
 }
 
 check_source_coverage() {
   local failures=0 tmp_dir expected actual file rel
-  tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/omp-baseline-coverage.XXXXXX")"
+  tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/omp-baseline-coverage.XXXXXX")" || return 1
   expected="$tmp_dir/expected"
   actual="$tmp_dir/actual"
   trap 'rm -rf "$tmp_dir"' RETURN
 
-  iter_manifest | while IFS=$'\t' read -r _kind _live repo_rel _os_scope; do
+  if ! iter_manifest | while IFS=$'\t' read -r _kind _live repo_rel _os_scope; do
     case "$repo_rel" in home/private_dot_omp/private_agent/*) printf '%s\n' "$repo_rel" ;; esac
-  done | sort >"$expected"
-
-  find "$REPO_ROOT/home/private_dot_omp/private_agent" -type f ! -name .chezmoiignore -print 2>/dev/null |
+  done | sort >"$expected" ||
+    ! find "$REPO_ROOT/home/private_dot_omp/private_agent" -type f ! -name .chezmoiignore -print 2>/dev/null |
     while IFS= read -r file; do
       rel="${file#"$REPO_ROOT/"}"
       printf '%s\n' "$rel"
-    done | sort >"$actual"
-
-  if ! diff -u "$expected" "$actual"; then
+    done | sort >"$actual"; then
+    printf 'COVERAGE probe failed (manifest or find)\n' >&2
+    failures=1
+  elif ! diff -u "$expected" "$actual"; then
     printf 'COVERAGE portable OMP source and manifest disagree\n' >&2
     failures=1
   else
@@ -267,68 +548,107 @@ check_source_coverage() {
 }
 
 check_tracking_and_secrets() {
-  local failures=0 repo_rel tracked runtime_managed
+  local failures=0 repo_rel tracked managed runtime_tracked runtime_managed paths tracked_rc
 
+  if ! paths="$(portable_paths | sort -u)"; then
+    printf 'TRACKED probe failed (manifest unreadable)\n' >&2
+    failures=1
+  fi
   while IFS= read -r repo_rel; do
     [ -n "$repo_rel" ] || continue
-    if git_tracked "$repo_rel"; then
+    tracked_rc=0
+    git_tracked "$repo_rel" || tracked_rc=$?
+    # ls-files --error-unmatch exits 1 for an untracked path; anything else is a failed probe.
+    if [ "$tracked_rc" -eq 0 ]; then
       printf 'TRACKED %s\n' "$repo_rel"
+    elif [ "$tracked_rc" -ne 1 ]; then
+      printf 'TRACKED probe failed (git ls-files exit %s) %s\n' "$tracked_rc" "$repo_rel" >&2
+      failures=1
     elif [ "$STRICT" = true ]; then
       printf 'PENDING %s\n' "$repo_rel" >&2
       failures=1
     else
       printf 'PENDING %s\n' "$repo_rel"
     fi
-  done < <(portable_paths | sort -u)
+  done <<<"${paths:-}"
 
-  tracked="$(git -C "$REPO_ROOT" ls-files home/private_dot_omp/private_agent 2>/dev/null || true)"
-  if printf '%s\n' "$tracked" | grep -Eq '(^|/)(agent\.db|history\.db|models\.db|auth-.*\.token|secret-placeholder\.key|\.env)(-|$|\.)|/(sessions|cache|logs|state|terminal-sessions|managed-skills)/'; then
-    printf 'SECRET  runtime or credential path is tracked\n' >&2
-    printf '%s\n' "$tracked" | grep -E '(^|/)(agent\.db|history\.db|models\.db|auth-.*\.token|secret-placeholder\.key|\.env)(-|$|\.)|/(sessions|cache|logs|state|terminal-sessions|managed-skills)/' >&2
-    failures=1
+  # Capture each probe's own status before filtering: a failed git or chezmoi
+  # probe yields empty output, which must not read as a clean boundary. The
+  # filters are Bash regex matches (match_lines), so no filter process can fail.
+  if tracked="$(git -C "$REPO_ROOT" ls-files home/private_dot_omp/private_agent 2>/dev/null)"; then
+    runtime_tracked="$(match_lines "$tracked" '(^|/)(agent\.db|history\.db|models\.db|auth-.*\.token|secret-placeholder\.key|\.env)(-|$|\.)|/(sessions|cache|logs|state|terminal-sessions|managed-skills)/')"
+    if [ -n "$runtime_tracked" ]; then
+      printf 'SECRET  runtime or credential path is tracked\n' >&2
+      printf '%s\n' "$runtime_tracked" >&2
+      failures=1
+    else
+      printf 'SECRET  Git boundary clean\n'
+    fi
   else
-    printf 'SECRET  Git boundary clean\n'
+    printf 'SECRET  probe failed (git ls-files exit %s)\n' "$?" >&2
+    failures=1
   fi
 
-  runtime_managed="$(cm managed 2>/dev/null | grep -E '^\.omp/agent/(agent\.db|history\.db|models\.db|auth-|secret-placeholder\.key|\.env|sessions/|cache/|logs/|state/|terminal-sessions/|managed-skills/)' || true)"
-  if [ -n "$runtime_managed" ]; then
-    printf 'SECRET  chezmoi owns runtime paths\n%s\n' "$runtime_managed" >&2
-    failures=1
+  if managed="$(cm managed 2>/dev/null)"; then
+    runtime_managed="$(match_lines "$managed" '^\.omp/agent/(agent\.db|history\.db|models\.db|auth-|secret-placeholder\.key|\.env|sessions/|cache/|logs/|state/|terminal-sessions/|managed-skills/)')"
+    if [ -n "$runtime_managed" ]; then
+      printf 'SECRET  chezmoi owns runtime paths\n%s\n' "$runtime_managed" >&2
+      failures=1
+    else
+      printf 'SECRET  chezmoi boundary clean\n'
+    fi
   else
-    printf 'SECRET  chezmoi boundary clean\n'
+    printf 'SECRET  probe failed (chezmoi managed exit %s)\n' "$?" >&2
+    failures=1
   fi
 
   return "$failures"
 }
 
+# Observational only; `omp-baseline repair` restores what this reports.
 check_runtime_permissions() {
-  local failures=0 file mode fstype attrs
-  for file in \
-    "$HOME/.omp/agent/.env" \
+  local failures=0 os="$HOST_OS" mode fstype attrs path want
+  # Directories 700, then credential and database files 600; absent paths are skipped.
+  for path in "d:$HOME/.omp" "d:$HOME/.omp/agent" \
+    "f:$HOME/.omp/agent/.env" \
     "$HOME/.omp/agent"/agent.db* \
     "$HOME/.omp/agent"/history.db* \
     "$HOME/.omp/agent"/models.db* \
     "$HOME/.omp/agent"/auth-*.token \
-    "$HOME/.omp/agent/secret-placeholder.key"; do
-    [ -e "$file" ] || continue
-    if [ "$(uname -s)" = Darwin ]; then
-      mode="$(stat -f '%Lp' "$file")"
-    else
-      mode="$(stat -c '%a' "$file")"
-    fi
-    case "$mode" in
-      600) ;;
-      *) printf 'MODE    expected 600 on %s, found %s\n' "$file" "$mode" >&2; failures=1 ;;
+    "f:$HOME/.omp/agent/secret-placeholder.key"; do
+    case "$path" in
+      d:*) path="${path#d:}"; want=700; [ -d "$path" ] || continue ;;
+      f:*) path="${path#f:}"; want=600; [ -e "$path" ] || continue ;;
+      *) want=600; [ -e "$path" ] || continue ;;
     esac
+    if [ "$os" = Darwin ]; then
+      mode="$(stat -f '%Lp' "$path")" || mode=""
+    else
+      mode="$(stat -c '%a' "$path")" || mode=""
+    fi
+    if [ -z "$mode" ]; then
+      printf 'MODE    probe failed (stat) on %s\n' "$path" >&2
+      failures=1
+    elif [ "$mode" != "$want" ]; then
+      printf 'MODE    expected %s on %s, found %s (run omp-baseline repair)\n' "$want" "$path" "$mode" >&2
+      failures=1
+    fi
   done
-  [ "$failures" -eq 0 ] && printf 'MODE    local credentials private\n'
-  if [ "$(uname -s)" = Linux ] && command -v lsattr >/dev/null 2>&1; then
-    fstype="$(findmnt -n -o FSTYPE -T "$HOME/.omp/agent" 2>/dev/null || true)"
-    if [ "$fstype" = btrfs ]; then
-      attrs="$(lsattr -d "$HOME/.omp/agent" 2>/dev/null || true)"
-      case "$attrs" in
+  [ "$failures" -eq 0 ] && printf 'MODE    runtime directories and local credentials private\n'
+  if [ "$os" = Linux ] && command -v lsattr >/dev/null 2>&1; then
+    if ! fstype="$(findmnt -n -o FSTYPE -T "$HOME/.omp/agent" 2>/dev/null)"; then
+      printf 'NOCOW   probe failed (findmnt) on ~/.omp/agent\n' >&2
+      failures=1
+    elif [ "$fstype" != btrfs ]; then
+      :
+    elif ! attrs="$(lsattr -d "$HOME/.omp/agent" 2>/dev/null)"; then
+      printf 'NOCOW   probe failed (lsattr) on ~/.omp/agent\n' >&2
+      failures=1
+    else
+      # Only the attribute field: the path itself may contain a C.
+      case "${attrs%% *}" in
         *C*) printf 'NOCOW   ~/.omp/agent\n' ;;
-        *) printf 'NOCOW   expected chattr +C on ~/.omp/agent\n' >&2; failures=1 ;;
+        *) printf 'NOCOW   expected chattr +C on ~/.omp/agent (run omp-baseline repair)\n' >&2; failures=1 ;;
       esac
     fi
   fi
@@ -342,7 +662,7 @@ harden_runtime_permissions() {
   # guidance; OMP #8082 saw the same cache-autoindex damage). Directory
   # +C is inherited by new files. Existing non-empty files stay CoW
   # until rewritten idle. APFS has no equivalent.
-  if [ "$(uname -s)" = Linux ] && command -v chattr >/dev/null 2>&1; then
+  if [ "$HOST_OS" = Linux ] && command -v chattr >/dev/null 2>&1; then
     fstype="$(findmnt -n -o FSTYPE -T "$HOME/.omp/agent" 2>/dev/null || true)"
     if [ "$fstype" = btrfs ]; then
       chattr +C "$HOME/.omp/agent" 2>/dev/null || true
@@ -386,27 +706,35 @@ require_scalar() {
 }
 
 omp_value() {
-  omp config get "$1" --json 2>/dev/null | jq -r 'if has("value") then .value else empty end'
+  omp_probe config get "$1" --json 2>/dev/null | jq -r 'if has("value") then .value else empty end'
 }
 
 check_policy_scalar() {
-  local path="$1" expected="$2" source_config="$3" live_value source_value section key
+  local path="$1" expected="$2" source_config="$3" live_value source_value section key read_rc=0
   if [[ "$path" == *.* ]]; then
     section="${path%%.*}"
     key="${path#*.}"
-    source_value="$(yaml_indented_scalar "$source_config" "$section" "$key")"
+    source_value="$(yaml_indented_scalar "$source_config" "$section" "$key")" || read_rc=$?
   else
-    source_value="$(yaml_top_scalar "$source_config" "$path")"
+    source_value="$(yaml_top_scalar "$source_config" "$path")" || read_rc=$?
+  fi
+  if [ "$read_rc" -ne 0 ]; then
+    printf 'CONFIG  source %s probe failed (read %s)\n' "$path" "$source_config" >&2
+    return 1
   fi
   require_scalar "source $path" "$source_value" "$expected" || return 1
-  live_value="$(omp_value "$path")"
+  # A failed probe is an error even when its stdout held the expected value.
+  if ! live_value="$(omp_value "$path")"; then
+    printf 'CONFIG  effective %s probe failed (omp config get)\n' "$path" >&2
+    return 1
+  fi
   require_scalar "effective $path" "$live_value" "$expected" || return 1
   return 0
 }
 
 check_effective_list() {
   local path="$1" expected_json="$2" output
-  if output="$(omp config get "$path" --json 2>/dev/null)" &&
+  if output="$(omp_probe config get "$path" --json 2>/dev/null)" &&
     printf '%s' "$output" | jq -e --argjson expected "$expected_json" '.value == $expected' >/dev/null; then
     printf 'CONFIG  effective %s %s\n' "$path" "$expected_json"
     return 0
@@ -437,12 +765,14 @@ check_thinking_and_loop_policy() {
   check_policy_scalar extendedContext false "$source_config" || failures=1
 
   local source_roles
-  source_roles="$(awk '
+  if ! source_roles="$(awk '
     /^modelRoles:/ { in_roles=1; next }
     in_roles && /^[^[:space:]#]/ { exit }
     in_roles && $1 ~ /^(default|slow|plan|vision|commit|smol|tiny|task):$/ { print $1 }
-  ' "$source_config")"
-  if printf '%s\n' "$source_roles" | grep -q '^default:' &&
+  ' "$source_config")"; then
+    printf 'CONFIG  source model roles probe failed (read %s)\n' "$source_config" >&2
+    failures=1
+  elif printf '%s\n' "$source_roles" | grep -q '^default:' &&
     printf '%s\n' "$source_roles" | grep -q '^slow:' &&
     printf '%s\n' "$source_roles" | grep -q '^plan:' &&
     printf '%s\n' "$source_roles" | grep -q '^task:'; then
@@ -453,12 +783,14 @@ check_thinking_and_loop_policy() {
   fi
 
   local source_provider
-  source_provider="$(awk '
+  if ! source_provider="$(awk '
     /^providers:/ { in_providers=1; next }
     in_providers && /^[^[:space:]#]/ { exit }
     in_providers && $1 ~ /^llama\.cpp:$/ { print $1 }
-  ' "$source_models")"
-  if printf '%s\n' "$source_provider" | grep -q '^llama.cpp:'; then
+  ' "$source_models")"; then
+    printf 'CONFIG  source providers probe failed (read %s)\n' "$source_models" >&2
+    failures=1
+  elif printf '%s\n' "$source_provider" | grep -q '^llama.cpp:'; then
     printf 'CONFIG  local inference provider present\n'
   else
     printf 'CONFIG  local inference provider missing\n' >&2
@@ -470,14 +802,21 @@ check_thinking_and_loop_policy() {
 
 check_omp_config() {
   local failures=0 pin source_pin setup_pin output omp_path
-  pin="$(expected_version)"
-  source_pin="$(sed -n 's/^"github:can1357\/oh-my-pi"[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$REPO_ROOT/home/dot_config/mise/config.toml" | head -n 1)"
-  setup_pin="$(sed -n 's/^OMP_VERSION="\([^"]*\)".*/\1/p' "$REPO_ROOT/home/run_onchange_after_04-setup-omp.sh.tmpl" | head -n 1)"
-  if [ "$pin" = "$source_pin" ] && [ "$pin" = "$setup_pin" ]; then
-    printf 'PIN     %s everywhere\n' "$pin"
-  else
-    printf 'PIN     manifest=%s mise=%s setup=%s\n' "$pin" "$source_pin" "$setup_pin" >&2
+  # Read whole sed outputs (no `| head`) so each read keeps its own status.
+  if ! pin="$(expected_version)" ||
+    ! source_pin="$(sed -n 's/^"github:can1357\/oh-my-pi"[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$REPO_ROOT/home/dot_config/mise/config.toml")" ||
+    ! setup_pin="$(sed -n 's/^OMP_VERSION="\([^"]*\)".*/\1/p' "$REPO_ROOT/home/run_onchange_after_04-setup-omp.sh.tmpl")"; then
+    printf 'PIN     probe failed (manifest, mise config or setup script unreadable)\n' >&2
     failures=1
+  else
+    source_pin="${source_pin%%$'\n'*}"
+    setup_pin="${setup_pin%%$'\n'*}"
+    if [ -n "$pin" ] && [ "$pin" = "$source_pin" ] && [ "$pin" = "$setup_pin" ]; then
+      printf 'PIN     %s everywhere\n' "$pin"
+    else
+      printf 'PIN     manifest=%s mise=%s setup=%s\n' "$pin" "$source_pin" "$setup_pin" >&2
+      failures=1
+    fi
   fi
 
   omp_path="$(command -v omp 2>/dev/null || true)"
@@ -491,7 +830,7 @@ check_omp_config() {
       ;;
   esac
 
-  if output="$(omp config get modelRoles --json 2>/dev/null)" \
+  if output="$(omp_probe config get modelRoles --json 2>/dev/null)" \
     && printf '%s' "$output" | jq -e '
       (.value.default | test("^anthropic/claude-opus-[0-9]+(-[0-9]+)?:high$")) and
       (.value.fable | test("^anthropic/claude-fable-[0-9]+(-[0-9]+)?:medium$")) and
@@ -513,8 +852,8 @@ check_omp_config() {
   # the 272K normal budget; a new Opus/Fable ID without a models.yml override
   # would silently compact near 850K again.
   # The catalog can exceed ARG_MAX (hundreds of OpenRouter models): feed it on stdin.
-  if roles="$(omp config get modelRoles --json 2>/dev/null)" \
-    && omp models --json 2>/dev/null | jq -e --argjson roles "$roles" '
+  if roles="$(omp_probe config get modelRoles --json 2>/dev/null)" \
+    && omp_probe models --json --no-extensions 2>/dev/null | jq -e --argjson roles "$roles" '
       [.. | objects | select(.provider? and .id?) | {key: "\(.provider)/\(.id)", value: .contextWindow}] | from_entries as $windows
       | [$roles.value | to_entries[] | .value | select(test("^(anthropic|openai-codex)/")) | sub(":[a-z]+$"; "")] | unique
       | all(. as $m | $windows[$m] != null and (($m | startswith("anthropic/") | not) or $windows[$m] <= 272000))
@@ -527,9 +866,9 @@ check_omp_config() {
 
   check_effective_list cycleOrder '["default","fable","task"]' || failures=1
 
-  if output="$(omp config get skills.enablePiUser --json 2>/dev/null)" \
+  if output="$(omp_probe config get skills.enablePiUser --json 2>/dev/null)" \
     && printf '%s' "$output" | jq -e '.value == true' >/dev/null \
-    && output="$(omp config get skills.enablePiProject --json 2>/dev/null)" \
+    && output="$(omp_probe config get skills.enablePiProject --json 2>/dev/null)" \
     && printf '%s' "$output" | jq -e '.value == true' >/dev/null; then
     printf 'CONFIG  native skills enabled\n'
   else
@@ -537,29 +876,180 @@ check_omp_config() {
     failures=1
   fi
 
-  local source_models="$REPO_ROOT/home/private_dot_omp/private_agent/private_models.yml" catalog
+  local source_models="$REPO_ROOT/home/private_dot_omp/private_agent/private_models.yml" catalog catalog_rc
   if grep -q '^  llama.cpp:' "$source_models" && grep -q 'Qwen3.8-27B-RVN-Heretic-Q4_K_M' "$source_models"; then
     printf 'CONFIG  promoted local catalog configured\n'
   else
     printf 'CONFIG  promoted local catalog missing\n' >&2
     failures=1
   fi
-  catalog="$(omp models llama.cpp --json 2>/dev/null || true)"
-  if printf '%s' "$catalog" | jq -e '[.models[]?.id] | index("Qwen3.8-27B-RVN-Heretic-Q4_K_M")' >/dev/null; then
+  # A failed or empty probe is an error; only a working probe without the entry
+  # is the nonfatal readiness gap.
+  catalog_rc=0
+  if ! catalog="$(omp_probe models llama.cpp --json --no-extensions 2>/dev/null)"; then
+    catalog_rc=probe
+  else
+    # jq -e exits 1 only for an absent entry; any other nonzero status is a failed probe.
+    printf '%s' "$catalog" | jq -e '.models | if type == "array" then map(.id) | index("Qwen3.8-27B-RVN-Heretic-Q4_K_M") else error("no models array") end' >/dev/null 2>&1 || catalog_rc=$?
+  fi
+  if [ "$catalog_rc" != 0 ] && [ "$catalog_rc" != 1 ]; then
+    printf 'MODEL   probe failed (omp models llama.cpp --json)\n' >&2
+    failures=1
+  elif [ "$catalog_rc" = 0 ]; then
     printf 'MODEL   Qwen3.8 local catalog entry\n'
   elif grep -q 'Qwen3.8-27B-RVN-Heretic-Q4_K_M' "$source_models"; then
-    printf 'MODEL   Qwen3.8 configured; discovery unavailable\n'
+    # Nonfatal: the server may be down or remote, but say what is unproven.
+    printf 'READY   llama.cpp discovery unavailable (Qwen3.8 configured; runtime readiness unverified)\n'
   else
     printf 'MODEL   Qwen3.8 absent from local catalog and source\n' >&2
     failures=1
   fi
-  if omp setup python --check --json >/dev/null 2>&1; then
+  if omp_probe setup python --check --json >/dev/null 2>&1; then
     printf 'PYTHON  available\n'
   else
     printf 'PYTHON  unavailable\n' >&2
     failures=1
   fi
   check_thinking_and_loop_policy || failures=1
+  return "$failures"
+}
+
+# A scratch profile NAME in the probe HOME holding CONFIG and MODELS (either may
+# be absent) plus the credentials and model caches of the live agent dir CREDS,
+# so `omp --profile NAME` loads what that config would on this host. Profiles
+# read their own auth-broker token.
+probe_profile() {
+  local root="$PROBE_HOME/.omp/profiles/$1" file
+  if ! mkdir -p "$root/agent" ||
+    { [ -f "$PROBE_HOME/.omp/auth-broker.token" ] && ! cp -p "$PROBE_HOME/.omp/auth-broker.token" "$root/"; } ||
+    { [ -f "$2" ] && ! cp "$2" "$root/agent/config.yml"; } ||
+    { [ -f "$3" ] && ! cp "$3" "$root/agent/models.yml"; } ||
+    ! probe_copy_env "$4/.env" "$root/agent/.env" ||
+    ! probe_screen "$2" "$3"; then
+    rm -rf "$root"
+    return 1
+  fi
+  for file in "$4"/agent.db* "$4"/models.db*; do
+    [ -f "$file" ] || continue
+    if ! cp -p "$file" "$root/agent/"; then
+      rm -rf "$root"
+      return 1
+    fi
+  done
+}
+
+# omp-agent-policy --catalog evidence from native runs in probe profile PROBE
+# (default: the probe HOME's copy of the live agent dir): `omp models --json`
+# with extensions off (no unreviewed module runs; the checker fails closed on
+# those) and its stderr, where native loading reports a rejected models.yml;
+# `omp config list --json`, every setting's effective value, which the checker
+# compares with its own merge; and the omp version, policy profile and
+# models.yml covered.
+agent_catalog() {
+  local out="$1" agent_dir="$PROBE_HOME/.omp/agent" version models=null
+  local -a args=()
+  if [ "$3" != default ]; then
+    agent_dir="$PROBE_HOME/.omp/profiles/$3/agent"
+    [ -d "$agent_dir" ] || return 1
+    args=(--profile "$3")
+  fi
+  version="$(omp_probe --version)" || return 1
+  omp_probe ${args[@]+"${args[@]}"} models --json --no-extensions >"$out.stdout" 2>"$out.stderr" || return 1
+  omp_probe ${args[@]+"${args[@]}"} config list --json >"$out.settings" 2>>"$out.stderr" || return 1
+  [ ! -f "$agent_dir/models.yml" ] || models="$(jq -Rs . "$agent_dir/models.yml")" || return 1
+  jq -n --arg version "${version#omp/}" --arg profile "$2" --argjson modelsYml "$models" \
+    --rawfile stderr "$out.stderr" --slurpfile catalog "$out.stdout" --slurpfile settings "$out.settings" '
+    if ($catalog | length) == 1 and ($catalog[0].models | type) == "array"
+      and ($settings | length) == 1 and ($settings[0] | type) == "object"
+    then $catalog[0] + {settings: $settings[0], ompVersion: $version, profile: $profile, modelsYml: $modelsYml, stderr: $stderr}
+    else error("no models array or settings object") end' >"$out"
+}
+
+# The checker with native catalog evidence (see agent_catalog). A failed
+# capture is reported and the checker still runs, so it also reports what it
+# cannot verify without evidence. The checker screens the environment an
+# ordinary launch would see, which never holds this script's own
+# OMP_BASELINE_* settings (no OMP code reads them), so they are dropped.
+agent_policy_run() {
+  local label="$1" profile="$2" probe="$3" out
+  shift 3
+  out="${PROBE_ROOT:-/nonexistent}/catalog-$probe.json"
+  if [ -n "$PROBE_HOME" ] && agent_catalog "$out" "$profile" "$probe"; then
+    policy_checker "$@" --catalog "$out"
+    return
+  fi
+  printf 'AGENT   probe failed (omp models --json, %s)\n' "$label" >&2
+  [ ! -s "$out.stderr" ] || sed -n '1,3p' "$out.stderr" >&2
+  policy_checker "$@" || true
+  return 1
+}
+
+policy_checker() {
+  (
+    for name in $(compgen -e); do
+      if [[ $name == OMP_BASELINE_* ]]; then
+        unset "$name"
+      fi
+    done
+    bun_run "$checker" "$@"
+  )
+}
+
+# Effective subagent model, thinking, tools and provenance, from the shared
+# offline checker (also used by publish), for the source and live default and
+# local profiles. Every run gets native evidence for its own config and
+# models.yml. Source runs use scratch profiles holding the source files with
+# this host's credentials and no host overlay: PI_CONFIG_FILES=":" names no
+# file and keeps a copied dotenv file from supplying one. Live probes run from a
+# scratch cwd holding copies of this cwd's project settings files.
+check_agent_policy() {
+  local failures=0 checker version src="$REPO_ROOT/home/private_dot_omp"
+  local live_local="$HOME/.omp/profiles/local/agent" local_creds="$HOME/.omp/agent"
+  local live_cwd="${PROBE_ROOT:-/nonexistent}/live-cwd" file
+  checker="$HOME/.local/bin/omp-agent-policy"
+  [ -x "$checker" ] || checker="$REPO_ROOT/home/dot_local/bin/executable_omp-agent-policy"
+  if [ ! -f "$checker" ]; then
+    printf 'AGENT   checker missing %s\n' "$checker" >&2
+    return 1
+  fi
+  if [ -n "$PROBE_HOME" ]; then
+    [ ! -d "$live_local" ] || local_creds="$live_local"
+    # A profile that cannot be prepared fails here and again in agent_policy_run,
+    # whose catalog capture finds no profile.
+    if ! probe_profile src-default "$src/private_agent/private_config.yml" \
+      "$src/private_agent/private_models.yml" "$HOME/.omp/agent"; then
+      printf 'AGENT   probe profile failed (source default)\n' >&2
+      failures=1
+    fi
+    if ! probe_profile src-local "$src/private_profiles/local/private_agent/private_config.yml" \
+      "$src/private_profiles/local/private_agent/private_models.yml" "$local_creds"; then
+      printf 'AGENT   probe profile failed (source local)\n' >&2
+      failures=1
+    fi
+    if [ -d "$live_local" ] &&
+      ! probe_profile local "$live_local/config.yml" "$live_local/models.yml" "$live_local"; then
+      printf 'AGENT   probe profile failed (live local)\n' >&2
+      failures=1
+    fi
+    mkdir -m 700 "$live_cwd" || return 1
+    for file in settings.json config.yml; do
+      [ -f "$PWD/.omp/$file" ] || continue
+      mkdir -p "$live_cwd/.omp" && cp -p "$PWD/.omp/$file" "$live_cwd/.omp/" || return 1
+    done
+  fi
+  PI_CONFIG_FILES=: agent_policy_run "source default" default src-default --root "$REPO_ROOT" || failures=1
+  PI_CONFIG_FILES=: agent_policy_run "source local" local src-local --root "$REPO_ROOT" --profile local || failures=1
+
+  if [ -z "$PROBE_HOME" ] || ! version="$(omp_probe --version)"; then
+    printf 'AGENT   omp --version probe failed; live agent checks skipped\n' >&2
+    return 1
+  fi
+  PROBE_CWD="$live_cwd" agent_policy_run "live default" default default --live "$HOME/.omp/agent" \
+    --omp-version "${version#omp/}" --cwd "$PWD" || failures=1
+  if [ -d "$live_local" ]; then
+    PROBE_CWD="$live_cwd" agent_policy_run "live local" local local --live "$live_local" \
+      --omp-version "${version#omp/}" --cwd "$PWD" || failures=1
+  fi
   return "$failures"
 }
 
@@ -576,13 +1066,28 @@ quarantine_legacy_wrapper() {
   fi
 }
 
+# Observational: native omp probes run against a scratch HOME (omp_probe) that
+# is removed when the subshell exits.
 validate() {
-  local failures=0 skill_manager
+  local status=0
+  (
+    trap cleanup_probe_home EXIT
+    # Without the scratch HOME every native probe fails (omp_probe); say why once.
+    probe_rc=0
+    probe_home || { probe_rc=1; printf 'PROBE   scratch HOME unavailable; native probes cannot run\n' >&2; }
+    validate_checks || exit 1
+    exit "$probe_rc"
+  ) || status=$?
+  return "$status"
+}
+
+validate_checks() {
+  local failures=0 skill_manager paths format_rc=0
   check_manifest_status || failures=1
   check_source_coverage || failures=1
   check_tracking_and_secrets || failures=1
   check_omp_config || failures=1
-  harden_runtime_permissions
+  check_agent_policy || failures=1
   check_runtime_permissions || failures=1
   skill_manager="$HOME/.local/bin/decent-angl-skills"
   [ -x "$skill_manager" ] || skill_manager="$REPO_ROOT/home/dot_local/bin/executable_decent-angl-skills"
@@ -591,13 +1096,25 @@ validate() {
   else
     failures=1
   fi
-  if git -C "$REPO_ROOT" diff --check -- $(portable_paths | sort -u) >/dev/null; then
-    printf 'FORMAT  clean\n'
-  else
-    printf 'FORMAT  whitespace errors\n' >&2
+  # git diff --check exits 2 for whitespace errors; any other nonzero status is a failed probe.
+  if ! paths="$(portable_paths | sort -u)"; then
+    printf 'FORMAT  probe failed (manifest unreadable)\n' >&2
     failures=1
+  else
+    # shellcheck disable=SC2086 # repo-relative paths without whitespace
+    git -C "$REPO_ROOT" diff --check -- $paths >/dev/null || format_rc=$?
+    case "$format_rc" in
+      0) printf 'FORMAT  clean\n' ;;
+      2) printf 'FORMAT  whitespace errors\n' >&2; failures=1 ;;
+      *) printf 'FORMAT  probe failed (git diff --check exit %s)\n' "$format_rc" >&2; failures=1 ;;
+    esac
   fi
   return "$failures"
+}
+
+repair() {
+  harden_runtime_permissions
+  validate
 }
 
 apply_local() {
@@ -639,6 +1156,7 @@ apply_local() {
   if [ "${OMP_BASELINE_IN_GUARD:-0}" != 1 ]; then
     install_guard
   fi
+  harden_runtime_permissions
   if [ "${OMP_BASELINE_SKIP_VALIDATE:-0}" = 1 ]; then
     return 0
   fi
@@ -884,7 +1402,7 @@ upgrade() {
 
 install_guard() {
   local os uid plist unit_dir
-  os="$(uname -s)"
+  os="$HOST_OS"
   mkdir -p "$STATE_DIR"
   case "$os" in
     Darwin)
@@ -1039,6 +1557,7 @@ main() {
   case "$command" in
     status) check_manifest_status ;;
     validate) validate ;;
+    repair) repair ;;
     apply) apply_local ;;
     pull) pull_published ;;
     guard) guard ;;

@@ -31,11 +31,13 @@ EOF
 }
 
 checksum() {
+  local output
   if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$1" | awk '{print $1}'
+    output="$(sha256sum "$1")" || return 1
   else
-    shasum -a 256 "$1" | awk '{print $1}'
+    output="$(shasum -a 256 "$1")" || return 1
   fi
+  printf '%s\n' "$output" | awk '{print $1}'
 }
 
 fail() {
@@ -66,29 +68,33 @@ frontmatter_value() {
 }
 
 is_explicit() {
-  [ "$(frontmatter_value "$1" disable-model-invocation)" = true ]
+  local value
+  value="$(frontmatter_value "$1" disable-model-invocation)" || return 1
+  if [ "$value" = true ]; then printf 'true\n'; else printf 'false\n'; fi
 }
 
 validate_skill() {
-  local directory="$1" expected_name file name description closed keys key count reference relative
-  expected_name="$(basename "$directory")"
+  local directory="$1" expected_name file name description closed keys key count reference relative references explicit grep_status
+  expected_name="${directory##*/}"
   if ! file="$(skill_file "$directory")"; then
     fail "$expected_name: require exactly one SKILL.md or SKILL.md.tmpl"
     return
   fi
-  [ "$(sed -n '1p' "$file")" = --- ] || fail "$expected_name: frontmatter must start on line 1"
-  closed="$(awk 'NR > 1 && $0 == "---" { print NR; exit }' "$file")"
+  local first_line
+  first_line="$(sed -n '1p' "$file")" || { fail "$expected_name: frontmatter unreadable"; return; }
+  [ "$first_line" = --- ] || fail "$expected_name: frontmatter must start on line 1"
+  closed="$(awk 'NR > 1 && $0 == "---" { print NR; exit }' "$file")" || { fail "$expected_name: frontmatter unreadable"; return; }
   [ -n "$closed" ] || { fail "$expected_name: frontmatter is not closed"; return; }
 
-  name="$(frontmatter_value "$file" name)"
-  description="$(frontmatter_value "$file" description)"
+  name="$(frontmatter_value "$file" name)" || { fail "$expected_name: name unreadable"; return; }
+  description="$(frontmatter_value "$file" description)" || { fail "$expected_name: description unreadable"; return; }
   [ "$name" = "$expected_name" ] || fail "$expected_name: folder and frontmatter name differ"
   printf '%s' "$name" | grep -Eq '^[a-z0-9]+(-[a-z0-9]+)*$' || fail "$expected_name: name must be lowercase hyphen-case"
   [ "${#name}" -le 64 ] || fail "$expected_name: name exceeds 64 characters"
   [ -n "$description" ] || fail "$expected_name: description must be one non-empty line"
   [ "${#description}" -le 1024 ] || fail "$expected_name: description exceeds 1024 characters"
 
-  keys="$(awk 'NR == 1 { next } $0 == "---" { exit } /^[A-Za-z0-9-]+:/ { sub(/:.*/, ""); print }' "$file")"
+  keys="$(awk 'NR == 1 { next } $0 == "---" { exit } /^[A-Za-z0-9-]+:/ { sub(/:.*/, ""); print }' "$file")" || { fail "$expected_name: frontmatter unreadable"; return; }
   while IFS= read -r key; do
     case "$key" in
       name|description|argument-hint|disable-model-invocation|'') ;;
@@ -98,12 +104,13 @@ validate_skill() {
 $keys
 EOF
   for key in name description; do
-    count="$(printf '%s\n' "$keys" | grep -cx "$key" || true)"
+    count="$(printf '%s\n' "$keys" | awk -v key="$key" '$0 == key { n++ } END { print n+0 }')" || { fail "$expected_name: frontmatter unreadable"; return; }
     [ "$count" -eq 1 ] || fail "$expected_name: $key must appear once"
   done
-  count="$(printf '%s\n' "$keys" | grep -cx disable-model-invocation || true)"
-  if [ "$count" -gt 0 ] && ! is_explicit "$file"; then
-    fail "$expected_name: disable-model-invocation only supports true"
+  count="$(printf '%s\n' "$keys" | awk '$0 == "disable-model-invocation" { n++ } END { print n+0 }')" || { fail "$expected_name: frontmatter unreadable"; return; }
+  if [ "$count" -gt 0 ]; then
+    explicit="$(frontmatter_value "$file" disable-model-invocation)" || { fail "$expected_name: disable-model-invocation unreadable"; return; }
+    [ "$explicit" = true ] || fail "$expected_name: disable-model-invocation only supports true"
   fi
   [ "$count" -le 1 ] || fail "$expected_name: disable-model-invocation appears more than once"
 
@@ -111,52 +118,79 @@ EOF
     fail "$expected_name: canonical source contains harness-specific agents/ metadata"
   fi
   if [ -d "$directory/references" ]; then
+    references="$(find "$directory/references" -type f | sort)" || { fail "$expected_name: references unreadable"; return; }
     while IFS= read -r reference; do
+      [ -n "$reference" ] || continue
       relative="${reference#"$directory/"}"
-      grep -Fq "($relative)" "$file" || fail "$expected_name: undisclosed reference '$relative'"
-    done < <(find "$directory/references" -type f | sort)
+      if grep -Fq "($relative)" "$file"; then
+        :
+      else
+        grep_status=$?
+        if [ "$grep_status" -eq 1 ]; then
+          fail "$expected_name: undisclosed reference '$relative'"
+        else
+          fail "$expected_name: references unreadable"
+          return
+        fi
+      fi
+    done <<EOF
+$references
+EOF
   fi
   validate_provenance "$directory" "$file"
 }
 
 validate_provenance() {
-  local directory="$1" file="$2" metadata expected actual license expected_license
+  local directory="$1" file="$2" metadata expected actual license expected_license upstream
   metadata="$directory/provenance.tsv"
   [ -f "$metadata" ] || return 0
-  expected="$(awk -F '\t' '$1 == "skill-sha256" { print $2 }' "$metadata")"
-  [ -n "$(awk -F '\t' '$1 == "upstream" { print $2 }' "$metadata")" ] || fail "$(basename "$directory"): provenance lacks upstream"
-  [ -n "$expected" ] || { fail "$(basename "$directory"): provenance lacks skill-sha256"; return; }
-  actual="$(checksum "$file")"
-  [ "$actual" = "$expected" ] || fail "$(basename "$directory"): vendored skill differs from pinned upstream"
+  expected="$(awk -F '\t' '$1 == "skill-sha256" { print $2 }' "$metadata")" || { fail "${directory##*/}: provenance unreadable"; return; }
+  upstream="$(awk -F '\t' '$1 == "upstream" { print $2 }' "$metadata")" || { fail "${directory##*/}: provenance unreadable"; return; }
+  [ -n "$upstream" ] || fail "${directory##*/}: provenance lacks upstream"
+  [ -n "$expected" ] || { fail "${directory##*/}: provenance lacks skill-sha256"; return; }
+  actual="$(checksum "$file")" || { fail "${directory##*/}: skill checksum unreadable"; return; }
+  [ "$actual" = "$expected" ] || fail "${directory##*/}: vendored skill differs from pinned upstream"
   license="$directory/LICENSE"
-  expected_license="$(awk -F '\t' '$1 == "license-sha256" { print $2 }' "$metadata")"
+  expected_license="$(awk -F '\t' '$1 == "license-sha256" { print $2 }' "$metadata")" || { fail "${directory##*/}: license provenance unreadable"; return; }
   if [ -f "$license" ]; then
-    [ -n "$expected_license" ] && [ "$(checksum "$license")" = "$expected_license" ] || fail "$(basename "$directory"): license provenance mismatch"
+    if [ -n "$expected_license" ]; then
+      actual="$(checksum "$license")" || { fail "${directory##*/}: license checksum unreadable"; return; }
+      [ "$actual" = "$expected_license" ] || fail "${directory##*/}: license provenance mismatch"
+    else
+      fail "${directory##*/}: license provenance mismatch"
+    fi
   elif [ -n "$expected_license" ]; then
-    fail "$(basename "$directory"): pinned license is missing"
+    fail "${directory##*/}: pinned license is missing"
   fi
 }
 
 discover() {
-  local root="$1" directory
+  local root="$1" directory names
   [ -d "$root" ] || return 0
-  for directory in "$root"/*; do
-    [ -d "$directory" ] || continue
-    basename "$directory"
-  done | sort
+  names="$(
+    for directory in "$root"/*; do
+      [ -d "$directory" ] || continue
+      printf '%s\n' "${directory##*/}"
+    done | sort
+  )" || return 1
+  printf '%s\n' "$names"
 }
 
 # Skills marked with a source-only `.macos-only` file (chezmoi never deploys
 # dotfiles from source) are expected live only on macOS.
 discover_host() {
-  local name
+  local name names system
+  if [ "$#" -gt 0 ]; then system="$1"; else system="$(uname -s)" || return 1; fi
+  names="$(discover "$SOURCE_ROOT")" || return 1
   while IFS= read -r name; do
     [ -n "$name" ] || continue
-    if [ "$(uname -s)" != Darwin ] && [ -e "$SOURCE_ROOT/$name/.macos-only" ]; then
+    if [ "$system" != Darwin ] && [ -e "$SOURCE_ROOT/$name/.macos-only" ]; then
       continue
     fi
     printf '%s\n' "$name"
-  done < <(discover "$SOURCE_ROOT")
+  done <<EOF
+$names
+EOF
 }
 
 require_safe_roots() {
@@ -171,14 +205,17 @@ require_safe_roots() {
 }
 
 audit_source() {
-  local name count=0
+  local name count=0 names
   failures=0
   [ -d "$SOURCE_ROOT" ] || { printf 'Missing shared skill source: %s\n' "$SOURCE_ROOT" >&2; return 1; }
+  names="$(discover "$SOURCE_ROOT")" || { printf 'SKILL  probe failed (skill inventory)\n' >&2; return 1; }
   while IFS= read -r name; do
     [ -n "$name" ] || continue
     count=$((count + 1))
     validate_skill "$SOURCE_ROOT/$name"
-  done < <(discover "$SOURCE_ROOT")
+  done <<EOF
+$names
+EOF
   [ "$count" -gt 0 ] || fail "source contains no skills"
   if [ "$failures" -gt 0 ]; then
     printf 'SKILL  failed %s source issue(s)\n' "$failures" >&2
@@ -188,31 +225,34 @@ audit_source() {
 }
 
 render_codex() {
-  local source="$1" destination="$2" input
+  local source="$1" destination="$2" input explicit relative files
   input="$source/SKILL.md"
-  mkdir -p "$destination"
-  (cd "$source" && find . -type f ! -path './agents/*' ! -name provenance.tsv ! -name SKILL.md -print) |
-    while IFS= read -r relative; do
-      mkdir -p "$destination/$(dirname "$relative")"
-      cp "$source/$relative" "$destination/$relative"
-    done
+  mkdir -p "$destination" || return 1
+  files="$(cd "$source" && find . -type f ! -path './agents/*' ! -name provenance.tsv ! -name SKILL.md -print)" || return 1
+  while IFS= read -r relative; do
+    [ -n "$relative" ] || continue
+    mkdir -p "$destination/${relative%/*}" && cp "$source/$relative" "$destination/$relative" || return 1
+  done <<EOF
+$files
+EOF
   awk '
     NR == 1 && $0 == "---" { in_yaml=1; print; next }
     in_yaml && $0 == "---" { in_yaml=0; print; next }
     in_yaml && ($0 ~ /^argument-hint:/ || $0 ~ /^disable-model-invocation:/) { next }
     { print }
-  ' "$input" >"$destination/SKILL.md"
-  if is_explicit "$input"; then
-    mkdir -p "$destination/agents"
-    printf 'policy:\n  allow_implicit_invocation: false\n' >"$destination/agents/openai.yaml"
+  ' "$input" >"$destination/SKILL.md" || return 1
+  explicit="$(is_explicit "$input")" || { printf 'SKILL  probe failed (frontmatter)\n' >&2; return 1; }
+  if [ "$explicit" = true ]; then
+    mkdir -p "$destination/agents" &&
+      printf 'policy:\n  allow_implicit_invocation: false\n' >"$destination/agents/openai.yaml" || return 1
   fi
 }
 
 safe_link() {
   local link="$1" target="$2" legacy="${3:-}" current
-  mkdir -p "$(dirname "$link")"
+  mkdir -p "${link%/*}" || return 1
   if [ -L "$link" ]; then
-    current="$(readlink "$link")"
+    current="$(readlink "$link")" || { printf 'SKILL  probe failed (link target)\n' >&2; return 1; }
     if [ "$current" != "$target" ] && [ -n "$legacy" ] && [ "$current" != "$legacy" ]; then
       case "$current" in "$CANONICAL_ROOT"/*|"$RENDER_ROOT"/*) ;; *) printf 'SKILL  collision %s -> %s\n' "$link" "$current" >&2; return 1 ;; esac
     fi
@@ -226,27 +266,31 @@ safe_link() {
 }
 
 preflight_links() {
-  local name link target current
+  local name link target current names
+  names="$(discover_host)" || { printf 'SKILL  probe failed (skill inventory)\n' >&2; return 1; }
   while IFS= read -r name; do
     [ -n "$name" ] || continue
     for link in "$OMP_ROOT/$name" "$CODEX_ROOT/$name"; do
       [ ! -e "$link" ] && [ ! -L "$link" ] && continue
       [ -L "$link" ] || { printf 'SKILL  collision unmanaged path %s\n' "$link" >&2; return 1; }
-      current="$(readlink "$link")"
+      current="$(readlink "$link")" || { printf 'SKILL  probe failed (link target)\n' >&2; return 1; }
       case "$current" in "$CANONICAL_ROOT"/*|"$RENDER_ROOT"/*) ;; *) printf 'SKILL  collision %s -> %s\n' "$link" "$current" >&2; return 1 ;; esac
     done
-  done < <(discover_host)
+  done <<EOF
+$names
+EOF
 }
 
 migrate_legacy_adapters() {
-  local name source_agents live_agents entries
+  local name source_agents live_agents entries names
+  names="$(discover_host)" || { printf 'SKILL  probe failed (skill inventory)\n' >&2; return 1; }
   while IFS= read -r name; do
     [ -n "$name" ] || continue
     source_agents="$SOURCE_ROOT/$name/agents"
     live_agents="$CANONICAL_ROOT/$name/agents"
     [ ! -e "$source_agents" ] || continue
     [ -d "$live_agents" ] || continue
-    entries="$(find "$live_agents" -type f -print | sort)"
+    entries="$(find "$live_agents" -type f -print | sort)" || return 1
     if [ "$entries" = "$live_agents/openai.yaml" ]; then
       rm "$live_agents/openai.yaml"
       rmdir "$live_agents"
@@ -255,18 +299,25 @@ migrate_legacy_adapters() {
       printf 'SKILL  collision unexpected canonical agents metadata: %s\n' "$name" >&2
       return 1
     fi
-  done < <(discover_host)
+  done <<EOF
+$names
+EOF
 }
 
 remove_owned_stale() {
-  local current_names="$1" old_name harness link target
+  local current_names="$1" old_name harness link target grep_status
   [ -f "$STATE_FILE" ] || return 0
   while IFS=$'\t' read -r old_name harness; do
     [ -n "$old_name" ] || continue
-    grep -Fqx "$old_name" "$current_names" && continue
+    if grep -Fqx "$old_name" "$current_names"; then
+      continue
+    else
+      grep_status=$?
+      [ "$grep_status" -eq 1 ] || { printf 'SKILL  probe failed (ownership inventory)\n' >&2; return 1; }
+    fi
     case "$harness" in codex) link="$CODEX_ROOT/$old_name" ;; omp) link="$OMP_ROOT/$old_name" ;; *) continue ;; esac
     if [ -L "$link" ]; then
-      target="$(readlink "$link")"
+      target="$(readlink "$link")" || { printf 'SKILL  probe failed (link target)\n' >&2; return 1; }
       case "$target" in "$CANONICAL_ROOT"/*|"$RENDER_ROOT"/*) rm "$link" ;; esac
     fi
     if [ "$harness" = codex ] && [ -d "$RENDER_ROOT/codex/$old_name" ]; then
@@ -284,17 +335,20 @@ sync_skills() {
   audit_source
   migrate_legacy_adapters
   failures=0
+  names="$(discover_host)" || { printf 'SKILL  probe failed (skill inventory)\n' >&2; return 1; }
   while IFS= read -r name; do
     [ -n "$name" ] || continue
     validate_skill "$CANONICAL_ROOT/$name"
-  done < <(discover_host)
+  done <<EOF
+$names
+EOF
   [ "$failures" -eq 0 ] || return 1
   preflight_links
   mkdir -p "$RENDER_ROOT/codex" "$STATE_DIR"
   names="$(mktemp "${TMPDIR:-/tmp}/decent-angl-skill-names.XXXXXX")"
   next_state="$(mktemp "${TMPDIR:-/tmp}/decent-angl-skill-state.XXXXXX")"
   trap 'rm -f "$names" "$next_state"' RETURN
-  discover_host >"$names"
+  discover_host >"$names" || { printf 'SKILL  probe failed (skill inventory)\n' >&2; return 1; }
   remove_owned_stale "$names"
   while IFS= read -r name; do
     [ -n "$name" ] || continue
@@ -322,12 +376,17 @@ sync_skills() {
 }
 
 validate_live() {
-  local failures_live=0 name source target expected count=0 state_names expected_names
+  local failures_live=0 name source target expected count=0 state_names expected_names canonical_names source_names host_names skipped system omp_target codex_target names canonical_file
   expected_names="$(mktemp "${TMPDIR:-/tmp}/decent-angl-skill-expected.XXXXXX")"
   state_names="$(mktemp "${TMPDIR:-/tmp}/decent-angl-skill-actual.XXXXXX")"
-  trap 'rm -rf "$expected_names" "$state_names" "${expected:-}"' RETURN
-  discover_host >"$expected_names"
-  if ! diff -q "$expected_names" <(discover "$CANONICAL_ROOT") >/dev/null 2>&1; then
+  canonical_file="$(mktemp "${TMPDIR:-/tmp}/decent-angl-skill-canonical.XXXXXX")"
+  trap 'rm -rf "$expected_names" "$state_names" "$canonical_file" "${expected:-}"' RETURN
+  system="$(uname -s)" || { printf 'SKILL  probe failed (host platform)\n' >&2; return 1; }
+  names="$(discover_host "$system")" || { printf 'SKILL  probe failed (skill inventory)\n' >&2; failures_live=1; names=""; }
+  canonical_names="$(discover "$CANONICAL_ROOT")" || { printf 'SKILL  probe failed (canonical inventory)\n' >&2; failures_live=1; canonical_names=""; }
+  printf '%s\n' "$names" >"$expected_names"
+  printf '%s\n' "$canonical_names" >"$canonical_file"
+  if ! diff -q "$expected_names" "$canonical_file" >/dev/null 2>&1; then
     printf 'SKILL  canonical live inventory drift\n' >&2
     failures_live=1
   fi
@@ -336,43 +395,74 @@ validate_live() {
     count=$((count + 1))
     source="$CANONICAL_ROOT/$name"
     target="$RENDER_ROOT/codex/$name"
-    [ -L "$OMP_ROOT/$name" ] && [ "$(readlink "$OMP_ROOT/$name")" = "$source" ] || { printf 'SKILL  live OMP link drift: %s\n' "$name" >&2; failures_live=1; }
-    [ -L "$CODEX_ROOT/$name" ] && [ "$(readlink "$CODEX_ROOT/$name")" = "$target" ] || { printf 'SKILL  live Codex link drift: %s\n' "$name" >&2; failures_live=1; }
+    if [ -L "$OMP_ROOT/$name" ]; then
+      omp_target="$(readlink "$OMP_ROOT/$name")" || { printf 'SKILL  live OMP link probe failed: %s\n' "$name" >&2; failures_live=1; omp_target=""; }
+    else omp_target=""; fi
+    [ "$omp_target" = "$source" ] || { printf 'SKILL  live OMP link drift: %s\n' "$name" >&2; failures_live=1; }
+    if [ -L "$CODEX_ROOT/$name" ]; then
+      codex_target="$(readlink "$CODEX_ROOT/$name")" || { printf 'SKILL  live Codex link probe failed: %s\n' "$name" >&2; failures_live=1; codex_target=""; }
+    else codex_target=""; fi
+    [ "$codex_target" = "$target" ] || { printf 'SKILL  live Codex link drift: %s\n' "$name" >&2; failures_live=1; }
     expected="$(mktemp -d "${TMPDIR:-/tmp}/decent-angl-codex-render.XXXXXX")"
-    render_codex "$source" "$expected"
-    diff -qr "$expected" "$target" >/dev/null 2>&1 || { printf 'SKILL  Codex projection drift: %s\n' "$name" >&2; failures_live=1; }
+    if ! render_codex "$source" "$expected"; then
+      printf 'SKILL  Codex projection probe failed: %s\n' "$name" >&2
+      failures_live=1
+    elif ! diff -qr "$expected" "$target" >/dev/null 2>&1; then
+      printf 'SKILL  Codex projection drift: %s\n' "$name" >&2
+      failures_live=1
+    fi
     rm -rf "$expected"
     expected=""
-  done <"$expected_names"
-  if [ -f "$STATE_FILE" ]; then awk -F '\t' '{print $1}' "$STATE_FILE" | sort -u >"$state_names"; else : >"$state_names"; fi
+  done <<EOF
+$names
+EOF
+  if [ -f "$STATE_FILE" ]; then
+    awk -F '\t' '{print $1}' "$STATE_FILE" | sort -u >"$state_names" || { printf 'SKILL  probe failed (ownership state)\n' >&2; failures_live=1; }
+  else
+    : >"$state_names"
+  fi
   diff -q "$expected_names" "$state_names" >/dev/null 2>&1 || { printf 'SKILL  ownership state drift\n' >&2; failures_live=1; }
   trap - RETURN
-  rm -f "$expected_names" "$state_names"
+  rm -f "$expected_names" "$state_names" "$canonical_file"
   [ "$failures_live" -eq 0 ] || return 1
   printf 'SKILL  live ok %s skill(s), OMP native and Codex projected\n' "$count"
+  source_names="$(discover "$SOURCE_ROOT")" || { printf 'SKILL  probe failed (skill inventory)\n' >&2; return 1; }
+  host_names="$(discover_host "$system")" || { printf 'SKILL  probe failed (skill inventory)\n' >&2; return 1; }
+  skipped="$(comm -23 <(printf '%s\n' "$source_names") <(printf '%s\n' "$host_names") | paste -sd, -)" || { printf 'SKILL  probe failed (skill inventory)\n' >&2; return 1; }
+  if [ -n "$skipped" ]; then
+    printf 'SKILL  skipped on %s by .macos-only: %s\n' "$system" "$skipped"
+  fi
 }
 
 validate_all() {
-  local name
+  local name names
   require_safe_roots
   audit_source
   failures=0
+  names="$(discover_host)" || { printf 'SKILL  probe failed (skill inventory)\n' >&2; return 1; }
   while IFS= read -r name; do
     [ -n "$name" ] || continue
     validate_skill "$CANONICAL_ROOT/$name"
-  done < <(discover_host)
+  done <<EOF
+$names
+EOF
   [ "$failures" -eq 0 ] || return 1
   validate_live
 }
 
 list_skills() {
-  local name file invocation
+  local name file invocation names explicit
+  names="$(discover_host)" || { printf 'SKILL  probe failed (skill inventory)\n' >&2; return 1; }
   printf 'NAME\tINVOCATION\tSOURCE\n'
   while IFS= read -r name; do
-    file="$(skill_file "$SOURCE_ROOT/$name")"
-    if is_explicit "$file"; then invocation=explicit; else invocation=model; fi
+    [ -n "$name" ] || continue
+    file="$(skill_file "$SOURCE_ROOT/$name")" || return 1
+    explicit="$(is_explicit "$file")" || { printf 'SKILL  probe failed (frontmatter)\n' >&2; return 1; }
+    if [ "$explicit" = true ]; then invocation=explicit; else invocation=model; fi
     printf '%s\t%s\t%s\n' "$name" "$invocation" "$SOURCE_ROOT/$name"
-  done < <(discover_host)
+  done <<EOF
+$names
+EOF
 }
 
 import_skill() {

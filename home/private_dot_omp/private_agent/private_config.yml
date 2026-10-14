@@ -15,8 +15,10 @@ modelRoles:
   task: openai-codex/gpt-6-luna:medium
   # Scarce Anthropic weekly pool (capped at half of it); see RULES.md.
   fable: anthropic/claude-fable-5-1:medium
-  # Keyless search only; provider-backed search stays an explicit choice.
-  web: web/public
+  # Web search: keyless APIs first; scrapers blocked as of 2026-10-14. Exa
+  # leads, then the exact fallbacks under retry.fallbackChains.web. No search
+  # credentials, and no web/hosted: it bills the session model's quota.
+  web: web/exa
 
 modelProviderOrder:
   - anthropic
@@ -80,8 +82,11 @@ retry:
   # Account rotation is native OAuth behavior. Do not silently change models
   # or turn a local job into paid cloud inference on failure.
   modelFallback: false
+  # Exact web fallbacks after modelRoles.web (replaces OMP's default chain,
+  # which includes web/hosted). Parallel's keyless adapter also sends the
+  # session ID when available and the model ID.
   fallbackChains:
-    web: [web/startpage, web/duckduckgo]
+    web: [web/firecrawl, web/parallel]
 
 task:
   maxConcurrency: 3

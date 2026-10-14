@@ -10,7 +10,10 @@ modelRoles:
   commit: llama.cpp/Qwen3.8-27B-RVN-Heretic-Q4_K_M:low
   smol: llama.cpp/Qwen3.8-27B-RVN-Heretic-Q4_K_M:low
   tiny: llama.cpp/Qwen3.8-27B-RVN-Heretic-Q4_K_M:low
-  web: web/public
+  # Inference stays local, but web searches contact third parties: keyless
+  # APIs first (scrapers blocked as of 2026-10-14), Exa then the exact
+  # fallbacks under retry.fallbackChains.web. No search credentials.
+  web: web/exa
 
 enabledModels:
   - llama.cpp/*
@@ -50,8 +53,10 @@ retry:
   baseDelayMs: 2000
   maxDelayMs: 60000
   modelFallback: false
+  # Exact web fallbacks; no web/hosted. Parallel's keyless adapter also sends
+  # the session ID when available and the model ID.
   fallbackChains:
-    web: [web/startpage, web/duckduckgo]
+    web: [web/firecrawl, web/parallel]
 
 task:
   # One llama.cpp slot: children interleave on the GPU rather than run in

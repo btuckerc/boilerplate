@@ -643,7 +643,7 @@ check_tracking_and_secrets() {
   # probe yields empty output, which must not read as a clean boundary. The
   # filters are Bash regex matches (match_lines), so no filter process can fail.
   if tracked="$(git -C "$REPO_ROOT" ls-files home/private_dot_omp/private_agent 2>/dev/null)"; then
-    runtime_tracked="$(match_lines "$tracked" '(^|/)(agent\.db|history\.db|models\.db|auth-.*\.token|secret-placeholder\.key|\.env)(-|$|\.)|/(sessions|cache|logs|state|terminal-sessions|managed-skills)/')"
+    runtime_tracked="$(match_lines "$tracked" '(^|/)(agent\.db|history\.db|models\.db|auth-.*\.token|secret-placeholder\.key|gpu_cache\.json|last-changelog-version|\.env)(-|$|\.)|/(sessions|cache|logs|state|terminal-sessions|managed-skills)/|\.log$')"
     if [ -n "$runtime_tracked" ]; then
       printf 'SECRET  runtime or credential path is tracked\n' >&2
       printf '%s\n' "$runtime_tracked" >&2
@@ -657,7 +657,7 @@ check_tracking_and_secrets() {
   fi
 
   if managed="$(cm managed 2>/dev/null)"; then
-    runtime_managed="$(match_lines "$managed" '^\.omp/agent/(agent\.db|history\.db|models\.db|auth-|secret-placeholder\.key|\.env|sessions/|cache/|logs/|state/|terminal-sessions/|managed-skills/)')"
+    runtime_managed="$(match_lines "$managed" '^\.omp/agent/(agent\.db|history\.db|models\.db|auth-|secret-placeholder\.key|gpu_cache\.json|last-changelog-version|\.env|sessions/|cache/|logs/|state/|terminal-sessions/|managed-skills/|.*\.log$)')"
     if [ -n "$runtime_managed" ]; then
       printf 'SECRET  chezmoi owns runtime paths\n%s\n' "$runtime_managed" >&2
       failures=1

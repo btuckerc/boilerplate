@@ -6,16 +6,21 @@
 set -euo pipefail
 # Byte-order collation keeps sort and comm consistent across hosts and locales.
 export LC_ALL=C
+# Scans must see the history a push transfers; pack transfer ignores refs/replace, so Git here does too.
+export GIT_NO_REPLACE_OBJECTS=1
 
 REPO_ROOT="${DECENT_ANGL_REPO_ROOT:-$HOME/src/boilerplate}"
 SOURCE_LINK="${DECENT_ANGL_SOURCE_LINK:-$HOME/.local/share/chezmoi}"
 REMOTE="${DECENT_ANGL_REMOTE:-origin}"
 BRANCH="${DECENT_ANGL_BRANCH:-master}"
+# Full refname: a short "origin/master" would resolve a local branch of that name first.
+TRACKING="refs/remotes/$REMOTE/$BRANCH"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/decent-angl"
 MARKER="$STATE_DIR/config-drift"
 LOG_FILE="$STATE_DIR/config-sync.log"
 LOCK_FILE="$STATE_DIR/config-sync.flock"
 PENDING="$STATE_DIR/config-pending"
+VALIDATED="$STATE_DIR/config-validated-commit"
 VALIDATION_ROOT="${DECENT_ANGL_VALIDATION_ROOT:-$HOME/src/boilerplate-work}"
 GUARD_MODE=false
 WITH_SCRIPTS=false
@@ -31,7 +36,8 @@ Usage: decent-angl-sync <status|validate|publish|adopt-source|reconcile|guard|ca
   validate               Check secret and shared-skill source boundaries.
   adopt-source           Preserve the old chezmoi clone and link it to the repo.
   publish                Validate and push committed HEAD; leave local edits/live files alone.
-  reconcile              Publish reviewed commits, fast-forward, and apply committed state.
+  reconcile              Publish reviewed commits, fast-forward, apply committed state, and
+                         run live omp-baseline validate once per fully applied revision.
   guard                  Scheduled reconcile that never publishes.
   capture TARGET...      Explicitly add live targets to the canonical source.
   install-guard          Install the 15-minute launchd/systemd user guard.
@@ -181,19 +187,351 @@ refresh_config() {
 }
 
 ahead_behind() {
-  git -C "$REPO_ROOT" rev-list --left-right --count "HEAD...$REMOTE/$BRANCH"
+  git -C "$REPO_ROOT" rev-list --left-right --count "HEAD...$TRACKING"
+}
+
+# The scans read rg's exit status (0 match, 1 no match). A broken rg can also exit 1, e.g. a mise shim
+# whose tool is gone ("not a valid shim"), so a working one must match a known path and reject another.
+rg_ready() {
+  local rc=0
+  rg -q '(^|/)auth\.json($|/)' <<<'home/auth.json' >/dev/null 2>&1 || return 1
+  rg -q '(^|/)auth\.json($|/)' <<<'home/example' >/dev/null 2>&1 || rc=$?
+  (( rc == 1 ))
+}
+
+# Credential/runtime names refused anywhere, in raw source names and in chezmoi targets.
+GLOBAL_DENY='(^|/)(auth\.json|auth-broker\.token|auth-gateway\.token|agent\.db(-shm|-wal)?|history\.db(-shm|-wal)?|models\.db(-shm|-wal)?|\.env)($|/)|(^|/)(sessions|logs)/'
+# Credential content signatures (POSIX ERE), searched in every file, text or binary, and in symlink
+# targets, whatever the name: any PEM/PGP private key armor, and the token formats of GitHub, GitLab,
+# OpenAI/Anthropic/OpenRouter (sk-), Slack, AWS, Google, Tailscale, Hugging Face, npm, and JWTs.
+CREDENTIAL_SIGNATURES='(-----BEGIN ([A-Z0-9]+ )*PRIVATE KEY( BLOCK)?-----|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|glpat-[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9_-]{30,}|xox[abeprs]-[A-Za-z0-9-]{20,}|(AKIA|ASIA)[A-Z0-9]{16}|AIza[A-Za-z0-9_-]{35}|tskey-[A-Za-z0-9-]{20,}|hf_[A-Za-z0-9]{30,}|npm_[A-Za-z0-9]{36}|eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})'
+# Runtime declarations: each .chezmoiignore lists the machine-local files of one target dir (pairs of
+# declaration, target-dir regex). Their patterns, not a second hand-kept list, define what is refused there.
+RUNTIME_DECLARATIONS=(
+  'home/private_dot_omp/private_agent/.chezmoiignore' '\.omp/(profiles/[^/]+/)?agent/'
+  'home/private_dot_codex/.chezmoiignore' '\.codex/'
+)
+
+# glob_regex GLOB: a .chezmoiignore glob as a regex fragment (* and ? stay within a component, ** spans
+# them, **/ also matches no directory). Scans run in byte mode, so ? (one character to chezmoi) is one
+# byte plus any UTF-8 continuation bytes: a whole multi-byte character, or more, never less. Fails on
+# syntax it does not translate, and on absolute or ./.. paths chezmoi rejects or resolves elsewhere,
+# so no pattern is silently dropped or narrowed.
+glob_regex() {
+  local p="$1" out="" c i=0
+  [[ "$p" != /* ]] || return 1
+  p="${p%/\*\*}"
+  p="${p%/}"
+  [[ -n "$p" && "/$p/" != *//* && "/$p/" != */./* && "/$p/" != */../* ]] || return 1
+  while (( i < ${#p} )); do
+    c="${p:i:1}"
+    case "$c" in
+      '*') if [[ "${p:i+1:2}" == '*/' ]]; then out+='(.*/)?'; i=$((i + 2))
+           elif [[ "${p:i+1:1}" == '*' ]]; then out+='.*'; i=$((i + 1))
+           else out+='[^/]*'; fi ;;
+      '?') out+='[^/][\x80-\xBF]*' ;;
+      '['|']'|'{'|'}'|'\') return 1 ;;
+      '.'|'+'|'('|')'|'|'|'^'|'$') out+="\\$c" ;;
+      *) out+="$c" ;;
+    esac
+    i=$((i + 1))
+  done
+  printf '%s' "$out"
+}
+
+# runtime_deny REV...: one regex over chezmoi target paths, the union of every runtime declaration's
+# patterns at each REV ("." is the working tree), so no single commit can narrow it. A declaration
+# absent from every REV, or an untranslatable pattern, fails. Negated patterns stay denied, and a
+# pattern matches at any depth below its dir: both only widen the set.
+runtime_deny() {
+  local i decl prefix rev text found line frag out=""
+  for ((i = 0; i < ${#RUNTIME_DECLARATIONS[@]}; i += 2)); do
+    decl="${RUNTIME_DECLARATIONS[i]}"
+    prefix="${RUNTIME_DECLARATIONS[i + 1]}"
+    found=0
+    for rev in "$@"; do
+      if [[ "$rev" == . ]]; then
+        [[ -f "$REPO_ROOT/$decl" ]] || continue
+        text="$(<"$REPO_ROOT/$decl")" || return 1
+      else
+        git -C "$REPO_ROOT" cat-file -e "$rev:$decl" 2>/dev/null || continue
+        text="$(git -C "$REPO_ROOT" show "$rev:$decl")" || return 1
+      fi
+      found=1
+      while IFS= read -r line; do
+        # chezmoi: whitespace then # starts a comment; surrounding whitespace is trimmed.
+        line="${line%%[[:space:]]#*}"
+        line="${line#"${line%%[![:space:]]*}"}"
+        line="${line%"${line##*[![:space:]]}"}"
+        [[ -n "$line" && "$line" != '#'* ]] || continue
+        line="${line#!}"
+        frag="$(glob_regex "$line")" || { printf 'Unsupported runtime pattern in %s: %s\n' "$decl" "$line" >&2; return 1; }
+        out+="${out:+|}^$prefix(.*/)?$frag(/|\$)"
+      done <<<"$text"
+    done
+    (( found )) || { printf 'Runtime declaration %s is missing.\n' "$decl" >&2; return 1; }
+  done
+  printf '%s\n' "$out"
+}
+
+# chezmoi_targets: home/ source paths on stdin -> the target paths to check, one or more per path.
+# The first is chezmoi's own parse (attr.go parseDirAttr/parseFileAttr, 2.72): attribute prefixes cut
+# once each in chezmoi's fixed order, then one dot_ or literal_; for the file, the encrypted suffix
+# after encrypted_ (.age or .asc, so both readings), then .literal, or .tmpl and an optional .literal.
+# A final .literal stops suffix parsing, so runtime.key.literal.literal targets runtime.key.literal.
+# Below an external_ dir chezmoi deploys names unparsed (external_x/a.literal targets x/a.literal).
+# The last line strips every attribute word and suffix repeatedly: extra names only widen matches.
+chezmoi_targets() {
+  local line comp dirs loose name cut p encrypted external i
+  local -a parts
+  while IFS= read -r line; do
+    [[ "$line" == home/?* ]] || continue
+    dirs=""; loose=""; i=0; external=false
+    IFS=/ read -r -a parts <<<"${line#home/}"
+    for comp in "${parts[@]}"; do
+      i=$((i + 1))
+      name="$comp"
+      if [[ "$external" == true ]]; then
+        if (( i < ${#parts[@]} )); then dirs+="$name/"; else printf '%s%s\n' "$dirs" "$name"; fi
+      elif (( i < ${#parts[@]} )); then
+        name="${name#remove_}"
+        if [[ "$name" == external_* ]]; then name="${name#external_}"; external=true; fi
+        for p in exact_ private_ readonly_; do name="${name#"$p"}"; done
+        case "$name" in dot_*) name=".${name#dot_}" ;; literal_*) name="${name#literal_}" ;; esac
+        dirs+="$name/"
+      else
+        cut="encrypted_ private_ readonly_ empty_ executable_"; encrypted=false
+        case "$name" in
+          create_*) name="${name#create_}" ;;
+          remove_*|symlink_*) name="${name#*_}"; cut="" ;;
+          run_*)
+            name="${name#run_}"; cut=""
+            case "$name" in once_*|onchange_*) name="${name#*_}" ;; esac
+            case "$name" in before_*|after_*) name="${name#*_}" ;; esac ;;
+          modify_*) name="${name#modify_}"; cut="encrypted_ private_ readonly_ executable_" ;;
+        esac
+        for p in $cut; do
+          [[ "$name" == "$p"* ]] || continue
+          name="${name#"$p"}"
+          [[ "$p" != encrypted_ ]] || encrypted=true
+        done
+        case "$name" in dot_*) name=".${name#dot_}" ;; literal_*) name="${name#literal_}" ;; esac
+        if [[ "$encrypted" == true && "$name" =~ ^(.+)\.(age|asc)$ ]]; then
+          chezmoi_file_suffixes "$dirs" "${BASH_REMATCH[1]}"
+        fi
+        chezmoi_file_suffixes "$dirs" "$name"
+      fi
+      while [[ "$comp" =~ ^(after|before|create|empty|encrypted|exact|executable|external|literal|modify|once|onchange|private|readonly|remove|run|symlink)_(.+)$ ]]; do
+        comp="${BASH_REMATCH[2]}"
+      done
+      [[ "$comp" != dot_?* ]] || comp=".${comp#dot_}"
+      while [[ "$comp" =~ ^(.+)\.(tmpl|literal|age|asc)$ ]]; do
+        comp="${BASH_REMATCH[1]}"
+      done
+      loose+="${loose:+/}$comp"
+    done
+    printf '%s\n' "$loose"
+  done
+}
+
+# chezmoi_file_suffixes DIRS NAME: prints DIRS plus NAME after chezmoi's .literal/.tmpl suffix rule.
+chezmoi_file_suffixes() {
+  local name="$2"
+  case "$name" in
+    *?.literal) name="${name%.literal}" ;;
+    *?.tmpl) name="${name%.tmpl}"; [[ "$name" != ?*.literal ]] || name="${name%.literal}" ;;
+  esac
+  printf '%s%s\n' "$1" "$name"
+}
+
+# Code points whose full case folding or decomposition is ASCII (ß, ẞ, ı, ſ, Greek question mark and
+# varia, Kelvin sign, ﬀ-ﬆ) or that HFS+ ignores. Rust's (?i) folds only simply (ſ, Kelvin), so a name
+# holding any of them is refused outright: it may alias a checked name on a case-insensitive host.
+FOLDS_TO_ASCII='[\x{DF}\x{131}\x{17F}\x{37E}\x{1E9E}\x{1FEF}\x{212A}\x{FB00}-\x{FB06}\x{200C}-\x{200F}\x{202A}-\x{202E}\x{206A}-\x{206F}\x{FEFF}]'
+
+# path_scan PATHS RUNTIME_REGEX: prints refused names (raw and target); exits like rg (0 hit, 1 none).
+# (?-u): byte mode, so [^/] and . also consume bytes that are not valid UTF-8. (?i) in Unicode mode
+# as well: macOS deploys onto case-insensitive APFS, where AUTH.JSON or .omp/Agent/agent.DB is the
+# same file as the denied name, so the names are matched under case folding too, and names holding
+# a FOLDS_TO_ASCII code point are refused.
+path_scan() {
+  local targets
+  targets="$(chezmoi_targets <<<"$1")" || return 2
+  rg -e "(?-u)$GLOBAL_DENY" -e "(?-u)$2" -e "(?i)$GLOBAL_DENY" -e "(?i)$2" -e "$FOLDS_TO_ASCII" \
+    <<<"$1"$'\n'"$targets"
+}
+
+# fold_aliases: tracked paths on stdin -> the ones a case-insensitive checkout (APFS on the Mac) would
+# merge with another or resolve differently from Linux. Every path prefix must be unique under ASCII
+# case folding (Home/ beside home/, a/ beside A), and names Git or chezmoi open by path take their
+# canonical spelling (.GITATTRIBUTES is .gitattributes there, a lone Home/ the source root). Non-ASCII
+# case is left to the source walk in omp-agent-policy; FOLDS_TO_ASCII names are refused by path_scan.
+fold_aliases() {
+  awk '{
+    n = split($0, part, "/"); p = ""
+    for (i = 1; i <= n; i++) {
+      p = (i == 1) ? part[i] : p "/" part[i]
+      k = tolower(p); c = tolower(part[i])
+      if (k in seen && seen[k] != p && !(p in told)) { print p " (same path as " seen[k] " when case-folded)"; told[p] = 1 }
+      if (!(k in seen)) seen[k] = p
+      if (c != part[i] && !(p in told) && ((i == 1 && c == "home") || c == ".gitattributes" || c == ".gitignore" ||
+          c == ".gitmodules" || c == ".mailmap" || c == ".chezmoiroot" || c == ".git")) { print p " (opened as " c ")"; told[p] = 1 }
+    }
+  }'
+}
+
+# content_scan REV: paths whose content matches CREDENTIAL_SIGNATURES in REV ("." is the working tree
+# Git can commit: tracked and untracked files, honoring .gitignore). git grep reads every file, text or
+# binary, but skips symlinks, so their targets (blobs of mode 120000, or readlink) are matched
+# separately; for a commit, so is its own object (message, author, committer). Callers refuse names
+# holding a newline first. Prints paths only, never content; exits 0 hit, 1 none, 2 scan failure.
+content_scan() {
+  local rev="$1" records record meta path target hits="" rc=0
+  if [[ "$rev" == . ]]; then
+    hits="$(git -C "$REPO_ROOT" grep --untracked -l -E "$CREDENTIAL_SIGNATURES" -- .)" || rc=$?
+    records="$(git -C "$REPO_ROOT" ls-files -z --cached --others --exclude-standard | tr '\n\0' '\001\n')" || return 2
+  else
+    hits="$(git -C "$REPO_ROOT" grep -l -E "$CREDENTIAL_SIGNATURES" "$rev" -- .)" || rc=$?
+    (( rc <= 1 )) || return 2
+    target="$(git -C "$REPO_ROOT" cat-file commit "$rev")" || return 2
+    rc=0
+    grep -a -q -E -e "$CREDENTIAL_SIGNATURES" <<<"$target" || rc=$?
+    (( rc <= 1 )) || return 2
+    (( rc == 1 )) || hits+="${hits:+$'\n'}$rev (commit message or header)"
+    rc=0
+    records="$(git -C "$REPO_ROOT" ls-tree -r -z "$rev" | tr '\n\0' '\001\n')" || return 2
+  fi
+  (( rc <= 1 )) || return 2
+  while IFS= read -r record; do
+    if [[ "$rev" == . ]]; then
+      path="$record"
+      [[ -n "$path" && -L "$REPO_ROOT/$path" ]] || continue
+      target="$(readlink "$REPO_ROOT/$path")" || return 2
+    else
+      meta="${record%%$'\t'*}"
+      path="${record#*$'\t'}"
+      [[ "$meta" == '120000 '* ]] || continue
+      target="$(git -C "$REPO_ROOT" cat-file blob "${meta##* }")" || return 2
+    fi
+    rc=0
+    grep -a -q -E -e "$CREDENTIAL_SIGNATURES" <<<"$target" || rc=$?
+    (( rc <= 1 )) || return 2
+    (( rc == 1 )) || hits+="${hits:+$'\n'}$path"
+  done <<<"$records"
+  [[ -n "$hits" ]] || return 1
+  printf '%s\n' "$hits"
+}
+
+# chezmoi_root_check REV: every check reads home/ as the chezmoi source root (chezmoi_targets, the
+# runtime declarations, check-source), so REV ("." is the working tree) must say exactly that in
+# .chezmoiroot, trimmed as chezmoi trims it. Another root, or a missing or non-regular marker, refuses.
+chezmoi_root_check() {
+  local rev="$1" mode value
+  if [[ "$rev" == . ]]; then
+    [[ -f "$REPO_ROOT/.chezmoiroot" && ! -L "$REPO_ROOT/.chezmoiroot" ]] || return 1
+    value="$(<"$REPO_ROOT/.chezmoiroot")" || return 1
+  else
+    mode="$(git -C "$REPO_ROOT" ls-tree "$rev" -- .chezmoiroot)" || return 1
+    [[ "$mode" == 100644\ * || "$mode" == 100755\ * ]] || return 1
+    value="$(git -C "$REPO_ROOT" cat-file blob "$rev:.chezmoiroot")" || return 1
+  fi
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  [[ "$value" == home ]]
+}
+
+# Attributes under which checkout writes a blob's bytes unchanged (eol=lf never converts on checkout). export-*
+# act only on git archive, which export_tree replaces, so they are inert here.
+ATTRIBUTE_ALLOW='^(-?text|text=auto|eol=lf|-?binary|-?diff|diff=[A-Za-z0-9_-]+|-?merge|whitespace=[^[:space:]]*|linguist-[A-Za-z-]+(=[^[:space:]]*)?|-?export-ignore|-?export-subst)$'
+
+# gitattributes_check REV: every .gitattributes in REV ("." is what Git can commit from the working tree)
+# sets only ATTRIBUTE_ALLOW attributes, so a checkout deploys the blobs the scans read: no filter (a
+# git-lfs smudge), ident, working-tree-encoding, eol=crlf or [attr] macro. Prints offending lines; exits
+# 0 clean, 1 refused (an unreadable file counts), 2 listing failure. Callers refuse newline names first.
+gitattributes_check() {
+  local rev="$1" file line attr bad="" names
+  local -a tokens
+  if [[ "$rev" == . ]]; then
+    names="$(git -C "$REPO_ROOT" ls-files -z --cached --others --exclude-standard | tr '\n\0' '\001\n')" || return 2
+  else
+    names="$(git -C "$REPO_ROOT" ls-tree -r -z --name-only "$rev" | tr '\n\0' '\001\n')" || return 2
+  fi
+  while IFS= read -r file; do
+    [[ "$file" == .gitattributes || "$file" == */.gitattributes ]] || continue
+    # An unstaged deletion is not committed as content.
+    [[ "$rev" != . || -e "$REPO_ROOT/$file" || -L "$REPO_ROOT/$file" ]] || continue
+    # || -n: an unterminated final line is still a rule (read fails at EOF but fills line).
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      # Git splits on " \t\r\n". A C-quoted pattern may run straight into an attribute ("x"ident),
+      # which a whitespace split cannot see, so quoted patterns refuse.
+      IFS=$' \t\r\n' read -r -a tokens <<<"$line"
+      (( ${#tokens[@]} > 0 )) && [[ "${tokens[0]}" != \#* ]] || continue
+      [[ "${tokens[0]}" != \[attr\]* && "${tokens[0]}" != \"* ]] || { bad+="$file: $line"$'\n'; continue; }
+      for attr in "${tokens[@]:1}"; do
+        [[ "$attr" =~ $ATTRIBUTE_ALLOW ]] || { bad+="$file: $line"$'\n'; break; }
+      done
+    done < <(if [[ "$rev" == . ]]; then cat -- "$REPO_ROOT/$file"; else git -C "$REPO_ROOT" cat-file blob "$rev:$file"; fi ||
+      echo '[attr]unreadable')
+  done <<<"$names"
+  [[ -n "$bad" ]] || return 0
+  printf '%s' "$bad"
+  return 1
+}
+
+# export_tree REV DIR: REV's files written to DIR from the object store, byte for byte. Unlike git
+# archive this applies no export-ignore/export-subst or checkout conversion, so the snapshot checks
+# read exactly the pushed blobs. Unsafe names, Git symlinks and submodules refuse (the source uses
+# chezmoi symlink_ files, and nothing below DIR may resolve outside it).
+export_tree() {
+  local rev="$1" dir="$2" list record meta path mode oid
+  list="$(mktemp "$VALIDATION_ROOT/tree.XXXXXX")" || return 1
+  git -C "$REPO_ROOT" ls-tree -r -z "$rev" >"$list" || { rm -f "$list"; return 1; }
+  while IFS= read -r -d '' record; do
+    meta="${record%%$'\t'*}"
+    path="${record#*$'\t'}"
+    mode="${meta%% *}"
+    oid="${meta##* }"
+    if [[ "$path" == /* || "/$path/" == *//* || "/$path/" == */./* || "/$path/" == */../* ||
+      "/$path/" == */.[Gg][Ii][Tt]/* ]]; then
+      printf 'Refusing unsafe path in %s: %q\n' "$rev" "$path" >&2; rm -f "$list"; return 1
+    fi
+    case "$mode" in
+      100644|100755) ;;
+      *) printf 'Refusing mode %s entry (symlink or submodule) in %s: %q\n' "$mode" "$rev" "$path" >&2; rm -f "$list"; return 1 ;;
+    esac
+    mkdir -p "$dir/$(dirname -- "$path")" &&
+      git -C "$REPO_ROOT" cat-file blob "$oid" >"$dir/$path" || { rm -f "$list"; return 1; }
+    [[ "$mode" == 100644 ]] || chmod 755 "$dir/$path" || { rm -f "$list"; return 1; }
+  done <"$list"
+  rm -f "$list"
 }
 
 secret_boundary() {
-  local paths forbidden hits result=0
-  command -v rg >/dev/null || { echo "ripgrep is required for source checks." >&2; return 1; }
-  paths="$(git -C "$REPO_ROOT" ls-files --cached --others --exclude-standard)" || return 1
-  forbidden="$(printf '%s\n' "$paths" | rg '(^|/)(auth\.json|auth-broker\.token|auth-gateway\.token|agent\.db(-shm|-wal)?|history\.db(-shm|-wal)?|models\.db(-shm|-wal)?|\.env)($|/)|(^|/)(sessions|logs)/' || true)"
-  if [[ -n "$forbidden" ]]; then
+  local paths forbidden hits runtime result=0 scan=0
+  rg_ready || { echo "A working ripgrep is required for source checks." >&2; return 1; }
+  runtime="$(runtime_deny HEAD .)" || return 1
+  # -z: raw names, not Git's quoted display form (core.quotePath would hide e.g. "home/caf\303\251/auth.json").
+  # A newline inside a name would split it into records that no longer match, so names holding one
+  # (mapped to \001) are refused. Scope: what Git can commit. Ignored files enter a commit only via
+  # `git add -f`, and publish scans every outgoing commit.
+  paths="$(git -C "$REPO_ROOT" ls-files -z --cached --others --exclude-standard | tr '\n\0' '\001\n')" || return 1
+  [[ "$paths" != *$'\001'* ]] || { echo "Refusing path names containing a newline or \\001." >&2; return 1; }
+  hits="$(fold_aliases <<<"$paths")" || return 1
+  [[ -z "$hits" ]] || { printf 'Refusing case-insensitive path aliases:\n%s\n' "$hits" >&2; return 1; }
+  chezmoi_root_check . || { echo "Refusing working tree: .chezmoiroot must be a regular file reading home." >&2; return 1; }
+  result=0
+  hits="$(gitattributes_check .)" || result=$?
+  (( result == 0 )) || { printf 'Refusing checkout-altering attributes:\n%s\n' "$hits" >&2; return 1; }
+  # rg: 0 match, 1 no match, anything else is a scan failure (fail closed).
+  forbidden="$(path_scan "$paths" "$runtime")" || scan=$?
+  if (( scan == 0 )); then
     printf 'Refusing machine-local paths:\n%s\n' "$forbidden" >&2
     return 1
+  elif (( scan != 1 )); then
+    echo "Machine-local path scan failed." >&2
+    return 1
   fi
-  hits="$(git -C "$REPO_ROOT" grep --untracked -I -l -E '(-----BEGIN (RSA |OPENSSH )?PRIVATE KEY-----|ghp_[A-Za-z0-9]{30,}|sk-or-v1-[A-Za-z0-9_-]{30,}|xox[baprs]-[A-Za-z0-9-]{20,})' -- . ':(exclude)*.lock')" || result=$?
+  hits="$(content_scan .)" || result=$?
   if (( result == 0 )); then
     printf 'Refusing credential signatures in: %s\n' "$hits" >&2
     return 1
@@ -229,7 +567,7 @@ status() {
   if git_dirty; then dirty=yes; else dirty=no; fi
   if source_is_canonical; then source_state=canonical; else source_state=split; fi
   if live_drift; then drift=yes; else drift=no; fi
-  if git -C "$REPO_ROOT" rev-parse --verify "$REMOTE/$BRANCH" >/dev/null 2>&1; then
+  if git -C "$REPO_ROOT" rev-parse --verify "$TRACKING" >/dev/null 2>&1; then
     counts="$(ahead_behind)"
     ahead="$(awk '{print $1}' <<<"$counts")"
     behind="$(awk '{print $2}' <<<"$counts")"
@@ -278,9 +616,24 @@ adopt_source() {
 }
 
 baseline_check() {
-  if [[ -f "$REPO_ROOT/utils/scripts/check_baseline.py" ]]; then
-    python3 "$REPO_ROOT/utils/scripts/check_baseline.py" "$REPO_ROOT" || return 1
+  [[ -f "$REPO_ROOT/utils/scripts/check_baseline.py" ]] || { echo "Missing check_baseline: $REPO_ROOT/utils/scripts/check_baseline.py" >&2; return 1; }
+  python3 "$REPO_ROOT/utils/scripts/check_baseline.py" "$REPO_ROOT" || return 1
+}
+
+# live_validate REV: after a full apply, the deployed omp-baseline screens the live result (agent
+# policy, plugin roots, pins): reconcile without --with-scripts skips the run_ hook that calls it.
+# Once per revision; omp-baseline's hourly guard screens between revisions. Failures retry next run.
+live_validate() {
+  local tool="$HOME/.local/bin/omp-baseline" output
+  [[ "$(cat "$VALIDATED" 2>/dev/null || true)" != "$1" ]] || return 0
+  [[ -x "$tool" ]] || { echo "Missing live omp-baseline: $tool" >&2; return 1; }
+  if ! output="$("$tool" validate 2>&1)"; then
+    printf '%s\n' "$output" >&2
+    printf 'Live omp-baseline validate failed after applying %s; not converged. A pin change needs reconcile --with-scripts.\n' "${1:0:12}" >&2
+    return 1
   fi
+  printf 'LIVE    omp-baseline validate passed\n'
+  printf '%s\n' "$1" >"$VALIDATED"
 }
 
 apply_tree() {
@@ -311,24 +664,36 @@ for name in sys.stdin.buffer.read().split(bytes([0])):
 # omp-baseline also checks the snapshot's agent policy (outgoing publication only).
 validate_commit() (
   local revision="$1" base="$2" publish_check="${3:-}"
-  local snapshot commit commits paths result baseline
+  local snapshot commit commits paths result baseline runtime hits
   mkdir -p "$VALIDATION_ROOT" || return 1
   snapshot="$(mktemp -d "$VALIDATION_ROOT/validate.XXXXXX")" || return 1
   trap 'rm -rf "$snapshot"' EXIT
   # Scan every outgoing commit, including secrets later deleted before HEAD.
   commits="$(git -C "$REPO_ROOT" rev-list "$base..$revision")" || return 1
-  command -v rg >/dev/null || { echo "ripgrep is required for publication checks." >&2; return 1; }
+  rg_ready || { echo "A working ripgrep is required for publication checks." >&2; return 1; }
+  # shellcheck disable=SC2086 # commit ids are single words
+  runtime="$(runtime_deny "$base" $commits)" || return 1
   for commit in $commits; do
-    paths="$(git -C "$REPO_ROOT" ls-tree -r --name-only "$commit")" || return 1
-    if printf '%s\n' "$paths" | rg -q '(^|/)(auth\.json|auth-broker\.token|auth-gateway\.token|agent\.db(-shm|-wal)?|history\.db(-shm|-wal)?|models\.db(-shm|-wal)?|\.env)($|/)|(^|/)(sessions|logs)/'; then
-      echo "Refusing runtime or credential paths in commit $commit." >&2
+    chezmoi_root_check "$commit" || { echo "Refusing commit $commit: .chezmoiroot must be a regular file reading home." >&2; return 1; }
+    paths="$(git -C "$REPO_ROOT" ls-tree -r -z --name-only "$commit" | tr '\n\0' '\001\n')" || return 1
+    [[ "$paths" != *$'\001'* ]] || { echo "Refusing path names containing a newline or \\001 in commit $commit." >&2; return 1; }
+    hits="$(fold_aliases <<<"$paths")" || return 1
+    [[ -z "$hits" ]] || { printf 'Refusing case-insensitive path aliases in commit %s:\n%s\n' "$commit" "$hits" >&2; return 1; }
+    # rg: 0 match, 1 no match, anything else is a scan failure (fail closed).
+    result=0
+    hits="$(path_scan "$paths" "$runtime")" || result=$?
+    if (( result == 0 )); then
+      printf 'Refusing runtime or credential paths in commit %s:\n%s\n' "$commit" "$hits" >&2
+      return 1
+    elif (( result != 1 )); then
+      echo "Credential path scan failed for commit $commit." >&2
       return 1
     fi
     # Print filenames only, never matching credential content.
     result=0
-    git -C "$REPO_ROOT" grep -I -l -E '(-----BEGIN (RSA |OPENSSH )?PRIVATE KEY-----|ghp_[A-Za-z0-9]{30,}|sk-or-v1-[A-Za-z0-9_-]{30,}|xox[baprs]-[A-Za-z0-9-]{20,})' "$commit" -- . ':(exclude)*.lock' >"$snapshot/credential-paths" || result=$?
+    hits="$(content_scan "$commit")" || result=$?
     if (( result == 0 )); then
-      echo "Refusing credential signature in commit $commit." >&2
+      printf 'Refusing credential signature in commit %s:\n%s\n' "$commit" "$hits" >&2
       return 1
     elif (( result != 1 )); then
       echo "Credential scan failed for commit $commit." >&2
@@ -336,13 +701,16 @@ validate_commit() (
     fi
   done
   git -C "$REPO_ROOT" diff --check "$base..$revision" || return 1
-  git -C "$REPO_ROOT" archive "$revision" | tar -x -C "$snapshot" || return 1
+  chezmoi_root_check "$revision" || { echo "Refusing commit $revision: .chezmoiroot must be a regular file reading home." >&2; return 1; }
+  result=0
+  hits="$(gitattributes_check "$revision")" || result=$?
+  (( result == 0 )) || { printf 'Refusing checkout-altering attributes in %s:\n%s\n' "$revision" "$hits" >&2; return 1; }
+  export_tree "$revision" "$snapshot" || return 1
   DECENT_ANGL_REPO_ROOT="$snapshot" \
     DECENT_ANGL_SKILL_SOURCE_ROOT="$snapshot/home/dot_local/share/decent-angl/skills" \
     bash "$snapshot/home/dot_local/bin/executable_decent-angl-skills" audit-source || return 1
-  if [[ -f "$snapshot/utils/scripts/check_baseline.py" ]]; then
-    python3 "$snapshot/utils/scripts/check_baseline.py" "$snapshot" || return 1
-  fi
+  [[ -f "$snapshot/utils/scripts/check_baseline.py" ]] || { echo "Missing snapshot check_baseline: $snapshot/utils/scripts/check_baseline.py" >&2; return 1; }
+  python3 "$snapshot/utils/scripts/check_baseline.py" "$snapshot" || return 1
   if [[ "$publish_check" == publish ]]; then
     baseline="$snapshot/home/dot_local/bin/executable_omp-baseline"
     [[ -f "$baseline" ]] || { echo "Missing snapshot omp-baseline: $baseline" >&2; return 1; }
@@ -357,7 +725,7 @@ fetch_branch() {
   [[ "$(git -C "$REPO_ROOT" branch --show-current)" == "$BRANCH" ]] || {
     echo "Reconciliation requires branch $BRANCH." >&2; return 1;
   }
-  git -C "$REPO_ROOT" fetch "$REMOTE" "refs/heads/$BRANCH:refs/remotes/$REMOTE/$BRANCH" || return 1
+  git -C "$REPO_ROOT" fetch "$REMOTE" "refs/heads/$BRANCH:$TRACKING" || return 1
 }
 
 receipt_refusal() {
@@ -405,15 +773,22 @@ check_publish_receipt() {
 }
 
 publish_fetched() {
-  local revision base tree
+  local revision base tree grafts
   revision="$(git -C "$REPO_ROOT" rev-parse HEAD)" || return 1
-  base="$(git -C "$REPO_ROOT" rev-parse "$REMOTE/$BRANCH")" || return 1
+  base="$(git -C "$REPO_ROOT" rev-parse --verify "$TRACKING^{commit}")" || return 1
   if [[ "$revision" == "$base" ]]; then
     echo "GIT     no unpublished commits"
     return 0
   fi
   git -C "$REPO_ROOT" merge-base --is-ancestor "$base" "$revision" || {
     echo "Remote is ahead or diverged; resolve history before publishing." >&2; return 1;
+  }
+  # A shallow boundary or graft would make rev-list skip commits the push still sends. --git-path
+  # honors GIT_GRAFT_FILE and may be relative to the repo.
+  grafts="$(git -C "$REPO_ROOT" rev-parse --git-path info/grafts)" || return 1
+  [[ "$grafts" == /* ]] || grafts="$REPO_ROOT/$grafts"
+  [[ "$(git -C "$REPO_ROOT" rev-parse --is-shallow-repository)" == false && ! -e "$grafts" ]] || {
+    echo "Refusing to publish from a shallow or grafted repository." >&2; return 1;
   }
   tree="$(git -C "$REPO_ROOT" rev-parse "$revision^{tree}")" || return 1
   check_publish_receipt "$revision" "$base" || return 1
@@ -423,8 +798,10 @@ publish_fetched() {
   }
   printf 'PUBLISH revision %s tree %s range %s..%s receipt %s\n' "$revision" "$tree" "$base" "$revision" \
     "${DECENT_ANGL_PUBLISH_RECEIPT-none}"
-  # Push the exact validated commit. A concurrent remote update rejects normally.
-  git -C "$REPO_ROOT" push "$REMOTE" "$revision:refs/heads/$BRANCH" || return 1
+  # Push the exact validated commit and nothing else: no followed tags, no submodules, and no pre-push
+  # hooks (git-lfs's would upload content the scanned pointer blobs only name). A concurrent remote
+  # update rejects normally.
+  git -C "$REPO_ROOT" push --no-verify --no-follow-tags --recurse-submodules=no "$REMOTE" "$revision:refs/heads/$BRANCH" || return 1
   printf '%s\n' "$revision" >"$STATE_DIR/config-published-commit" || return 1
   printf 'GIT     published validated commit %s; working edits preserved\n' "$revision"
 }
@@ -456,7 +833,7 @@ unpublished_overlap() {
   local path incoming
   while IFS= read -r path; do
     [[ -n "$path" ]] || continue
-    incoming="$(git -C "$REPO_ROOT" rev-parse -q --verify "$REMOTE/$BRANCH:$path" 2>/dev/null || echo absent)"
+    incoming="$(git -C "$REPO_ROOT" rev-parse -q --verify "$TRACKING:$path" 2>/dev/null || echo absent)"
     [[ "$(worktree_blob "$path")" == "$incoming" ]] || printf '%s\n' "$path"
   done
 }
@@ -499,7 +876,7 @@ reconcile() {
   if (( behind > 0 )); then
     # Fast-forward around working edits unless an incoming commit changes them
     # to something else.
-    overlap="$(comm -12 <(git -C "$REPO_ROOT" diff --no-renames --name-only HEAD "$REMOTE/$BRANCH" | sort -u) \
+    overlap="$(comm -12 <(git -C "$REPO_ROOT" diff --no-renames --name-only -z HEAD "$TRACKING" | tr '\0' '\n' | sort -u) \
       <(dirty_paths))" || return 1
     conflicting="$(unpublished_overlap <<<"$overlap")" || return 1
     if [[ -n "$conflicting" ]]; then
@@ -507,7 +884,7 @@ reconcile() {
       return
     fi
     if [[ -n "$overlap" ]]; then restore_published_edits <<<"$overlap" || return 1; fi
-    git -C "$REPO_ROOT" merge --ff-only "$REMOTE/$BRANCH" || return 1
+    git -C "$REPO_ROOT" merge --ff-only "$TRACKING" || return 1
     printf 'GIT     fast-forwarded %s commit(s)\n' "$behind"
   fi
   revision="$(git -C "$REPO_ROOT" rev-parse HEAD)" || return 1
@@ -530,6 +907,7 @@ reconcile() {
   if (( ${#APPLY_TARGETS[@]} > 0 )); then
     defer_apply "Applied ${revision:0:12}; edited targets held until committed."
   else
+    live_validate "$revision" || return 1
     rm -f "$PENDING" || return 1
     printf 'CONFIG  converged %s\n' "${revision:0:12}"
   fi

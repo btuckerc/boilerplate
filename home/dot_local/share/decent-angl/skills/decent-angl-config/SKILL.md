@@ -23,7 +23,9 @@ commit; no mutable live filesystem silently wins.
   sources hold back their own targets; edits overlapping incoming commits or
   touching shared inputs (`.chezmoidata`, `.chezmoitemplates`, `.chezmoiignore`,
   shared skills) defer the whole apply. Guard never publishes; `reconcile`
-  publishes reviewed commits first.
+  publishes reviewed commits first. A full apply reports converged only after
+  live `omp-baseline validate` passes, once per revision; a failure leaves
+  `config-drift`.
 - `--exclude scripts` skips chezmoi `run_*` hooks. Ordinary `executable_*`
   files still deploy. Use `reconcile --with-scripts` only for reviewed hooks.
   Check the destination and PATH before diagnosing a missing wrapper.
@@ -64,7 +66,11 @@ run `decent-angl-sync publish`. Never capture secrets or runtime state.
 For source edits, validate affected platforms, then publish. Use
 `python3 utils/scripts/check_baseline.py` and the sync regression tests for
 sync changes. Record offline hosts as unverified. Publishing scans outgoing
-history for credential signatures and checks the committed source skills.
+history for credential paths (raw names, any encoding) and signatures, refuses
+if a scan errors or ripgrep does not work, and checks the committed source
+skills. Runtime paths are whatever `private_agent/.chezmoiignore` and
+`private_dot_codex/.chezmoiignore` declare (union with the published base, by
+chezmoi target name); keep new runtime files listed there.
 
 Omarchy changes must pass `omarchy-roaming-sync validate --strict`; OMP changes
 must pass `omp-baseline validate --strict`.

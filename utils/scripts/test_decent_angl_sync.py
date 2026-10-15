@@ -9,6 +9,17 @@ import tempfile
 import unittest
 
 SCRIPT = Path(__file__).resolve().parents[2] / "home/dot_local/bin/executable_decent-angl-sync"
+RUNTIME_DECLARATIONS = ("home/private_dot_omp/private_agent/.chezmoiignore", "home/private_dot_codex/.chezmoiignore")
+
+
+def real_rg():
+    """The ripgrep binary itself: a mise shim stops resolving under the fixture's HOME."""
+    found = shutil.which("rg")
+    if found and os.path.basename(os.path.realpath(found)) != "rg":
+        found = subprocess.run(["mise", "which", "rg"], text=True, capture_output=True, check=True).stdout.strip()
+    if not found:
+        raise RuntimeError("ripgrep is required to run these tests")
+    return found
 
 
 class SyncTest(unittest.TestCase):
@@ -27,6 +38,7 @@ class SyncTest(unittest.TestCase):
                         DECENT_ANGL_VALIDATION_ROOT=str(self.root / "validation"),
                         PATH=str(self.bin) + os.pathsep + os.environ["PATH"])
         self.env.pop("DECENT_ANGL_SYNC_LOCK_HELD", None)
+        self.executable(self.bin / "rg", f'#!/bin/sh\nexec "{real_rg()}" "$@"\n')
         self.command("git", "init", "--bare", "-b", "master", str(self.remote))
         self.command("git", "init", "-b", "master", str(self.repo))
         self.git("config", "user.name", "Fixture")
@@ -44,7 +56,12 @@ fi
 ''')
         self.env["BASELINE_LOG"] = str(self.root / "baseline.log")
         self.write("home/dot_local/bin/executable_decent-angl-skills", "#!/bin/sh\nexit 0\n")
+        self.write("utils/scripts/check_baseline.py", "import sys\nsys.exit(0)\n")
         self.write("home/example", "initial\n")
+        self.write(".chezmoiroot", "home\n")
+        # The repo's real runtime declarations: the publisher refuses what they list.
+        for decl in RUNTIME_DECLARATIONS:
+            self.write(decl, (SCRIPT.parents[3] / decl).read_text())
         self.commit("initial")
         self.git("remote", "add", "origin", str(self.remote))
         self.git("push", "-u", "origin", "master")
@@ -70,9 +87,16 @@ case "$cmd" in
 esac
 ''')
         self.executable(self.user / ".local/bin/decent-angl-skills", "#!/bin/sh\nexit 0\n")
+        # The deployed omp-baseline: live validate logs each run and fails on FAIL_LIVE_VALIDATE.
+        self.executable(self.user / ".local/bin/omp-baseline", '''#!/bin/sh
+[ "$1" = validate ] || exit 17
+echo validate >>"$HOME/live-validate.log"
+[ -z "$FAIL_LIVE_VALIDATE" ] || { echo "MISSING scout expected user definition" >&2; exit 1; }
+''')
 
     def command(self, *args, check=True, **kwargs):
-        return subprocess.run(args, env=self.env, text=True, stdout=subprocess.PIPE,
+        # surrogateescape: refused names may hold bytes that are not valid UTF-8.
+        return subprocess.run(args, env=self.env, text=True, errors="surrogateescape", stdout=subprocess.PIPE,
                               stderr=subprocess.PIPE, check=check, **kwargs)
 
     def git(self, *args):
@@ -102,6 +126,14 @@ esac
 
     def remote_head(self):
         return self.command("git", "--git-dir", str(self.remote), "rev-parse", "master").stdout.strip()
+
+    def test_publish_runs_no_pre_push_hook(self):
+        # A pre-push hook (git-lfs uploads object content there) could send what the scans never saw.
+        self.executable(self.repo / ".git/hooks/pre-push", f"#!/bin/sh\ntouch '{self.root / 'hook-ran'}'\n")
+        self.outgoing()
+        self.run_sync("publish")
+        self.assertEqual(self.remote_head(), self.git("rev-parse", "HEAD").stdout.strip())
+        self.assertFalse((self.root / "hook-ran").exists())
 
     def test_new_directories_created_without_changing_existing_modes(self):
         import json
@@ -187,6 +219,112 @@ esac
         self.git("commit", "-m", "drop baseline")
         result = self.run_sync("publish", success=False)
         self.assertIn("Missing snapshot omp-baseline", result.stderr)
+        self.assertEqual(self.remote_head(), self.initial)
+
+    def test_publish_and_validate_require_check_baseline(self):
+        self.outgoing()
+        self.git("rm", "-q", "utils/scripts/check_baseline.py")
+        self.git("commit", "-m", "drop check_baseline")
+        result = self.run_sync("validate", success=False)
+        self.assertIn("Missing check_baseline", result.stderr)
+        result = self.run_sync("publish", success=False)
+        self.assertIn("Missing snapshot check_baseline", result.stderr)
+        self.assertEqual(self.remote_head(), self.initial)
+
+    def key_then_clean(self):
+        """B -> U (adds a private key) -> R (deletes it); returns U."""
+        self.write("home/backup.pem", "-----BEGIN EC PRIVATE " + "KEY-----\nMHcCAQEE\n")
+        self.commit("key fixture")
+        unsafe = self.git("rev-parse", "HEAD").stdout.strip()
+        self.git("rm", "-q", "home/backup.pem")
+        self.commit("remove key fixture")
+        return unsafe
+
+    def test_publish_base_is_the_remote_tracking_ref_not_a_local_branch(self):
+        # A local branch named origin/master would win the short-name lookup and hide U from the scan.
+        unsafe = self.key_then_clean()
+        self.git("update-ref", "refs/heads/origin/master", unsafe)
+        result = self.run_sync("publish", success=False)
+        self.assertIn(f"Refusing credential signature in commit {unsafe}", result.stderr)
+        self.assertEqual(self.remote_head(), self.initial)
+
+    def test_publish_snapshot_is_the_pushed_blobs(self):
+        # git archive would drop an export-ignore'd file before check-source; the snapshot is written from the blobs.
+        self.write(".gitattributes", "home/policy export-ignore\nhome/example export-subst\n")
+        self.write("home/policy", "bad committed policy\n")
+        self.commit("hidden policy")
+        result = self.run_sync("publish", success=False)
+        self.assertIn("EFFORT browser", result.stderr)
+        self.assertEqual(self.remote_head(), self.initial)
+
+    def test_publish_and_validate_refuse_checkout_altering_attributes(self):
+        # A checkout must deploy the scanned bytes: no git-lfs smudge, ident, re-encoding, CRLF or macro.
+        self.write("home/dot_config/x/.gitattributes", "*.txt text eol=lf\n# comment\n\n*.md -diff linguist-generated\n")
+        self.commit("benign attributes")
+        self.run_sync("validate")
+        self.run_sync("publish")
+        published = self.remote_head()
+        refused = ("*.bin filter=lfs diff=lfs merge=lfs -text", "* ident", "*.txt working-tree-encoding=UTF-16",
+                   "*.txt eol=crlf", "[attr]lfs filter=lfs", '"a b" text', '"home/example"ident', "home/example\rident")
+        # The last case has no trailing newline: read fails at EOF, but Git still applies the rule.
+        for line, end in [(line, "\n") for line in refused] + [("home/example ident", "")]:
+            with self.subTest(line=line, end=end):
+                self.write("home/dot_config/x/.gitattributes", line + end)
+                self.assertIn("Refusing checkout-altering attributes", self.run_sync("validate", success=False).stderr)
+                self.commit(f"attributes {line}")
+                result = self.run_sync("publish", success=False)
+                self.assertIn("Refusing checkout-altering attributes in", result.stderr)
+                self.assertEqual(self.remote_head(), published)
+                self.git("reset", "-q", "--hard", published)
+
+    def test_publish_and_validate_require_home_chezmoiroot(self):
+        # The scans read home/ as the chezmoi source root; another root would deploy names they never mapped.
+        for content in ("payload\n", None, "home/\n"):
+            with self.subTest(content=content):
+                if content is None:
+                    self.git("rm", "-q", ".chezmoiroot")
+                else:
+                    self.write(".chezmoiroot", content)
+                self.assertIn(".chezmoiroot must be a regular file reading home", self.run_sync("validate", success=False).stderr)
+                self.commit(f"root {content!r}")
+                bad = self.git("rev-parse", "HEAD").stdout.strip()
+                # Restoring home afterwards does not help: the bad commit is still pushed.
+                self.write(".chezmoiroot", "home\n")
+                self.commit("root restored")
+                result = self.run_sync("publish", success=False)
+                self.assertIn(f"Refusing commit {bad}: .chezmoiroot must be a regular file reading home", result.stderr)
+                self.assertEqual(self.remote_head(), self.initial)
+                self.git("reset", "-q", "--hard", self.initial)
+        # chezmoi trims surrounding whitespace (trailing whitespace would fail diff --check first).
+        self.write(".chezmoiroot", "  home\n")
+        self.commit("padded root")
+        self.run_sync("validate")
+        self.run_sync("publish")
+
+    def test_publish_ignores_replacement_objects(self):
+        # refs/replace/U -> a clean V would hide U from rev-list/grep, but the push still sends U.
+        unsafe = self.key_then_clean()
+        tree = self.git("rev-parse", f"{self.initial}^{{tree}}").stdout.strip()
+        clean = self.git("commit-tree", tree, "-p", self.initial, "-m", "clean stand-in").stdout.strip()
+        self.git("replace", unsafe, clean)
+        result = self.run_sync("publish", success=False)
+        self.assertIn(f"Refusing credential signature in commit {unsafe}", result.stderr)
+        self.assertEqual(self.remote_head(), self.initial)
+
+    def test_publish_refuses_grafted_repository(self):
+        self.key_then_clean()
+        (self.repo / ".git/info").mkdir(exist_ok=True)
+        (self.repo / ".git/info/grafts").write_text(f"{self.git('rev-parse', 'HEAD').stdout.strip()} {self.initial}\n")
+        result = self.run_sync("publish", success=False)
+        self.assertIn("Refusing to publish from a shallow or grafted repository.", result.stderr)
+        self.assertEqual(self.remote_head(), self.initial)
+
+    def test_publish_refuses_credential_in_commit_message(self):
+        self.write("home/example", "changed\n")
+        self.git("add", ".")
+        self.git("commit", "-m", "token gh" + "p_" + "A" * 36)
+        result = self.run_sync("publish", success=False)
+        self.assertIn("(commit message or header)", result.stderr)
         self.assertEqual(self.remote_head(), self.initial)
 
     def test_guard_defers_and_incoming_validation_skips_check_source(self):
@@ -349,6 +487,25 @@ esac
         self.assertTrue((self.user / "apply.log").exists())
         self.assertEqual((self.state / "config-applied-commit").read_text().strip(), self.initial)
 
+    def test_live_validate_gates_convergence_once_per_revision(self):
+        # Reconcile skips the run_ hook that calls omp-baseline apply, so it screens the live result itself.
+        self.env["FAIL_LIVE_VALIDATE"] = "1"
+        result = self.run_sync("guard", success=False)
+        self.assertIn("Live omp-baseline validate failed", result.stdout)
+        self.assertNotIn("CONFIG  converged", result.stdout)
+        self.assertTrue((self.state / "config-drift").exists())
+        self.assertFalse((self.state / "config-validated-commit").exists())
+        del self.env["FAIL_LIVE_VALIDATE"]
+        self.assertIn("CONFIG  converged", self.run_sync("reconcile").stdout)
+        self.assertFalse((self.state / "config-drift").exists())
+        self.assertEqual((self.state / "config-validated-commit").read_text().strip(), self.initial)
+        self.run_sync("guard")
+        self.assertEqual((self.user / "live-validate.log").read_text().splitlines(), ["validate", "validate"])
+        (self.user / ".local/bin/omp-baseline").unlink()
+        self.outgoing()
+        self.run_sync("publish")
+        self.assertIn("Missing live omp-baseline", self.run_sync("guard", success=False).stdout)
+
     def test_failed_skill_audit_blocks_publish(self):
         self.write("home/dot_local/bin/executable_decent-angl-skills", "#!/bin/sh\nexit 8\n")
         self.commit("invalid skill")
@@ -368,6 +525,248 @@ esac
         self.commit("remove credential fixture")
         self.run_sync("publish", success=False)
         self.assertEqual(self.remote_head(), self.initial)
+
+    def test_deleted_non_ascii_credential_in_outgoing_history_still_blocks(self):
+        # Git quotes non-ASCII names ("home/caf\303\251/auth.json"); the scan must read raw names.
+        self.git("config", "core.quotePath", "true")
+        self.write("home/café/auth.json", "{}\n")
+        self.commit("credential fixture")
+        self.git("rm", "home/café/auth.json")
+        self.commit("remove credential fixture")
+        result = self.run_sync("publish", success=False)
+        self.assertIn("Refusing runtime or credential paths in commit", result.stderr)
+        self.assertEqual(self.remote_head(), self.initial)
+
+    def test_validate_refuses_non_ascii_machine_local_path(self):
+        self.git("config", "core.quotePath", "true")
+        self.write("home/café/auth.json", "{}\n")
+        result = self.run_sync("validate", success=False)
+        self.assertIn("home/café/auth.json", result.stderr)
+
+    def failing_rg(self):
+        # rg exit 2 is a scan error, not "no match"; both scans must fail closed. The stub passes
+        # rg_ready's probe (match home/auth.json, reject home/example) so the scan itself errors.
+        self.executable(self.bin / "rg", "#!/bin/sh\ninput=$(cat)\n"
+                        "case \"$input\" in home/auth.json) exit 0 ;; home/example) exit 1 ;; esac\n"
+                        "echo 'rg: simulated failure' >&2\nexit 2\n")
+
+    def test_publish_credential_path_scan_error_blocks(self):
+        self.outgoing()
+        self.failing_rg()
+        result = self.run_sync("publish", success=False)
+        self.assertIn("Credential path scan failed for commit", result.stderr)
+        self.assertEqual(self.remote_head(), self.initial)
+
+    def test_validate_machine_local_path_scan_error_blocks(self):
+        self.failing_rg()
+        result = self.run_sync("validate", success=False)
+        self.assertIn("Machine-local path scan failed.", result.stderr)
+
+    def dead_shim_rg(self):
+        # A mise shim whose tool is gone exits 1, which reads as "no match".
+        self.executable(self.bin / "rg", "#!/bin/sh\necho 'mise ERROR rg is not a valid shim.' >&2\nexit 1\n")
+
+    def test_publish_with_dead_rg_shim_blocks_deleted_credential(self):
+        self.write("home/auth.json", "{}\n")
+        self.commit("credential fixture")
+        self.git("rm", "home/auth.json")
+        self.commit("remove credential fixture")
+        self.dead_shim_rg()
+        result = self.run_sync("publish", success=False)
+        self.assertIn("A working ripgrep is required", result.stderr)
+        self.assertEqual(self.remote_head(), self.initial)
+
+    def test_validate_with_dead_rg_shim_blocks(self):
+        self.dead_shim_rg()
+        result = self.run_sync("validate", success=False)
+        self.assertIn("A working ripgrep is required for source checks.", result.stderr)
+
+    def publish_added_then_deleted(self, name):
+        self.write(name, "fixture\n")
+        self.commit("runtime fixture")
+        self.git("rm", "-q", name)
+        self.commit("remove runtime fixture")
+        result = self.run_sync("publish", success=False)
+        self.assertIn("Refusing runtime or credential paths in commit", result.stderr)
+        self.assertEqual(self.remote_head(), self.initial)
+        return result
+
+    def test_publish_refuses_declared_runtime_path_in_history(self):
+        # private_agent/.chezmoiignore declares secret-placeholder.key machine-local.
+        self.publish_added_then_deleted("home/private_dot_omp/private_agent/secret-placeholder.key")
+
+    def test_publish_refuses_runtime_path_behind_chezmoi_attributes(self):
+        # private_state/ deploys as state/ in a profile agent dir; cache/x.tmpl as cache/x.
+        self.publish_added_then_deleted("home/private_dot_omp/private_profiles/local/private_agent/private_state/x")
+        self.publish_added_then_deleted("home/private_dot_omp/private_agent/cache/x.tmpl")
+
+    def test_publish_refuses_codex_runtime_path(self):
+        self.publish_added_then_deleted("home/private_dot_codex/history.jsonl")
+
+    def test_outgoing_commit_cannot_narrow_the_declaration(self):
+        decl = "home/private_dot_omp/private_agent/.chezmoiignore"
+        self.write(decl, "agent.db\n")
+        self.write("home/private_dot_omp/private_agent/terminal-sessions/s1", "fixture\n")
+        self.commit("narrow the declaration and add runtime state")
+        result = self.run_sync("publish", success=False)
+        self.assertIn("terminal-sessions/s1", result.stderr)
+        self.assertEqual(self.remote_head(), self.initial)
+
+    def test_validate_refuses_declared_runtime_path(self):
+        self.write("home/private_dot_omp/private_agent/gpu_cache.json", "{}\n")
+        result = self.run_sync("validate", success=False)
+        self.assertIn(".omp/agent/gpu_cache.json", result.stderr)
+
+    def test_validate_allows_ordinary_agent_config(self):
+        self.write("home/private_dot_omp/private_agent/config.yml", "a: 1\n")
+        self.write("home/private_dot_codex/config.toml", "a = 1\n")
+        self.run_sync("validate")
+
+    def test_missing_runtime_declaration_blocks(self):
+        for decl in RUNTIME_DECLARATIONS:
+            self.git("rm", "-q", decl)
+        self.commit("drop declarations")
+        result = self.run_sync("validate", success=False)
+        self.assertIn("is missing.", result.stderr)
+
+    def test_untranslatable_runtime_pattern_blocks(self):
+        # Unsupported glob syntax, an absolute path chezmoi rejects, and a .. that resolves elsewhere.
+        decl = self.repo / RUNTIME_DECLARATIONS[0]
+        original = decl.read_text()
+        for pattern in ("cache-[ab]/", "/abs.key", "a/../b.key"):
+            decl.write_text(original + pattern + "\n")
+            result = self.run_sync("validate", success=False)
+            self.assertIn(f"Unsupported runtime pattern in {RUNTIME_DECLARATIONS[0]}: {pattern}", result.stderr)
+
+    def test_double_star_slash_matches_the_declared_dir_itself(self):
+        # chezmoi (doublestar): **/runtime.key also ignores runtime.key directly in the agent dir.
+        decl = self.repo / RUNTIME_DECLARATIONS[0]
+        decl.write_text(decl.read_text() + "**/runtime.key\n")
+        self.write("home/private_dot_omp/private_agent/runtime.key", "fixture\n")
+        result = self.run_sync("validate", success=False)
+        self.assertIn(".omp/agent/runtime.key", result.stderr)
+
+    def test_question_mark_matches_one_multibyte_character(self):
+        # chezmoi's ? is one character; scans run in byte mode, where é is two bytes.
+        decl = self.repo / RUNTIME_DECLARATIONS[0]
+        decl.write_text(decl.read_text() + "?.key\n")
+        self.commit("declare one-character keys")
+        name = "home/private_dot_omp/private_agent/é.key"
+        self.write(name, "fixture\n")
+        self.assertIn(".omp/agent/é.key", self.run_sync("validate", success=False).stderr)
+        (self.repo / name).unlink()
+        self.publish_added_then_deleted(name)
+
+    def test_path_scans_fold_case_for_case_insensitive_hosts(self):
+        # On APFS these names are the denied file itself: case variants, long s (U+017F), Kelvin sign (U+212A),
+        # and full-folding forms Rust's (?i) misses: sharp s (ss) and the st ligature (U+FB06). Outside home/
+        # a long s still aliases a by-path name such as .gitattributes.
+        for name in ("home/private_dot_omp/private_agent/AUTH.JSON", "home/x/\u017fessions/s1",
+                     "home/private_dot_omp/private_agent/Secret-Placeholder.KEY",
+                     "home/private_dot_omp/private_agent/secret-placeholder.\u212aey",
+                     "home/x/se\u00dfions/s1", "home/private_dot_omp/private_agent/hi\ufb06ory.db",
+                     "utils/.gitattribute\u017f"):
+            with self.subTest(name=name):
+                self.write(name, "fixture\n")
+                self.assertIn("Refusing", self.run_sync("validate", success=False).stderr)
+                (self.repo / name).unlink()
+        self.publish_added_then_deleted("home/private_dot_omp/private_agent/AUTH.JSON")
+
+    def test_case_insensitive_path_aliases_refuse(self):
+        # A Mac checkout (APFS) merges Home/ into home/ and opens .GITATTRIBUTES as .gitattributes.
+        for name, content, reported in (
+                ("Home/private_dot_omp/private_agent/secret-placeholder.key", "fixture\n", "Home (opened as home)"),
+                (".GITATTRIBUTES", "home/example ident\n", ".GITATTRIBUTES (opened as .gitattributes)"),
+                ("home/EXAMPLE", "other\n", "home/example (same path as home/EXAMPLE when case-folded)")):
+            with self.subTest(name=name):
+                self.write(name, content)
+                self.assertIn(reported, self.run_sync("validate", success=False).stderr)
+                self.commit(f"alias {name}")
+                self.git("rm", "-q", name)
+                self.commit(f"drop {name}")
+                result = self.run_sync("publish", success=False)
+                self.assertIn(f"Refusing case-insensitive path aliases in commit", result.stderr)
+                self.assertIn(reported, result.stderr)
+                self.assertEqual(self.remote_head(), self.initial)
+                self.git("reset", "-q", "--hard", self.initial)
+
+    def test_runtime_pattern_with_trailing_comment(self):
+        # chezmoi: whitespace then # starts a comment, so "runtime.key # note" declares runtime.key.
+        decl = self.repo / RUNTIME_DECLARATIONS[0]
+        decl.write_text(decl.read_text() + "runtime.key\t# machine-local\n")
+        self.write("home/private_dot_omp/private_agent/runtime.key", "fixture\n")
+        result = self.run_sync("validate", success=False)
+        self.assertIn(".omp/agent/runtime.key", result.stderr)
+
+    def test_runtime_pattern_matches_chezmoi_literal_suffix_target(self):
+        # A final .literal stops chezmoi's suffix parsing, and an external_ dir deploys its children unparsed:
+        # both sources target .omp/agent/runtime.key.literal.
+        decl = self.repo / RUNTIME_DECLARATIONS[0]
+        decl.write_text(decl.read_text() + "runtime.key.literal\n")
+        self.commit("declare runtime.key.literal")
+        self.git("push", "-q")
+        self.initial = self.git("rev-parse", "HEAD").stdout.strip()
+        for name in ("home/private_dot_omp/private_agent/runtime.key.literal.literal",
+                     "home/private_dot_omp/external_agent/runtime.key.literal"):
+            with self.subTest(name=name):
+                self.write(name, "fixture\n")
+                self.assertIn(".omp/agent/runtime.key.literal", self.run_sync("validate", success=False).stderr)
+                (self.repo / name).unlink()
+                self.publish_added_then_deleted(name)
+                self.git("reset", "-q", "--hard", self.initial)
+
+    def test_newline_in_path_name_blocks(self):
+        # A newline would split "trace\n.log" into records that no longer match the *.log declaration.
+        name = "home/private_dot_omp/private_agent/trace\n.log"
+        self.write(name, "fixture\n")
+        result = self.run_sync("validate", success=False)
+        self.assertIn("Refusing path names containing a newline", result.stderr)
+        self.commit("runtime fixture")
+        self.git("rm", "-q", name)
+        self.commit("remove runtime fixture")
+        result = self.run_sync("publish", success=False)
+        self.assertIn("Refusing path names containing a newline or \\001 in commit", result.stderr)
+        self.assertEqual(self.remote_head(), self.initial)
+
+    def credential_file_blocks(self, name, content, symlink=False):
+        # The content scan covers every file, whatever its name, encoding or type, in the tree and in history.
+        if symlink:
+            (self.repo / name).parent.mkdir(parents=True, exist_ok=True)
+            os.symlink(content, self.repo / name)
+        else:
+            self.write(name, content)
+        result = self.run_sync("validate", success=False)
+        self.assertIn(f"Refusing credential signatures in: {name}", result.stderr)
+        self.commit("credential fixture")
+        self.git("rm", "-q", name)
+        self.commit("remove credential fixture")
+        result = self.run_sync("publish", success=False)
+        self.assertIn("Refusing credential signature in commit", result.stderr)
+        self.assertIn(name, result.stderr)
+        self.assertEqual(self.remote_head(), self.initial)
+
+    def test_credential_signature_in_lock_file_blocks(self):
+        self.credential_file_blocks("home/backup.lock", "gh" + "p_" + "A" * 36 + "\n")
+
+    def test_credential_signature_in_binary_file_blocks(self):
+        self.credential_file_blocks("home/backup.bin", "\0gh" + "p_" + "A" * 36 + "\n")
+
+    def test_credential_signature_in_symlink_target_blocks(self):
+        # git grep skips mode-120000 entries; their stored target text is scanned separately.
+        self.credential_file_blocks("home/backup-link", "gh" + "p_" + "A" * 36, symlink=True)
+
+    def test_any_private_key_armor_blocks(self):
+        for kind in ("EC ", "DSA ", "ENCRYPTED ", "PGP "):
+            with self.subTest(kind=kind):
+                block = " BLOCK" if kind == "PGP " else ""
+                self.write("home/backup.pem", f"-----BEGIN {kind}PRIVATE " + f"KEY{block}-----\nMHcCAQEE\n")
+                result = self.run_sync("validate", success=False)
+                self.assertIn("Refusing credential signatures in: home/backup.pem", result.stderr)
+
+    def test_runtime_path_with_invalid_utf8_byte_blocks(self):
+        # A raw 0xff byte must not stop [^/]* from matching the *.log declaration.
+        name = os.fsdecode(b"home/private_dot_omp/private_agent/\xff.log")
+        self.publish_added_then_deleted(name)
 
     def test_guard_failed_fetch_stops_before_apply(self):
         self.git("remote", "set-url", "origin", str(self.root / "missing"))

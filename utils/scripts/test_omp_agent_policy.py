@@ -254,6 +254,41 @@ class PolicyTests(unittest.TestCase):
         self.assertIn("INERT", result.stderr)
         self.assertIn("argument-hint", result.stderr)
 
+    def test_17b_source_prompts_and_commands_resolve_chezmoi_names(self):
+        """Every source entry that deploys a loaded prompt or Markdown command is checked; one not deployed as stored fails closed."""
+        prompts = self.agent / "private_prompts"
+        (prompts / "nested").mkdir(parents=True)
+        (prompts / "nested/clean.md").write_text("---\ndescription: ok\n---\nbody\n")
+        (prompts / ".hidden.md").write_text("---\nmodel: x\n---\n")
+        commands = self.agent / "private_commands"
+        (commands / "clean.md").write_text("---\ndescription: ok\nargument-hint: file\n---\nbody\n")
+        result = self.run_checker("--catalog", self.evidence())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        cases = {
+            prompts / "probe.md.tmpl": "UNSUPPORTED source {}",
+            prompts / "symlink_probe.md": "UNSUPPORTED source {}",
+            commands / "probe.md.tmpl": "UNSUPPORTED source {}",
+            prompts / "nested/probe.md": "INERT {} key model",
+            prompts / "readonly_probe.md": "INERT {} key model",
+        }
+        for file, message in cases.items():
+            with self.subTest(file=file.name):
+                file.write_text("---\ndescription: probe\nmodel: openai-codex/gpt-6.1-sol\nrestore: true\n---\nReview this change.\n")
+                result = self.run_checker("--catalog", self.evidence())
+                file.unlink()
+                self.assertEqual(result.returncode, 1)
+                self.assertIn(message.format(file), result.stderr)
+        # The prompts dir itself under another source name, and as a template.
+        renamed = self.agent / "readonly_prompts"
+        prompts.rename(renamed)
+        (renamed / "probe.md").write_text("---\nmodel: x\n---\n")
+        result = self.run_checker("--catalog", self.evidence())
+        self.assertIn(f"INERT {renamed / 'probe.md'} key model", result.stderr)
+        shutil.rmtree(renamed)
+        (self.agent / "symlink_prompts").write_text("/elsewhere\n")
+        result = self.run_checker("--catalog", self.evidence())
+        self.assertIn(f"UNSUPPORTED source {self.agent / 'symlink_prompts'}", result.stderr)
+
     def test_18_no_catalog_suffix_overrides_frontmatter(self):
         self.add("sol", "openai-codex/gpt-6.1-sol:low", "high")
         result = self.run_checker()
@@ -466,7 +501,7 @@ class PolicyTests(unittest.TestCase):
         for created, cleanup, profile, message in [
             (f"{omp}/private_profiles/local/private_agent/agents/seance.md", f"{omp}/private_profiles/local/private_agent/agents", "local", "deploys agents; only private_agents is mirrored"),
             (f"{omp}/private_agent/exact_agents/seance.md", f"{omp}/private_agent/exact_agents", "default", "deploys agents; only private_agents is mirrored"),
-            (f"{omp}/private_agent/agents.literal/seance.md", f"{omp}/private_agent/agents.literal", "default", "deploys agents; only private_agents is mirrored"),
+            (f"{omp}/private_agent/literal_agents/seance.md", f"{omp}/private_agent/literal_agents", "default", "deploys agents; only private_agents is mirrored"),
             ("dot_omp/agent/agents/seance.md", "dot_omp", "default", "deploys .omp; only private_dot_omp is mirrored"),
             (f"{omp}/agent/agents/seance.md", f"{omp}/agent", "default", "deploys agent; only private_agent is mirrored"),
             (f"{omp}/private_profiles/exact_local/agent/agents/seance.md", f"{omp}/private_profiles/exact_local", "local", "deploys local; only local is mirrored"),
@@ -477,6 +512,25 @@ class PolicyTests(unittest.TestCase):
             (f"{omp}/private_agent/private_agents/encrypted_seance.md.age", f"{omp}/private_agent/private_agents/encrypted_seance.md.age", "default", "(encrypted; contents not mirrored)"),
             (f"{omp}/agents/seance.md", f"{omp}/agents", "default", "deploys project agents dir ~/.omp/agents; not mirrored"),
             ("src/app/dot_omp/exact_agents/seance.md", "src", "default", "deploys project agents dir ~/src/app/.omp/agents; not mirrored"),
+            # chezmoi deploys an external_ dir's children unparsed: this is ~/src/app/.omp/agents/seance.md.
+            ("src/external_app/.omp/agents/seance.md", "src", "default", "(chezmoi external_ dir deploys its children unparsed; not mirrored)"),
+            # A launch from ~/src/probe reads that dir's project inputs, which only the live check at that cwd sees.
+            ("src/probe/dot_omp/config.yml", "src", "default", "deploys ~/src/probe/.omp/config.yml, a project .omp input"),
+            ("src/probe/dot_omp/private_extensions/index.ts", "src", "default", "deploys ~/src/probe/.omp/extensions, a project .omp input"),
+            (f"{omp}/settings.json", f"{omp}/settings.json", "default", "deploys ~/.omp/settings.json, a project .omp input"),
+            ("src/probe/dot_claude/hooks/pre/index.ts", "src", "default", "deploys ~/src/probe/.claude/hooks, project hooks or tools"),
+            ("src/probe/dot_env.local", "src", "default", "deploys ~/src/probe/.env.local, a dotenv file"),
+            ("src/probe/dot_mcp.json", "src", "default", "deploys ~/src/probe/.mcp.json, a mcp-json provider input"),
+            ("src/probe/dot_claude/settings.json", "src", "default", "deploys ~/src/probe/.claude/settings.json, a claude provider input"),
+            # macOS deploys onto case-insensitive APFS: each of these is the canonical file or dir there.
+            (f"{omp}/private_agent/private_Config.yml", f"{omp}/private_agent/private_Config.yml", "default", "deploys config.yml; only private_config.yml is mirrored"),
+            (f"{omp}/private_Agent/private_agents/seance.md", f"{omp}/private_Agent", "default", "deploys agent; only private_agent is mirrored"),
+            ("private_dot_OMP/agent/agents/seance.md", "private_dot_OMP", "default", "deploys .omp; only private_dot_omp is mirrored"),
+            (f"{omp}/private_profiles/Local/private_agent/private_agents/seance.md", f"{omp}/private_profiles/Local", "local", "deploys local; only local is mirrored"),
+            ("dot_claude/Plugins/seance.md", "dot_claude", "default", "deploys plugin registry ~/.claude/Plugins"),
+            ("src/app/dot_OMP/Agents/seance.md", "src", "default", "deploys project agents dir ~/src/app/.OMP/Agents"),
+            (f"{omp}/private_agent/private_agents/Architect.md", f"{omp}/private_agent/private_agents/Architect.md", "default", "once names are case-folded"),
+            (f"{omp}/private_agent/private_agents/se\u017fance.md", f"{omp}/private_agent/private_agents/se\u017fance.md", "default", "fold to ASCII or ignore"),
         ]:
             with self.subTest(created=created):
                 (home / created).parent.mkdir(parents=True, exist_ok=True)
@@ -498,6 +552,20 @@ class PolicyTests(unittest.TestCase):
                 self.assertIn("bash", report["declared"])
                 (self.agent / "private_agents" / name).unlink()
 
+    def test_source_provider_launch_file_gated_by_certified_disabled_providers(self):
+        # ~/.config/opencode/opencode.json is read by a launch from ~/.config/opencode while opencode is enabled.
+        opencode = self.root / "home/dot_config/opencode/opencode.json"
+        opencode.parent.mkdir(parents=True)
+        opencode.write_text("{}\n")
+        result = self.run_checker("--catalog", self.evidence())
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("deploys ~/.config/opencode/opencode.json, a opencode provider input", result.stderr)
+        with self.config.open("a") as config:
+            config.write("disabledProviders: [opencode]\n")
+        self.native["disabledProviders"] = ["opencode"]
+        result = self.run_checker("--catalog", self.evidence())
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_source_agents_resolve_in_deployed_name_order(self):
         # Upstream sorts the deployed names and keeps the first definition of a name: private_aaa.md deploys aaa.md,
         # which precedes architect.md, so its architect is the one dispatched and must be the one certified.
@@ -512,6 +580,16 @@ class PolicyTests(unittest.TestCase):
         (self.agent / "private_agents/aaa.md").write_text(aaa.read_text())
         result = self.run_checker("--catalog", catalog)
         self.assertIn(f"deploys aaa.md, as does", result.stderr)
+        # Prefixes are cut in chezmoi's order for the entry's kind: a file takes after_ only after run_, so after_zz.md
+        # deploys after_zz.md, which also precedes architect.md (not zz.md, which would follow it).
+        text = aaa.read_text()
+        aaa.unlink()
+        (self.agent / "private_agents/aaa.md").unlink()
+        after = self.agent / "private_agents/after_zz.md"
+        after.write_text(text)
+        result = self.run_checker("--json", "--catalog", catalog)
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(self.agent_report(result, "architect")["path"], str(after))
 
     def agent_report(self, result, name):
         return next(agent for agent in json.loads(result.stdout)["agents"] if agent["name"] == name)
@@ -1019,14 +1097,11 @@ class PolicyTests(unittest.TestCase):
         for created, message in [
             (commands / "private_x/index.ts", f"UNSUPPORTED custom command {commands / 'private_x/index.ts'} sha256"),
             (commands / "y/index.ts.tmpl", f"UNSUPPORTED source {commands / 'y/index.ts.tmpl'} (chezmoi template"),
-            (commands / "symlink_z.tmpl", None),
+            # chezmoi deploys an external_ dir's children unparsed: external_z/index.ts is command z's module.
+            (commands / "external_z/index.ts", f"UNSUPPORTED source {commands / 'external_z'} (chezmoi template"),
         ]:
-            if created.name == "symlink_z.tmpl":
-                (commands / "symlink_z.tmpl").mkdir()
-                message = f"UNSUPPORTED source {commands / 'symlink_z.tmpl'} (chezmoi template"
-            else:
-                created.parent.mkdir(parents=True)
-                created.write_text("export default () => ({});\n")
+            created.parent.mkdir(parents=True)
+            created.write_text("export default () => ({});\n")
             result = self.run_checker("--catalog", catalog())
             self.assertEqual(result.returncode, 1, created)
             self.assertIn(message, result.stderr)

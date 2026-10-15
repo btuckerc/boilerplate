@@ -37,7 +37,15 @@ commit; no mutable live filesystem silently wins.
 Start with `decent-angl-sync status` or `decent-angl-doctor --fleet`. If
 `source=split`, run `adopt-source`. Stage only the completed task's paths or
 hunks, inspect the staged diff, and commit intentionally. Other dirty work
-does not prevent `decent-angl-sync publish`. If
+does not prevent `decent-angl-sync publish`, which checks the exported commit's
+OMP agent policy (`omp-baseline check-source`). The installed omp must equal the
+commit's pin; before a pin bump is installed, run
+`mise exec github:can1357/oh-my-pi@<pin> -- decent-angl-sync publish`. A
+release-audited publish sets `DECENT_ANGL_PUBLISH_RECEIPT` (the omp-audit
+`result.json` whose candidate is the outgoing commit) and
+`DECENT_ANGL_PUBLISH_PACKET` (its packet, with one `Audited-Range: BASE..COMMIT`
+line); a receipt that is not an accepted PASS for exactly that commit and range
+refuses publication. If
 `skills=invalid`, dest skill projections are stale or a `references/` file is
 unlinked in dest SKILL.md; `decent-angl-skills sync` then re-validate.
 `apply=` shows what the next reconcile would do. `config-pending` means held or

@@ -35,5 +35,5 @@ description: Change the shared Codex baseline in chezmoi - config.toml, model-po
 1. Run `decent-angl-sync status`, then edit `~/src/boilerplate/home/...`.
 2. Apply targeted files with `chezmoi apply`.
 3. Verify rendered files and `codex --version`, then publish through
-   `decent-angl-sync publish`. Unrelated dirty work does not block publication
-   of reviewed commits.
+   `decent-angl-sync publish`. It validates the exported snapshot's OMP agent
+   policy; unrelated dirty work does not block publication of reviewed commits.

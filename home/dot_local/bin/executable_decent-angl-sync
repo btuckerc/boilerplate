@@ -307,8 +307,11 @@ for name in sys.stdin.buffer.read().split(bytes([0])):
   fi
 }
 
+# validate_commit REV BASE [publish]: with "publish", the exported snapshot's own
+# omp-baseline also checks the snapshot's agent policy (outgoing publication only).
 validate_commit() (
-  local revision="$1" base="$2" snapshot commit commits paths result
+  local revision="$1" base="$2" publish_check="${3:-}"
+  local snapshot commit commits paths result baseline
   mkdir -p "$VALIDATION_ROOT" || return 1
   snapshot="$(mktemp -d "$VALIDATION_ROOT/validate.XXXXXX")" || return 1
   trap 'rm -rf "$snapshot"' EXIT
@@ -340,6 +343,11 @@ validate_commit() (
   if [[ -f "$snapshot/utils/scripts/check_baseline.py" ]]; then
     python3 "$snapshot/utils/scripts/check_baseline.py" "$snapshot" || return 1
   fi
+  if [[ "$publish_check" == publish ]]; then
+    baseline="$snapshot/home/dot_local/bin/executable_omp-baseline"
+    [[ -f "$baseline" ]] || { echo "Missing snapshot omp-baseline: $baseline" >&2; return 1; }
+    bash "$baseline" check-source "$snapshot" || return 1
+  fi
   printf 'VALIDATE committed snapshot %s\n' "$revision"
 )
 
@@ -352,8 +360,52 @@ fetch_branch() {
   git -C "$REPO_ROOT" fetch "$REMOTE" "refs/heads/$BRANCH:refs/remotes/$REMOTE/$BRANCH" || return 1
 }
 
+receipt_refusal() {
+  echo "Receipt gate: $1; not publishing." >&2
+  return 1
+}
+
+# With DECENT_ANGL_PUBLISH_RECEIPT set (even empty), publication requires that
+# omp-audit result.json to be an accepted release PASS whose candidate is the
+# exact outgoing commit (its id binds the whole history; a tree would not), and
+# DECENT_ANGL_PUBLISH_PACKET to be its audited packet (packet_sha256) whose one
+# `Audited-Range: BASE..COMMIT` line starts at or before the remote base, so the
+# audit covered every outgoing commit.
+check_publish_receipt() {
+  local revision="$1" base="$2" receipt packet candidate expected digest ranges first
+  [[ ${DECENT_ANGL_PUBLISH_RECEIPT+x} ]] || return 0
+  receipt="$DECENT_ANGL_PUBLISH_RECEIPT"
+  packet="${DECENT_ANGL_PUBLISH_PACKET-}"
+  [[ -n "$receipt" && -f "$receipt" && -r "$receipt" ]] || receipt_refusal "receipt '$receipt' is empty or unreadable" || return 1
+  [[ -n "$packet" && -f "$packet" && -r "$packet" ]] || receipt_refusal "packet '$packet' is empty or unreadable" || return 1
+  jq -e 'type == "object" and .accepted == true and .verdict == "PASS" and .release == true
+      and (.candidate | type == "string" and test("^[0-9a-f]{40}$"))
+      and (.packet_sha256 | type == "string" and test("^[0-9a-f]{64}$"))' "$receipt" >/dev/null 2>&1 ||
+    receipt_refusal "receipt is not an accepted release PASS with candidate and packet_sha256" || return 1
+  candidate="$(jq -r .candidate "$receipt")" || return 1
+  expected="$(jq -r .packet_sha256 "$receipt")" || return 1
+  [[ "$candidate" == "$revision" ]] ||
+    receipt_refusal "candidate $candidate is not the outgoing commit $revision" || return 1
+  if command -v sha256sum >/dev/null; then
+    digest="$(sha256sum <"$packet")" || return 1
+  else
+    digest="$(shasum -a 256 <"$packet")" || return 1
+  fi
+  [[ "${digest%% *}" == "$expected" ]] || receipt_refusal "packet digest differs from packet_sha256" || return 1
+  ranges="$(grep -E '^Audited-Range: ' "$packet" || true)"
+  [[ "$ranges" =~ ^Audited-Range:\ ([0-9a-f]{40})\.\.([0-9a-f]{40})$ ]] ||
+    receipt_refusal "packet needs exactly one 'Audited-Range: BASE..COMMIT' line of full ids" || return 1
+  first="${BASH_REMATCH[1]}"
+  [[ "${BASH_REMATCH[2]}" == "$candidate" ]] || receipt_refusal "audited range ends at ${BASH_REMATCH[2]}, not the candidate" || return 1
+  git -C "$REPO_ROOT" cat-file -e "$first^{commit}" 2>/dev/null &&
+    git -C "$REPO_ROOT" merge-base --is-ancestor "$first" "$base" &&
+    git -C "$REPO_ROOT" merge-base --is-ancestor "$first" "$revision" ||
+    receipt_refusal "audited range $first..$candidate does not cover $base..$revision" || return 1
+  printf 'RECEIPT PASS %s covers %s..%s\n' "$candidate" "$base" "$revision"
+}
+
 publish_fetched() {
-  local revision base
+  local revision base tree
   revision="$(git -C "$REPO_ROOT" rev-parse HEAD)" || return 1
   base="$(git -C "$REPO_ROOT" rev-parse "$REMOTE/$BRANCH")" || return 1
   if [[ "$revision" == "$base" ]]; then
@@ -363,10 +415,14 @@ publish_fetched() {
   git -C "$REPO_ROOT" merge-base --is-ancestor "$base" "$revision" || {
     echo "Remote is ahead or diverged; resolve history before publishing." >&2; return 1;
   }
-  validate_commit "$revision" "$base" || return 1
+  tree="$(git -C "$REPO_ROOT" rev-parse "$revision^{tree}")" || return 1
+  check_publish_receipt "$revision" "$base" || return 1
+  validate_commit "$revision" "$base" publish || return 1
   [[ "$(git -C "$REPO_ROOT" rev-parse HEAD)" == "$revision" ]] || {
     echo "HEAD changed during validation; run publish again." >&2; return 1;
   }
+  printf 'PUBLISH revision %s tree %s range %s..%s receipt %s\n' "$revision" "$tree" "$base" "$revision" \
+    "${DECENT_ANGL_PUBLISH_RECEIPT-none}"
   # Push the exact validated commit. A concurrent remote update rejects normally.
   git -C "$REPO_ROOT" push "$REMOTE" "$revision:refs/heads/$BRANCH" || return 1
   printf '%s\n' "$revision" >"$STATE_DIR/config-published-commit" || return 1

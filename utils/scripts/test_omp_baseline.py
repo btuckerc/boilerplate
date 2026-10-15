@@ -92,6 +92,110 @@ class OmpBaselineTest(unittest.TestCase):
         return subprocess.run(["bash", str(SCRIPT), *args], env={**self.env, **env}, cwd=cwd or self.root,
                               capture_output=True, text=True, timeout=60)
 
+    def source_root(self):
+        """A minimal exported tree for check-source, with a fake checker (logging its
+        arguments, PI_CONFIG_FILES and cwd) and an omp stub serving catalog evidence."""
+        root = self.root / "snapshot"
+        manifest = root / "home/dot_config/decent-angl/omp-baseline-manifest.tsv"
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text("# omp-version\t18.10.4\n")
+        checker = root / "home/dot_local/bin/executable_omp-agent-policy"
+        checker.parent.mkdir(parents=True)
+        checker.write_text("")
+        for rel in ("private_agent", "private_profiles/local/private_agent"):
+            (root / "home/private_dot_omp" / rel).mkdir(parents=True)
+            (root / "home/private_dot_omp" / rel / "private_config.yml").write_text("theme: dark\n")
+        (self.bin / "mise").write_text(MISE.replace(
+            '[ "$tool" = bun ] && exec',
+            'case "$tool $*" in "bun "*omp-agent-policy*) '
+            'printf "%s|%s|%s|%s\\\\n" "$*" "${PI_CONFIG_FILES-unset}" "$PWD" "$(env | grep -c "^PI_MODEL=")" >>"$POLICY_LOG"; '
+            'case "$* $FAIL_PROFILE" in *"--profile local"*local) exit 1 ;; esac; exit 0 ;; esac\n'
+            '[ "$tool" = bun ] && exec',
+        ))
+        (self.bin / "omp").write_text(OMP.replace('[ -n "$OMP_LOG" ]', '''[ "$1" = --profile ] && shift 2
+if [ "$1 $2" = "models --json" ]; then
+  { echo "PROBE $HOME $PWD"; ls -A "$HOME/.omp/agent"; cut -d= -f1 "$HOME/.omp/agent/.env" 2>/dev/null
+    env | grep -E "^(PI|OMP)_" | cut -d= -f1; } >>"$STUB_LOG"
+  if [ -n "$CATALOG_OUT" ]; then printf '%s\\n' "$CATALOG_OUT"; else printf '{"models":[]}\\n'; fi
+  exit 0
+fi
+[ "$1 $2" = "config list" ] && { printf '{}\\n'; exit 0; }
+[ -n "$OMP_LOG" ]'''))
+        return root
+
+    def test_check_source_uses_the_snapshot_and_no_live_settings(self):
+        root = self.source_root()
+        agent = self.home / ".omp/agent"
+        ran = self.root / "command-ran"
+        (agent / "config.yml").write_text(f'modelRoles:\n  default: "{chr(33)}touch {ran}"\n')
+        (agent / "models.yml").write_text("not: [valid\n")
+        (agent / ".env").write_text("OPENAI_API_KEY=k\nOMP_AUTH_BROKER_URL=http://broker\n"
+                                    "PI_SMOL_MODEL=x\nOMP_TASK_ISOLATION=1\n")
+        launch = self.root / "launch"
+        (launch / ".omp").mkdir(parents=True)
+        (launch / ".omp/settings.json").write_text('{"modelRoles": {"default": "x"}}')
+        (launch / ".env").write_text("PI_CONFIG_FILES=/nonexistent\n")
+        log, omp_log, scratch = self.root / "policy.log", self.root / "omp.log", self.root / "tmp"
+        scratch.mkdir()
+        # An inherited PROBE_CWD names a project with its own .omp settings.
+        env = dict(POLICY_LOG=str(log), STUB_LOG=str(omp_log), TMPDIR=str(scratch),
+                   PI_MODEL="live", PI_CONFIG_FILES=str(self.root / "overlay.yml"),
+                   OMP_AUTH_BROKER_URL="http://broker", PROBE_CWD=str(launch))
+        result = self.run_baseline("check-source", str(root), cwd=launch, **env)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        runs = log.read_text().splitlines()
+        self.assertEqual(len(runs), 2)
+        for run, profile in zip(runs, ("", " --profile local")):
+            args, config_files, cwd, live_model = run.split("|")
+            self.assertTrue(args.startswith(f"{root}/home/dot_local/bin/executable_omp-agent-policy --root {root}{profile} --catalog "), args)
+            self.assertEqual((config_files, live_model), (":", "0"))
+            self.assertTrue(cwd.startswith(f"{scratch}/omp-baseline-probe."), cwd)
+        probes = omp_log.read_text()
+        probe_cwds = [line.split()[2] for line in probes.splitlines() if line.startswith("PROBE ")]
+        self.assertEqual(len(probe_cwds), 2)
+        for cwd in probe_cwds:
+            self.assertTrue(cwd.startswith(f"{scratch}/omp-baseline-probe."), cwd)
+        self.assertNotIn("config.yml", probes)
+        self.assertNotIn("models.yml", probes)
+        self.assertIn("OPENAI_API_KEY", probes)
+        self.assertIn("OMP_AUTH_BROKER_URL", probes)
+        for leaked in ("PI_SMOL_MODEL", "OMP_TASK_ISOLATION", "PI_MODEL"):
+            self.assertNotIn(leaked, probes)
+        self.assertFalse(ran.exists())
+        self.assertEqual([], list(scratch.iterdir()))
+
+        # A relative ROOT still names the snapshot after the checker's cd.
+        log.write_text("")
+        result = self.run_baseline("check-source", root.name, cwd=root.parent, **env)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        runs = log.read_text().splitlines()
+        self.assertEqual(len(runs), 2)
+        real = root.resolve()
+        for run in runs:
+            self.assertTrue(run.startswith(f"{real}/home/dot_local/bin/executable_omp-agent-policy --root {real} "), run)
+        self.assertEqual([], list(scratch.iterdir()))
+
+        result = self.run_baseline("check-source", str(root), FAIL_PROFILE="local", cwd=launch, **env)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual([], list(scratch.iterdir()))
+
+    def test_check_source_fails_closed(self):
+        root = self.source_root()
+        scratch = self.root / "tmp"
+        scratch.mkdir()
+        env = dict(POLICY_LOG=str(self.root / "policy.log"), STUB_LOG=str(self.root / "omp.log"), TMPDIR=str(scratch))
+        result = self.run_baseline("check-source", str(root), VERSION_OUT="omp/18.4.4", **env)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("installed omp/18.4.4, source pin omp/18.10.4", result.stderr)
+        result = self.run_baseline("check-source", str(root), CATALOG_OUT="not json", **env)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("probe failed", result.stderr)
+        (root / "home/dot_local/bin/executable_omp-agent-policy").unlink()
+        result = self.run_baseline("check-source", str(root), **env)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("checker missing", result.stderr)
+        self.assertEqual([], list(scratch.iterdir()))
+
     def snapshot(self):
         """Contents, modes and (where supported) file attributes under ~/.omp."""
         state = {}

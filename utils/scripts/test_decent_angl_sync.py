@@ -32,6 +32,17 @@ class SyncTest(unittest.TestCase):
         self.git("config", "user.name", "Fixture")
         self.git("config", "user.email", "fixture@example.invalid")
         (self.root / "source").symlink_to(self.repo, target_is_directory=True)
+        # The snapshot's own omp-baseline: check-source logs the exported root and
+        # fails when that root holds a committed bad policy marker.
+        self.executable(self.repo / "home/dot_local/bin/executable_omp-baseline", '''#!/bin/sh
+[ "$1" = check-source ] || exit 17
+printf '%s\\n' "$2" >>"$BASELINE_LOG"
+if grep -qs 'bad committed policy' "$2/home/policy"; then
+  echo "EFFORT browser expected medium resolved high" >&2
+  exit 1
+fi
+''')
+        self.env["BASELINE_LOG"] = str(self.root / "baseline.log")
         self.write("home/dot_local/bin/executable_decent-angl-skills", "#!/bin/sh\nexit 0\n")
         self.write("home/example", "initial\n")
         self.commit("initial")
@@ -134,9 +145,148 @@ esac
         before = self.snapshot()
         self.run_sync("publish")
         self.assertEqual(self.snapshot(), before)
-        self.assertEqual(self.remote_head(), self.git("rev-parse", "HEAD").stdout.strip())
         self.assertFalse((self.user / "apply.log").exists())
         self.assertEqual(self.git("stash", "list").stdout, "")
+
+    def check_source_runs(self):
+        log = Path(self.env["BASELINE_LOG"])
+        return log.read_text().splitlines() if log.exists() else []
+
+    def worktree_state(self):
+        return (self.git("diff", "--binary").stdout, self.git("diff", "--cached", "--binary").stdout,
+                self.git("status", "--porcelain=v1", "--untracked-files=all").stdout)
+
+    def test_publish_checks_the_committed_snapshot_not_the_worktree(self):
+        self.write("home/policy", "bad committed policy\n")
+        self.commit("bad policy")
+        self.write("home/policy", "corrected but uncommitted\n")
+        result = self.run_sync("publish", success=False)
+        self.assertIn("EFFORT browser", result.stderr)
+        self.assertEqual(self.remote_head(), self.initial)
+
+        self.write("home/policy", "corrected policy\n")
+        self.commit("corrected policy")
+        self.write("home/policy", "bad committed policy\n")
+        self.write("home/unrelated", "staged\n")
+        self.git("add", "home/unrelated")
+        self.write("home/unrelated", "staged then unstaged\n")
+        self.write("home/untracked", "untracked\n")
+        before = self.worktree_state()
+        result = self.run_sync("publish")
+        self.assertIn("receipt none", result.stdout)
+        self.assertEqual(self.remote_head(), self.git("rev-parse", "HEAD").stdout.strip())
+        self.assertEqual(self.worktree_state(), before)
+        runs = self.check_source_runs()
+        self.assertEqual(len(runs), 2)
+        self.assertTrue(all(run.startswith(str(self.root / "validation/validate.")) for run in runs))
+        self.assertFalse(any(Path(run).exists() for run in runs))
+
+    def test_publish_requires_snapshot_baseline(self):
+        self.outgoing()
+        self.git("rm", "-q", "home/dot_local/bin/executable_omp-baseline")
+        self.git("commit", "-m", "drop baseline")
+        result = self.run_sync("publish", success=False)
+        self.assertIn("Missing snapshot omp-baseline", result.stderr)
+        self.assertEqual(self.remote_head(), self.initial)
+
+    def test_guard_defers_and_incoming_validation_skips_check_source(self):
+        self.outgoing()
+        self.run_sync("guard")
+        self.assertEqual(self.remote_head(), self.initial)
+        self.assertEqual(self.check_source_runs(), [])
+        self.run_sync("reconcile")
+        self.assertEqual(self.remote_head(), self.git("rev-parse", "HEAD").stdout.strip())
+        self.assertEqual(len(self.check_source_runs()), 1)
+        # Incoming: another clone publishes; this host fast-forwards and applies.
+        other = self.root / "other"
+        self.command("git", "clone", "-q", str(self.remote), str(other))
+        (other / "home/example").write_text("incoming\n")
+        self.command("git", "-C", str(other), "-c", "user.name=F", "-c", "user.email=f@x.invalid",
+                     "commit", "-qam", "incoming")
+        self.command("git", "-C", str(other), "push", "-q", "origin", "master")
+        self.run_sync("guard")
+        self.assertEqual(self.git("rev-parse", "HEAD").stdout.strip(), self.remote_head())
+        self.assertEqual(len(self.check_source_runs()), 1)
+
+    def receipt(self, candidate, start=None, end=None, extra="", **fields):
+        import hashlib
+        import json
+        packet = self.root / "packet.md"
+        packet.write_text(f"# packet\nAudited-Range: {start or self.initial}..{end or candidate}\n{extra}")
+        data = {"accepted": True, "verdict": "PASS", "release": True, "candidate": candidate,
+                "packet_sha256": hashlib.sha256(packet.read_bytes()).hexdigest()}
+        data.update(fields)
+        result = self.root / "result.json"
+        result.write_text(json.dumps(data))
+        self.env.update(DECENT_ANGL_PUBLISH_RECEIPT=str(result), DECENT_ANGL_PUBLISH_PACKET=str(packet))
+        return result, packet
+
+    def test_receipt_gate_accepts_the_audited_commit(self):
+        self.write("home/example", "reviewed\n")
+        self.commit("reviewed")
+        revision = self.git("rev-parse", "HEAD").stdout.strip()
+        result, _ = self.receipt(revision)
+        self.assertIn(f"receipt {result}", self.run_sync("publish").stdout)
+        self.assertEqual(self.remote_head(), revision)
+
+    def test_receipt_gate_binds_the_outgoing_history(self):
+        # Audit B..C with final tree T, then rebuild the unpublished history as
+        # B -> U (unreviewed) -> R (restores T): same tree, different commits.
+        self.write("home/example", "reviewed\n")
+        self.commit("reviewed")
+        audited = self.git("rev-parse", "HEAD").stdout.strip()
+        tree = self.git("rev-parse", "HEAD^{tree}").stdout.strip()
+        self.git("reset", "-q", "--hard", self.initial)
+        self.write("home/example", "unreviewed hook change\n")
+        self.commit("unreviewed")
+        self.write("home/example", "reviewed\n")
+        self.commit("restore")
+        self.assertEqual(self.git("rev-parse", "HEAD^{tree}").stdout.strip(), tree)
+        for candidate, end in ((audited, audited), (tree, tree)):
+            with self.subTest(candidate=candidate):
+                self.receipt(candidate, end=end)
+                self.assertIn("is not the outgoing commit", self.run_sync("publish", success=False).stderr)
+                self.assertEqual(self.remote_head(), self.initial)
+        self.assertEqual(self.check_source_runs(), [])
+
+    def test_receipt_gate_refuses_and_publishes_nothing(self):
+        self.outgoing()
+        first = self.git("rev-parse", "HEAD").stdout.strip()
+        self.write("home/example", "second\n")
+        self.commit("second")
+        revision = self.git("rev-parse", "HEAD").stdout.strip()
+        cases = {
+            "BLOCK": lambda: self.receipt(revision, verdict="BLOCK"),
+            "UNVERIFIED": lambda: self.receipt(revision, verdict="UNVERIFIED"),
+            "not accepted": lambda: self.receipt(revision, accepted=False),
+            "string boolean": lambda: self.receipt(revision, accepted="true"),
+            "not release": lambda: self.receipt(revision, release=False),
+            "missing release": lambda: self.receipt(revision, release=None),
+            "other candidate": lambda: self.receipt(first),
+            "ref name": lambda: self.receipt("master", end=revision),
+            "range of the last phase only": lambda: self.receipt(revision, start=first),
+            "range end differs": lambda: self.receipt(revision, end=first),
+            "two ranges": lambda: self.receipt(revision, extra=f"Audited-Range: {self.initial}..{revision}\n"),
+        }
+        for name, make in cases.items():
+            with self.subTest(name):
+                make()
+                self.assertIn("Receipt gate:", self.run_sync("publish", success=False).stderr)
+                self.assertEqual(self.remote_head(), self.initial)
+        _, packet = self.receipt(revision)
+        packet.write_text(packet.read_text() + "edited after the audit\n")
+        self.assertIn("digest", self.run_sync("publish", success=False).stderr)
+        self.receipt(revision)
+        (self.root / "result.json").write_text("{not json")
+        self.run_sync("publish", success=False)
+        self.receipt(revision)
+        self.env["DECENT_ANGL_PUBLISH_RECEIPT"] = ""
+        self.assertIn("empty or unreadable", self.run_sync("publish", success=False).stderr)
+        self.receipt(revision)
+        del self.env["DECENT_ANGL_PUBLISH_PACKET"]
+        self.assertIn("packet", self.run_sync("publish", success=False).stderr)
+        self.assertEqual(self.remote_head(), self.initial)
+        self.assertEqual(self.check_source_runs(), [])
 
     def test_reconcile_publishes_and_holds_dirty_target(self):
         self.outgoing()

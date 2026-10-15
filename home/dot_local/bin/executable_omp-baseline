@@ -20,11 +20,14 @@ HOST_OS="$(uname -s)"
 
 usage() {
   cat <<'EOF'
-Usage: omp-baseline <status|validate|repair|apply|pull|check-upstream|upgrade|guard|install-guard|fleet> [options]
+Usage: omp-baseline <status|validate|check-source ROOT|repair|apply|pull|check-upstream|upgrade|guard|install-guard|fleet> [options]
 
   status          Compare repo, chezmoi source, rendered live files, and version.
   validate        Run status plus coverage, secret-boundary, agent-policy, and OMP parser
                   checks. Observational: never changes files or modes.
+  check-source ROOT
+                  Agent-policy source checks for the exported tree ROOT with its own
+                  checker; the installed omp must equal ROOT's pin. No live settings.
   repair          Restore private runtime modes (and btrfs NOCOW), then validate.
   apply           Apply the local published source, install its exact pin, repair, validate.
   pull            Reconcile the complete published baseline, then validate OMP.
@@ -118,6 +121,11 @@ PROBE_JAIL=()
 # to PI_* when it loads a dotenv file). Probes drop them from the environment,
 # and a copied dotenv file that sets one would point a probe back at live state.
 PROBE_DIR_KEYS='(OMP|PI)_[A-Z0-9_]*(DIR|PROFILE|DB|CACHE)|XDG_[A-Z]+_HOME'
+# check-source probes (probe_home source): credentials and model caches only,
+# never live settings, overlays or policy-changing PI_*/OMP_* variables. The
+# auth broker address is where credentials live, so it is kept.
+PROBE_SOURCE_ONLY=false
+PROBE_CREDENTIAL_KEYS='(OMP|PI)_AUTH_BROKER_(URL|TOKEN)|[A-Za-z_][A-Za-z0-9_]*(_API_KEY|_TOKEN|_KEY)'
 
 # Print the lines of $1 that match the ERE $2, without a filter process.
 match_lines() {
@@ -145,6 +153,43 @@ probe_copy_env() {
       ;;
   esac
   cp -p "$1" "$2"
+}
+
+# The credential lines (PROBE_CREDENTIAL_KEYS, other PI_*/OMP_* keys excluded)
+# of dotenv file $1, written to $2. Everything else may change settings.
+probe_copy_credentials_env() {
+  [ -f "$1" ] || return 0
+  (umask 077 && awk -v keys="^($PROBE_CREDENTIAL_KEYS)\$" '
+    /^[[:space:]]*(#|$)/ { next }
+    {
+      key = $0
+      sub(/^[[:space:]]*(export[[:space:]]+)?/, "", key)
+      sub(/[[:space:]]*=.*/, "", key)
+      if (key ~ keys && (key !~ /^(PI|OMP)_/ || key ~ /^(PI|OMP)_AUTH_BROKER_/)) print
+    }' "$1" >"$2")
+}
+
+# omp 18.10.4 AgentStorage.getSettings() reads agent.db's `settings` table, so
+# a source-only copy of agent.db $1 drops its rows and keeps the credentials.
+probe_clear_settings() {
+  python3 - "$1" <<'PY'
+import sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+try:
+    if db.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'settings'").fetchone():
+        db.execute("DELETE FROM settings")
+        db.commit()
+finally:
+    db.close()
+PY
+}
+
+probe_copy_dotenv() {
+  if [ "$PROBE_SOURCE_ONLY" = true ]; then
+    probe_copy_credentials_env "$1" "$2"
+  else
+    probe_copy_env "$1" "$2"
+  fi
 }
 
 # Native omp runs a config value that starts with "!" as `/bin/sh -c` and uses
@@ -250,15 +295,17 @@ probe_home() {
   PROBE_HOME="$PROBE_ROOT/home"
   if ! mkdir -m 700 "$PROBE_ROOT/cwd" "$PROBE_HOME" "$PROBE_HOME/.omp" "$PROBE_HOME/.omp/agent" ||
     { [ -f "$live/auth-broker.token" ] && ! cp -p "$live/auth-broker.token" "$PROBE_HOME/.omp/"; } ||
-    ! probe_copy_env "$HOME/.env" "$PROBE_HOME/.env" ||
-    ! probe_copy_env "$live/.env" "$PROBE_HOME/.omp/.env" ||
-    ! probe_copy_env "$live/agent/.env" "$PROBE_HOME/.omp/agent/.env"; then
+    ! probe_copy_dotenv "$HOME/.env" "$PROBE_HOME/.env" ||
+    ! probe_copy_dotenv "$live/.env" "$PROBE_HOME/.omp/.env" ||
+    ! probe_copy_dotenv "$live/agent/.env" "$PROBE_HOME/.omp/agent/.env"; then
     printf 'PROBE   scratch HOME setup failed\n' >&2
     cleanup_probe_home
     return 1
   fi
-  for file in "$live/agent"/*.yml "$live/agent"/*.yaml "$live/agent"/*.json \
-    "$live/agent"/agent.db* "$live/agent"/models.db*; do
+  local -a copies=("$live/agent"/agent.db* "$live/agent"/models.db*)
+  [ "$PROBE_SOURCE_ONLY" = true ] ||
+    copies+=("$live/agent"/*.yml "$live/agent"/*.yaml "$live/agent"/*.json)
+  for file in "${copies[@]}"; do
     [ -f "$file" ] || continue
     if ! cp -p "$file" "$PROBE_HOME/.omp/agent/"; then
       printf 'PROBE   copy failed %s\n' "$file" >&2
@@ -266,7 +313,14 @@ probe_home() {
       return 1
     fi
   done
-  if ! probe_jail || ! probe_screen "$live/agent"/models.{yml,yaml,json} "$live/agent"/config.{yml,yaml}; then
+  if [ "$PROBE_SOURCE_ONLY" = true ]; then
+    if [ -f "$PROBE_HOME/.omp/agent/agent.db" ] && ! probe_clear_settings "$PROBE_HOME/.omp/agent/agent.db"; then
+      printf 'PROBE   could not clear settings from the agent.db copy\n' >&2
+      cleanup_probe_home
+      return 1
+    fi
+    probe_jail || { cleanup_probe_home; return 1; }
+  elif ! probe_jail || ! probe_screen "$live/agent"/models.{yml,yaml,json} "$live/agent"/config.{yml,yaml}; then
     cleanup_probe_home
     return 1
   fi
@@ -287,12 +341,22 @@ probe_home() {
 }
 
 cleanup_probe_home() {
+  local tries=0
   case "$PROBE_ROOT" in
-    "${TMPDIR:-/tmp}"/omp-baseline-probe.?*) rm -rf "$PROBE_ROOT" ;;
+    "${TMPDIR:-/tmp}"/omp-baseline-probe.?*)
+      # An interrupted probe's omp (argv under the scratch HOME) can outlive
+      # this shell and write into it; wait up to 5 s for it before removing.
+      while [ "$tries" -lt 50 ] && pgrep -f -- "$PROBE_ROOT/" >/dev/null 2>&1; do
+        sleep 0.1
+        tries=$((tries + 1))
+      done
+      rm -rf "$PROBE_ROOT"
+      ;;
   esac
   PROBE_ROOT=""
   PROBE_HOME=""
   PROBE_JAIL=()
+  PROBE_SOURCE_ONLY=false
 }
 
 # omp in the shell jail (probe_jail) from the scratch cwd (PROBE_CWD if set)
@@ -309,11 +373,14 @@ omp_probe() {
   local overlays="" entry name
   local -a vars=(HOME="$PROBE_HOME") unset=()
   for name in $(compgen -e); do
-    if [[ $name =~ ^($PROBE_DIR_KEYS)$ ]]; then
+    if [[ $name =~ ^($PROBE_DIR_KEYS)$ ]] || { [ "$PROBE_SOURCE_ONLY" = true ] &&
+      [[ $name =~ ^(PI|OMP)_ ]] && ! [[ $name =~ ^(OMP|PI)_AUTH_BROKER_(URL|TOKEN)$ ]]; }; then
       unset+=(-u "$name")
     fi
   done
-  if [ -n "${PI_CONFIG_FILES:-}" ]; then
+  if [ "$PROBE_SOURCE_ONLY" = true ]; then
+    vars+=(PI_CONFIG_FILES=:)
+  elif [ -n "${PI_CONFIG_FILES:-}" ]; then
     while IFS= read -r -d : entry; do
       [ -n "$entry" ] || continue
       entry="$(expand_home "$entry")"
@@ -924,7 +991,7 @@ probe_profile() {
     { [ -f "$PROBE_HOME/.omp/auth-broker.token" ] && ! cp -p "$PROBE_HOME/.omp/auth-broker.token" "$root/"; } ||
     { [ -f "$2" ] && ! cp "$2" "$root/agent/config.yml"; } ||
     { [ -f "$3" ] && ! cp "$3" "$root/agent/models.yml"; } ||
-    ! probe_copy_env "$4/.env" "$root/agent/.env" ||
+    ! probe_copy_dotenv "$4/.env" "$root/agent/.env" ||
     ! probe_screen "$2" "$3"; then
     rm -rf "$root"
     return 1
@@ -987,10 +1054,15 @@ agent_policy_run() {
 policy_checker() {
   (
     for name in $(compgen -e); do
-      if [[ $name == OMP_BASELINE_* ]]; then
+      if [[ $name == OMP_BASELINE_* ]] ||
+        { [ "$PROBE_SOURCE_ONLY" = true ] && [[ $name =~ ^(PI|OMP)_ ]]; }; then
         unset "$name"
       fi
     done
+    if [ "$PROBE_SOURCE_ONLY" = true ]; then
+      cd "$PROBE_ROOT/cwd" || exit 1
+      export PI_CONFIG_FILES=:
+    fi
     bun_run "$checker" "$@"
   )
 }
@@ -1002,22 +1074,22 @@ policy_checker() {
 # this host's credentials and no host overlay: PI_CONFIG_FILES=":" names no
 # file and keeps a copied dotenv file from supplying one. Live probes run from a
 # scratch cwd holding copies of this cwd's project settings files.
-check_agent_policy() {
-  local failures=0 checker version src="$REPO_ROOT/home/private_dot_omp"
-  local live_local="$HOME/.omp/profiles/local/agent" local_creds="$HOME/.omp/agent"
-  local live_cwd="${PROBE_ROOT:-/nonexistent}/live-cwd" file
-  checker="$HOME/.local/bin/omp-agent-policy"
-  [ -x "$checker" ] || checker="$REPO_ROOT/home/dot_local/bin/executable_omp-agent-policy"
-  if [ ! -f "$checker" ]; then
-    printf 'AGENT   checker missing %s\n' "$checker" >&2
-    return 1
+# check_source_agent_policy ROOT runs the source half with $checker; under
+# check-source the probe HOME is source-only, so its credentials stand in for
+# both profiles.
+check_source_agent_policy() {
+  local failures=0 src="$1/home/private_dot_omp"
+  local default_creds="$HOME/.omp/agent" local_creds="$HOME/.omp/agent"
+  [ ! -d "$HOME/.omp/profiles/local/agent" ] || local_creds="$HOME/.omp/profiles/local/agent"
+  if [ "$PROBE_SOURCE_ONLY" = true ]; then
+    default_creds="$PROBE_HOME/.omp/agent"
+    local_creds="$PROBE_HOME/.omp/agent"
   fi
   if [ -n "$PROBE_HOME" ]; then
-    [ ! -d "$live_local" ] || local_creds="$live_local"
     # A profile that cannot be prepared fails here and again in agent_policy_run,
     # whose catalog capture finds no profile.
     if ! probe_profile src-default "$src/private_agent/private_config.yml" \
-      "$src/private_agent/private_models.yml" "$HOME/.omp/agent"; then
+      "$src/private_agent/private_models.yml" "$default_creds"; then
       printf 'AGENT   probe profile failed (source default)\n' >&2
       failures=1
     fi
@@ -1026,6 +1098,23 @@ check_agent_policy() {
       printf 'AGENT   probe profile failed (source local)\n' >&2
       failures=1
     fi
+  fi
+  PI_CONFIG_FILES=: agent_policy_run "source default" default src-default --root "$1" || failures=1
+  PI_CONFIG_FILES=: agent_policy_run "source local" local src-local --root "$1" --profile local || failures=1
+  return "$failures"
+}
+
+check_agent_policy() {
+  local failures=0 checker version live_local="$HOME/.omp/profiles/local/agent"
+  local live_cwd="${PROBE_ROOT:-/nonexistent}/live-cwd" file
+  checker="$HOME/.local/bin/omp-agent-policy"
+  [ -x "$checker" ] || checker="$REPO_ROOT/home/dot_local/bin/executable_omp-agent-policy"
+  if [ ! -f "$checker" ]; then
+    printf 'AGENT   checker missing %s\n' "$checker" >&2
+    return 1
+  fi
+  check_source_agent_policy "$REPO_ROOT" || failures=1
+  if [ -n "$PROBE_HOME" ]; then
     if [ -d "$live_local" ] &&
       ! probe_profile local "$live_local/config.yml" "$live_local/models.yml" "$live_local"; then
       printf 'AGENT   probe profile failed (live local)\n' >&2
@@ -1037,8 +1126,6 @@ check_agent_policy() {
       mkdir -p "$live_cwd/.omp" && cp -p "$PWD/.omp/$file" "$live_cwd/.omp/" || return 1
     done
   fi
-  PI_CONFIG_FILES=: agent_policy_run "source default" default src-default --root "$REPO_ROOT" || failures=1
-  PI_CONFIG_FILES=: agent_policy_run "source local" local src-local --root "$REPO_ROOT" --profile local || failures=1
 
   if [ -z "$PROBE_HOME" ] || ! version="$(omp_probe --version)"; then
     printf 'AGENT   omp --version probe failed; live agent checks skipped\n' >&2
@@ -1051,6 +1138,46 @@ check_agent_policy() {
       --omp-version "${version#omp/}" --cwd "$PWD" || failures=1
   fi
   return "$failures"
+}
+
+# check-source ROOT: the agent-policy source runs for an exported tree ROOT
+# (decent-angl-sync publish runs it on the archived revision), with ROOT's own
+# checker and native evidence from the installed omp, which must be ROOT's pin.
+# Nothing live but credentials and model caches enters the probe HOME.
+check_source() {
+  local root pin actual checker
+  # Absolute: policy_checker runs from the scratch cwd.
+  root="$(cd "$1" 2>/dev/null && pwd -P)" || {
+    printf 'AGENT   source root %s not found\n' "$1" >&2
+    return 1
+  }
+  checker="$root/home/dot_local/bin/executable_omp-agent-policy"
+  if [ ! -f "$checker" ]; then
+    printf 'AGENT   checker missing %s\n' "$checker" >&2
+    return 1
+  fi
+  pin="$(MANIFEST="$root/home/dot_config/decent-angl/omp-baseline-manifest.tsv" manifest_value omp-version)" || pin=""
+  if [ -z "$pin" ]; then
+    printf 'VERSION no omp-version pin in %s\n' "$root" >&2
+    return 1
+  fi
+  actual="$(omp --version 2>/dev/null)" || actual=""
+  if [ "$actual" != "omp/$pin" ]; then
+    printf 'VERSION installed %s, source pin omp/%s; install the pin first\n' "${actual:-missing}" "$pin" >&2
+    return 1
+  fi
+  printf 'VERSION %s matches the source pin\n' "$actual"
+  (
+    trap cleanup_probe_home EXIT
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    PROBE_SOURCE_ONLY=true
+    # An inherited PROBE_CWD would let a live project's .omp settings into the probe.
+    unset PROBE_CWD
+    probe_home || { printf 'PROBE   scratch HOME unavailable; source check cannot run\n' >&2; exit 1; }
+    check_source_agent_policy "$root"
+  )
 }
 
 quarantine_legacy_wrapper() {
@@ -1537,6 +1664,11 @@ main() {
   local command="${1:-status}"
   [ "$#" -gt 0 ] && shift
   case "$command" in
+    check-source)
+      [ "$#" -eq 1 ] && [ -n "$1" ] || { printf 'Usage: omp-baseline check-source ROOT\n' >&2; return 2; }
+      check_source "$1"
+      return
+      ;;
     check-upstream)
       check_upstream
       return

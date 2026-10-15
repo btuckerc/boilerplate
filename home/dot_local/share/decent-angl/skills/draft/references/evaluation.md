@@ -73,8 +73,9 @@ these expected outcomes. Keep generated artifacts in a temporary workspace.
 | --- | --- |
 | A typo in an existing README | Small direct task, no swarm or campaign machinery; no underlying edit while only drafting. |
 | A one-file data-loss race versus a large mechanical rename | Difficulty follows ambiguity/consequence rather than number of files. Both routes have a reason and appropriate verification. |
-| “Revamp my app with Astra and Luna workers; make it visually excellent and accessible” | Honors Astra; Luna max inside the copyable contract; concrete first milestone, rendered visual review, integration owner; no invented product requirements. |
-| “Explore the code, then implement the fix” with workers | Read-only low is allowed, but implementation/design/review explicitly moves to max; no unchanged low worker silently edits. |
+| “Revamp my app with Astra and Luna workers; make it visually excellent and accessible” | Honors Astra; Luna medium for implementation and high for visual review inside the copyable contract; concrete first milestone, rendered visual review, integration owner; no invented product requirements. |
+| “Explore the code, then implement the fix” with workers | Read-only low is allowed, but implementation/design/review explicitly moves to medium or higher; no unchanged low worker silently edits. |
+| “Implement this with Luna max workers” | Luna max verbatim in the copyable contract; the medium default does not override an explicit request. |
 | “Draft a simulation campaign alongside this hardware campaign” plus an older all-devices prompt | Keeps simulation-first intent, checks shared ownership, and does not assert historical all-device permission as current exclusive availability. |
 | “Create WORKSPACE and save the full prompt there too” | Actually creates requested handoff artifacts in the permitted temporary fixture, preserves existing content, and reports real paths. |
 | “Amend this, do not condense; add GitHub” | Returns full revised prompt, preserves constraints and detail, includes GitHub; no implementation drift. |

@@ -54,7 +54,21 @@ interface TaskResult {
 	resolvedModelIdentity?: string;
 	resolvedThinkingLevel?: string;
 	resolvedModelIsFallback?: boolean;
+	structuredOutput?: { status?: string; mode?: string; source?: string; data?: any; error?: unknown };
 }
+
+/**
+ * Agents whose own `output` schema the smoke exercises: the identity task asks for one schema-valid placeholder
+ * yield in strict mode, and the result must validate against the agent schema (task/structured-subagent.ts:232-246).
+ */
+const SCHEMA_SMOKE: Record<string, { task: string; check: (data: any) => boolean }> = {
+	auditor: {
+		task:
+			"Identity smoke, not an audit; there is no packet. Call yield once with exactly this result and use no other tool: " +
+			`{"verdict":"UNVERIFIED","candidate":"${"0".repeat(64)}","findings":[],"missing_evidence":["identity smoke: no packet"],"summary":"identity smoke"}`,
+		check: data => data?.verdict === "UNVERIFIED" && data?.candidate === "0".repeat(64),
+	},
+};
 
 function parseArgs(argv: string[]) {
 	const opts = {
@@ -206,7 +220,7 @@ export function mcpOwnership(servers: string[], sessionTools: string[], systemPr
 }
 
 /** Compare one spawned child against its prediction; returns failure reasons (empty = pass). */
-function checkChild(pred: Prediction, result: TaskResult | undefined, sessionsDir: string): string[] {
+export function checkChild(pred: Prediction, result: TaskResult | undefined, sessionsDir: string): string[] {
 	if (!result) return ["no task result for this agent"];
 	const fails: string[] = [];
 	if (result.exitCode !== 0 || result.aborted) fails.push(`child exit ${result.exitCode} aborted=${!!result.aborted} ${result.error ?? ""}`.trim());
@@ -214,6 +228,12 @@ function checkChild(pred: Prediction, result: TaskResult | undefined, sessionsDi
 	if (result.resolvedModelIsFallback) fails.push("task result reports a fallback model");
 	if (bare(result.resolvedModelIdentity) !== pred.model) fails.push(`result model ${result.resolvedModelIdentity} predicted ${pred.model}`);
 	if (result.resolvedThinkingLevel !== pred.thinking) fails.push(`result thinking ${result.resolvedThinkingLevel} predicted ${pred.thinking}`);
+	const schemaSmoke = SCHEMA_SMOKE[pred.name];
+	if (schemaSmoke) {
+		const so = result.structuredOutput ?? {};
+		if (so.status !== "valid" || so.mode !== "strict" || so.source !== "agent" || !schemaSmoke.check(so.data))
+			fails.push(`structuredOutput status=${so.status} mode=${so.mode} source=${so.source} data=${JSON.stringify(so.data)}`);
+	}
 
 	const file = findFile(sessionsDir, `${result.id}.jsonl`);
 	if (!file) return [...fails, `child session ${result.id}.jsonl not found`];
@@ -241,8 +261,9 @@ function checkChild(pred: Prediction, result: TaskResult | undefined, sessionsDi
 	if (lastModel !== pred.model) fails.push(`model_change ${lastModel} predicted ${pred.model}`);
 	const lastThinking = entries.filter(e => e.type === "thinking_level_change").at(-1)?.thinkingLevel;
 	if (lastThinking !== pred.thinking) fails.push(`thinking_level_change ${lastThinking} predicted ${pred.thinking}`);
+	// Every assistant message counts, aborted ones included: a partial reply is still output from its model.
 	const serving = entries
-		.filter(e => e.type === "message" && e.message?.role === "assistant" && e.message.stopReason !== "aborted")
+		.filter(e => e.type === "message" && e.message?.role === "assistant")
 		.map(e => `${e.message.provider}/${e.message.model}`);
 	if (serving.length === 0) fails.push("no serving assistant message");
 	for (const m of new Set(serving)) if (m !== pred.model) fails.push(`assistant served by ${m} predicted ${pred.model}`);
@@ -330,8 +351,9 @@ function main() {
 		const tasks = selected.map(agent => ({
 			name: agentTaskName(agent),
 			agent,
-			task: "Finish immediately: call yield with the smallest valid result (a one-word summary). Use no other tool.",
+			task: SCHEMA_SMOKE[agent]?.task ?? "Finish immediately: call yield with the smallest valid result (a one-word summary). Use no other tool.",
 			solutionSpace: "none: identity smoke",
+			...(SCHEMA_SMOKE[agent] ? { schemaMode: "strict" } : {}),
 		}));
 		const prompt =
 			`Call the task tool exactly once with context "omp-agent-smoke identity check" and exactly this tasks array, ` +

@@ -92,7 +92,8 @@ independent chezmoi clone.
   a missing jail, or a `!command` value in any settings layer or models file,
   fails validate. The smoke proves each MCP proxy's server from the prompt's
   route or inventory label, not from a name prefix. A new or edited OMP
-  extension needs its sha256 reviewed into the checker's `REVIEWED_EXTENSIONS`.
+  extension needs its sha256 reviewed into the checker's `REVIEWED_EXTENSIONS`, and
+  a custom command module (the `/review` override included) into `REVIEWED_COMMANDS`.
   `omp-baseline repair` fixes runtime permissions.
 - Use the shared Codex model policy and `codex-baseline` wrapper. Account state
   remains local. See [the Codex baseline](home/private_dot_codex/README.md).

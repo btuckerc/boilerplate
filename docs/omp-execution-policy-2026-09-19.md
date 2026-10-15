@@ -1,5 +1,10 @@
 # OMP execution policy and measured migration — 2026-09-19
 
+> **Historical (superseded).** This records the 2026-09-19 to 09-22 policy and its
+> measurements. Current routing, escalation and audit policy is
+> `home/private_dot_omp/private_agent/RULES.md` and the `omp-config` and
+> `local-workers` skills; current agents are in `private_agents/`.
+
 See the focused [OMP context and routing audit](omp-context-audit-2026-09-19.md) for the final RULES and local-workers changes and the failed native tool-surface trial.
 
 The current routing recommendation was revised on 2026-09-22 from Astra-first

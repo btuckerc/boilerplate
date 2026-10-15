@@ -25,7 +25,8 @@ second opinion from a different model family after Sol fails. `omp-quota`
 prints the remaining quota for both subscriptions on one line. RULES.md has
 the thresholds.
 In Codex, retain the current parent model unless explicitly configured otherwise.
-There is no compulsory classifier, routine Sol review, swarm or planner tax.
+When a change needs a release audit, and why there is otherwise no review tax,
+is the RULES.md audit rule; this skill only routes workers.
 Native OMP escalation launches a child; it does not switch the parent's model.
 
 For native Codex Luna workers, use a fresh brief (`fork_turns="none"`,
@@ -86,8 +87,8 @@ Use a roughly 150-second attempt target / 180-second supervised deadline for
 small slices; a larger budget needs a concrete task-specific reason.
 
 OMP exposes per-task `effort` without adding a classifier call. Omit it to keep
-the agent default (medium; high for `sol`, xhigh for `architect`, which should
-always omit it since `med` drops it to high). On the Luna `task`
+the agent default (medium; high for `sol`, xhigh for `architect` and `auditor`,
+which should always omit it since `med` drops them to high). On the Luna `task`
 agent, pass `lo` for read-only exploration and extraction, `med` for subtle logic
 or after one failed check, `hi` only for hard debugging or substantive review;
 unresolved design belongs with Sol.
@@ -103,8 +104,9 @@ The gated Qwen3.8 pilot matched Luna on eight attempts across four small synthet
 task families with frozen Astra briefs, not repository-scale autonomous work.
 It justifies this bounded lane, not a general parity or subscription-savings
 claim. Keep foreground work direct when local queuing/latency costs more than
-the cloud usage it can avoid. Do not route vision work to the text-only local
-deployment. Do not enable an automatic cloud fallback.
+the cloud usage it can avoid. Do not route vision work locally: the catalog
+enables image input, but no visual acceptance has been demonstrated, so the
+`vision` role stays on cloud Luna. Do not enable an automatic cloud fallback.
 
 Native local children remain background-capable so the director can inspect
 compact `read proc://` status at natural checkpoints, message corrections with

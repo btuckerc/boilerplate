@@ -1,5 +1,5 @@
 ---
-description: Develop a request into an executable handoff; inspect context, recommend model and effort, and specify Luna max implementation/review workers.
+description: Develop a request into an executable handoff; inspect context, recommend model and effort, and specify Luna implementation/review workers at the effort the work needs.
 ---
 
 Read `skill://draft`.

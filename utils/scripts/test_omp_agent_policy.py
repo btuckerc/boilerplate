@@ -13,6 +13,8 @@ BUN = subprocess.check_output(["mise", "which", "bun"], text=True).strip()
 REPO = pathlib.Path(__file__).resolve().parents[2]
 CHECKER = REPO / "home/dot_local/bin/executable_omp-agent-policy"
 REVIEWED = REPO / "home/private_dot_omp/private_agent/private_extensions"
+AUDITOR = REPO / "home/private_dot_omp/private_agent/private_agents/auditor.md"
+REVIEW = REPO / "home/private_dot_omp/private_agent/private_commands/private_review/index.ts"
 FULL = ["low", "medium", "high", "xhigh", "max"]
 # What `omp models --json` writes to stderr (still exiting 0) when native loading rejects models.yml.
 REJECTED = (
@@ -65,13 +67,16 @@ class PolicyTests(unittest.TestCase):
             },
             "astGrep.enabled": True, "retry.modelFallback": False, "task.structured": True,
         }
-        self.add("architect", "openai-codex/gpt-6.1-sol", "xhigh", ["read", "grep", "glob", "web_search", "yield"])
+        self.add("architect", "@plan:xhigh", "xhigh", ["read", "grep", "glob", "web_search", "yield"])
+        shutil.copy(AUDITOR, self.agent / "private_agents/auditor.md")
         self.add("browser", "@default:medium", "medium", ["eval", "yield"])
         self.add("nous", "llama.cpp/test", "medium", ["read", "grep", "glob", "edit", "write", "yield"])
         self.add("scout", "llama.cpp/test", "low", ["read", "grep", "glob", "web_search", "yield"])
-        self.add("sol", "openai-codex/gpt-6.1-sol", "high")
-        self.add("sonic", "llama.cpp/test", "low")
+        self.add("sol", "@plan", "high")
+        self.add("sonic", "llama.cpp/test", "low", ["read", "grep", "glob", "edit", "write", "yield"])
         self.add("fable", "anthropic/claude-fable-test", "medium")
+        (self.agent / "private_commands/private_review").mkdir(parents=True)
+        shutil.copy(REVIEW, self.agent / "private_commands/private_review/index.ts")
 
     def add(self, name, model, thinking, tools=None, description="agent"):
         text = f"---\nname: {name}\ndescription: {description}\nmodel: \"{model}\"\nthinkingLevel: {thinking}\n"
@@ -262,6 +267,8 @@ class PolicyTests(unittest.TestCase):
         (live / "config.yml").write_text(self.config.read_text())
         for agent in (self.agent / "private_agents").iterdir():
             (live / "agents" / agent.name).write_text(agent.read_text())
+        (live / "commands/review").mkdir(parents=True)
+        shutil.copy(REVIEW, live / "commands/review/index.ts")
         cwd = self.root / "work"
         (cwd / ".omp").mkdir(parents=True)
         # Hermetic: only the variables a test passes reach the checker's environment screen.
@@ -413,7 +420,8 @@ class PolicyTests(unittest.TestCase):
         narrowed = [(p, i, ["low", "medium", "high"] if i == "gpt-6.1-sol" else t) for p, i, t in self.MODELS]
         result = self.run_checker("--catalog", self.evidence(models=narrowed))
         self.assertEqual(result.returncode, 1)
-        self.assertIn("EFFORT architect expected xhigh resolved high via frontmatter (openai-codex/gpt-6.1-sol)", result.stderr)
+        self.assertIn("EFFORT architect expected xhigh resolved high via selector-suffix (openai-codex/gpt-6.1-sol:high:xhigh)", result.stderr)
+        self.assertIn("EFFORT auditor expected xhigh resolved high via selector-suffix", result.stderr)
         self.assertNotIn("EFFORT sol", result.stderr)
 
     def test_27_live_code_surfaces(self):
@@ -651,6 +659,127 @@ class PolicyTests(unittest.TestCase):
                     f"---\nname: extra\ndescription: x\nmodel: llama.cpp/test\nthinkingLevel: low\n{line}\n---\n")
                 result = self.run_checker("--json")
                 self.assertEqual(self.agent_report(result, "extra")["declared"], declared)
+
+    def test_38_escalation_model_lists_and_auditor_schema(self):
+        catalog = lambda: self.evidence()
+        auditor = self.agent / "private_agents/auditor.md"
+        original = auditor.read_text()
+        # A reserve candidate fails even though Sol, listed first, resolves.
+        for name, models, thinking, tools in [("architect", "@plan:xhigh, openai-codex/gpt-6-astra:xhigh", "xhigh", "\ntools: [read, grep, glob, web_search, yield]"),
+                                              ("sol", "@plan, openai-codex/gpt-6-astra:high", "high", "")]:
+            quoted = ", ".join(f'"{m}"' for m in models.split(", "))
+            (self.agent / f"private_agents/{name}.md").write_text(f"---\nname: {name}\ndescription: agent\nmodel: [{quoted}]\nthinkingLevel: {thinking}{tools}\n---\nbody\n")
+        result = self.run_checker("--catalog", catalog())
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("MODEL architect declares [@plan:xhigh, openai-codex/gpt-6-astra:xhigh] expected [@plan:xhigh] (no reserve candidates)", result.stderr)
+        self.assertIn("MODEL sol declares [@plan, openai-codex/gpt-6-astra:high] expected [@plan] (no reserve candidates)", result.stderr)
+        self.add("architect", "@plan:xhigh", "xhigh", ["read", "grep", "glob", "web_search", "yield"])
+        self.add("sol", "@plan", "high")
+        # Key order is irrelevant; a weaker verdict enum, a looser nested object or no schema is not.
+        reordered = original.replace("  type: object\n  additionalProperties: false\n", "  additionalProperties: false\n  type: object\n", 1)
+        self.assertNotEqual(reordered, original)
+        for text, ok in [(reordered, True), (original.replace("enum: [PASS, BLOCK, UNVERIFIED]", "enum: [PASS, BLOCK]"), False),
+                         (original.replace("        additionalProperties: false\n", "", 1), False)]:
+            auditor.write_text(text)
+            result = self.run_checker("--catalog", catalog())
+            self.assertEqual(result.returncode, 0 if ok else 1, result.stderr)
+            if not ok:
+                self.assertIn("OUTPUT auditor schema differs from the reviewed verdict schema", result.stderr)
+        head, body = original.split("output:\n", 1)
+        auditor.write_text(head + body[body.index("---\n"):])
+        self.assertIn("OUTPUT auditor schema differs", self.run_checker("--catalog", catalog()).stderr)
+        auditor.unlink()
+        self.assertIn("MISSING auditor expected user definition; effective none", self.run_checker("--catalog", catalog()).stderr)
+
+    def test_39_live_custom_commands(self):
+        cwd, run = self.live_fixture()
+        home = self.root / "home-temp"
+        live = home / ".omp/agent"
+        review = live / "commands/review/index.ts"
+        self.assertEqual(run().returncode, 0, run().stderr)
+        for created, message in [
+            (live / "commands/x/index.ts", f"UNSUPPORTED custom command {live / 'commands/x/index.ts'} sha256"),
+            (cwd / ".claude/commands/y/index.js", f"UNSUPPORTED custom command {cwd / '.claude/commands/y/index.js'} sha256"),
+            (home / ".gemini/commands/z/index.mjs", f"UNSUPPORTED custom command {home / '.gemini/commands/z/index.mjs'} sha256"),
+        ]:
+            created.parent.mkdir(parents=True)
+            created.write_text("export default () => ({ name: 'review', description: 'x', execute: () => 'x' });\n")
+            result = run()
+            self.assertEqual(result.returncode, 1, created)
+            self.assertIn(message, result.stderr)
+            shutil.rmtree(created.parent)
+        # A dot directory is not discovered; a reviewed copy in a project root is a second /review.
+        (live / "commands/.hidden").mkdir()
+        (live / "commands/.hidden/index.ts").write_text("export default 1;\n")
+        self.assertEqual(run().returncode, 0, run().stderr)
+        dup = cwd / ".omp/commands/review/index.ts"
+        dup.parent.mkdir(parents=True)
+        shutil.copy(REVIEW, dup)
+        self.assertIn(f"UNSUPPORTED custom command {dup} duplicates {review}", run().stderr)
+        shutil.rmtree(cwd / ".omp/commands")
+        review.write_text(review.read_text() + "// edited\n")
+        result = run()
+        self.assertIn(f"UNSUPPORTED custom command {review} sha256", result.stderr)
+        self.assertIn(f"MISSING /review override {review} (the bundled reviewer would run)", result.stderr)
+        shutil.rmtree(live / "commands/review")
+        result = run()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(f"MISSING /review override {review}", result.stderr)
+        # A symlinked command dir is skipped by the native loader, so it cannot provide the override.
+        outside = self.root / "outside-review"
+        outside.mkdir()
+        shutil.copy(REVIEW, outside / "index.ts")
+        (live / "commands/review").symlink_to(outside)
+        result = run()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(f"MISSING /review override {review}", result.stderr)
+
+    def test_40_source_custom_commands(self):
+        catalog = lambda: self.evidence()
+        commands = self.agent / "private_commands"
+        (commands / "board.md").write_text("---\ndescription: x\n---\nbody\n")
+        self.assertEqual(self.run_checker("--catalog", catalog()).returncode, 0, self.run_checker("--catalog", catalog()).stderr)
+        for created, message in [
+            (commands / "private_x/index.ts", f"UNSUPPORTED custom command {commands / 'private_x/index.ts'} sha256"),
+            (commands / "y/index.ts.tmpl", f"UNSUPPORTED source {commands / 'y/index.ts.tmpl'} (chezmoi template"),
+            (commands / "symlink_z.tmpl", None),
+        ]:
+            if created.name == "symlink_z.tmpl":
+                (commands / "symlink_z.tmpl").mkdir()
+                message = f"UNSUPPORTED source {commands / 'symlink_z.tmpl'} (chezmoi template"
+            else:
+                created.parent.mkdir(parents=True)
+                created.write_text("export default () => ({});\n")
+            result = self.run_checker("--catalog", catalog())
+            self.assertEqual(result.returncode, 1, created)
+            self.assertIn(message, result.stderr)
+            shutil.rmtree(created if created.is_dir() else created.parent)
+        # Other native command roots the source deploys are scanned too: user roots, and project roots anywhere
+        # under the source home. An opaque root or command entry (a symlink payload file) fails closed.
+        for module in [self.root / "home/private_dot_codex/commands/evil/index.ts",
+                       self.root / "home/hearth/inbox/probe/dot_omp/commands/evil/index.ts"]:
+            module.parent.mkdir(parents=True)
+            module.write_text("export default () => ({});\n")
+            result = self.run_checker("--catalog", catalog())
+            self.assertEqual(result.returncode, 1, module)
+            self.assertIn(f"UNSUPPORTED custom command {module} sha256", result.stderr)
+            shutil.rmtree(module.parents[2])
+        for opaque in [self.root / "home/symlink_dot_claude", commands / "symlink_evil"]:
+            opaque.write_text("/elsewhere\n")
+            result = self.run_checker("--catalog", catalog())
+            self.assertEqual(result.returncode, 1, opaque)
+            self.assertIn(f"UNSUPPORTED source {opaque} (chezmoi template", result.stderr)
+            opaque.unlink()
+        shutil.rmtree(commands / "private_review")
+        result = self.run_checker("--catalog", catalog())
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(f"MISSING /review override {commands / 'review/index.ts'}", result.stderr)
+        # The local profile has no commands and needs no override.
+        local = self.root / "home/private_dot_omp/private_profiles/local/private_agent"
+        (local / "private_agents").mkdir(parents=True)
+        (local / "private_config.yml").write_text(self.config.read_text())
+        result = self.run_checker("--profile", "local", "--catalog", self.evidence(models_file=local / "private_models.yml", profile="local"))
+        self.assertNotIn("/review", result.stderr)
 
 
 if __name__ == "__main__":

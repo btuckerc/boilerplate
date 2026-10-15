@@ -8,7 +8,7 @@ rewriting the drafting workflow. User choices override these defaults.
 
 | Candidate | Useful starting role | Effort guidance |
 | --- | --- | --- |
-| `gpt-5.6-luna` | Interactive drafting; bounded work with clear verification | max for drafting judgment, implementation, design, and substantive review; low only for read-only exploration |
+| `gpt-5.6-luna` | Interactive drafting; bounded work with clear verification | medium for implementation (the OMP agent default); high for subtle logic, substantive review or after one failed check; max for hard debugging or on user request; low only for read-only exploration |
 | `gpt-5.6-terra` | Everyday coding with manageable ambiguity | medium initially; increase when the reasoning burden warrants it |
 | `gpt-5.6-sol` | Cross-cutting professional work and synthesis | medium initially; choose greater effort for interdependent reasoning |
 | `gpt-6-astra` | Difficult architecture, uncertain diagnosis, or integration with costly errors | medium or high based on uncertainty; xhigh/max when justified by depth or observed failures |
@@ -23,9 +23,10 @@ Official [model descriptions](https://developers.openai.com/api/docs/models)
 describe Luna as cost-sensitive, Terra as balanced, and Astra as suited to complex
 work. [Luna documentation](https://developers.openai.com/api/docs/models/gpt-5.6-luna)
 supports max reasoning. These API facts do not establish subscription usage,
-GUI availability, or performance on this user's tasks. The local preference for
-Luna max on implementation/review comes from user feedback, not an official claim
-that low always fails.
+GUI availability, or performance on this user's tasks. Earlier user feedback
+favored Luna max for implementation and review; the 2026-10-15 policy keeps
+medium as the default (RULES.md) and reserves max for hard debugging or an
+explicit request. Neither is an official claim that low always fails.
 
 ## Resolve capabilities, then map the role
 
@@ -46,31 +47,35 @@ differ between providers, use their real controls; do not translate max blindly.
 
 Use this compact contract when Luna implementation workers are appropriate:
 
-> Use Luna subagents (`gpt-5.6-luna`) with reasoning effort `max` for implementation,
-> debugging, design, and substantive review. Use `low` only for explicitly
-> read-only exploration. Set both model and effort on each spawn; an exploration
-> worker must be reassigned at max before editing or making substantive design
-> decisions. Give each worker an outcome it can own through investigation,
+> Use Luna subagents (`gpt-5.6-luna`) at reasoning effort `medium` for
+> implementation, `high` for subtle logic, substantive review or after one
+> failed check, and `max` only for hard debugging [or: the user's requested
+> effort, verbatim]. Use `low` only for explicitly read-only exploration. Set
+> both model and effort on each spawn; an exploration worker must be reassigned
+> at medium or higher before editing or making substantive design decisions.
+> Give each worker an outcome it can own through investigation,
 > implementation, validation and correction, with relevant evidence and acceptance
 > checks. Return a compact recommendation with artifacts, decisive evidence and
 > remaining gaps. The lead owns integration and targeted acceptance review,
-> and can revise the division of work or work directly where useful. If max
-> cannot be selected, report the limitation and use a supported capable fallback
-> or let the lead do that work; do not silently use low.
+> and can revise the division of work or work directly where useful. If the
+> chosen effort cannot be selected, report the limitation and use a supported
+> capable fallback or let the lead do that work; do not silently lower it.
 
 Adapt to the actual receiving tool schema:
 
 - Codex `collaboration.spawn_agent`: set `model: "gpt-5.6-luna"` and
-  `reasoning_effort: "max"`. In the observed harness, model overrides require
+  `reasoning_effort` to the chosen effort (`"medium"` by default, `"max"` only
+  as above). In the observed harness, model overrides require
   `fork_turns: "none"` or a positive turn count; `"all"` inherits the parent's
   settings. Supply the task's necessary context explicitly with a fresh fork.
   Recheck the tool schema if this changes. A task name such as `visual_review`
   is a label, not the model selector.
 - OMP: the task tool has no per-call model override (removed in 18.8.2). The
   agent definition selects the model; the task `effort` field (`lo`/`med`/`hi`),
-  when the tool exposes it, selects effort. Agent role IDs such as `task`,
+  when the tool exposes it, selects effort: omit it for the medium default,
+  `med` gives high and `hi` gives max on cloud models. Agent role IDs such as `task`,
   `scout`, and `reviewer` are not model IDs. Do not invent `agent: luna`, assume
-  prose selects max, or retain an OMP-only role restriction in a Codex handoff.
+  prose selects an effort, or retain an OMP-only role restriction in a Codex handoff.
   Pick an agent whose definition resolves to the wanted model or use the
   fallback above; do not mutate global agent defaults just to draft a prompt.
 

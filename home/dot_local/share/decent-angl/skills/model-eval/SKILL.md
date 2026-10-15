@@ -16,6 +16,7 @@ Decide whether a candidate model earns a lane. Adoption itself follows the
 | --- | --- | --- | --- |
 | Director | `default` | Anthropic | Opus high |
 | Escalation | `plan` → `architect`/`sol` | Codex | GPT-6.1 Sol (`architect` xhigh, `sol` high) |
+| Release audit | `plan` → `auditor` | Codex | GPT-6.1 Sol xhigh |
 | Sustained frontier | `slow` | Anthropic | Opus high |
 | Escalation, second opinion | `fable` | Anthropic, capped at half | Fable medium (after Sol fails) |
 | Local worker | `nous`, `smol`, `tiny`, `commit` | nous GPU, no quota | Qwen3.8 27B |
@@ -43,8 +44,21 @@ escalation, because it spreads load.
 4. **Quota fit.** Run `omp-quota`. A lane that exhausts its pool before the
    weekly reset loses to a slightly weaker model on a pool with headroom.
 5. **Smoke.** Run `omp -p --mode json --no-session --model CANDIDATE --thinking medium "Reply OK"`
-   and confirm the exact `provider`/`model` in the response. For a worker or
-   director candidate, also run one real bounded task with an independent check.
+   and confirm the exact `provider`/`model` in the response. Then test the
+   named lane itself at its intended effort: point a scratch copy of that
+   lane's agent definition (or its role in a scratch profile) at the
+   candidate, dispatch it with no `effort` override, and confirm from the
+   child session that the candidate, not the incumbent, served at that
+   effort. For a worker or director candidate, run one real bounded task with
+   an independent check. For an escalation or `auditor` candidate, copy
+   `~/.omp/agent/agents/auditor.md` with its `model` set to the candidate at
+   `:xhigh` and run two admission controls,
+   `omp-audit --agent-file COPY --model PROVIDER/MODEL NAME PACKET CANDIDATE`
+   (the copy runs as a project agent of that run only; the result says
+   `release: false` and fails unless the candidate served): a realistic
+   seeded defect (for example a dropped validation branch in a real diff)
+   must come back BLOCK with its file:line, and the same packet without the
+   defect must not come back BLOCK.
 6. **Decide.** Write a one-line verdict per lane (adopt / trial / reject) with
    the deciding number. Then adopt through `omp-config`: change the IDs in
    `config.yml` roles/`enabledModels`, and for Anthropic models add a 272K

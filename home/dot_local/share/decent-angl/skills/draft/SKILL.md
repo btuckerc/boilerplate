@@ -55,11 +55,14 @@ according to the work. Do not add workers to a trivial task. When delegation is
 requested or appropriate under the receiving harness's rules, put the delegation
 instruction and explicit worker model AND effort inside the copyable prompt.
 
-- Default Luna workers to `gpt-5.6-luna`, reasoning `max` for implementation,
-  debugging, design, substantial synthesis, correctness review, and visual review.
+- Default Luna workers to `gpt-5.6-luna` at `medium` for implementation (the
+  OMP agent default, see RULES.md). Use `high` for subtle logic, substantial
+  synthesis, correctness or visual review, or after one failed check, and `max`
+  only for hard debugging or when the user asks for it. An explicit user model
+  or effort request goes into the handoff verbatim and overrides these defaults.
 - Luna `low` is an optional read-only exploration lane: locating files, gathering
   sources, inventory, or extracting facts. A worker moving from exploration into
-  implementation or substantive judgment must be reassigned at max first.
+  implementation or substantive judgment must be reassigned at medium or higher first.
 - Give workers complete outcomes with owned files/resources or read-only scope,
   relevant raw evidence, acceptance checks, and an integration owner. Scale
   concurrency to independent work and available resources.
@@ -67,8 +70,8 @@ instruction and explicit worker model AND effort inside the copyable prompt.
   decision points and challenge the hypothesis or metric. Don't require a
   permanent critic or fixed review cadence for every task.
 - If a requested route is unavailable, disclose that and choose a supported
-  fallback respecting user constraints. Never silently substitute Luna low for
-  max, invent a worker role, or claim a dropdown was changed by prompt text.
+  fallback respecting user constraints. Never silently lower a requested effort,
+  invent a worker role, or claim a dropdown was changed by prompt text.
 
 ## Make delegation useful
 
@@ -76,7 +79,7 @@ When a lead with workers fits, develop an initial division of work grounded in
 this request and put it inside the handoff. It is a starting hypothesis the
 receiving agents can revise, not a fixed plan. Help the lead use its strongest
 reasoning to clarify uncertainties, choose discriminating evidence, and explain
-interfaces and product tradeoffs so Luna max can carry substantial work further.
+interfaces and product tradeoffs so Luna workers can carry substantial work further.
 
 Prefer worker outcomes that include the useful execution loop: investigate,
 implement, run and monitor checks, diagnose failures, correct, and return a
@@ -97,7 +100,7 @@ Retain freedom to work directly, change models, reshape lanes, and escalate base
 on evidence. Optimize accepted progress and low rework, not worker utilization.
 Avoid fixed worker counts, mandatory critics, a no-coding lead, or a prescribed
 escalation ladder. Include only the parts that improve this particular handoff;
-simple amendments and well-bounded tasks may be best handled directly on Luna max.
+simple amendments and well-bounded tasks may be best handled directly on Luna medium.
 
 ## Make the handoff executable
 

@@ -85,5 +85,38 @@ class McpOwnershipTests(unittest.TestCase):
         self.assertEqual(self.owners([], MAC), ["unpredicted MCP tools [mcp__mac_click, mcp__mac_see]"])
 
 
+class ServingIdentityTests(unittest.TestCase):
+    def test_aborted_message_from_another_model_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            shutil.copy(SMOKE, root / "smoke.ts")
+            (root / "run.ts").write_text(
+                'import { checkChild } from "./smoke.ts";\n'
+                "const c = JSON.parse(await Bun.stdin.text());\n"
+                "console.log(JSON.stringify(checkChild(c.pred, c.result, c.sessions)));\n"
+            )
+            tools = ["read", "grep", "glob", "web_search", "yield"]
+            pred = {"name": "architect", "source": "user", "path": "", "declared": tools, "callable": tools,
+                    "conditional": [], "mcp": [], "model": "openai-codex/gpt-6.1-sol", "thinking": "xhigh"}
+            result = {"id": "C", "agent": "architect", "agentSource": "user", "exitCode": 0,
+                      "resolvedModelIdentity": "openai-codex/gpt-6.1-sol", "resolvedThinkingLevel": "xhigh"}
+
+            def check(aborted_model):
+                sessions = root / f"sessions-{aborted_model}"
+                sessions.mkdir()
+                entries = [{"type": "session_init", "agent": "architect", "tools": tools, "systemPrompt": ""},
+                           {"type": "model_change", "model": "openai-codex/gpt-6.1-sol"},
+                           {"type": "thinking_level_change", "thinkingLevel": "xhigh"},
+                           {"type": "message", "message": {"role": "assistant", "provider": "openai-codex", "model": aborted_model, "stopReason": "aborted"}},
+                           {"type": "message", "message": {"role": "assistant", "provider": "openai-codex", "model": "gpt-6.1-sol", "stopReason": "stop"}}]
+                (sessions / "C.jsonl").write_text("\n".join(json.dumps(e) for e in entries) + "\n")
+                case = {"pred": pred, "result": result, "sessions": str(sessions)}
+                out = subprocess.run([BUN, str(root / "run.ts")], input=json.dumps(case), capture_output=True, text=True, check=True)
+                return json.loads(out.stdout)
+
+            self.assertEqual(check("gpt-6.1-sol"), [])
+            self.assertIn("assistant served by openai-codex/gpt-6-astra predicted openai-codex/gpt-6.1-sol", check("gpt-6-astra"))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -2,3 +2,6 @@
 .omp/agent/agents/astra.md
 # Retired 2026-09-30: the task role moved to Luna, so `task` is the cloud worker.
 .omp/agent/agents/luna.md
+# Retired 2026-10-15: /review is commands/review/index.ts (the auditor); OMP's
+# bundled /review custom command shadowed this prompt template anyway.
+.omp/agent/prompts/review.md

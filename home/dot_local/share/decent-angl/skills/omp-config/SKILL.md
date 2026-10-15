@@ -36,27 +36,37 @@ description: Change the shared OMP baseline in chezmoi - upgrades, omp-baseline,
   on nous Qwen to save Codex quota.
   Use fresh compact briefs, not the full parent transcript or pre-solved implementations.
 - Escalation lanes: GPT-6.1 Sol (`architect` read-only at xhigh, `sol`
-  implementation at high; both `@plan`) is the default. It trails GPT-6 Astra by 1–5
-  points on coding/agentic benchmarks at about 1/8 the blended token price
-  (model-eval benchmarks, 2026-09-29) and draws from the Codex pool, not the
-  director's. Both agents list `openai-codex/gpt-6-astra` after `@plan`
-  (architect at xhigh, sol at high) only so sessions still on OMP <18.4.4
-  (no Sol in their catalog) resolve.
-  Astra otherwise is a manual reserve; it stays in `enabledModels`. Fable
-  medium (`fable`, `@fable`) is only a second opinion from a different model
-  family after Sol fails. Trigger on concrete evidence: unresolved
-  high-consequence design, conflicting evidence after focused investigation,
-  or a failed check after one focused repair. The director runs `omp-quota`
-  first. `@slow` is Opus high. Escalation is scoped child delegation, not a
-  parent-model switch. There is no compulsory classifier or routine review.
-  The "Sol xhigh council" (the Sol high council until 2026-10-14) is
-  `architect` at xhigh: its model is `@plan:xhigh`, because the `plan` role's
-  `:high` suffix beats a frontmatter `thinkingLevel`. Ad-hoc Sol reviewer
-  invocations also use xhigh (`omp -p --no-session --model
-  openai-codex/gpt-6.1-sol --thinking xhigh --tools read,grep,glob`, stdin
-  closed) and follow the RULES one-Sol-reviewer-per-decision limit. Codex
-  quota per xhigh council decision is unmeasured; the price ratios above are
-  per token.
+  implementation at high; both `@plan`, with no reserve model) is the default.
+  It trails GPT-6 Astra by 1–5 points on coding/agentic benchmarks at about 1/8
+  the blended token price (model-eval benchmarks, 2026-09-29) and draws from the
+  Codex pool, not the director's. Astra is a manual reserve; it stays in
+  `enabledModels`. Fable medium (`fable`, `@fable`) is only a second opinion
+  from a different model family after Sol fails. `@slow` is Opus high.
+  Escalation is scoped child delegation, not a parent-model switch. When to
+  escalate, consult or audit is the RULES.md policy; this section covers only
+  the mechanics.
+- The "Sol xhigh council" (the Sol high council until 2026-10-14) is one
+  `architect` at xhigh, and the release `auditor` (read-only, strict verdict
+  schema) is the same model and effort: both use `@plan:xhigh`, because the
+  `plan` role's `:high` suffix beats a frontmatter `thinkingLevel`. Run release
+  audits through `/review` or `omp-audit NAME PACKET CANDIDATE`, never a plain
+  `task` call: an ordinary child inherits MCP servers and the xd:// write
+  transport. `omp-audit` dispatches from a hardened project (no MCP, no
+  device write, structured results) that serves a read-only copy of the
+  deployed `~/.omp/agent/agents/AGENT.md` as its only project agent, which
+  outranks every other same-name definition. It sends the caller schema in
+  strict mode, then accepts the verdict only if the child served that project
+  copy on `openai-codex/gpt-6.1-sol` at xhigh without fallback, with exactly
+  the five read-only tools, a system prompt holding the hashed definition's
+  body, and the packet's candidate id, the copy and the read-only packet copy
+  it read are unchanged, and a PASS lists no blocker/major finding or missing
+  evidence. It refuses to run with `PI_CODING_AGENT_DIR`, `OMP_PROFILE`,
+  `PI_PROFILE` or `PI_CONFIG_DIR` set. Auth fallback can still substitute a
+  model, so that serving check stays even with no reserve listed.
+  `--agent-file`/`--model` runs are model-admission controls
+  (`release: false`; see `model-eval`), never release verdicts.
+  Results stay under `~/.local/state/omp-audit/runs/`. Codex quota per xhigh
+  decision is unmeasured; the price ratios above are per token.
 - Fable shares the Anthropic weekly pool with the Opus director. It can use at
   most half of that pool and costs about 2x Opus on the real token mix, so it is
   not extra capacity. `cycleOrder` (default → fable → task) is kept for manual
@@ -64,8 +74,8 @@ description: Change the shared OMP baseline in chezmoi - upgrades, omp-baseline,
   silently move Fable to Opus 4.8.
 - Keep `task.enableEffort: true` for per-task choices without an extra classifier.
   Omit effort to retain the agent default (medium; high for `sol`, xhigh for
-  `architect`). Always omit it for `architect`: a task `effort: med` was
-  observed to drop it to high. `lo` is for routine cloud work.
+  `architect` and `auditor`). Always omit it for those two: a task
+  `effort: med` was observed to drop `architect` to high. `lo` is for routine cloud work.
   Coarse `med` selects high on every cloud model. Keep local implementation
   medium; lower effort is not automatically faster. Recheck mappings against
   native discovery after catalog changes.
@@ -131,7 +141,9 @@ description: Change the shared OMP baseline in chezmoi - upgrades, omp-baseline,
   runtime-deferred to `omp-agent-smoke` (paid), which checks them with real
   spawns and proves each proxy's server from the prompt's route or inventory
   label. It fails closed on hooks, custom tools and extensions not in its
-  `REVIEWED_EXTENSIONS` digests, on unmirrored `OMP_*`/`PI_*` variables,
+  `REVIEWED_EXTENSIONS` digests, on custom command modules (`commands/*/index.*`
+  in every config root) not in `REVIEWED_COMMANDS`, on a default profile
+  without the `/review` override `commands/review/index.ts`, on unmirrored `OMP_*`/`PI_*` variables,
   launch-dir dotenv keys, settings and MCP sources, when a contract agent
   arms prewalk or retry model fallback or takes its model only from the
   parent, and when the default profile leaves `task.structured` off. Validate

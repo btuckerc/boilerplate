@@ -7,7 +7,8 @@ modelRoles:
   default: anthropic/claude-opus-5-5:high
   slow: anthropic/claude-opus-5-5:high
   plan: openai-codex/gpt-6.1-sol:high
-  # The local model is text-only.
+  # Cloud vision: the local model takes image input, but no visual acceptance
+  # has been demonstrated on it.
   vision: openai-codex/gpt-6-luna:medium
   commit: llama.cpp/Qwen3.8-27B-RVN-Heretic-Q4_K_M:low
   smol: llama.cpp/Qwen3.8-27B-RVN-Heretic-Q4_K_M:low

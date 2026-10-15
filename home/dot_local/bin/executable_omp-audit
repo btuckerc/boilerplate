@@ -1,0 +1,416 @@
+#!/usr/bin/env bun
+// Exact-candidate release audit: one read-only `auditor` (or `architect`) child, dispatched from a hardened project.
+// Paid (one Sol xhigh child plus a short director turn). Never call it from validate, guards or hooks.
+//
+// An ordinary task child inherits MCP servers (task/structured-subagent.ts:535-537,593-595) and, with tools.xdev,
+// a device-only write transport (tools/index.ts:861-888) that session_init.tools omits (task/executor.ts:4573-4589).
+// So the dispatcher runs `omp -p` in a fresh project of its own (<state>/runs/NAME/project) with async and xdev
+// off, structured results on, and every MCP server named in ~/.omp/agent/mcp.json disabled. That provisioning is best effort; the
+// post-run checks below are the guarantee: any MCP proxy, xd:// route, extra tool, other model, fallback or
+// effort makes the run UNVERIFIED.
+//
+// The caller outputSchema is the deployed auditor.md `output` (omp-agent-policy pins it), sent with schemaMode
+// strict; a caller schema wins over the agent's and strict mode rejects an invalid yield
+// (task/structured-subagent.ts:232-246). The packet is copied read-only into the run dir, the child reads that copy,
+// and its digest is rechecked afterwards. The AGENT definition served is a byte copy of the hashed
+// ~/.omp/agent/agents/AGENT.md installed read-only as the sole file of the run project's `.omp/agents`: native
+// discovery takes the nearest project `.omp/agents` before the user dir, extension and plugin roots and bundled
+// agents, keeping the first definition per name (config.ts:218-245, task/discovery.ts:93-119,157-167), so no other
+// file can serve AGENT whatever its frontmatter. Accepted only if all hold: the dispatcher sent exactly the intended
+// args; one task result, child exit 0 and not aborted; structuredOutput valid/strict/caller; data.candidate equals
+// CANDIDATE; the result names AGENT from the project, openai-codex/gpt-6.1-sol without fallback, at xhigh; in the
+// child session every session_init has AGENT and exactly the five read-only tools, no mcp__/xd:// route in its
+// system prompt and the body of the hashed AGENT definition in it, every model_change is that model without
+// fallback, the last thinking level is xhigh, and every serving assistant message came from that model; the packet
+// copy is unchanged; the project agents dir still holds only that copy, equal to the hashed definition; and the
+// verdict is consistent (a PASS has no blocker or major finding and no missing evidence, a BLOCK has a finding). A
+// run stops before dispatch when an agent-dir or profile override is in its environment.
+//
+// Model admission (model-eval): --agent-file installs a scratch AGENT definition the same way in place of the
+// deployed one and --model names the candidate it must serve; the same checks then expect that model.
+// Such a run is a control result (release: false), never a release verdict.
+import { createHash } from "node:crypto";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+
+const USAGE = `usage: omp-audit [--agent auditor|architect] [--timeout SEC] [--agent-file FILE --model ID] NAME PACKET CANDIDATE
+  NAME          new run name ([A-Za-z][A-Za-z0-9]{0,31}); results in <state>/runs/NAME/result.json
+  PACKET        packet file: contract, candidate id, diffs, hashes, raw check output
+  CANDIDATE     40- or 64-hex id the packet states (Git tree/commit or sha256)
+  --agent       auditor (default) or architect
+  --timeout     dispatcher timeout in seconds (default 3600)
+  --agent-file  model admission only: scratch AGENT definition, dispatched as a project agent of this run
+  --model       model admission only: provider/model the scratch definition must serve (with --agent-file)
+State root: $OMP_AUDIT_HOME, else \${XDG_STATE_HOME:-~/.local/state}/omp-audit.
+Exit 0: accepted PASS. 1: BLOCK, UNVERIFIED or not accepted. 2: usage.
+An --agent-file run reports release: false; its verdict is a model-admission control, not a release audit.`;
+
+const RELEASE_MODEL = "openai-codex/gpt-6.1-sol";
+const THINKING = "xhigh";
+const READ_ONLY = ["read", "grep", "glob", "web_search", "yield"];
+const AGENTS = ["auditor", "architect"];
+const PROJECT_CONFIG = `# Written by omp-audit on every run.
+# Blocking task calls so \`omp -p\` waits for the child; no device-only write grant.
+async:
+  enabled: false
+tools:
+  xdev: false
+# A full-candidate xhigh audit can outlast the global 10-minute child cap; keep yield and caller schemas.
+task:
+  maxRuntimeMs: 2400000
+  structured: true
+`;
+const EXPECTED_SETTINGS: [string, boolean][] = [
+	["tools.xdev", false],
+	["task.structured", true],
+	["async.enabled", false],
+];
+// Each relocates the agent dir the child loads definitions from (18.10.4 packages/utils/src/dirs.ts:43,308,481).
+const RELOCATING_ENV = ["PI_CODING_AGENT_DIR", "OMP_PROFILE", "PI_PROFILE", "PI_CONFIG_DIR"];
+
+function usage(message: string): never {
+	console.error(`omp-audit: ${message}\n${USAGE}`);
+	process.exit(2);
+}
+
+function parseArgs(argv: string[]) {
+	let agent = "auditor";
+	let timeoutSec = 3600;
+	let agentFile: string | undefined;
+	let model: string | undefined;
+	const positional: string[] = [];
+	for (let i = 0; i < argv.length; i++) {
+		const a = argv[i];
+		if (a === "--agent") agent = argv[++i] ?? usage("--agent needs a value");
+		else if (a === "--timeout") timeoutSec = Number(argv[++i]);
+		else if (a === "--agent-file") agentFile = path.resolve(argv[++i] ?? usage("--agent-file needs a value"));
+		else if (a === "--model") model = argv[++i] ?? usage("--model needs a value");
+		else if (a === "-h" || a === "--help") {
+			console.log(USAGE);
+			process.exit(0);
+		} else if (a.startsWith("-")) usage(`unknown option ${a}`);
+		else positional.push(a);
+	}
+	if (!AGENTS.includes(agent)) usage(`--agent must be one of ${AGENTS.join(", ")}`);
+	if (!Number.isFinite(timeoutSec) || timeoutSec <= 0) usage("--timeout must be a positive number");
+	if (!agentFile !== !model) usage("--agent-file and --model go together");
+	if (model && !/^[^\s/:]+\/[^\s:]+$/.test(model)) usage(`invalid --model ${model} (provider/model, no effort suffix)`);
+	if (positional.length !== 3) usage("expected NAME PACKET CANDIDATE");
+	const [name, packetArg, candidate] = positional;
+	if (!/^[A-Za-z][A-Za-z0-9]{0,31}$/.test(name)) usage(`invalid NAME ${name}`);
+	if (!/^([0-9a-f]{40}|[0-9a-f]{64})$/.test(candidate)) usage(`invalid CANDIDATE ${candidate}`);
+	const packet = path.resolve(packetArg);
+	for (const [label, file] of [["PACKET", packet], ["--agent-file", agentFile]] as const) {
+		if (!file) continue;
+		try {
+			if (!fs.statSync(file).isFile()) throw new Error();
+			fs.accessSync(file, fs.constants.R_OK);
+		} catch {
+			usage(`${label} ${file} is not a readable file`);
+		}
+	}
+	return { agent, timeoutSec, name, packet, candidate, agentFile, model };
+}
+
+function run(cmd: string[], cwd: string, timeoutSec = 120) {
+	const p = Bun.spawnSync(cmd, { cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe", timeout: timeoutSec * 1000 });
+	return { code: p.exitCode ?? -1, stdout: p.stdout.toString(), stderr: p.stderr.toString() };
+}
+
+const sha256 = (file: string) => createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+
+/** JSONL records; a truncated or malformed line is a problem, never a crash. */
+function readJsonl(file: string, problems: string[]): any[] {
+	const out: any[] = [];
+	for (const [i, line] of fs.readFileSync(file, "utf8").split("\n").entries()) {
+		if (!line.trim()) continue;
+		try {
+			out.push(JSON.parse(line));
+		} catch {
+			problems.push(`unparseable JSONL ${file}:${i + 1}`);
+		}
+	}
+	return out;
+}
+
+function findFile(dir: string, name: string): string | undefined {
+	for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+		const p = path.join(dir, ent.name);
+		if (ent.isDirectory()) {
+			const hit = findFile(p, name);
+			if (hit) return hit;
+		} else if (ent.name === name) return p;
+	}
+	return undefined;
+}
+
+/** The dispatcher model may send outputSchema as a JSON string; the task tool parses it (normalizeSchema). */
+function canonicalArgs(args: any): any {
+	const out = structuredClone(args ?? {});
+	for (const item of out.tasks ?? []) {
+		if (typeof item.outputSchema === "string") {
+			try {
+				item.outputSchema = JSON.parse(item.outputSchema);
+			} catch {}
+		}
+	}
+	return out;
+}
+
+/** The deployed auditor's verdict schema (frontmatter `output`). */
+function auditorSchema(file: string): object | undefined {
+	try {
+		const text = fs.readFileSync(file, "utf8");
+		const end = text.indexOf("\n---", 4);
+		if (!text.startsWith("---\n") || end < 0) return undefined;
+		const output = (Bun.YAML.parse(text.slice(4, end)) as any)?.output;
+		return output && typeof output === "object" && !Array.isArray(output) ? output : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/** Prompt body of an agent definition (text after the frontmatter), as the child's system prompt embeds it. */
+function definitionBody(file: string): string | undefined {
+	try {
+		const text = fs.readFileSync(file, "utf8");
+		if (!text.startsWith("---\n")) return text.trim() || undefined;
+		const end = text.indexOf("\n---\n", 3);
+		return end < 0 ? undefined : text.slice(end + 5).trim() || undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/** Disable every MCP server the user's OMP config names, by name, in the project overlay. */
+function projectMcp(home: string): string {
+	let servers: Record<string, unknown> = {};
+	try {
+		servers = JSON.parse(fs.readFileSync(path.join(home, ".omp/agent/mcp.json"), "utf8"))?.mcpServers ?? {};
+	} catch {}
+	const disabled = Object.fromEntries(Object.keys(servers).map(n => [n, { type: "stdio", command: "false", enabled: false }]));
+	return `${JSON.stringify({ mcpServers: disabled }, null, 2)}\n`;
+}
+
+/** Child session identity checks; returns the evidence and appends problems. */
+function checkChild(sessions: string, id: string, agent: string, model: string, definition: string, problems: string[]) {
+	const child = fs.existsSync(sessions) ? findFile(sessions, `${id}.jsonl`) : undefined;
+	if (!child) {
+		problems.push("child session JSONL not found");
+		return {};
+	}
+	const entries = readJsonl(child, problems);
+	// task/executor.ts writes the first session_init; agent-session appends one whenever the base prompt changes.
+	const inits = entries.filter(e => e.type === "session_init");
+	const modelChanges = entries.filter(e => e.type === "model_change");
+	const thinking = entries.filter(e => e.type === "thinking_level_change").map(e => e.thinkingLevel);
+	// Every assistant message counts, aborted ones included: a partial reply is still output from its model.
+	const serving = entries
+		.filter(e => e.type === "message" && e.message?.role === "assistant")
+		.map(e => `${e.message.provider}/${e.message.model}`);
+	const promptText = (i: any) => (i.systemPrompt ?? []).map((b: unknown) => (typeof b === "string" ? b : JSON.stringify(b))).join("\n");
+	const prompts = inits.map(promptText).join("\n");
+	const routes = prompts.includes("mcp__") || prompts.includes("xd://");
+	// The definition that served must be the hashed one: its body is in every system prompt.
+	const body = definitionBody(definition);
+	const bound = !!body && inits.length > 0 && inits.every(i => promptText(i).includes(body));
+	if (!inits.length || inits.some(i => i.agent !== agent)) problems.push(`session_init.agent ${JSON.stringify(inits.map(i => i.agent))}`);
+	if (!inits.length || inits.some(i => JSON.stringify(i.tools) !== JSON.stringify(READ_ONLY)))
+		problems.push(`session_init.tools ${JSON.stringify(inits.map(i => i.tools))}`);
+	if (routes) problems.push("session_init.systemPrompt names an MCP proxy or xd:// route");
+	if (!bound) problems.push(`session_init.systemPrompt lacks the body of ${definition}`);
+	if (!modelChanges.length || modelChanges.some(e => e.model !== model || e.resolvedModelIsFallback))
+		problems.push(`model_change ${JSON.stringify(modelChanges.map(e => [e.model, e.resolvedModelIsFallback]))}`);
+	if (thinking.at(-1) !== THINKING) problems.push(`thinking ${JSON.stringify(thinking)}`);
+	if (!serving.length || serving.some(m => m !== model)) problems.push(`serving ${JSON.stringify([...new Set(serving)])} n=${serving.length}`);
+	return {
+		child_session: child,
+		"session_init.agent": inits[0]?.agent,
+		"session_init.tools": inits[0]?.tools,
+		model_changes: modelChanges.map(e => [e.model, e.resolvedModelIsFallback]),
+		thinking_levels: thinking,
+		serving_messages: serving.length,
+		serving_models: [...new Set(serving)].sort(),
+		mcp_or_xd_routes_in_prompt: routes,
+	};
+}
+
+function main(): number {
+	const { agent, timeoutSec, name, packet, candidate, agentFile: scratchAgent, model: admissionModel } = parseArgs(process.argv.slice(2));
+	const model = admissionModel ?? RELEASE_MODEL;
+	const home = os.homedir();
+	const userDefinition = path.join(home, ".omp/agent/agents", `${agent}.md`);
+	const root = process.env.OMP_AUDIT_HOME || path.join(process.env.XDG_STATE_HOME || path.join(home, ".local/state"), "omp-audit");
+	const runDir = path.join(root, "runs", name);
+	fs.mkdirSync(path.dirname(runDir), { recursive: true, mode: 0o700 });
+	try {
+		fs.mkdirSync(runDir, { mode: 0o700 });
+	} catch {
+		usage(`run ${runDir} already exists; use a new NAME`);
+	}
+	const save = (result: Record<string, unknown>) => {
+		fs.writeFileSync(path.join(runDir, "result.json"), `${JSON.stringify(result, null, 2)}\n`);
+		console.log(JSON.stringify(result, null, 2));
+		return result.accepted === true && result.verdict === "PASS" ? 0 : 1;
+	};
+	crash = err => save({ name, agent, candidate, packet, accepted: false, problems: [`evaluation failed: ${String(err)}`], verdict: "UNVERIFIED" });
+
+	// A fresh project per run: concurrent runs share nothing. Its `.omp/agents` holds only the definition to serve.
+	const project = path.join(runDir, "project");
+	fs.mkdirSync(path.join(project, ".omp"), { recursive: true, mode: 0o700 });
+	fs.writeFileSync(path.join(project, ".omp/config.yml"), PROJECT_CONFIG);
+	fs.writeFileSync(path.join(project, ".omp/mcp.json"), projectMcp(home));
+	const source = scratchAgent ?? userDefinition;
+	const projectAgents = path.join(project, ".omp/agents");
+	const definition = path.join(projectAgents, `${agent}.md`);
+	fs.mkdirSync(projectAgents, { mode: 0o700 });
+	if (fs.existsSync(source)) {
+		fs.copyFileSync(source, definition);
+		fs.chmodSync(definition, 0o400);
+	}
+	const schemaFile = path.join(home, ".omp/agent/agents/auditor.md");
+	// The child reads a read-only copy whose digest is rechecked after the run.
+	const packetCopy = path.join(runDir, "packet.md");
+	fs.copyFileSync(packet, packetCopy);
+	fs.chmodSync(packetCopy, 0o400);
+	const packetSha = sha256(packetCopy);
+	const prerequisites = Object.fromEntries(
+		[fs.realpathSync(process.argv[1]), path.join(project, ".omp/config.yml"), path.join(project, ".omp/mcp.json"), schemaFile, source, definition]
+			.filter(f => fs.existsSync(f))
+			.map(f => [f, sha256(f)]),
+	);
+	const base = {
+		name,
+		agent,
+		release: !scratchAgent,
+		...(scratchAgent ? { admission: { agent_file: scratchAgent, model } } : {}),
+		candidate,
+		packet,
+		packet_copy: packetCopy,
+		packet_sha256: packetSha,
+		prerequisites_sha256: prerequisites,
+	};
+	const unverified = (problems: string[], extra = {}) => save({ ...base, ...extra, accepted: false, problems, verdict: "UNVERIFIED" });
+	crash = err => unverified([`evaluation failed: ${String(err)}`]);
+
+	const schema = auditorSchema(schemaFile);
+	if (!schema) return unverified([`no verdict schema: ${schemaFile} has no object frontmatter output`]);
+
+	// Effective settings in the audit project, from the binary that dispatches.
+	const version = run(["omp", "--version"], project);
+	const effective: Record<string, unknown> = {};
+	const pre: string[] = [];
+	if (version.code !== 0) pre.push(`omp --version exit ${version.code}`);
+	for (const key of RELOCATING_ENV) if (process.env[key]) pre.push(`${key} is set; the child would not load ${definition}`);
+	if (!fs.existsSync(definition) || sha256(definition) !== sha256(source)) pre.push(`${definition} is not a copy of ${source}`);
+	for (const [key, want] of EXPECTED_SETTINGS) {
+		const got = run(["omp", "config", "get", key, "--json"], project);
+		try {
+			effective[key] = got.code === 0 ? JSON.parse(got.stdout).value : `exit ${got.code}`;
+		} catch {
+			effective[key] = `unparsed ${got.stdout.trim()}`;
+		}
+		if (effective[key] !== want) pre.push(`effective ${key}=${JSON.stringify(effective[key])} expected ${want}`);
+	}
+	const env = { omp_version: version.stdout.trim(), effective_settings: effective };
+	if (pre.length) return unverified(pre, env);
+
+	const intended = {
+		context: "Independent exact-candidate release audit.",
+		tasks: [
+			{
+				name,
+				agent,
+				task:
+					`Release audit. Read the whole packet file ${packetCopy} (sha256 ${packetSha}) with the read tool; it holds the ` +
+					`contract, the exact candidate and the raw check output. Audit candidate ${candidate} adversarially against ` +
+					"that contract and return your verdict through yield. Use only the packet and repository files as evidence.",
+				solutionSpace: "verdict on one fixed candidate",
+				outputSchema: schema,
+				schemaMode: "strict",
+			},
+		],
+	};
+	const argsFile = path.join(runDir, "args.json");
+	fs.writeFileSync(argsFile, `${JSON.stringify(intended, null, 2)}\n`);
+	const prompt =
+		`Read ${argsFile} and call the task tool exactly once with that JSON object as its complete ` +
+		"arguments, unchanged. Call no other tool after that. Then reply DONE.";
+	const sessions = path.join(runDir, "sessions");
+	const started = Date.now();
+	const dispatch = run(["omp", "-p", "--mode", "json", "--session-dir", sessions, prompt], project, timeoutSec);
+	fs.writeFileSync(path.join(runDir, "out.jsonl"), dispatch.stdout);
+	fs.writeFileSync(path.join(runDir, "err.txt"), dispatch.stderr);
+
+	const problems: string[] = [];
+	const events = readJsonl(path.join(runDir, "out.jsonl"), problems);
+	const starts = events.filter(e => e.type === "tool_execution_start" && e.toolName === "task");
+	const results = events
+		.filter(e => e.type === "tool_execution_end" && e.toolName === "task")
+		.flatMap(e => e.result?.details?.results ?? []);
+	if (starts.length !== 1) problems.push(`dispatcher made ${starts.length} task calls`);
+	else if (JSON.stringify(canonicalArgs(starts[0].args)) !== JSON.stringify(intended)) problems.push("dispatcher args differ from args.json");
+	if (results.length !== 1) problems.push(`${results.length} task results`);
+	const res = results.length === 1 ? results[0] : {};
+	const so = res.structuredOutput ?? {};
+	const data = so.data ?? {};
+	if (res.exitCode !== 0 || res.aborted) problems.push(`child exitCode ${res.exitCode} aborted ${res.aborted} error ${JSON.stringify(res.error)}`);
+	if (so.status !== "valid" || so.mode !== "strict" || so.source !== "caller")
+		problems.push(`structuredOutput status=${so.status} mode=${so.mode} source=${so.source} error=${JSON.stringify(so.error)}`);
+	if (data.candidate !== candidate) problems.push(`candidate ${JSON.stringify(data.candidate)} != ${candidate}`);
+	if (res.agent !== agent || res.agentSource !== "project") problems.push(`agent ${res.agent} source ${res.agentSource}`);
+	if ((res.resolvedModelIdentity ?? "").split("@")[0] !== model || res.resolvedModelIsFallback)
+		problems.push(`result identity ${res.resolvedModelIdentity} fallback ${res.resolvedModelIsFallback}`);
+	if (res.resolvedThinkingLevel !== THINKING) problems.push(`result thinking ${res.resolvedThinkingLevel}`);
+	const identity = checkChild(sessions, res.id ?? name, agent, model, definition, problems);
+	let copySha: string | undefined;
+	try {
+		copySha = sha256(packetCopy);
+	} catch {}
+	if (copySha !== packetSha) problems.push(`packet copy changed during the run (sha256 ${copySha ?? "unreadable"})`);
+	const served = fs.readdirSync(projectAgents);
+	if (served.length !== 1 || served[0] !== `${agent}.md`) problems.push(`project agents dir holds ${JSON.stringify(served)}`);
+	for (const [file, digest] of Object.entries(prerequisites)) {
+		let now: string | undefined;
+		try {
+			now = sha256(file);
+		} catch {}
+		if (now !== digest) problems.push(`prerequisite ${file} changed during the run`);
+	}
+	const findings: any[] = Array.isArray(data.findings) ? data.findings : [];
+	const missing: any[] = Array.isArray(data.missing_evidence) ? data.missing_evidence : [];
+	if (data.verdict === "PASS" && findings.some(f => f?.severity === "blocker" || f?.severity === "major")) problems.push("PASS with a blocker or major finding");
+	if (data.verdict === "PASS" && missing.length) problems.push("PASS with missing evidence");
+	if (data.verdict === "BLOCK" && findings.length === 0) problems.push("BLOCK with no findings");
+
+	return save({
+		...base,
+		...env,
+		dispatcher_rc: dispatch.code,
+		seconds: Math.round((Date.now() - started) / 1000),
+		child_exitCode: res.exitCode,
+		structuredOutput: { status: so.status, mode: so.mode, source: so.source, error: so.error },
+		identity,
+		result_identity: {
+			agent: res.agent,
+			agentSource: res.agentSource,
+			resolvedModelIdentity: res.resolvedModelIdentity,
+			resolvedThinkingLevel: res.resolvedThinkingLevel,
+			resolvedModelIsFallback: res.resolvedModelIsFallback,
+		},
+		accepted: problems.length === 0,
+		problems,
+		verdict: problems.length === 0 ? data.verdict : "UNVERIFIED",
+		data,
+	});
+}
+
+// Once the run dir exists, any unexpected error still records an UNVERIFIED result (main sets crash).
+let crash: ((err: unknown) => number) | undefined;
+try {
+	process.exit(main());
+} catch (err) {
+	if (!crash) throw err;
+	process.exit(crash(err));
+}

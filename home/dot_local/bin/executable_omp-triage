@@ -23,7 +23,7 @@ LABELS = (
     "retain",
 )
 CRITERIA = {
-    LABELS[0]: "Bounded mechanical file transform or extraction using supplied text, one file, cheap exact verification. Local 9B model is weak at algorithmic reasoning, tools and large context; never use it for diagnosing unknown bugs or independent arithmetic design.",
+    LABELS[0]: "Bounded mechanical file transform or extraction using supplied text, one file, cheap exact verification. The local 27B Qwen worker serves one request at a time on the GPU and has passed only small bounded tasks; never use it for diagnosing unknown bugs, open design, or decisions with costly errors.",
     LABELS[1]: "Capable coding model for ordinary implementation, tests, navigation, routine computer use and bounded debugging. Default for clear implementable work. Can use tools and run tests.",
     LABELS[2]: "Frontier reasoning for ambiguous architecture, unexplained repeated failures, deep conflicting research or hard decisions. Higher cost; unnecessary for routine edits.",
     LABELS[3]: "Context-dependent continuation or unclear request that cannot be safely classified from the provided text. Preserve the current model; do not guess.",

@@ -15,7 +15,7 @@ description: Change the shared OMP baseline in chezmoi - upgrades, omp-baseline,
 
 ## Invariants
 
-- Pin OMP to the exact reviewed mise release (currently 18.4.4); do not combine
+- Pin OMP to the exact reviewed mise release (currently 18.10.4); do not combine
   the shared pin with `omp update`. Use `omp-baseline upgrade` to move the three
   pin sites together.
 - Prefer native OMP config and features. Keep native skill discovery enabled.
@@ -132,13 +132,14 @@ description: Change the shared OMP baseline in chezmoi - upgrades, omp-baseline,
   spawns and proves each proxy's server from the prompt's route or inventory
   label. It fails closed on hooks, custom tools and extensions not in its
   `REVIEWED_EXTENSIONS` digests, on unmirrored `OMP_*`/`PI_*` variables,
-  launch-dir dotenv keys, settings and MCP sources, and when a contract agent
-  arms prewalk, retry model fallback or Code Mode, or takes its model only from
-  the parent. Validate runs its native probes in a scratch HOME under a shell
-  jail (bwrap on Linux, sandbox-exec on macOS), so `!command` config values and
-  stored keys never execute; it fails when the jail is unavailable or any
-  settings layer or models file holds a `!command` value. A new OMP version
-  needs the checker mirror re-verified first.
+  launch-dir dotenv keys, settings and MCP sources, when a contract agent
+  arms prewalk or retry model fallback or takes its model only from the
+  parent, and when the default profile leaves `task.structured` off. Validate
+  runs its native probes in a scratch HOME under a shell jail (bwrap on Linux,
+  sandbox-exec on macOS), so `!command` config values and stored keys never
+  execute; it fails when the jail is unavailable or any settings layer or
+  models file holds a `!command` value. A new OMP version needs the checker
+  mirror re-verified first.
 
 ## Workflow
 
@@ -194,10 +195,17 @@ apply defers dirty source files without stashing them; it skips run_* hooks. On
 every other host: `omp-baseline pull` (reconcile + `mise install` missing pins).
 `omp-baseline fleet` checks t14, macbook, and macmini.
 
-Rollback the pin with `omp-baseline upgrade <previous>` (same clean-pin-file
-rule). After every pin move, treat live `omp models` as authoritative before
-keeping shared model IDs. OMP 18.4.4 is the reviewed release; it is the first
-to discover `openai-codex/gpt-6.1-sol`. 18.3.0 deprecated
+Roll back by reverting the upgrade commit (the pins and the version-pinned
+`omp-agent-policy`/`omp-agent-smoke` mirror move together), then `chezmoi
+apply` every target that commit changed outside the manifest (such as
+`~/.local/bin/omp-baseline` and canonical skills under
+`~/.local/share/decent-angl/skills`), then `omp-baseline apply`: it applies
+only manifest paths and syncs skills from the live canonical copies. After
+every pin move, treat live `omp models` as authoritative before keeping shared
+model IDs. OMP 18.10.4 is the reviewed
+release. Since 18.10.2 `task.structured` defaults off, which drops `yield` and
+every output schema; both profiles set it true. 18.10.4 removed Codex Code
+Mode, 18.8.2 per-call task model overrides. 18.3.0 deprecated
 the `hub` tool: use `wait`, `read proc://`, `write proc://<id>/kill` and
 `write agent://<id>`; RULES and skills use those forms.
 Recheck callers before changing provider compatibility. Foreign `~/.cursor`,

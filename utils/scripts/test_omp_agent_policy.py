@@ -19,7 +19,7 @@ REJECTED = (
     "Warning: models.yml validation failed \u2014 custom providers disabled\n"
     "Schema error: providers.llama.cpp.models.0.thinking.supportsDisplay: must be boolean (was a string)\n"
 )
-# `omp config list --json` values at the 18.4.4 schema defaults, for the settings the checker compares.
+# `omp config list --json` values at the 18.10.4 schema defaults, for the settings the checker compares.
 NATIVE_DEFAULTS = {
     "todo.enabled": True, "glob.enabled": True, "grep.enabled": True, "astGrep.enabled": False, "astEdit.enabled": True,
     "find.enabled": "auto", "debug.enabled": True, "launch.enabled": True, "checkpoint.enabled": False, "github.enabled": False,
@@ -28,7 +28,7 @@ NATIVE_DEFAULTS = {
     "externalThinking": False, "autolearn.enabled": False, "task.maxRecursionDepth": 2, "memory.backend": "off",
     "compaction.experimentalContextManagement": False, "eval.py": True, "eval.js": True,
     "enabledProviders": [], "task.prewalk": False, "task.agentPrewalk": {}, "retry.enabled": True, "retry.modelFallback": True,
-    "retry.usageAwareFallback": False, "providers.openai-codex.codeMode": "off",
+    "retry.usageAwareFallback": False, "task.structured": False,
     "modelRoles": {}, "task.agentModelOverrides": {}, "task.disabledAgents": [], "task.maxEffort": "max",
     "disabledProviders": [], "extensions": [],
 }
@@ -41,7 +41,7 @@ class PolicyTests(unittest.TestCase):
         self.root = pathlib.Path(self.tmp.name)
         manifest = self.root / "home/dot_config/decent-angl/omp-baseline-manifest.tsv"
         manifest.parent.mkdir(parents=True)
-        manifest.write_text("# omp-version 18.4.4\n")
+        manifest.write_text("# omp-version 18.10.4\n")
         self.agent = self.root / "home/private_dot_omp/private_agent"
         (self.agent / "private_agents").mkdir(parents=True)
         self.config = self.agent / "private_config.yml"
@@ -52,7 +52,7 @@ class PolicyTests(unittest.TestCase):
             "  smol: llama.cpp/test:low\n"
             "  tiny: '@smol'\n"
             "  task: openai-codex/gpt-6-luna:medium\n"
-            "task:\n  agentModelOverrides: {}\n"
+            "task:\n  agentModelOverrides: {}\n  structured: true\n"
             "astGrep:\n  enabled: true\n"
             "tools:\n  xdev: true\n"
             "retry:\n  modelFallback: false\n"
@@ -63,12 +63,12 @@ class PolicyTests(unittest.TestCase):
                 "default": "anthropic/claude-opus-5-5:high", "plan": "openai-codex/gpt-6.1-sol:high",
                 "smol": "llama.cpp/test:low", "tiny": "@smol", "task": "openai-codex/gpt-6-luna:medium",
             },
-            "astGrep.enabled": True, "retry.modelFallback": False,
+            "astGrep.enabled": True, "retry.modelFallback": False, "task.structured": True,
         }
-        self.add("architect", "openai-codex/gpt-6.1-sol", "xhigh", ["read", "grep", "glob", "web_search"])
-        self.add("browser", "@default:medium", "medium", ["eval"])
-        self.add("nous", "llama.cpp/test", "medium", ["read", "grep", "glob", "edit", "write"])
-        self.add("scout", "llama.cpp/test", "low", ["read", "grep", "glob", "web_search"])
+        self.add("architect", "openai-codex/gpt-6.1-sol", "xhigh", ["read", "grep", "glob", "web_search", "yield"])
+        self.add("browser", "@default:medium", "medium", ["eval", "yield"])
+        self.add("nous", "llama.cpp/test", "medium", ["read", "grep", "glob", "edit", "write", "yield"])
+        self.add("scout", "llama.cpp/test", "low", ["read", "grep", "glob", "web_search", "yield"])
         self.add("sol", "openai-codex/gpt-6.1-sol", "high")
         self.add("sonic", "llama.cpp/test", "low")
         self.add("fable", "anthropic/claude-fable-test", "medium")
@@ -92,7 +92,7 @@ class PolicyTests(unittest.TestCase):
         env = {**os.environ, "HOME": str(self.root / "home-temp")}
         return subprocess.run([BUN, str(CHECKER), "--root", str(self.root), *args], capture_output=True, text=True, env=env)
 
-    def evidence(self, models=None, models_file=None, profile="default", stderr="", version="18.4.4", native=None):
+    def evidence(self, models=None, models_file=None, profile="default", stderr="", version="18.10.4", native=None):
         """--catalog evidence as omp-baseline writes it: the native listing and settings, its stderr and what it covered."""
         models_file = models_file or self.agent / "private_models.yml"
         out = self.root / f"evidence-{next(self.serial)}.json"
@@ -116,7 +116,7 @@ class PolicyTests(unittest.TestCase):
         self.assertIn("UNVERIFIED architect thinking xhigh unclamped: openai-codex/gpt-6.1-sol needs native catalog evidence", result.stderr)
 
     def test_02_plan_suffix_clamps(self):
-        self.add("architect", "@plan", "xhigh", ["read", "grep", "glob", "web_search"])
+        self.add("architect", "@plan", "xhigh", ["read", "grep", "glob", "web_search", "yield"])
         result = self.run_checker()
         self.assertIn("EFFORT architect expected xhigh resolved high via selector-suffix", result.stderr)
 
@@ -190,6 +190,13 @@ class PolicyTests(unittest.TestCase):
         restricted = self.run_checker("--dispatch", "restricted", "--json")
         architect = next(agent for agent in json.loads(restricted.stdout)["agents"] if agent["name"] == "architect")
         self.assertEqual(architect["callable"], ["read", "grep", "yield"])
+        # task.structured off: the child gets no yield, even a declared one (task/executor.ts:4041-4045).
+        self.add("architect", "openai-codex/gpt-6.1-sol", "xhigh", ["read", "grep", "yield"])
+        self.config.write_text(self.config.read_text().replace("  structured: true\n", ""))
+        for args in ((), ("--dispatch", "restricted")):
+            architect = self.agent_report(self.run_checker("--json", *args), "architect")
+            self.assertNotIn("yield", architect["callable"])
+            self.assertIn("read", architect["callable"])
 
     def test_12_unknown_version(self):
         (self.root / "home/dot_config/decent-angl/omp-baseline-manifest.tsv").write_text("# omp-version 19.0\n")
@@ -261,10 +268,10 @@ class PolicyTests(unittest.TestCase):
         env = {k: v for k, v in os.environ.items() if not k.startswith(("PI_", "OMP_", "XDG_")) and k != "CLAUDE_CONFIG_DIR"}
         env["HOME"] = str(home)
 
-        def run(live_dir=live, args=(), **extra):
+        def run(live_dir=live, args=(), at=None, **extra):
             catalog = self.evidence(models_file=live_dir / "models.yml")
             return subprocess.run(
-                [BUN, str(CHECKER), "--live", str(live_dir), "--omp-version", "omp/18.4.4", "--cwd", str(cwd), "--catalog", catalog, *args],
+                [BUN, str(CHECKER), "--live", str(live_dir), "--omp-version", "omp/18.10.4", "--cwd", str(at or cwd), "--catalog", catalog, *args],
                 capture_output=True, text=True, env={**env, **extra},
             )
         return cwd, run
@@ -279,6 +286,13 @@ class PolicyTests(unittest.TestCase):
         self.assertIn("EFFORT architect expected xhigh resolved high via selector-suffix", result.stderr)
         # Any other live shape would skip the default-profile contracts silently.
         self.assertEqual(run(self.root / "elsewhere/agent").returncode, 2)
+        # discovery/builtin.ts getConfigDirs: no project layer when cwd is home, compared by realpath.
+        home = self.root / "home-temp"
+        (home / ".omp/config.yml").write_text("task:\n  agentModelOverrides:\n    architect: '@plan'\n")
+        (self.root / "home-link").symlink_to(home)
+        for at in (home, self.root / "home-link"):
+            result = run(at=at)
+            self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_20_live_host_overlay_and_plugin_registry(self):
         cwd, run = self.live_fixture()
@@ -384,7 +398,7 @@ class PolicyTests(unittest.TestCase):
         raw = self.root / "raw.json"
         raw.write_text('{"models": []}')
         for catalog, message in [
-            (self.evidence(version="18.10.4"), "was captured on omp 18.10.4, checking 18.4.4"),
+            (self.evidence(version="18.4.4"), "was captured on omp 18.4.4, checking 18.10.4"),
             (self.evidence(profile="local"), "was captured for profile local, checking default"),
             (stale, f"was captured from a different {models}"),
             (str(raw), "is not native catalog evidence"),
@@ -512,7 +526,7 @@ class PolicyTests(unittest.TestCase):
         self.assertIn(f"UNSUPPORTED dotenv {dotenv} sets PI_SMOL_MODEL (launch-dir dotenv not mirrored)", run().stderr)
 
     def test_31_role_env_overrides_after_settings_check(self):
-        self.add("architect", "@plan:xhigh", "xhigh", ["read", "grep", "glob", "web_search"])
+        self.add("architect", "@plan:xhigh", "xhigh", ["read", "grep", "glob", "web_search", "yield"])
         cwd, run = self.live_fixture()
         self.assertEqual(run().returncode, 0, run().stderr)
         # main.ts applies PI_PLAN_MODEL to the plan role at runtime; `config list` never shows it.
@@ -567,8 +581,8 @@ class PolicyTests(unittest.TestCase):
         for config, native, message in [
             (base, {"retry.modelFallback": True}, "SETTINGS retry.modelFallback mirror false native true"),
             (base.replace(retry_off, ""), {"retry.modelFallback": True}, "RUNTIME architect retry may switch models"),
-            (base + "providers:\n  openai-codex:\n    codeMode: auto\n", {"providers.openai-codex.codeMode": "auto"},
-             "UNSUPPORTED providers.openai-codex.codeMode=auto (Code Mode tool presentation not mirrored)"),
+            (base.replace("  structured: true\n", ""), {"task.structured": False},
+             "RUNTIME task.structured is off: children get no yield tool and output schemas are dropped"),
             (base.replace("  agentModelOverrides: {}\n", "  agentModelOverrides: {}\n  agentPrewalk: {sol: 'on'}\n"),
              {"task.agentPrewalk": {"sol": "on"}}, "RUNTIME sol prewalk armed (@smol)"),
         ]:
@@ -588,7 +602,7 @@ class PolicyTests(unittest.TestCase):
         self.assertIn("MODEL browser resolves only through the parent session model", result.stderr)
 
     def test_35_live_settings_files(self):
-        self.add("architect", "@plan:xhigh", "xhigh", ["read", "grep", "glob", "web_search"])
+        self.add("architect", "@plan:xhigh", "xhigh", ["read", "grep", "glob", "web_search", "yield"])
         cwd, run = self.live_fixture()
         live = self.root / "home-temp/.omp/agent"
         # A project role that is not a string or string list is cleared, so the global plan role stays.
@@ -629,8 +643,8 @@ class PolicyTests(unittest.TestCase):
     def test_37_tool_lists_parse_like_native(self):
         # discovery/helpers.ts parseArrayOrCSV: a list with no string items, or an empty string, is no list at all,
         # so the agent gets every tool; only a literal [] is an empty list. Array items are not trimmed.
-        cases = {"tools: [42]": None, "tools: \"\"": None, "tools: \" , \"": None, "tools: []": ["yield"],
-                 "tools: [\" bash\"]": [" bash", "yield"], "tools: \" bash, read \"": ["bash", "read", "yield"]}
+        cases = {"tools: [42]": None, "tools: \"\"": None, "tools: \" , \"": None, "tools: []": [],
+                 "tools: [\" bash\"]": [" bash"], "tools: \" bash, read \"": ["bash", "read"]}
         for line, declared in cases.items():
             with self.subTest(line=line):
                 (self.agent / "private_agents/extra.md").write_text(

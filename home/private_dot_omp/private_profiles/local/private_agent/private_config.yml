@@ -65,6 +65,8 @@ task:
   maxRecursionDepth: 1
   eager: default
   enableLsp: false
+  # OMP 18.10.2+ defaults this off, dropping yield and output schemas (scout).
+  structured: true
   enableEffort: false
   showResolvedModelBadge: true
   softRequestBudget: 40

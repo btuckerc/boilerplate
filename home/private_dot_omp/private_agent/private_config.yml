@@ -93,6 +93,10 @@ task:
   maxRecursionDepth: 1
   eager: default
   enableLsp: false
+  # OMP 18.10.2+ defaults this off: children then get no yield tool and every
+  # outputSchema (caller or agent frontmatter) is dropped. Release audits and
+  # scout rely on schema-validated results.
+  structured: true
   # Per-task choice without an extra classifier call. Omit for the agent default
   # (medium; sol high, architect xhigh); coarse "med" maps to high on every cloud
   # model, so it lowers architect.

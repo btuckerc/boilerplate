@@ -66,11 +66,13 @@ Adapt to the actual receiving tool schema:
   settings. Supply the task's necessary context explicitly with a fresh fork.
   Recheck the tool schema if this changes. A task name such as `visual_review`
   is a label, not the model selector.
-- OMP: inspect the available task tool/agent registry and model/effort override
-  mechanism. Agent role IDs such as `task`, `scout`, and `reviewer` are not model
-  IDs. Do not invent `agent: luna`, assume prose selects max, or retain an OMP-only
-  role restriction in a Codex handoff. Use verified override fields or the fallback
-  above; do not mutate global agent defaults just to draft a prompt.
+- OMP: the task tool has no per-call model override (removed in 18.8.2). The
+  agent definition selects the model; the task `effort` field (`lo`/`med`/`hi`),
+  when the tool exposes it, selects effort. Agent role IDs such as `task`,
+  `scout`, and `reviewer` are not model IDs. Do not invent `agent: luna`, assume
+  prose selects max, or retain an OMP-only role restriction in a Codex handoff.
+  Pick an agent whose definition resolves to the wanted model or use the
+  fallback above; do not mutate global agent defaults just to draft a prompt.
 
 The receiving agent can revise decomposition and supported routes as evidence
 changes, within explicit user constraints. Recommendations do not automatically

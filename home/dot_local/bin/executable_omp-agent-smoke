@@ -6,8 +6,8 @@
 // result (agentSource, resolvedModelIdentity, resolvedThinkingLevel, resolvedModelIsFallback) and the child
 // session JSONL (session_init.agent/tools, model_change, thinking_level_change, and the provider/model of every
 // serving assistant message, which auth fallback could change). session_init.tools holds the child's enabled
-// tools minus a write the explicit list did not grant (task/executor.ts:4146-4166), plus one mcp__<server>_*
-// proxy per MCP tool (:3865-3869). Non-MCP tools must equal the predicted callable set (without the xd://
+// tools minus a write the explicit list did not grant (task/executor.ts:4573-4589), plus one mcp__<server>_*
+// proxy per MCP tool (:4346-4348). Non-MCP tools must equal the predicted callable set (without the xd://
 // device-only write), give or take the predicted conditional tools, so no tool outside the grant is enabled;
 // MCP proxies must come from exactly the predicted runtime-deferred servers, by native minting from the raw
 // tool names of the system prompt's MCP routes (see mcpOwnership).
@@ -126,14 +126,14 @@ function readJsonl(file: string): any[] {
 
 const bare = (identity: string | undefined) => identity?.split(/[\s@]/)[0];
 
-/** mcp/tool-bridge.ts:390-400 sanitizeMCPToolNamePart with digits kept (the current mint). */
+/** mcp/tool-bridge.ts:395-405 sanitizeMCPToolNamePart with digits kept (the current mint). */
 function mcpPart(value: string, fallback: string): string {
 	const s = value.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/_+/g, "_").replace(/^_+|_+$/g, "");
 	return s.length > 0 ? s : fallback;
 }
 
 /**
- * createMCPToolName (mcp/tool-bridge.ts:410-465): the proxy name SERVER mints for raw tool TOOL, and
+ * createMCPToolName (mcp/tool-bridge.ts:415-470): the proxy name SERVER mints for raw tool TOOL, and
  * whether the mint lost information. A name alone is lossy: one server's sanitized name can prefix
  * another's (`mac` vs `mac_evil`), raw names differing only in case or punctuation sanitize alike, a
  * stripped `<server>_` tool prefix (`mac_x_y` on `mac_x` and on `mac` both give `mcp__mac_x_y`) and the
@@ -151,13 +151,13 @@ function mcpMint(server: string, tool: string): { name: string; lossy: boolean }
 
 /**
  * Ownership of the child's MCP proxies (session_init.tools `mcp__*` plus every xd:// MCP route) by
- * predicted server. Native ownership is mcpServerName (mcp/manager.ts:930-936), which the session
+ * predicted server. Native ownership is mcpServerName (mcp/manager.ts:1054-1060), which the session
  * JSONL does not record. The system prompt names each proxy's source in one of two forms:
  *  - an xd://-mounted proxy is an MCP Tool Routes line `- "<raw tool>" → \`xd://<name>\``
- *    (prompts/system/mcp-xdev-guidance.md from session/session-tools.ts:196-221; JSON-quoted);
+ *    (prompts/system/mcp-xdev-guidance.md from session/session-tools.ts:190-215; JSON-quoted);
  *  - a top-level proxy is a Tool Inventory line `- <raw server>/<raw tool>: \`<name>\``
- *    (prompts/system/system-prompt.md:59-63, label from mcp/tool-bridge.ts:679,808 kept by the task
- *    proxy, task/executor.ts:939-946).
+ *    (prompts/system/system-prompt.md:73-77, label from mcp/tool-bridge.ts:684,813 kept by the task
+ *    proxy, task/executor.ts:959-966).
  * An inventory line owns the proxy for the predicted server it names, if that server mints the name.
  * A route owns it for the one predicted server that mints the name from that raw tool without loss;
  * a server outside the prediction can then mint it only under the same sanitized name (`MAC` and
@@ -218,18 +218,23 @@ function checkChild(pred: Prediction, result: TaskResult | undefined, sessionsDi
 	const file = findFile(sessionsDir, `${result.id}.jsonl`);
 	if (!file) return [...fails, `child session ${result.id}.jsonl not found`];
 	const entries = readJsonl(file);
-	const init = entries.find(e => e.type === "session_init");
-	if (init?.agent !== pred.name) fails.push(`session_init.agent ${init?.agent}`);
-	const sessionTools: string[] = init?.tools ?? [];
-	const ownTools = sessionTools.filter(t => !t.startsWith("mcp__"));
+	// task/executor.ts:4591-4614 writes the first session_init; session/agent-session.ts:6205-6236 appends a copy
+	// whenever a model call's base prompt changes, so every one must match.
+	const inits = entries.filter(e => e.type === "session_init");
+	if (!inits.length) fails.push("no session_init entry");
 	const expected = pred.callable.filter(t => !t.startsWith("mcp:") && t !== "write(xd-devices-only)");
 	const optional = pred.conditional.map(c => c.split(" ")[0]);
-	const missing = expected.filter(t => !ownTools.includes(t));
-	const extra = ownTools.filter(t => !expected.includes(t) && !optional.includes(t));
-	if (missing.length || extra.length) {
-		fails.push(`session_init.tools [${ownTools.join(", ")}] predicted [${expected.join(", ")}] conditional [${optional.join(", ")}]`);
+	for (const init of inits) {
+		if (init.agent !== pred.name) fails.push(`session_init.agent ${init.agent}`);
+		const sessionTools: string[] = init.tools ?? [];
+		const ownTools = sessionTools.filter(t => !t.startsWith("mcp__"));
+		const missing = expected.filter(t => !ownTools.includes(t));
+		const extra = ownTools.filter(t => !expected.includes(t) && !optional.includes(t));
+		if (missing.length || extra.length) {
+			fails.push(`session_init.tools [${ownTools.join(", ")}] predicted [${expected.join(", ")}] conditional [${optional.join(", ")}]`);
+		}
+		fails.push(...mcpOwnership(pred.mcp, sessionTools, init.systemPrompt));
 	}
-	fails.push(...mcpOwnership(pred.mcp, sessionTools, init?.systemPrompt));
 	const modelChanges = entries.filter(e => e.type === "model_change");
 	if (modelChanges.some(e => e.resolvedModelIsFallback)) fails.push("model_change reports a fallback model");
 	const lastModel = modelChanges.at(-1)?.model;

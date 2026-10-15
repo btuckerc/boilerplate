@@ -1385,7 +1385,8 @@ upgrade() {
     mise reshim || true
     return 1
   fi
-  if ! check_omp_config; then
+  # Native config probes need the scratch HOME that validate prepares (omp_probe).
+  if ! (trap cleanup_probe_home EXIT; probe_home && check_omp_config); then
     printf 'UPGRADE OMP config checks failed; restoring pin %s\n' "$pin" >&2
     restore_pin_sites
     apply_pin_files_live || true

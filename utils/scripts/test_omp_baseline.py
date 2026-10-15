@@ -28,7 +28,8 @@ esac
 """
 # Probes run where /bin/sh cannot start, so the omp stub is a bash script.
 OMP = """#!/usr/bin/env bash
-[ "$1" = --version ] && { echo omp/18.4.4; exit "${VERSION_EXIT:-0}"; }
+[ "$1" = --version ] && { echo "${VERSION_OUT:-omp/18.10.4}"; exit "${VERSION_EXIT:-0}"; }
+[ -n "$OMP_LOG" ] && echo "$HOME $*" >>"$OMP_LOG"
 if [ "$1 $2" = "models llama.cpp" ]; then
   [ -n "$LLAMA_EXIT" ] && exit "$LLAMA_EXIT"
   printf '%s' "$LLAMA_OUT"
@@ -73,7 +74,7 @@ class OmpBaselineTest(unittest.TestCase):
         (self.home / ".omp/agent").mkdir(parents=True)
         (self.home / ".omp/agent/RULES.md").write_text("rules\n")
         self.manifest = self.root / "manifest.tsv"
-        self.manifest.write_text(f"# omp-version 18.4.4\nfile\t~/.omp/agent/RULES.md\t{rel}\n")
+        self.manifest.write_text(f"# omp-version 18.10.4\nfile\t~/.omp/agent/RULES.md\t{rel}\n")
         for name, body in (("mise", MISE), ("omp", OMP)):
             (self.bin / name).write_text(body)
             (self.bin / name).chmod(0o755)
@@ -196,11 +197,11 @@ class OmpBaselineTest(unittest.TestCase):
     def test_failed_version_probe_is_an_error_despite_expected_stdout(self):
         result = self.run_baseline("status")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("VERSION omp/18.4.4", result.stdout)
+        self.assertIn("VERSION omp/18.10.4", result.stdout)
         result = self.run_baseline("status", VERSION_EXIT="7")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("VERSION probe failed (omp --version exit 7)", result.stderr)
-        self.assertNotIn("VERSION omp/18.4.4", result.stdout)
+        self.assertNotIn("VERSION omp/18.10.4", result.stdout)
 
     @unittest.skipUnless(os.uname().sysname == "Linux", "lsattr NOCOW check is Linux-only")
     def test_failed_nocow_probe_is_an_error_despite_expected_stdout(self):
@@ -348,6 +349,43 @@ class OmpBaselineTest(unittest.TestCase):
                 self.assertIn(f"PROBE   {agent}/.env sets an OMP directory or profile variable", result.stderr)
                 self.assertEqual(before, self.snapshot())
                 self.assertEqual([], list(scratch.iterdir()))
+
+    def test_upgrade_config_check_runs_in_scratch_home_and_restores_pins(self):
+        # upgrade's post-install config check uses omp_probe, which needs the scratch HOME validate prepares.
+        pins = {
+            "home/dot_config/decent-angl/omp-baseline-manifest.tsv": "# omp-version\t18.4.4\n",
+            "home/dot_config/mise/config.toml": '[tools]\n"github:can1357/oh-my-pi" = "18.4.4"\n',
+            "home/run_onchange_after_04-setup-omp.sh.tmpl": 'OMP_VERSION="18.4.4"\n',
+        }
+        for rel, text in pins.items():
+            (self.repo / rel).parent.mkdir(parents=True, exist_ok=True)
+            (self.repo / rel).write_text(text)
+        git = ["git", "-C", str(self.repo), "-c", "user.name=t", "-c", "user.email=t@t"]
+        subprocess.run([*git, "init", "-q"], check=True)
+        subprocess.run([*git, "add", "-A"], check=True)
+        subprocess.run([*git, "commit", "-qm", "pins"], check=True)
+        self.manifest.write_text(self.manifest.read_text().replace("18.10.4", "18.4.4"))
+        (self.bin / "mise").write_text(MISE.replace('[ "$1" = exec ]', 'case "$1" in install|reshim) exit 0 ;; esac\n[ "$1" = exec ]'))
+        (self.bin / "gh").write_text("#!/bin/sh\necho v18.10.4\n")
+        skills = self.home / ".local/bin/decent-angl-skills"
+        skills.parent.mkdir(parents=True)
+        skills.write_text("#!/bin/sh\nexit 0\n")
+        for exe in (self.bin / "gh", skills):
+            exe.chmod(0o755)
+        scratch, log = self.root / "tmp", self.root / "omp.log"
+        scratch.mkdir()
+        log.touch()
+        result = self.run_baseline("upgrade", "18.10.4", TMPDIR=str(scratch), OMP_LOG=str(log), OMP_BASELINE_IN_GUARD="1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("UPGRADE OMP config checks failed; restoring pin 18.4.4", result.stderr)
+        # The native probes ran, each under a scratch HOME (the stub's config answers fail the check).
+        probes = [line for line in log.read_text().splitlines() if " config get modelRoles" in line]
+        self.assertTrue(probes, result.stderr)
+        for line in probes:
+            self.assertTrue(line.startswith(f"{scratch}/omp-baseline-probe."), line)
+        status = subprocess.run([*git, "status", "--porcelain"], capture_output=True, text=True, check=True)
+        self.assertEqual("", status.stdout)
+        self.assertEqual([], list(scratch.iterdir()))
 
 
 if __name__ == "__main__":

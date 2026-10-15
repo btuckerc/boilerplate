@@ -9,7 +9,7 @@ import unittest
 BUN = subprocess.check_output(["mise", "which", "bun"], text=True).strip()
 SMOKE = pathlib.Path(__file__).resolve().parents[2] / "home/dot_local/bin/executable_omp-agent-smoke"
 
-# The two native prompt forms naming an MCP proxy's source (18.4.4): an xd:// route and a Tool Inventory label.
+# The two native prompt forms naming an MCP proxy's source (18.10.4): an xd:// route and a Tool Inventory label.
 def route(tool, name):
     return f"- {json.dumps(tool)} → `xd://{name}`"
 

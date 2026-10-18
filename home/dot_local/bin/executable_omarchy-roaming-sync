@@ -39,7 +39,8 @@ expand_home() {
 iter_manifest() {
   local kind live_path repo_rel
 
-  while IFS=$'\t' read -r kind live_path repo_rel; do
+  # || -n: an unterminated final row is still a row.
+  while IFS=$'\t' read -r kind live_path repo_rel || [[ -n "${kind}" ]]; do
     [[ -z "${kind}" ]] && continue
     [[ "${kind}" == \#* ]] && continue
     printf '%s\t%s\t%s\n' "${kind}" "$(expand_home "${live_path}")" "${repo_rel}"

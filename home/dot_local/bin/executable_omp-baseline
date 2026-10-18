@@ -407,7 +407,8 @@ os_in_scope() {
 
 iter_manifest() {
   local kind live_path repo_rel os_scope
-  while IFS=$'\t' read -r kind live_path repo_rel os_scope; do
+  # || -n: an unterminated final row is still a row.
+  while IFS=$'\t' read -r kind live_path repo_rel os_scope || [ -n "${kind:-}" ]; do
     [ -n "${kind:-}" ] || continue
     case "$kind" in \#*) continue ;; esac
     printf '%s\t%s\t%s\t%s\n' "$kind" "$(expand_home "$live_path")" "$repo_rel" "${os_scope:-all}"

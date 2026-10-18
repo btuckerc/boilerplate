@@ -220,6 +220,13 @@ fi
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(f"OK      {self.home}/.omp/agent/RULES.md", result.stdout)
 
+    def test_unterminated_final_manifest_row_is_checked(self):
+        # read fails at EOF on a row without a newline; the row is still part of the manifest.
+        self.manifest.write_text(self.manifest.read_text().rstrip("\n"))
+        result = self.run_baseline("status")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"OK      {self.home}/.omp/agent/RULES.md", result.stdout)
+
     def test_failed_secret_probes_are_errors(self):
         # The fixture repo is not a Git checkout, so git ls-files fails too.
         result = self.run_baseline("validate", FAIL_MANAGED="3")

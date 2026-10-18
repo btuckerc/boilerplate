@@ -107,6 +107,14 @@ echo validate >>"$HOME/live-validate.log"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text)
 
+    def stage(self, name, text):
+        # Index-only entry, so the name reaches Git byte for byte even where the filesystem would refuse it
+        # (APFS rejects invalid UTF-8) or merge it into an existing entry (APFS opens Home/ as home/).
+        blob = self.root / "staged-blob"
+        blob.write_text(text)
+        sha = self.git("hash-object", "-w", str(blob)).stdout.strip()
+        self.git("update-index", "--add", "--cacheinfo", f"100644,{sha},{name}")
+
     def executable(self, path, text):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text)
@@ -581,11 +589,16 @@ echo validate >>"$HOME/live-validate.log"
         result = self.run_sync("validate", success=False)
         self.assertIn("A working ripgrep is required for source checks.", result.stderr)
 
-    def publish_added_then_deleted(self, name):
-        self.write(name, "fixture\n")
-        self.commit("runtime fixture")
-        self.git("rm", "-q", name)
-        self.commit("remove runtime fixture")
+    def publish_added_then_deleted(self, name, index_only=False):
+        if index_only:
+            self.stage(name, "fixture\n")
+            self.git("commit", "-q", "-m", "runtime fixture")
+            self.git("rm", "-q", "--cached", name)
+        else:
+            self.write(name, "fixture\n")
+            self.commit("runtime fixture")
+            self.git("rm", "-q", name)
+        self.git("commit", "-q", "-m", "remove runtime fixture")
         result = self.run_sync("publish", success=False)
         self.assertIn("Refusing runtime or credential paths in commit", result.stderr)
         self.assertEqual(self.remote_head(), self.initial)
@@ -673,17 +686,18 @@ echo validate >>"$HOME/live-validate.log"
         self.publish_added_then_deleted("home/private_dot_omp/private_agent/AUTH.JSON")
 
     def test_case_insensitive_path_aliases_refuse(self):
-        # A Mac checkout (APFS) merges Home/ into home/ and opens .GITATTRIBUTES as .gitattributes.
+        # A Mac checkout (APFS) merges Home/ into home/ and opens .GITATTRIBUTES as .gitattributes. The names are
+        # staged index-only so the test builds the same commits on a case-insensitive filesystem.
         for name, content, reported in (
                 ("Home/private_dot_omp/private_agent/secret-placeholder.key", "fixture\n", "Home (opened as home)"),
                 (".GITATTRIBUTES", "home/example ident\n", ".GITATTRIBUTES (opened as .gitattributes)"),
                 ("home/EXAMPLE", "other\n", "home/example (same path as home/EXAMPLE when case-folded)")):
             with self.subTest(name=name):
-                self.write(name, content)
+                self.stage(name, content)
                 self.assertIn(reported, self.run_sync("validate", success=False).stderr)
-                self.commit(f"alias {name}")
-                self.git("rm", "-q", name)
-                self.commit(f"drop {name}")
+                self.git("commit", "-q", "-m", f"alias {name}")
+                self.git("rm", "-q", "--cached", name)
+                self.git("commit", "-q", "-m", f"drop {name}")
                 result = self.run_sync("publish", success=False)
                 self.assertIn(f"Refusing case-insensitive path aliases in commit", result.stderr)
                 self.assertIn(reported, result.stderr)
@@ -766,7 +780,7 @@ echo validate >>"$HOME/live-validate.log"
     def test_runtime_path_with_invalid_utf8_byte_blocks(self):
         # A raw 0xff byte must not stop [^/]* from matching the *.log declaration.
         name = os.fsdecode(b"home/private_dot_omp/private_agent/\xff.log")
-        self.publish_added_then_deleted(name)
+        self.publish_added_then_deleted(name, index_only=True)
 
     def test_guard_failed_fetch_stops_before_apply(self):
         self.git("remote", "set-url", "origin", str(self.root / "missing"))

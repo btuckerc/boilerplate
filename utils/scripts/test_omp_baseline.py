@@ -124,7 +124,8 @@ fi
         return root
 
     def test_check_source_uses_the_snapshot_and_no_live_settings(self):
-        root = self.source_root()
+        # check-source resolves the snapshot physically (cd -P); on macOS the temp dir's /var is /private/var.
+        root = self.source_root().resolve()
         agent = self.home / ".omp/agent"
         ran = self.root / "command-ran"
         (agent / "config.yml").write_text(f'modelRoles:\n  default: "{chr(33)}touch {ran}"\n')
@@ -213,6 +214,15 @@ fi
         result = self.run_baseline("status", FAIL_DIFF="1")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("LIVE    probe failed (chezmoi diff exit 1)", result.stderr)
+        self.assertNotIn("OK      ", result.stdout)
+
+    def test_drift_probe_inside_chezmoi_hook_is_deferred(self):
+        # Inside a chezmoi run_ hook chezmoi holds its state lock, so a nested diff exits 1
+        # ("timeout obtaining persistent state lock"): the probe is deferred, never OK or failed.
+        result = self.run_baseline("status", FAIL_DIFF="1", OMP_BASELINE_IN_CHEZMOI="1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"LIVE    deferred {self.home}/.omp/agent/RULES.md (inside chezmoi apply", result.stdout)
+        self.assertNotIn("probe failed", result.stderr)
         self.assertNotIn("OK      ", result.stdout)
 
     def test_successful_empty_diff_is_clean(self):
@@ -436,7 +446,8 @@ fi
                       result.stderr)
         self.assertEqual([], ran(), "validate ran a models.yml header command")
         self.assertEqual(before, self.snapshot())
-        self.assertEqual([], list(scratch.iterdir()))
+        # Only validate's own temp dirs count: the real omp extracts native libraries (omp-applefm-*.dylib on macOS).
+        self.assertEqual([], [p.name for p in scratch.iterdir() if p.name.startswith("omp-baseline-")])
 
     @unittest.skipUnless(REAL_OMP, "real omp binary not found")
     def test_dotenv_relocating_omp_state_fails_closed(self):
@@ -459,7 +470,7 @@ fi
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn(f"PROBE   {agent}/.env sets an OMP directory or profile variable", result.stderr)
                 self.assertEqual(before, self.snapshot())
-                self.assertEqual([], list(scratch.iterdir()))
+                self.assertEqual([], [p.name for p in scratch.iterdir() if p.name.startswith("omp-baseline-")])
 
     def test_upgrade_config_check_runs_in_scratch_home_and_restores_pins(self):
         # upgrade's post-install config check uses omp_probe, which needs the scratch HOME validate prepares.

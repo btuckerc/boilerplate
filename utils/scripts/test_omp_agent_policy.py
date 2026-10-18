@@ -37,6 +37,29 @@ NATIVE_DEFAULTS = {
 }
 
 
+def _case_sensitive_tmp() -> bool:
+    with tempfile.TemporaryDirectory() as d:
+        (pathlib.Path(d) / "CaseProbe").touch()
+        return not (pathlib.Path(d) / "caseprobe").exists()
+
+
+# APFS (the macOS default) folds case, so fixtures that need a case variant beside an existing entry cannot exist there.
+CASE_SENSITIVE = _case_sensitive_tmp()
+
+
+def aliases_existing(base: pathlib.Path, rel: str) -> bool:
+    """Whether a component of rel names an existing entry under another case spelling."""
+    d = base
+    for part in pathlib.PurePosixPath(rel).parts:
+        if not d.is_dir():
+            return False
+        names = os.listdir(d)
+        if part not in names and any(n.casefold() == part.casefold() for n in names):
+            return True
+        d = d / part
+    return False
+
+
 class PolicyTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -371,7 +394,7 @@ class PolicyTests(unittest.TestCase):
         self.assertIn(f"UNSUPPORTED agent root {registry}", result.stderr)
         self.assertIn(f"UNSUPPORTED agent root {registry}", result.stderr)
 
-    @unittest.skipUnless(os.name == "posix", "case-sensitive Linux discovery regression")
+    @unittest.skipUnless(CASE_SENSITIVE, "needs a case-sensitive filesystem: APFS opens HOME-TEMP as home-temp")
     def test_plugin_registry_case_distinct_home_is_not_a_ceiling(self):
         _, run = self.live_fixture()
         foreign = self.root / "HOME-TEMP"
@@ -533,6 +556,8 @@ class PolicyTests(unittest.TestCase):
             (f"{omp}/private_agent/private_agents/se\u017fance.md", f"{omp}/private_agent/private_agents/se\u017fance.md", "default", "fold to ASCII or ignore"),
         ]:
             with self.subTest(created=created):
+                if not CASE_SENSITIVE and aliases_existing(home, created):
+                    self.skipTest("needs a case-sensitive filesystem: APFS opens this name as the existing entry")
                 (home / created).parent.mkdir(parents=True, exist_ok=True)
                 (home / created).write_text(seance)
                 result = runs[profile]()

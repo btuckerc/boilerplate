@@ -564,17 +564,25 @@ check_manifest_status() {
     esac
 
     # A failed probe is not a clean diff: empty stdout from a failed chezmoi
-    # must never print OK.
+    # must never print OK. Inside a chezmoi run_ hook (OMP_BASELINE_IN_CHEZMOI=1)
+    # chezmoi holds its persistent-state lock, so a nested chezmoi diff can only
+    # fail ("timeout obtaining persistent state lock"): the drift probe is
+    # reported deferred, neither OK nor failed. decent-angl-sync reconcile and the
+    # hourly guard rerun validate once chezmoi has exited.
     local diff_rc=0
-    diff_output="$(cm diff "$live_path" 2>/dev/null)" || diff_rc=$?
-    if [ "$diff_rc" -ne 0 ]; then
-      printf 'LIVE    probe failed (chezmoi diff exit %s) %s\n' "$diff_rc" "$live_path" >&2
-      failures=1
-    elif [ -n "$diff_output" ]; then
-      printf 'LIVE    drift %s\n' "$live_path" >&2
-      failures=1
+    if [ "${OMP_BASELINE_IN_CHEZMOI:-0}" = 1 ]; then
+      printf 'LIVE    deferred %s (inside chezmoi apply; rerun validate after it)\n' "$live_path"
     else
-      printf 'OK      %s\n' "$live_path"
+      diff_output="$(cm diff "$live_path" 2>/dev/null)" || diff_rc=$?
+      if [ "$diff_rc" -ne 0 ]; then
+        printf 'LIVE    probe failed (chezmoi diff exit %s) %s\n' "$diff_rc" "$live_path" >&2
+        failures=1
+      elif [ -n "$diff_output" ]; then
+        printf 'LIVE    drift %s\n' "$live_path" >&2
+        failures=1
+      else
+        printf 'OK      %s\n' "$live_path"
+      fi
     fi
 
     if [ "$kind" = exec ] && [ ! -x "$live_path" ]; then

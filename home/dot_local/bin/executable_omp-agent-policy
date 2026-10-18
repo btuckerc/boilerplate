@@ -1621,7 +1621,7 @@ function main(): number {
 		const { patterns, via } = bundledSeance
 			? { patterns: [], via: "source-session (runtime-only)" }
 			: candidatePatterns(agent, settings, parent);
-		
+
 		let match: Match | undefined;
 		let pattern: string | undefined;
 		for (const p of patterns) {

@@ -1,0 +1,9 @@
+[1/4] compile core.c
+warning: implicit conversion loses precision [-Wconversion]
+[2/4] compile ui.c
+warning: unused parameter 'ctx' [-Wunused-parameter]
+[3/4] link pebble
+error: undefined reference to `touch_poll'
+[4/4] target ui FAILED
+[4/4] target firmware FAILED
+warning: linker input unused

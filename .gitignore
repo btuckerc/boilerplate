@@ -4,6 +4,8 @@
 # Backups
 *.bak*
 *.backup.*
+# ...but not the restic backup job's launchd template, whose name only looks like a backup.
+!home/dot_local/share/decent-angl/launchd/com.decentangl.restic.backup.plist.tmpl
 
 # Neovim
 lazy-lock.json
@@ -26,6 +28,8 @@ home/.chezmoistate
 # Temp files
 *.tmp
 *.log
+# ...but not eval case inputs.
+!utils/omp-context-eval/cases/*/*.log
 __pycache__/
 *.pyc
 

@@ -169,7 +169,7 @@ probe_copy_credentials_env() {
     }' "$1" >"$2")
 }
 
-# omp 18.10.4 AgentStorage.getSettings() reads agent.db's `settings` table, so
+# omp 18.12.1 AgentStorage.getSettings() reads agent.db's `settings` table (session/agent-storage.ts:484-491), so
 # a source-only copy of agent.db $1 drops its rows and keeps the credentials.
 probe_clear_settings() {
   python3 - "$1" <<'PY'
@@ -192,8 +192,8 @@ probe_copy_dotenv() {
   fi
 }
 
-# Native omp runs a config value that starts with "!" as `/bin/sh -c` and uses
-# its stdout (config/resolve-config-value.ts:104-105,116-145): models.yml
+# Native omp runs a config value starting with "!" as a shell command and uses its stdout
+# (config/resolve-config-value.ts:22-24,104-107,116-145): models.yml
 # apiKey and headers, auth.broker.url/token in config.yml and stored api_key
 # credentials, including broker-held ones. validate must run none of them, so
 # every probe runs where /bin/sh cannot start: bwrap with a stub bound over the

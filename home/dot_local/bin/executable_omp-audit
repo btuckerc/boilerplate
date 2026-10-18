@@ -2,8 +2,8 @@
 // Exact-candidate release audit: one read-only `auditor` (or `architect`) child, dispatched from a hardened project.
 // Paid (one Sol xhigh child plus a short director turn). Never call it from validate, guards or hooks.
 //
-// An ordinary task child inherits MCP servers (task/structured-subagent.ts:535-537,593-595) and, with tools.xdev,
-// a device-only write transport (tools/index.ts:861-888) that session_init.tools omits (task/executor.ts:4573-4589).
+// An ordinary task child inherits MCP servers (task/structured-subagent.ts:646-649) and, with tools.xdev,
+// a device-only write transport (tools/index.ts:861-888) that session_init.tools omits (task/executor.ts:4668-4681).
 // So the dispatcher runs `omp -p` in a fresh project of its own (<state>/runs/NAME/project) with async and xdev
 // off, structured results on, and every MCP server named in ~/.omp/agent/mcp.json disabled. That provisioning is best effort; the
 // post-run checks below are the guarantee: any MCP proxy, xd:// route, extra tool, other model, fallback or
@@ -11,7 +11,7 @@
 //
 // The caller outputSchema is the deployed auditor.md `output` (omp-agent-policy pins it), sent with schemaMode
 // strict; a caller schema wins over the agent's and strict mode rejects an invalid yield
-// (task/structured-subagent.ts:232-246). The packet is copied read-only into the run dir, the child reads that copy,
+// (task/structured-subagent.ts:241-254; task/executor.ts:754-789). The packet is copied read-only into the run dir, the child reads that copy,
 // and its digest is rechecked afterwards. The AGENT definition served is a byte copy of the hashed
 // ~/.omp/agent/agents/AGENT.md installed read-only as the sole file of the run project's `.omp/agents`: native
 // discovery takes the nearest project `.omp/agents` before the user dir, extension and plugin roots and bundled
@@ -66,7 +66,7 @@ const EXPECTED_SETTINGS: [string, boolean][] = [
 	["task.structured", true],
 	["async.enabled", false],
 ];
-// Each relocates the agent dir the child loads definitions from (18.10.4 packages/utils/src/dirs.ts:43,308,481).
+// Each relocates the agent dir the child loads definitions from (18.12.1 utils/src/dirs.ts:43,90-95,306-315,478-486).
 const RELOCATING_ENV = ["PI_CODING_AGENT_DIR", "OMP_PROFILE", "PI_PROFILE", "PI_CONFIG_DIR"];
 
 function usage(message: string): never {

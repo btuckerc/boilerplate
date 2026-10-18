@@ -21,7 +21,7 @@ REJECTED = (
     "Warning: models.yml validation failed \u2014 custom providers disabled\n"
     "Schema error: providers.llama.cpp.models.0.thinking.supportsDisplay: must be boolean (was a string)\n"
 )
-# `omp config list --json` values at the 18.10.4 schema defaults, for the settings the checker compares.
+# `omp config list --json` values at the 18.12.1 schema defaults, for the settings the checker compares.
 NATIVE_DEFAULTS = {
     "todo.enabled": True, "glob.enabled": True, "grep.enabled": True, "astGrep.enabled": False, "astEdit.enabled": True,
     "find.enabled": "auto", "debug.enabled": True, "launch.enabled": True, "checkpoint.enabled": False, "github.enabled": False,
@@ -29,8 +29,9 @@ NATIVE_DEFAULTS = {
     "lsp.enabled": True, "task.enableLsp": False, "bash.enabled": True, "ida.enabled": True, "goal.enabled": True,
     "externalThinking": False, "autolearn.enabled": False, "task.maxRecursionDepth": 2, "memory.backend": "off",
     "compaction.experimentalContextManagement": False, "eval.py": True, "eval.js": True,
-    "enabledProviders": [], "task.prewalk": False, "task.agentPrewalk": {}, "retry.enabled": True, "retry.modelFallback": True,
-    "retry.usageAwareFallback": False, "task.structured": False,
+    "advisor.continueSeverity": "concern", "lsp.requestTimeout": 10, "sharpshooter.minPromptLength": 16, "statusLine.segmentOptions": {},
+    "enabledProviders": [], "task.prewalk": False, "task.agentPrewalk": {}, "prewalk.auto": "off", "prewalk.autoTarget": "@smol",
+    "retry.enabled": True, "retry.modelFallback": True, "retry.usageAwareFallback": False, "task.structured": False,
     "modelRoles": {}, "task.agentModelOverrides": {}, "task.disabledAgents": [], "task.maxEffort": "max",
     "disabledProviders": [], "extensions": [],
 }
@@ -43,7 +44,7 @@ class PolicyTests(unittest.TestCase):
         self.root = pathlib.Path(self.tmp.name)
         manifest = self.root / "home/dot_config/decent-angl/omp-baseline-manifest.tsv"
         manifest.parent.mkdir(parents=True)
-        manifest.write_text("# omp-version 18.10.4\n")
+        manifest.write_text("# omp-version 18.12.1\n")
         self.agent = self.root / "home/private_dot_omp/private_agent"
         (self.agent / "private_agents").mkdir(parents=True)
         self.config = self.agent / "private_config.yml"
@@ -97,7 +98,7 @@ class PolicyTests(unittest.TestCase):
         env = {**os.environ, "HOME": str(self.root / "home-temp")}
         return subprocess.run([BUN, str(CHECKER), "--root", str(self.root), *args], capture_output=True, text=True, env=env)
 
-    def evidence(self, models=None, models_file=None, profile="default", stderr="", version="18.10.4", native=None):
+    def evidence(self, models=None, models_file=None, profile="default", stderr="", version="18.12.1", native=None):
         """--catalog evidence as omp-baseline writes it: the native listing and settings, its stderr and what it covered."""
         models_file = models_file or self.agent / "private_models.yml"
         out = self.root / f"evidence-{next(self.serial)}.json"
@@ -278,7 +279,7 @@ class PolicyTests(unittest.TestCase):
         def run(live_dir=live, args=(), at=None, **extra):
             catalog = self.evidence(models_file=live_dir / "models.yml")
             return subprocess.run(
-                [BUN, str(CHECKER), "--live", str(live_dir), "--omp-version", "omp/18.10.4", "--cwd", str(at or cwd), "--catalog", catalog, *args],
+                [BUN, str(CHECKER), "--live", str(live_dir), "--omp-version", "omp/18.12.1", "--cwd", str(at or cwd), "--catalog", catalog, *args],
                 capture_output=True, text=True, env={**env, **extra},
             )
         return cwd, run
@@ -300,6 +301,14 @@ class PolicyTests(unittest.TestCase):
         for at in (home, self.root / "home-link"):
             result = run(at=at)
             self.assertEqual(result.returncode, 0, result.stderr)
+        project = home / "project"
+        (project / ".git").mkdir(parents=True)
+        (home / ".omp/agents").mkdir(parents=True)
+        (home / ".omp/agents/architect.md").write_text(
+            "---\nname: architect\ndescription: project walk loads this user-layout directory\nmodel: anthropic/claude-opus-5-5\nthinkingLevel: low\n---\n")
+        project_result = run(at=project)
+        self.assertEqual(project_result.returncode, 1)
+        self.assertIn("MISSING architect expected user definition; effective project", project_result.stderr)
 
     def test_20_live_host_overlay_and_plugin_registry(self):
         cwd, run = self.live_fixture()
@@ -314,7 +323,195 @@ class PolicyTests(unittest.TestCase):
         registry.write_text('{"version": 2, "plugins": {}}')
         result = run()
         self.assertEqual(result.returncode, 1)
+        foreign = self.root / "srv/foreign"
+        repo = foreign / "repo"
+        (repo / ".git").mkdir(parents=True)
+        (foreign / ".omp/agent").mkdir(parents=True)
+        (foreign / ".omp/plugins").mkdir(parents=True)
+        (self.root / "srv/.omp/plugins").mkdir(parents=True)
+        registry = self.root / "srv/.omp/plugins/installed_plugins.json"
+        registry.write_text('{"version": 2, "plugins": {}}')
+        result = run(at=repo)
+        self.assertEqual(result.returncode, 1)
         self.assertIn(f"UNSUPPORTED agent root {registry}", result.stderr)
+        self.assertIn(f"UNSUPPORTED agent root {registry}", result.stderr)
+
+    @unittest.skipUnless(os.name == "posix", "case-sensitive Linux discovery regression")
+    def test_plugin_registry_case_distinct_home_is_not_a_ceiling(self):
+        _, run = self.live_fixture()
+        foreign = self.root / "HOME-TEMP"
+        repo = foreign / "repo"
+        (repo / ".git").mkdir(parents=True)
+        plugin = self.root / "case-plugin"
+        (plugin / "agents").mkdir(parents=True)
+        (plugin / "agents/task.md").write_text("---\nname: task\ndescription: plugin task\ntools: [read]\n---\n")
+        registry = foreign / ".omp/plugins/installed_plugins.json"
+        registry.parent.mkdir(parents=True)
+        registry.write_text(json.dumps({"version": 2, "plugins": {"case@test": [
+            {"scope": "project", "installPath": str(plugin), "version": "1.0.0", "enabled": True},
+        ]}}))
+        result = run(at=repo)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn(f"UNSUPPORTED agent root {registry}", result.stderr)
+
+    def test_plugin_registry_agent_file_is_not_a_foreign_user_root(self):
+        _, run = self.live_fixture()
+        foreign = self.root / "srv/foreign"
+        repo = foreign / "repo"
+        (repo / ".git").mkdir(parents=True)
+        (foreign / ".omp").mkdir()
+        (foreign / ".omp/agent").write_text("a file, not a user agent directory\n")
+        plugin = self.root / "foreign-plugin"
+        (plugin / "agents").mkdir(parents=True)
+        (plugin / "agents/task.md").write_text("---\nname: task\ndescription: plugin task\ntools: [read]\n---\n")
+        registry = foreign / ".omp/plugins/installed_plugins.json"
+        registry.parent.mkdir()
+        registry.write_text(json.dumps({"version": 2, "plugins": {"foreign@test": [
+            {"scope": "project", "installPath": str(plugin), "version": "1.0.0", "enabled": True},
+        ]}}))
+        result = run(at=repo)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn(f"UNSUPPORTED agent root {registry}", result.stderr)
+
+    def test_plugin_registry_agent_symlink_to_active_agent_dir_is_screened(self):
+        # Upstream helpers.ts:1061-1065 compares real paths with getAgentDir(): an .omp/agent that links to the
+        # active agent dir is not foreign, so its registry is the one selected and must be screened.
+        _, run = self.live_fixture()
+        shared = self.root / "srv/shared"
+        repo = shared / "repo"
+        (repo / ".git").mkdir(parents=True)
+        (shared / ".omp").mkdir()
+        (shared / ".omp/agent").symlink_to(self.root / "home-temp/.omp/agent", target_is_directory=True)
+        plugin = self.root / "shared-plugin"
+        (plugin / "agents").mkdir(parents=True)
+        (plugin / "agents/task.md").write_text("---\nname: task\ndescription: plugin task\ntools: [read]\n---\n")
+        registry = shared / ".omp/plugins/installed_plugins.json"
+        registry.parent.mkdir()
+        registry.write_text(json.dumps({"version": 2, "plugins": {"shared@test": [
+            {"scope": "project", "installPath": str(plugin), "version": "1.0.0", "enabled": True},
+        ]}}))
+        result = run(at=repo)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn(f"UNSUPPORTED agent root {registry}", result.stderr)
+
+    def test_plugin_registry_of_every_profile_is_screened(self):
+        # utils/src/dirs.ts:342-434,669-674: a named profile keeps plugins under its own data root,
+        # ~/.omp/profiles/<name> or $XDG_DATA_HOME/omp/profiles/<name>, which the checker must not skip.
+        _, run = self.live_fixture()
+        home = self.root / "home-temp"
+        xdg = self.root / "xdg-data"
+        registries = [home / ".omp/profiles/local/plugins/installed_plugins.json", xdg / "omp/profiles/work/plugins/installed_plugins.json"]
+        for registry in registries:
+            registry.parent.mkdir(parents=True)
+            registry.write_text('{"version": 2, "plugins": {}}')
+        result = run(XDG_DATA_HOME=str(xdg))
+        self.assertEqual(result.returncode, 1, result.stderr)
+        for registry in registries:
+            self.assertIn(f"UNSUPPORTED agent root {registry}", result.stderr)
+
+    @unittest.skipIf(os.name != "posix" or os.geteuid() == 0, "needs a non-root POSIX user for EACCES")
+    def test_unlistable_profiles_dir_fails_closed(self):
+        # A searchable but unreadable profiles dir would hide every profile's registry.
+        _, run = self.live_fixture()
+        profiles = self.root / "home-temp/.omp/profiles"
+        (profiles / "local/plugins").mkdir(parents=True)
+        (profiles / "local/plugins/installed_plugins.json").write_text('{"version": 2, "plugins": {}}')
+        profiles.chmod(0o111)
+        self.addCleanup(profiles.chmod, 0o755)
+        result = run()
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn(f"UNSUPPORTED agent root {profiles} cannot be listed (EACCES)", result.stderr)
+
+    def test_source_deploying_a_plugin_registry_fails_closed(self):
+        # Managed plugin registries (user, profile, XDG, project, Claude) change agent discovery after deployment.
+        catalog = self.evidence()
+        self.assertEqual(self.run_checker("--catalog", catalog).returncode, 0)
+        home = self.root / "home"
+        for created, cleanup, message in [
+            ("private_dot_omp/private_plugins/installed_plugins.json", "private_dot_omp/private_plugins", "deploys plugin registry ~/.omp/plugins"),
+            ("private_dot_omp/private_profiles/work/plugins/x", "private_dot_omp/private_profiles/work", "deploys plugin registry ~/.omp/profiles/work/plugins"),
+            ("dot_local/share/omp/plugins/x", "dot_local/share/omp", "deploys plugin registry ~/.local/share/omp/plugins"),
+            ("xdg/omp/profiles/w/plugins/x", "xdg", "deploys plugin registry ~/xdg/omp/profiles/w/plugins"),
+            ("src/app/dot_omp/plugins/x", "src", "deploys plugin registry ~/src/app/.omp/plugins"),
+            ("dot_claude/plugins/installed_plugins.json", "dot_claude/plugins", "deploys plugin registry ~/.claude/plugins"),
+            ("dot_local/share/symlink_omp", "dot_local/share/symlink_omp", f"UNSUPPORTED source {home / 'dot_local/share/symlink_omp'}"),
+            (".chezmoiexternal.toml", ".chezmoiexternal.toml", "chezmoi external not mirrored"),
+        ]:
+            with self.subTest(created=created):
+                (home / created).parent.mkdir(parents=True, exist_ok=True)
+                (home / created).write_text("{}\n")
+                result = self.run_checker("--catalog", catalog)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn(message, result.stderr)
+                target = home / cleanup
+                shutil.rmtree(target) if target.is_dir() else target.unlink()
+                self.assertEqual(self.run_checker("--catalog", catalog).returncode, 0)
+
+    def test_source_alternative_spellings_fail_closed(self):
+        # Only the canonical source spellings are mirrored (and probed by omp-baseline); any other entry deploying the
+        # same target fails closed, whichever profile it serves. Agent files are read by their target names.
+        local = self.root / "home/private_dot_omp/private_profiles/local/private_agent"
+        (local / "private_agents").mkdir(parents=True)
+        (local / "private_config.yml").write_text(self.config.read_text())
+        runs = {
+            "default": lambda *a: self.run_checker("--catalog", self.evidence(), *a),
+            "local": lambda *a: self.run_checker("--profile", "local", "--catalog", self.evidence(models_file=local / "private_models.yml", profile="local"), *a),
+        }
+        for run in runs.values():
+            result = run()
+            self.assertEqual(result.returncode, 0, result.stderr)
+        home = self.root / "home"
+        seance = "---\nname: seance\ndescription: fixture\nmodel: '@task'\nthinkingLevel: low\ntools: [bash, write]\n---\n"
+        omp = "private_dot_omp"
+        for created, cleanup, profile, message in [
+            (f"{omp}/private_profiles/local/private_agent/agents/seance.md", f"{omp}/private_profiles/local/private_agent/agents", "local", "deploys agents; only private_agents is mirrored"),
+            (f"{omp}/private_agent/exact_agents/seance.md", f"{omp}/private_agent/exact_agents", "default", "deploys agents; only private_agents is mirrored"),
+            (f"{omp}/private_agent/agents.literal/seance.md", f"{omp}/private_agent/agents.literal", "default", "deploys agents; only private_agents is mirrored"),
+            ("dot_omp/agent/agents/seance.md", "dot_omp", "default", "deploys .omp; only private_dot_omp is mirrored"),
+            (f"{omp}/agent/agents/seance.md", f"{omp}/agent", "default", "deploys agent; only private_agent is mirrored"),
+            (f"{omp}/private_profiles/exact_local/agent/agents/seance.md", f"{omp}/private_profiles/exact_local", "local", "deploys local; only local is mirrored"),
+            (f"{omp}/private_profiles/work/private_agent/private_agents/seance.md", f"{omp}/private_profiles/work", "default", "(profile work not certified"),
+            (f"{omp}/private_agent/config.yaml", f"{omp}/private_agent/config.yaml", "default", "deploys config.yaml; only no entry is mirrored"),
+            (f"{omp}/private_agent/models.yml", f"{omp}/private_agent/models.yml", "default", "deploys models.yml; only private_models.yml is mirrored"),
+            (f"{omp}/private_agent/private_agents/symlink_seance.md", f"{omp}/private_agent/private_agents/symlink_seance.md", "default", "(chezmoi symlink, script or encrypted entry not mirrored)"),
+            (f"{omp}/private_agent/private_agents/encrypted_seance.md.age", f"{omp}/private_agent/private_agents/encrypted_seance.md.age", "default", "(encrypted; contents not mirrored)"),
+            (f"{omp}/agents/seance.md", f"{omp}/agents", "default", "deploys project agents dir ~/.omp/agents; not mirrored"),
+            ("src/app/dot_omp/exact_agents/seance.md", "src", "default", "deploys project agents dir ~/src/app/.omp/agents; not mirrored"),
+        ]:
+            with self.subTest(created=created):
+                (home / created).parent.mkdir(parents=True, exist_ok=True)
+                (home / created).write_text(seance)
+                result = runs[profile]()
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn(message, result.stderr)
+                target = home / cleanup
+                shutil.rmtree(target) if target.is_dir() else target.unlink()
+                result = runs[profile]()
+                self.assertEqual(result.returncode, 0, result.stderr)
+        # A prefixed or .literal name deploys seance.md verbatim, so it is parsed as the user seance it shadows with.
+        for name in ("private_seance.md", "seance.md.literal", "readonly_seance.md"):
+            with self.subTest(parsed=name):
+                (self.agent / "private_agents" / name).write_text(seance)
+                result = runs["default"]("--json")
+                report = self.agent_report(result, "seance")
+                self.assertEqual((report["source"], report["path"]), ("user", str(self.agent / "private_agents" / name)))
+                self.assertIn("bash", report["declared"])
+                (self.agent / "private_agents" / name).unlink()
+
+    def test_source_agents_resolve_in_deployed_name_order(self):
+        # Upstream sorts the deployed names and keeps the first definition of a name: private_aaa.md deploys aaa.md,
+        # which precedes architect.md, so its architect is the one dispatched and must be the one certified.
+        catalog = self.evidence()
+        aaa = self.agent / "private_agents/private_aaa.md"
+        aaa.write_text("---\nname: architect\ndescription: fixture\nmodel: '@task'\nthinkingLevel: low\ntools: [bash, write]\n---\n")
+        result = self.run_checker("--json", "--catalog", catalog)
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(self.agent_report(result, "architect")["path"], str(aaa))
+        self.assertTrue(any(e.startswith("TOOLS architect declared [bash, write]") for e in json.loads(result.stdout)["errors"]), result.stdout)
+        # Two entries deploying one target are an inconsistent chezmoi state and fail closed.
+        (self.agent / "private_agents/aaa.md").write_text(aaa.read_text())
+        result = self.run_checker("--catalog", catalog)
+        self.assertIn(f"deploys aaa.md, as does", result.stderr)
 
     def agent_report(self, result, name):
         return next(agent for agent in json.loads(result.stdout)["agents"] if agent["name"] == name)
@@ -405,7 +602,7 @@ class PolicyTests(unittest.TestCase):
         raw = self.root / "raw.json"
         raw.write_text('{"models": []}')
         for catalog, message in [
-            (self.evidence(version="18.4.4"), "was captured on omp 18.4.4, checking 18.10.4"),
+            (self.evidence(version="18.4.4"), "was captured on omp 18.4.4, checking 18.12.1"),
             (self.evidence(profile="local"), "was captured for profile local, checking default"),
             (stale, f"was captured from a different {models}"),
             (str(raw), "is not native catalog evidence"),
@@ -435,6 +632,14 @@ class PolicyTests(unittest.TestCase):
         (home / ".claude/hooks/herdr-agent-state.sh").write_text("#!/bin/sh\n")  # neither pre/ nor post/
         result = run()
         self.assertEqual(result.returncode, 0, result.stderr)
+        symlink_target = self.root / "external-hook.ts"
+        symlink_target.write_text("export default () => {};\n")
+        hook = cwd / ".omp/hooks/pre/shared.ts"
+        hook.parent.mkdir(parents=True)
+        hook.symlink_to(symlink_target)
+        result = run()
+        self.assertIn(f"UNSUPPORTED hook {hook} (not mirrored)", result.stderr)
+        hook.unlink()
         extra = live / "extensions/extra.ts"
         extra.write_text("export default (pi) => pi.registerTool({ name: 'extra_write' });\n")
         digest = hashlib.sha256(extra.read_bytes()).hexdigest()
@@ -523,6 +728,8 @@ class PolicyTests(unittest.TestCase):
     def test_30_environment_screen(self):
         cwd, run = self.live_fixture()
         self.assertEqual(run(PI_SESSION_FILE="/x.jsonl", PI_AUTH_BROKER_URL="http://x").returncode, 0)
+        self.assertEqual(run(PI_REQUEST_COMPRESSION="0").returncode, 0)
+        self.assertIn("UNSUPPORTED env PI_CODEX_ZSTD is set", run(PI_CODEX_ZSTD="0").stderr)
         result = run(PI_FROBNICATE="1")
         self.assertEqual(result.returncode, 1)
         self.assertIn("UNSUPPORTED env PI_FROBNICATE is set (not mirrored)", result.stderr)
@@ -590,7 +797,7 @@ class PolicyTests(unittest.TestCase):
             (base, {"retry.modelFallback": True}, "SETTINGS retry.modelFallback mirror false native true"),
             (base.replace(retry_off, ""), {"retry.modelFallback": True}, "RUNTIME architect retry may switch models"),
             (base.replace("  structured: true\n", ""), {"task.structured": False},
-             "RUNTIME task.structured is off: children get no yield tool and output schemas are dropped"),
+             "RUNTIME architect task.structured is off: caller output schemas are dropped"),
             (base.replace("  agentModelOverrides: {}\n", "  agentModelOverrides: {}\n  agentPrewalk: {sol: 'on'}\n"),
              {"task.agentPrewalk": {"sol": "on"}}, "RUNTIME sol prewalk armed (@smol)"),
         ]:
@@ -649,9 +856,8 @@ class PolicyTests(unittest.TestCase):
         self.assertNotIn("command-backed", run().stderr)
 
     def test_37_tool_lists_parse_like_native(self):
-        # discovery/helpers.ts parseArrayOrCSV: a list with no string items, or an empty string, is no list at all,
-        # so the agent gets every tool; only a literal [] is an empty list. Array items are not trimmed.
-        cases = {"tools: [42]": None, "tools: \"\"": None, "tools: \" , \"": None, "tools: []": [],
+        # Malformed/empty declarations fail closed to an empty allowlist; only absent/null selects defaults.
+        cases = {"tools: [42]": [], "tools: \"\"": [], "tools: \" , \"": [], "tools: []": [],
                  "tools: [\" bash\"]": [" bash"], "tools: \" bash, read \"": ["bash", "read"]}
         for line, declared in cases.items():
             with self.subTest(line=line):
@@ -659,6 +865,77 @@ class PolicyTests(unittest.TestCase):
                     f"---\nname: extra\ndescription: x\nmodel: llama.cpp/test\nthinkingLevel: low\n{line}\n---\n")
                 result = self.run_checker("--json")
                 self.assertEqual(self.agent_report(result, "extra")["declared"], declared)
+
+    def test_malformed_tools_declaration_grants_no_builtin_tools(self):
+        (self.agent / "private_agents/extra.md").write_text(
+            "---\nname: extra\ndescription: x\nmodel: llama.cpp/test\nthinkingLevel: low\ntools: [42]\n---\n")
+        result = self.agent_report(self.run_checker("--json"), "extra")
+        self.assertEqual(result["declared"], [])
+        self.assertNotIn("read", result["callable"])
+
+    def test_agent_structured_override_keeps_own_schema_but_not_caller_contract(self):
+        # task.structured off: structured: true keeps yield and the agent's own schema (structured-subagent.ts:241-254)
+        # but task/index.ts:781-782 drops caller schemas, so a contract agent still fails.
+        self.config.write_text(self.config.read_text().replace("  structured: true\n", "  structured: false\n"))
+        self.native["task.structured"] = False
+        schema = {"type": "object", "required": ["answer"], "properties": {"answer": {"type": "string"}}}
+        (self.agent / "private_agents/extra.md").write_text("---\nname: extra\ndescription: x\nmodel: llama.cpp/test\nthinkingLevel: low\nstructured: true\noutput:\n  type: object\n  required: [answer]\n  properties:\n    answer: {type: string}\ntools: [read]\n---\n")
+        architect = self.agent / "private_agents/architect.md"
+        architect.write_text(architect.read_text().replace("thinkingLevel:", "structured: true\nthinkingLevel:", 1))
+        result = self.run_checker("--json", "--catalog", self.evidence())
+        extra = self.agent_report(result, "extra")
+        self.assertEqual(extra["output"], schema)
+        self.assertTrue(extra["structured"])
+        self.assertIn("yield", extra["callable"])
+        self.assertIn("yield", self.agent_report(result, "architect")["callable"])
+        result = self.run_checker("--catalog", self.evidence())
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("RUNTIME architect task.structured is off: caller output schemas are dropped (frontmatter structured: true", result.stderr)
+
+    def test_agent_structured_override_and_auto_prewalk(self):
+        self.config.write_text(self.config.read_text().replace("  structured: true\n", ""))
+        self.config.write_text(self.config.read_text() + "prewalk:\n  auto: suggest\n")
+        self.native["prewalk.auto"] = "suggest"
+        self.assertNotIn("automatic prewalk is on", self.run_checker("--catalog", self.evidence()).stderr)
+        self.config.write_text(self.config.read_text().replace("auto: suggest", "auto: on"))
+        self.native["prewalk.auto"] = "on"
+        self.assertIn("automatic prewalk is on", self.run_checker("--catalog", self.evidence()).stderr)
+
+    def test_seance_is_a_bundled_agent_with_restricted_policy(self):
+        report = self.agent_report(self.run_checker("--json"), "seance")
+        self.assertEqual(report["source"], "bundled")
+        self.assertIsNone(report["model"])
+        self.assertEqual(report["mcp"], [])
+        self.assertTrue(report["structured"])
+        self.assertEqual(report["callable"], ["read", "grep", "glob", "yield"])
+        # v18.12.1 task/index.ts:781-785, structured-subagent.ts:403-405; bundled frontmatter
+        # (prompts/agents/seance.md:1-6) does not opt in when task.structured is off.
+        self.config.write_text(self.config.read_text().replace("  structured: true\n", "  structured: false\n"))
+        report = self.agent_report(self.run_checker("--json"), "seance")
+        self.assertFalse(report["structured"])
+        self.assertEqual(report["callable"], ["read", "grep", "glob"])
+
+    def test_user_seance_shadow_has_ordinary_policy(self):
+        self.add("seance", "llama.cpp/test", "low", ["read", "grep", "glob"])
+        cwd, run = self.live_fixture()
+        (cwd / ".omp/mcp.json").write_text(json.dumps({"mcpServers": {"proj": {"command": "x"}}}))
+        result = run(args=["--json"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = self.agent_report(result, "seance")
+        self.assertEqual(report["source"], "user")
+        self.assertEqual(report["model"], "llama.cpp/test")
+        self.assertEqual(report["thinking"], "low")
+        self.assertEqual(report["thinkingLayer"], "frontmatter")
+        self.assertTrue(report["structured"])
+        self.assertEqual(report["callable"], ["read", "grep", "glob", "yield", "write(xd-devices-only)"])
+        self.assertEqual(report["mcp"], ["proj"])
+        self.assertEqual(report["path"], str(self.root / "home-temp/.omp/agent/agents/seance.md"))
+
+    def test_text_report_includes_definition_path(self):
+        result = self.run_checker("--catalog", self.evidence())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"source=user {self.agent / 'private_agents/architect.md'}", result.stdout)
+        self.assertNotIn("undefined", result.stdout)
 
     def test_38_escalation_model_lists_and_auditor_schema(self):
         catalog = lambda: self.evidence()

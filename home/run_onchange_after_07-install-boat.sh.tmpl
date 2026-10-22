@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Boat (boat.dev) sandbox CLI. Installs the static binary only: the upstream
+# installer also rewrites shell rc files and starts interactive onboarding.
+# The binary updates itself afterwards. Sign-in is machine-local state:
+#   boat login --key-stdin < key-file   (see the boat skill)
+
+bin="$HOME/.local/bin/boat"
+[ -x "$bin" ] && exit 0
+
+case "$(uname -s)" in
+  Linux) os=linux ;;
+  Darwin) os=darwin ;;
+  *) echo "boat: unsupported OS $(uname -s)" >&2; exit 1 ;;
+esac
+case "$(uname -m)" in
+  x86_64|amd64) arch=x64 ;;
+  arm64|aarch64) arch=arm64 ;;
+  *) echo "boat: unsupported arch $(uname -m)" >&2; exit 1 ;;
+esac
+
+mkdir -p "$HOME/.local/bin"
+tmp="$(mktemp)"
+trap 'rm -f "$tmp"' EXIT
+curl --proto '=https' --tlsv1.2 -fsSL \
+  "https://boat.dev/api/boat/cli/download?platform=$os-$arch&channel=prod" -o "$tmp"
+chmod 755 "$tmp"
+BOAT_NO_UPDATE=1 "$tmp" --version >/dev/null
+mv "$tmp" "$bin"
+trap - EXIT

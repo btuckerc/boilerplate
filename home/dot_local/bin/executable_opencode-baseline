@@ -3,6 +3,15 @@ set -eu
 
 # Resolve the applied shared mise pin outside project overrides, but keep the
 # caller's working directory when launching OpenCode.
+# This is a mise exec equivalent that preserves the caller's working directory.
+# T3 recognizes mise exec wrappers as package-managed, so it must not run the
+# upstream self-updater against a version-pinned binary.
+case "${1:-}" in
+  upgrade|update)
+    echo "OpenCode is pinned by the shared mise baseline. Update opencode in ~/src/boilerplate/home/dot_config/mise/config.toml, apply it, then run mise install opencode." >&2
+    exit 2
+    ;;
+esac
 mise_bin=""
 for candidate in \
   "$(command -v mise 2>/dev/null || true)" \

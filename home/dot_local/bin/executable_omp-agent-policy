@@ -13,7 +13,9 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-const MIRRORED_OMP = ["18.12.1"];
+// Rechecked against v18.12.6: fresh dispatch grants/discovery remain unchanged;
+// widget role fallback and the runtime task.enableEffort gate are mirrored below.
+const MIRRORED_OMP = ["18.12.6"];
 const USAGE = `usage: omp-agent-policy (--root REPO | --live AGENT_DIR --omp-version VER) [options]
   --root REPO            chezmoi source tree; no HOME or cwd reads
   --live AGENT_DIR       deployed agent dir (e.g. ~/.omp/agent)
@@ -35,12 +37,13 @@ const EFFORTS = ["minimal", "low", "medium", "high", "xhigh", "max"];
 // tui/src/thinking.ts THINKING_LEVEL_BY_SELECTOR
 const SELECTORS = ["inherit", "off", ...EFFORTS];
 // tui/src/overlays/model-browser.ts:71-87 MODEL_ROLE_IDS
-const ROLE_IDS = new Set(["default", "smol", "slow", "vision", "plan", "commit", "tiny", "memory", "task", "advisor", "image", "web", "speech", "dictation", "judge"]);
+const ROLE_IDS = new Set(["default", "smol", "slow", "vision", "plan", "commit", "tiny", "memory", "task", "advisor", "widget", "image", "web", "speech", "dictation", "judge"]);
 // config/model-resolver.ts:1128-1132
 const ROLE_CONFIGURED_FALLBACK: Record<string, { role: string; configuredOnly: boolean }> = {
 	advisor: { role: "slow", configuredOnly: true },
 	memory: { role: "tiny", configuredOnly: false },
 	tiny: { role: "smol", configuredOnly: false },
+	widget: { role: "smol", configuredOnly: false },
 };
 
 /** Default-profile contracts. `model` is an exact id or, with a leading ^, a regex. */
@@ -1204,7 +1207,7 @@ function taskEffort(agent: string, m: any, effort: string, ceiling: string): str
  */
 function resolveThinking(agent: Agent, match: Match | undefined, settings: any, models: any, catalog: any[] | undefined, effort?: string) {
 	const m = modelOf(catalog, match?.model);
-	if (effort) {
+	if (effort && gate(settings, "task.enableEffort") === true) {
 		if (!catalog) errors.push(`UNVERIFIED ${agent.name} effort mapping needs --catalog`);
 		else {
 			const level = taskEffort(agent.name, m, effort, settings.task.maxEffort ?? "max");
@@ -1237,6 +1240,7 @@ function resolveThinking(agent: Agent, match: Match | undefined, settings: any, 
  * additional settings are included so native effective-value evidence covers the 18.12.1 contract.
  */
 const GATE_DEFAULTS: Record<string, unknown> = {
+	"task.enableEffort": false,
 	"todo.enabled": true, "glob.enabled": true, "grep.enabled": true, "astGrep.enabled": false, "astEdit.enabled": true,
 	"advisor.continueSeverity": "concern", "lsp.requestTimeout": 10, "sharpshooter.minPromptLength": 16, "statusLine.segmentOptions": {},
 	"find.enabled": "auto", "debug.enabled": true, "launch.enabled": true, "checkpoint.enabled": false, "github.enabled": false,

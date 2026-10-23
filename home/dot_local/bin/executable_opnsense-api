@@ -4,8 +4,6 @@ set -eu
 # Talk to the LAN OPNsense REST API with HTTP Basic key/secret auth.
 # Never prints credentials. Secrets stay machine-local.
 
- 
-
 normalize_fp() {
     printf '%s' "$1" | tr '[:lower:]' '[:upper:]' | tr -d '[:space:]:'
 }

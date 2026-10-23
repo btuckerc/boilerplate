@@ -156,8 +156,7 @@ Applications/Codex Third.app/**
 !.local/bin/decent-angl-doctor
 !.local/bin/decent-angl-skills
 !.local/bin/decent-angl-sync
-!.local/bin/bw-ensure-auth
-!.local/bin/bw-secret
+!.local/bin/op-secret
 !.local/bin/opnsense-*
 !.local/bin/nous-git-mirror
 !.config/systemd
@@ -168,6 +167,8 @@ Applications/Codex Third.app/**
 !.config/systemd/user/omp-chrome-reaper.timer
 !.local/share
 !.local/share/decent-angl
+!.local/share/decent-angl/bin
+!.local/share/decent-angl/bin/bw_bot.py
 !.local/share/decent-angl/skills
 # Excludes beat ignores: whitelist skills by name, skipping `.macos-only` ones.
 {{- range glob (joinPath .chezmoi.sourceDir "dot_local/share/decent-angl/skills/*") }}

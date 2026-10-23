@@ -1,0 +1,43 @@
+#!/bin/sh
+set -eu
+
+quote_sh() {
+    printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
+CONFIG_FILE="${RESTIC_CONFIG_FILE:-$HOME/.config/decent-angl/restic.env}"
+if [ -f "$CONFIG_FILE" ]; then
+    # shellcheck disable=SC1090
+    . "$CONFIG_FILE"
+fi
+
+if [ "${RESTIC_OFFSITE_ENABLED:-0}" != "1" ]; then
+    echo "Offsite restic target is not enabled in $CONFIG_FILE." >&2
+    exit 1
+fi
+
+provider="${RESTIC_OFFSITE_PROVIDER:-}"
+if [ "$provider" != "rest-server" ]; then
+    echo "Unsupported offsite provider: ${provider:-unset}" >&2
+    exit 1
+fi
+
+rest_username="${RESTIC_REST_USERNAME:-}"
+rest_password="${RESTIC_REST_PASSWORD:-}"
+if [ -z "$rest_username" ] || [ -z "$rest_password" ]; then
+    item="${RESTIC_OFFSITE_VAULT_ITEM:-restic-offsite-rest-server}"
+    OP_SECRET="${OP_SECRET_BIN:-$HOME/.local/bin/op-secret}"
+    if [ ! -x "$OP_SECRET" ]; then
+        echo "op-secret is unavailable." >&2
+        exit 127
+    fi
+    rest_username="$("$OP_SECRET" field "$item" username)"
+    rest_password="$("$OP_SECRET" field "$item" password)"
+    if [ -z "$rest_username" ] || [ -z "$rest_password" ]; then
+        echo "1Password item '$item' must store the rest-server username and password." >&2
+        exit 1
+    fi
+fi
+
+printf 'export RESTIC_REST_USERNAME=%s\n' "$(quote_sh "$rest_username")"
+printf 'export RESTIC_REST_PASSWORD=%s\n' "$(quote_sh "$rest_password")"

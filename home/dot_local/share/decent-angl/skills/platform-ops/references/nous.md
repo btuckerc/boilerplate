@@ -3,7 +3,7 @@
 `nous` is the default host for OMP and Herdr sessions (2026-09-23) and serves
 local inference. It is chezmoi machine `nous`, role `agent-host`: an allowlist
 applies only `~/.omp/agent`, skills, the mise pin file and hook, Herdr config,
-`.gitconfig` and the `omp-*`/`decent-angl-*`/`bw-*`/`opnsense-*` helpers. Its
+`.gitconfig` and the `omp-*`/`decent-angl-*`/`op-secret`/`opnsense-*` helpers. Its
 shell rc files, services and packages stay host-owned. `omp-baseline apply`
 installs only the agent toolchain there; the host-local
 `~/.config/mise/conf.d/agent-host.toml` disables the workstation tools.

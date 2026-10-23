@@ -161,7 +161,7 @@ fi
 
 if [ ! -f "$PASSWORD_FILE" ]; then
     echo "Missing machine-local restic password file: $PASSWORD_FILE" >&2
-    echo "Run 'restic-local-password sync' after unlocking Bitwarden, then try again." >&2
+    echo "Run 'restic-local-password sync' (op-secret, see machine-secrets), then try again." >&2
     exit 1
 fi
 

@@ -5,3 +5,11 @@
 # Retired 2026-10-15: /review is commands/review/index.ts (the auditor); OMP's
 # bundled /review custom command shadowed this prompt template anyway.
 .omp/agent/prompts/review.md
+# Retired 2026-10-23: Bitwarden helpers replaced by op-secret (1Password).
+.local/bin/bw-restic-password
+.local/bin/bw-secret
+.local/bin/bw-ensure-auth
+.local/bin/bw-home-status
+.local/bin/bw-vault-export
+.local/bin/bw-restic-offsite-env
+.local/share/decent-angl/skills/bitwarden-secrets

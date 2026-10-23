@@ -4,15 +4,7 @@ set -eu
 # Talk to the LAN OPNsense REST API with HTTP Basic key/secret auth.
 # Never prints credentials. Secrets stay machine-local.
 
-find_bin() {
-    for candidate in "$@"; do
-        if [ -n "$candidate" ] && [ -x "$candidate" ]; then
-            printf '%s\n' "$candidate"
-            return 0
-        fi
-    done
-    return 1
-}
+ 
 
 normalize_fp() {
     printf '%s' "$1" | tr '[:lower:]' '[:upper:]' | tr -d '[:space:]:'
@@ -27,7 +19,7 @@ load_config() {
 
     OPNSENSE_HOST="${OPNSENSE_HOST:-https://10.77.77.1}"
     OPNSENSE_HOSTNAME="${OPNSENSE_HOSTNAME:-OPNsense.internal}"
-    OPNSENSE_BW_ITEM="${OPNSENSE_BW_ITEM:-opnsense-api}"
+    OPNSENSE_VAULT_ITEM="${OPNSENSE_VAULT_ITEM:-opnsense-api}"
     OPNSENSE_TLS_FINGERPRINT_SHA256="${OPNSENSE_TLS_FINGERPRINT_SHA256:-20915FA97BB4B3E59F1B41563D7F13C07643BDFD55DFE85F8A703456BA13459E}"
     OPNSENSE_TLS_PINNED_PUBKEY_SHA256="${OPNSENSE_TLS_PINNED_PUBKEY_SHA256:-5g/kVN6nFwMdNqW9pWiKmtV9syYtqmHBBW4HX7YlZqs=}"
     OPNSENSE_SECRET_FILE="${OPNSENSE_SECRET_FILE:-$HOME/.local/share/decent-angl/secrets/opnsense-api.env}"
@@ -51,7 +43,7 @@ Usage: opnsense-api <command> [args]
 
 Commands:
   status              Check TLS pin, credential file, and firmware/info
-  sync                Write key/secret from Bitwarden to the local secret file
+  sync                Write key/secret from 1Password to the local secret file
   get <path>          GET /api/<path>
   post <path> [json]  POST /api/<path> (json file, JSON string, or stdin)
   apply-filter        POST firewall/filter/apply
@@ -111,8 +103,7 @@ load_secrets() {
     fi
     if [ -z "${OPNSENSE_API_KEY:-}" ] || [ -z "${OPNSENSE_API_SECRET:-}" ]; then
         echo "OPNsense API credentials are missing." >&2
-        echo "Create vault item '$OPNSENSE_BW_ITEM' (username=key, password=secret)," >&2
-        echo "unlock bw, then run: opnsense-api sync" >&2
+        echo "Create the item with opnsense-store-secret, then run opnsense-api sync." >&2
         exit 1
     fi
 }
@@ -142,6 +133,16 @@ is_destructive_path() {
     esac
 }
 
+curl_config_quote() {
+    printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+curl_auth_config() {
+    printf 'user = "%s:%s"\n' \
+        "$(curl_config_quote "$OPNSENSE_API_KEY")" \
+        "$(curl_config_quote "$OPNSENSE_API_SECRET")"
+}
+
 request() {
     method="$1"
     path="$(api_path "$2")"
@@ -165,10 +166,11 @@ request() {
     }
     trap cleanup EXIT INT TERM
 
+    # Credentials go to curl on stdin (-K -), never in its argv.
     set -- curl -sS -k -o "$tmp_body" -D "$tmp_hdr" \
         --max-time 30 \
         --pinnedpubkey "sha256//${OPNSENSE_TLS_PINNED_PUBKEY_SHA256}" \
-        -u "${OPNSENSE_API_KEY}:${OPNSENSE_API_SECRET}" \
+        -K - \
         -H "Accept: application/json" \
         -X "$method"
 
@@ -181,7 +183,7 @@ request() {
         fi
     fi
 
-    if ! "$@" "$url"; then
+    if ! curl_auth_config | "$@" "$url"; then
         echo "opnsense-api request failed: $method $url" >&2
         exit 1
     fi
@@ -222,7 +224,7 @@ cmd_status() {
 
     printf 'host=%s\n' "$OPNSENSE_HOST"
     printf 'connect=%s:%s\n' "$OPNSENSE_CONNECT_HOST" "$OPNSENSE_CONNECT_PORT"
-    printf 'vault_item=%s\n' "$OPNSENSE_BW_ITEM"
+    printf 'vault_item=%s\n' "$OPNSENSE_VAULT_ITEM"
     printf 'secret_file=%s\n' "$OPNSENSE_SECRET_FILE"
     printf 'secret_exists=%s\n' "$secret_exists"
     printf 'secret_mode=%s\n' "$secret_mode"
@@ -262,46 +264,17 @@ cmd_status() {
     fi
 }
 
-bw_bin() {
-    find_bin \
-        "${BW_BIN:-}" \
-        "$HOME/.local/share/mise/shims/bw" \
-        "$HOME/.local/bin/bw" \
-        "/opt/homebrew/bin/bw" \
-        "/usr/local/bin/bw" \
-        "$(command -v bw 2>/dev/null || true)"
-}
-
 cmd_sync() {
-    BW_BIN="$(bw_bin || true)"
-    if [ -z "${BW_BIN:-}" ]; then
-        echo "bw CLI not found." >&2
-        exit 1
+    OP_SECRET="${OP_SECRET_BIN:-$HOME/.local/bin/op-secret}"
+    if [ ! -x "$OP_SECRET" ]; then
+        echo "op-secret is unavailable." >&2
+        exit 127
     fi
-
-    status="$("$BW_BIN" status 2>/dev/null | sed -n 's/.*"status":"\([^"]*\)".*/\1/p' | sed -n '1p')"
-    status="${status:-unknown}"
-    case "$status" in
-        unlocked) ;;
-        unauthenticated)
-            echo "bw is unauthenticated; run 'bw login' first." >&2
-            exit 1
-            ;;
-        locked)
-            echo "bw is locked; run 'export BW_SESSION=\$(bw unlock --raw)' first." >&2
-            exit 1
-            ;;
-        *)
-            echo "Unable to determine bw status." >&2
-            exit 1
-            ;;
-    esac
-
-    key="$("$BW_BIN" get username "$OPNSENSE_BW_ITEM" 2>/dev/null || true)"
-    secret="$("$BW_BIN" get password "$OPNSENSE_BW_ITEM" 2>/dev/null || true)"
+    key="$("$OP_SECRET" field "$OPNSENSE_VAULT_ITEM" username)"
+    secret="$("$OP_SECRET" field "$OPNSENSE_VAULT_ITEM" password)"
     if [ -z "$key" ] || [ -z "$secret" ]; then
-        echo "Vaultwarden item '$OPNSENSE_BW_ITEM' is missing or incomplete." >&2
-        echo "Create a login item named '$OPNSENSE_BW_ITEM' with username=API key and password=API secret." >&2
+        echo "1Password item '$OPNSENSE_VAULT_ITEM' is missing or incomplete." >&2
+        echo "Create it with opnsense-store-secret." >&2
         exit 1
     fi
 

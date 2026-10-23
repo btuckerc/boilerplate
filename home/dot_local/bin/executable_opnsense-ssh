@@ -14,7 +14,7 @@ USER="${OPNSENSE_SSH_USER:-agent}"
 KEY_FILE="${OPNSENSE_SSH_KEY_FILE:-$HOME/.ssh/opnsense_agent}"
 
 if [ ! -f "$KEY_FILE" ]; then
-    echo "Missing $KEY_FILE. Unlock bw, then run: opnsense-agent-key" >&2
+    echo "Missing $KEY_FILE. Run: opnsense-agent-key" >&2
     exit 1
 fi
 

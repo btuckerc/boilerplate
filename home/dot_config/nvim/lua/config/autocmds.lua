@@ -95,3 +95,27 @@ vim.api.nvim_create_autocmd({ "BufWritePre" }, {
     vim.fn.mkdir(vim.fn.fnamemodify(file, ":p:h"), "p")
   end,
 })
+
+-- Secret files: no undo, swap or backup copies on disk, and no shada for the
+-- rest of the session so yanked values are not persisted either. BufFilePost
+-- and BufWritePre cover buffers renamed or saved into a secret path (:saveas);
+-- FileReadPre covers a secret file pulled into another buffer with :read.
+vim.api.nvim_create_autocmd({ "BufReadPre", "BufNewFile", "BufFilePost", "BufWritePre", "FileReadPre" }, {
+  group = augroup("secret_files"),
+  pattern = {
+    "*.env",
+    ".env",
+    ".env.*",
+    "*.password",
+    "*.passphrase*",
+    "*/secrets/*",
+    "*/.secrets/*",
+  },
+  callback = function(event)
+    vim.bo[event.buf].undofile = false
+    vim.bo[event.buf].swapfile = false
+    vim.opt.backup = false
+    vim.opt.writebackup = false
+    vim.opt.shada = ""
+  end,
+})

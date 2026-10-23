@@ -30,7 +30,7 @@ commit; no mutable live filesystem silently wins.
   files still deploy. Use `reconcile --with-scripts` only for reviewed hooks.
   Check the destination and PATH before diagnosing a missing wrapper.
 
-- Secrets and runtime state stay outside Git. Use `bitwarden-secrets`. The
+- Secrets and runtime state stay outside Git. Use `machine-secrets`. The
   publish scanner matches PEM armor (`-----BEGIN … PRIVATE KEY-----`), not
   wrappers that mention the header in source.
 

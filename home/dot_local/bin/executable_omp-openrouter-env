@@ -1,16 +1,16 @@
 #!/bin/sh
 set -eu
 
-# Inject Bitwarden item omp-openrouter into the machine-local OMP env file.
+# Inject 1Password item omp-openrouter into the machine-local OMP env file.
 # Never prints the key. Re-run after rotating the vault item.
 
-ITEM_NAME="${OPENROUTER_BW_ITEM:-omp-openrouter}"
+ITEM_NAME="${OPENROUTER_VAULT_ITEM:-omp-openrouter}"
 ENV_FILE="${OMP_OPENROUTER_ENV:-$HOME/.omp/agent/.env}"
 
-BW_SECRET="${BW_SECRET_BIN:-$HOME/.local/bin/bw-secret}"
-if [ ! -x "$BW_SECRET" ]; then
-    echo "bw-secret is unavailable; apply the shared decent-angl baseline first." >&2
+OP_SECRET="${OP_SECRET_BIN:-$HOME/.local/bin/op-secret}"
+if [ ! -x "$OP_SECRET" ]; then
+    echo "op-secret is unavailable; apply the shared decent-angl baseline first." >&2
     exit 127
 fi
 
-"$BW_SECRET" write-env "$ITEM_NAME" password OPENROUTER_API_KEY "$ENV_FILE"
+"$OP_SECRET" write-env "$ITEM_NAME" password OPENROUTER_API_KEY "$ENV_FILE"

@@ -51,9 +51,9 @@ RESTIC_MACHINE_REPO_BIN="$(find_bin \
 RESTIC_OFFSITE_REPO_BIN="$(find_bin \
     "$HOME/.local/bin/restic-offsite-repo" \
     "$(command -v restic-offsite-repo 2>/dev/null || true)")"
-BW_RESTIC_OFFSITE_ENV_BIN="$(find_bin \
-    "$HOME/.local/bin/bw-restic-offsite-env" \
-    "$(command -v bw-restic-offsite-env 2>/dev/null || true)")"
+RESTIC_OFFSITE_ENV_BIN="$(find_bin \
+    "$HOME/.local/bin/restic-offsite-env" \
+    "$(command -v restic-offsite-env 2>/dev/null || true)" || true)"
 
 case "$TARGET_NAME" in
     local)
@@ -90,11 +90,11 @@ case "$TARGET_NAME" in
         printf 'export RESTIC_TARGET_PROVIDER=%s\n' "$(quote_sh "${RESTIC_OFFSITE_PROVIDER:-unknown}")"
         printf 'export RESTIC_TARGET_REPO=%s\n' "$(quote_sh "$repo")"
         if [ "$PLAN_ONLY" -eq 0 ]; then
-            if [ -z "${BW_RESTIC_OFFSITE_ENV_BIN:-}" ]; then
-                echo "bw-restic-offsite-env helper not found." >&2
+            if [ -z "${RESTIC_OFFSITE_ENV_BIN:-}" ]; then
+                echo "restic-offsite-env helper not found." >&2
                 exit 1
             fi
-            "$BW_RESTIC_OFFSITE_ENV_BIN"
+            "$RESTIC_OFFSITE_ENV_BIN"
         fi
         ;;
     *)

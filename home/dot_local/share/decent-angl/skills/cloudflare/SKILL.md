@@ -24,8 +24,10 @@ Exception: a project with `wrangler.toml`/`wrangler.jsonc` and no
   in Git or chezmoi. Check with `cf auth whoami`.
 - `cf` does not reuse a Wrangler login. A `CLOUDFLARE_API_TOKEN` in the
   environment or a project `.env` overrides the login.
-- Unattended jobs need a scoped API token from Bitwarden via
-  `bw-secret exec ITEM FIELD CLOUDFLARE_API_TOKEN -- cf ...`.
+- Unattended jobs need a scoped API token from 1Password: the user stores it
+  once with `op-secret add ITEM password`, then jobs run
+  `op-secret exec ITEM password CLOUDFLARE_API_TOKEN -- cf ...`
+  (`machine-secrets` skill).
 
 ## Workflow
 

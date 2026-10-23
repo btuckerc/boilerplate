@@ -48,7 +48,7 @@ decentangl:
     offsite:
       enabled: false
       provider: "rest-server"
-      bw_item: "restic-offsite-rest-server"
+      vault_item: "restic-offsite-rest-server"
       url_base: ""
   machines:
     omarchy:

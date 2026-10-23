@@ -153,10 +153,13 @@ WORKSTREAM_RULES: tuple[WorkstreamRule, ...] = (
         title="Credentials, Auth & Vaults",
         group="Access",
         description=(
-            "Bitwarden/Vaultwarden, account access, API keys, credentials, "
+            "1Password, Bitwarden/Vaultwarden, account access, API keys, credentials, "
             "and related authentication flows."
         ),
         keywords=(
+            "1password",
+            "op-secret",
+            "service account",
             "bitwarden",
             "vaultwarden",
             "recovery code",

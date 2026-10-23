@@ -12,7 +12,7 @@ settings stay in `platform-ops`.
 
 - Shared config contains the host and TLS pins, never credentials or appliance
   backups.
-- Bitwarden item `opnsense-api` materializes to a machine-local `0600` env file.
+- 1Password item `opnsense-api` materializes to a machine-local `0600` env file.
 - Use `opnsense-api`; do not paste credentials into `curl` or disable TLS checks.
 
 If `opnsense-api status` reports `api=unconfigured`, read
@@ -80,26 +80,24 @@ open 22/443 on WAN.
 Never copy `~/.ssh/opnsense_agent` through chat, scp, or Git. Item
 `opnsense-agent-ssh` is the only distribution path.
 
-Agents do not unlock Bitwarden. `BW_SESSION` is per shell. Give the user
-the commands; they run them. `opnsense-agent-key status` is safe without
-unlock. It only reports local key mode and fingerprint.
+Reads use the machine's read-only 1Password service account (`op-secret`,
+see `machine-secrets`); no unlock. Writes need the user's 1Password session,
+so give the user the store command; they run it. `opnsense-agent-key status`
+only reports local key mode and fingerprint.
 
 1. Wrappers on PATH. `command -v opnsense-agent-key` and
    `command -v opnsense-ssh`. If missing, pull published master and
    `chezmoi apply ~/.local/bin/opnsense-agent-key ~/.local/bin/opnsense-ssh`.
    Scheduled reconcile skips scripts.
 2. One writer. On a host that already has `~/.ssh/opnsense_agent`, the user
-   unlocks bw in that shell and runs
-   `opnsense-agent-key store --from ~/.ssh/opnsense_agent`.
+   runs `opnsense-agent-key store --from ~/.ssh/opnsense_agent`.
    Expect `stored:opnsense-agent-ssh`.
-3. Each consumer. The user unlocks bw in that machine's shell and runs
-   `opnsense-agent-key`. The wrapper syncs the CLI cache, then writes
-   mode 600. Unlock does not pull. Expect `materialized:...`.
+3. Each consumer runs `opnsense-agent-key` (agents may run it once the host is
+   enrolled). It writes mode 600. Expect `materialized:...`.
 4. `opnsense-ssh 'id -un; hostname'` prints `agent` and `router.home.arpa`.
 
 Do not run step 3 before step 2. Do not run step 4 if step 3 failed.
-Vault 5xx: wait and retry. The wrapper retries sync and must not print
-origin error bodies.
+1Password errors: wait and retry once; never print item contents.
 
 ## LAN clients
 

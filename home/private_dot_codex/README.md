@@ -145,7 +145,7 @@ defaults unless a separate, measured experiment justifies changing them.
 Current shared skills:
 
 - `decent-angl-config`: reconcile and publish the complete cross-machine baseline
-- `bitwarden-secrets`: provision and consume vault-backed machine-local secrets safely
+- `machine-secrets`: provision and consume 1Password service-account machine secrets safely
 - `codex-config`: maintain the shared Codex baseline itself
 - `platform-ops`: handle Omarchy/Linux and macOS system settings, hardware preferences, and shared-vs-local config decisions
 

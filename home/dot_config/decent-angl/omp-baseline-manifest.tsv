@@ -25,7 +25,7 @@ file	~/.omp/profiles/local/agent/models.yml	home/private_dot_omp/private_profile
 file	~/.omp/profiles/local/agent/RULES.md	home/private_dot_omp/private_profiles/local/private_agent/RULES.md
 exec	~/.local/bin/omp-local	home/dot_local/bin/executable_omp-local
 exec	~/.local/bin/op-secret	home/dot_local/bin/executable_op-secret
-exec	~/.local/bin/omp-openrouter-env	home/dot_local/bin/executable_omp-openrouter-env
+exec	~/.local/bin/omp-env	home/dot_local/bin/executable_omp-env
 file	~/.config/decent-angl/opnsense.env	home/dot_config/decent-angl/opnsense.env.tmpl
 exec	~/.local/bin/opnsense-api	home/dot_local/bin/executable_opnsense-api
 file	~/.omp/agent/commands/board.md	home/private_dot_omp/private_agent/private_commands/board.md

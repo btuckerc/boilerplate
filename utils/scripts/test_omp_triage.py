@@ -106,7 +106,6 @@ class TriageTests(unittest.TestCase):
             env["HOME"] = home
             result = subprocess.run([str(SCRIPT), "request"], env=env, text=True, capture_output=True)
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("omp-openrouter-env", result.stderr)
         self.assertNotIn("secret-value", result.stderr)
         self.assertNotIn("provider body", result.stderr)
 

@@ -13,3 +13,10 @@
 .local/bin/bw-vault-export
 .local/bin/bw-restic-offsite-env
 .local/share/decent-angl/skills/bitwarden-secrets
+# Retired 2026-10-29: boat.dev sandboxes dropped (CLI, sign-in, skill).
+.local/bin/boat
+.config/boat
+.config/ascii/boat
+.local/share/decent-angl/skills/boat
+# Retired 2026-10-29: omp-openrouter-env became omp-env (all OMP API keys).
+.local/bin/omp-openrouter-env

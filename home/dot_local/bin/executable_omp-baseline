@@ -459,7 +459,7 @@ home/dot_config/decent-angl/opnsense.env.tmpl
 home/dot_config/mise/config.toml
 home/dot_local/bin/executable_omp-baseline
 home/dot_local/bin/executable_decent-angl-skills
-home/dot_local/bin/executable_omp-openrouter-env
+home/dot_local/bin/executable_omp-env
 home/dot_local/bin/executable_opnsense-api
 home/dot_local/bin/executable_opnsense-store-secret
 home/run_onchange_after_04-setup-omp.sh.tmpl

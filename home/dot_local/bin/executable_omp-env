@@ -1,0 +1,32 @@
+#!/bin/sh
+set -eu
+
+# Materialize OMP API keys from 1Password into the machine-local OMP env file.
+# Items absent from the vault are skipped; any other failure stops the run.
+# Never prints keys. Re-run after adding or rotating a vault item.
+
+ENV_FILE="${OMP_ENV_FILE:-$HOME/.omp/agent/.env}"
+OP_SECRET="${OP_SECRET_BIN:-$HOME/.local/bin/op-secret}"
+if [ ! -x "$OP_SECRET" ]; then
+    echo "op-secret is unavailable; apply the shared decent-angl baseline first." >&2
+    exit 127
+fi
+
+# op-secret's exact message for an item missing from every readable vault.
+absent() { printf "op-secret: item '%s' not found in the vaults this service account can read." "$1"; }
+
+# vault item -> env key (single token in the item's password field)
+while read -r item key; do
+    if err=$("$OP_SECRET" write-env "$item" password "$key" "$ENV_FILE" 2>&1 >/dev/null </dev/null); then
+        echo "materialized: $key"
+    elif [ "$err" = "$(absent "$item")" ]; then
+        echo "skipped: $key (no vault item $item)"
+    else
+        printf '%s\n' "$err" >&2
+        exit 1
+    fi
+done <<'EOF'
+omp-openrouter OPENROUTER_API_KEY
+parallel-api PARALLEL_API_KEY
+firecrawl-api FIRECRAWL_API_KEY
+EOF

@@ -150,7 +150,7 @@ def main(argv: list[str] | None = None) -> int:
         return _error(f"request exceeds {MAX_REQUEST_CHARS} characters")
     key = _key()
     if not key:
-        return _error("missing OPENROUTER_API_KEY; run omp-openrouter-env")
+        return _error("missing OPENROUTER_API_KEY; run omp-env")
     try:
         result = triage(request, key)
     except (RuntimeError, ValueError) as exc:

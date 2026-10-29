@@ -23,7 +23,7 @@ from typing import Any
 AGENT_ID = "openrouter"
 AGENT_NAME = "OpenRouter"
 API_BASE_URL = "https://openrouter.ai/api/v1"
-AUTH_HELP = "Run `omp-openrouter-env` to restore OpenRouter credits."
+AUTH_HELP = "Run `omp-env` to restore OpenRouter credits."
 SCAN_REUSE_SECONDS = 20
 LIMITS_ONLY_REUSE_SECONDS = 900
 PROBE_REUSE_SECONDS = 15
@@ -278,7 +278,7 @@ def load_api_key() -> str | None:
   direct = os.environ.get("OPENROUTER_API_KEY", "").strip()
   if direct:
     return direct
-  env_path = os.environ.get("OMP_OPENROUTER_ENV", "").strip()
+  env_path = os.environ.get("OMP_ENV_FILE", "").strip()
   if not env_path:
     env_path = str(Path.home() / ".omp" / "agent" / ".env")
   try:

@@ -49,7 +49,7 @@ account. SOURCE: omitted = hidden prompt, `@PATH` = file, `env:NAME` =
 environment variable, `-` = stdin. `--replace` updates only the named fields
 (creates the item if absent). Agents never run `add`; give the user the
 command. Then re-run each consumer's materializer (for example
-`opnsense-api sync`, `omp-openrouter-env`, `restic-local-password sync`).
+`opnsense-api sync`, `omp-env`, `restic-local-password sync`).
 
 Naming: item titles are lowercase kebab-case `<service>-<purpose>`
 (`opnsense-api`, `restic-decent-angl`), unique across both vaults. A

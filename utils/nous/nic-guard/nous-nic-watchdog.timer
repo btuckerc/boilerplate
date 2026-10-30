@@ -1,0 +1,11 @@
+[Unit]
+Description=Check eno2 receive health every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=5s
+Unit=nous-nic-watchdog.service
+
+[Install]
+WantedBy=timers.target

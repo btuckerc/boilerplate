@@ -123,6 +123,18 @@ independent auth and sessions. Read `~/src/omp-serve/README.md` and
   (dmesg "SMU is resumed successfully!"). `vm.swappiness = 10` lives in
   `/etc/sysctl.d/90-nous-inference.conf`. OverDrive/undervolt is unavailable
   (ppfeaturemask bit 0x4000 clear); decode already runs at the 300 W cap.
+- NIC: onboard I226-V (`igc`, `eno2`, 0000:09:00.0) can stop receiving with
+  carrier and tx up (2026-10-30, 8 h outage; host alive, unreachable). udev
+  `81-nous-i226-aspm.rules` disables its PCIe ASPM L1; `nous-nic-watchdog.timer`
+  (every minute) bounces `eno2` after 3 min of frozen `rx_packets` plus
+  unreachable gateway, rebinds `igc` after 6. Unreachable nous: check sysstat
+  `sar -n DEV` and `journalctl -u nous-nic-watchdog` before assuming a hang.
+  Sources: `utils/nous/nic-guard/`, `docs/nous-inference.md` § NIC guard.
+- Docker is rootless only (user `docker.service`, context `rootless`, data
+  `/srv/workspaces/docker`). Rootful docker/containerd are masked and `tux` is
+  not in the `docker` group: never unmask them, re-add the group or point
+  `data-root` at `/` (small, was 96% full). Containers cannot touch `eno2`,
+  host routes or firewall. § Rootless Docker in `docs/nous-inference.md`.
 - Memory (128 GB DDR5 since 2026-10-01; was 32 GB). Guard added after the
   2026-09-28 OOM freeze (RAM-backed `/tmp` held ~10 GiB of agent scratch, plus
   11 agent sessions and llama's then 8 GiB host prompt cache):

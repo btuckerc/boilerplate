@@ -1,0 +1,68 @@
+#!/bin/bash
+# Detect and recover an igc receive stall on eno2 (2026-10-30: rx stopped,
+# tx and carrier stayed up, host unreachable for 8 h).
+#
+# Healthy if the gateway answers ping. Otherwise a strike is counted only when
+# carrier is up and rx_packets has not moved since the previous run (one
+# minute): any received frame, including LAN broadcast, means the NIC still
+# receives and the fault is elsewhere. Third consecutive strike: link bounce.
+# Sixth: igc driver rebind, then the count restarts.
+#
+# Usage: nous-nic-watchdog
+set -u
+
+IF=eno2
+PCI=0000:09:00.0
+STATE_DIR=/run/nous-nic-watchdog
+SYS=/sys/class/net/$IF
+
+mkdir -p "$STATE_DIR"
+read -r last_rx strikes down_since 2>/dev/null <"$STATE_DIR/state" || { last_rx=-1; strikes=0; down_since=0; }
+rx=$(cat "$SYS/statistics/rx_packets")
+carrier=$(cat "$SYS/carrier" 2>/dev/null || echo 0)
+gw=$(ip -4 route show default dev "$IF" | awk '{print $3; exit}')
+now=$(date +%s)
+
+save() { echo "$rx $strikes $down_since" >"$STATE_DIR/state"; }
+
+snapshot() {
+    echo "aspm=$(cat /sys/bus/pci/devices/$PCI/link/l1_aspm 2>/dev/null) carrier=$carrier rx_packets=$rx gw=${gw:-none}"
+    ip -s link show dev "$IF"
+    ethtool -S "$IF" | grep -vE ': 0$' | grep -iE 'err|miss|drop|fifo|timeout|hang|reset|no_buffer|crc'
+}
+
+if [ -n "$gw" ] && ping -q -c 3 -W 1 -I "$IF" "$gw" >/dev/null 2>&1; then
+    if [ "$down_since" -ne 0 ]; then
+        echo "recovered: gateway $gw reachable after $(((now - down_since) / 60)) min"
+    fi
+    strikes=0 down_since=0
+    save
+    exit 0
+fi
+
+[ "$down_since" -eq 0 ] && down_since=$now
+if [ "$carrier" != 1 ] || [ "$rx" != "$last_rx" ]; then
+    echo "gateway ${gw:-none} unreachable; carrier=$carrier, rx moving ($last_rx -> $rx): not an rx stall"
+    strikes=0
+    save
+    exit 0
+fi
+
+strikes=$((strikes + 1))
+echo "rx stall strike $strikes: carrier up, rx_packets frozen at $rx, gateway ${gw:-none} unreachable"
+case $strikes in
+3)
+    snapshot
+    echo "recovery: bouncing $IF"
+    ip link set "$IF" down && sleep 2 && ip link set "$IF" up
+    ;;
+6)
+    snapshot
+    echo "recovery: rebinding igc on $PCI"
+    echo "$PCI" >/sys/bus/pci/drivers/igc/unbind
+    sleep 2
+    echo "$PCI" >/sys/bus/pci/drivers/igc/bind
+    strikes=0
+    ;;
+esac
+save

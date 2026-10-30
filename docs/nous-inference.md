@@ -495,6 +495,86 @@ ssh nous 'cd ~/memory-guard-stage && sudo install -m 0755 nous-tmp-clean /usr/lo
 
 Inspect: `journalctl -u nous-tmp-clean -u earlyoom`; `grep -E 'Zswap|Swap' /proc/meminfo`.
 
+## NIC guard
+
+On 2026-10-30 nous went unreachable on LAN and tailnet from 05:39 to 14:05 UTC
+(power-button shutdown). The host kept running: the onboard Intel I226-V
+(`igc`, `eno2`, PCI `0000:09:00.0`, NVM `2017:888d`) stopped receiving while
+carrier and transmit stayed up. sysstat showed `eno2` rx at exactly 0 pkt/s
+for 8 h after ~10 MB/s of Docker image pulls, with tx ~1.3 pkt/s (ARP for the
+gateway), no kernel message and no link flap. Outbound connections failed with
+`no route to host`. PCIe ASPM L1 was enabled on that link, a known I225/I226
+receive-hang trigger; EEE was already off.
+
+- `81-nous-i226-aspm.rules` sets `link/l1_aspm=0` on `0000:09:00.0`
+  (`lspci -vv -s 09:00.0` shows `LnkCtl: ASPM Disabled`).
+- `nous-nic-watchdog` (timer, every minute) is silent while the gateway answers
+  ping. Otherwise it logs one line per run, and counts a strike only when
+  carrier is up and `rx_packets` has not moved since the previous run (any
+  received frame, including LAN broadcast, rules out a receive stall). On the
+  third consecutive strike it logs counters and bounces `eno2`; on the sixth it
+  rebinds `igc` and starts over. It logs `recovered` with the outage length.
+  State is in `/run/nous-nic-watchdog/state` (`rx_packets strikes down_since`).
+
+If a stall recurs with ASPM off, the next step is an I226 NVM update via a
+board BIOS update.
+
+| Source (`utils/nous/nic-guard/`) | Installed |
+| --- | --- |
+| `81-nous-i226-aspm.rules` | `/etc/udev/rules.d/` (0644) |
+| `nous-nic-watchdog` | `/usr/local/sbin/` (0755) |
+| `nous-nic-watchdog.service`, `nous-nic-watchdog.timer` | `/etc/systemd/system/` (0644) |
+
+```sh
+scp -r utils/nous/nic-guard nous:/home/tux/nic-guard-stage
+ssh nous 'cd ~/nic-guard-stage && sudo install -m 0644 81-nous-i226-aspm.rules /etc/udev/rules.d/ \
+  && sudo install -m 0755 nous-nic-watchdog /usr/local/sbin/ \
+  && sudo install -m 0644 nous-nic-watchdog.service nous-nic-watchdog.timer /etc/systemd/system/ \
+  && sudo udevadm control --reload && sudo udevadm trigger --action=add /sys/bus/pci/devices/0000:09:00.0 \
+  && sudo systemctl daemon-reload && sudo systemctl enable --now nous-nic-watchdog.timer \
+  && rm -r ~/nic-guard-stage'
+```
+
+Inspect: `journalctl -u nous-nic-watchdog`; past traffic per interface:
+`sar -n DEV -f /var/log/sysstat/saDD`.
+
+## Rootless Docker
+
+Docker on nous runs rootless for `tux` (user unit `docker.service`, socket
+`/run/user/1000/docker.sock`, docker context `rootless` selected in
+`~/.docker/config.json`; Harbor and compose use the CLI, so they follow the
+context). The rootful `docker.service`, `docker.socket` and `containerd.service`
+are masked and `tux` is not in the `docker` group. A rootful socket is root on
+the host for any agent that can reach it; under rootless, even
+`--privileged --network host` only reaches rootlesskit's namespace (`tap0`
+via slirp4netns), never `eno2`, host routes or the host firewall.
+
+An agent installed rootful `docker.io` on 2026-10-30 for a Terminal-Bench run;
+its 57 GB store filled `/` to 96%. Rootless data lives on
+`/srv/workspaces/docker` (`utils/nous/rootless-docker/daemon.json` →
+`~/.config/docker/daemon.json`); `/home` is on the small root filesystem.
+Ubuntu's AppArmor userns restriction is satisfied by the packaged
+`/etc/apparmor.d/rootlesskit` profile.
+
+```sh
+scp utils/nous/rootless-docker/daemon.json nous:.config/docker/daemon.json
+ssh nous 'sudo apt-get install -y docker.io docker-compose-v2 docker-buildx rootlesskit uidmap slirp4netns \
+  && sudo install -d -o tux -g tux -m 0700 /srv/workspaces/docker \
+  && sudo systemctl disable --now docker.service docker.socket containerd.service \
+  && sudo systemctl mask docker.service docker.socket containerd.service \
+  && sudo gpasswd -d tux docker; \
+  PATH=/usr/share/docker.io/contrib:$PATH dockerd-rootless-setuptool.sh install --force; \
+  systemctl --user enable --now docker.service \
+  && docker context create rootless --docker host=unix:///run/user/1000/docker.sock \
+  && docker context use rootless'
+```
+
+The setup tool's final `docker version` step fails (it looks for the CLI next to
+itself); the unit it writes is fine. Inspect: `docker info` (`name=rootless`
+under Security Options), `systemctl --user status docker`,
+`journalctl --user -u docker`. Space: `docker system df`; `docker image prune -a`
+drops unused task images.
+
 ## Expanded model and benchmark evaluation
 
 See [the September 19 report](nous-model-evaluation-2026-09-19.md) for six-model

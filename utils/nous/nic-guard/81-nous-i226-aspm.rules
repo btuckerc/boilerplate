@@ -1,0 +1,3 @@
+# Intel I226-V (igc, eno2): disable PCIe ASPM L1. With L1 enabled the NIC
+# stopped receiving for 8 h on 2026-10-30 (rx 0 pkt/s, tx alive, link up).
+ACTION=="add|bind", SUBSYSTEM=="pci", KERNEL=="0000:09:00.0", ATTR{link/l1_aspm}="0"

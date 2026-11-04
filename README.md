@@ -54,6 +54,25 @@ server. The managed OMP integration supplies working/blocked/idle state and
 native session restore. Runtime sessions and saved SSH-machine profiles remain
 machine-local.
 
+## Terminal font
+
+macOS Ghostty uses [Obel Mono](https://typographic.systems/obel-mono) 1.000
+(SIL OFL 1.1): regular at 400, bold at the ExtraBold instance, and cell height
+16% to keep Meslo's line rhythm. `run_onchange_after_07-install-obel-mono`
+installs pinned, hash-checked TTFs on macOS and Linux desktops, into
+`~/Library/Fonts` or `~/.local/share/fonts/obel-mono`; existing hosts get it
+through `omp-baseline pull` or `decent-angl-sync reconcile --with-scripts`.
+The always-masked "Obel Mono Masked" family is installed for apps without font
+feature settings. Linux Ghostty and kitty stay on JetBrains Mono until Obel
+Mono is verified on screen there. macOS kitty keeps Meslo because CoreText does
+not flag Obel Mono as monospace, so kitty there falls back to Menlo.
+
+Feature `ss01` masks recognised secrets (`ghp_`, `sk-`, `TOKEN=`,
+`Authorization: Bearer`, …) after their first four characters. Only pixels
+change: copy, paste, files, and history keep the real value. The part of a key
+that wraps onto the next line, and unrecognised formats, stay visible. For one
+unmasked window, run `open -na Ghostty --args --font-feature=-ss01`.
+
 ## Where things live
 
 | Path | Contents |

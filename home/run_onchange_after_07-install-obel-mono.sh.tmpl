@@ -1,0 +1,107 @@
+{{- if or (eq .chezmoi.os "darwin") (eq .chezmoi.os "linux") -}}
+#!/usr/bin/env bash
+# Obel Mono, the terminal font (SIL OFL 1.1, https://typographic.systems/obel-mono).
+# Installs the four variable TTFs the vendor's install.sh installs: Obel Mono
+# (secret masking opt-in through the ss01 feature, as the Ghostty config sets it)
+# and Obel Mono Masked (masking always on, for apps without feature settings).
+# Zip pins match the vendor's install.sh; file pins skip the download when the
+# installed copies already match. Bump VERSION and every pin together.
+set -euo pipefail
+
+VERSION=1.000
+BASE=https://typographic.systems/download
+# zip  zip-sha256
+ZIPS=(
+    "ObelMono-${VERSION}-ttf.zip d39d480b4b52ac8cc9221b86f888ab7b19be8574b315e34fec14145731e0384d"
+    "ObelMonoMasked-${VERSION}-ttf.zip dfe976f2cd975d665a5b076594ee2c0b9c0f71354f7dc09b9b79269c16199bdb"
+)
+# zip  font-file  font-sha256 (member path: <zip stem>/variable/<font-file>)
+FONTS=(
+    "ObelMono-${VERSION}-ttf.zip ObelMono[wght].ttf 24af8e60b67e6829bc6f7055e9fe459e9d93b2f730899e5a9a7ea37a9dd1dbf3"
+    "ObelMono-${VERSION}-ttf.zip ObelMono-Italic[wght].ttf 87f53cb557dc4824d667824c6f86d81285f0dfee1709e392a3c051afe1bd9425"
+    "ObelMonoMasked-${VERSION}-ttf.zip ObelMonoMasked[wght].ttf eb8e73b73a29ddf63eaa8d1a75637e11d4d122569dc5ad32ecf4b1db2eaafa72"
+    "ObelMonoMasked-${VERSION}-ttf.zip ObelMonoMasked-Italic[wght].ttf 73afbb72b55e5c2d49424ab47087e9d50c34a8be075198cdfb8d91d1c292a348"
+)
+
+echo ""
+echo "========================================"
+echo "  Obel Mono ${VERSION}"
+echo "========================================"
+echo ""
+
+case "$(uname -s)" in
+    Darwin) dest="$HOME/Library/Fonts" ;;
+    Linux)
+        if ! command -v fc-cache >/dev/null 2>&1; then
+            echo "fontconfig not found; no desktop fonts on this host. Skipping."
+            exit 0
+        fi
+        dest="${XDG_DATA_HOME:-$HOME/.local/share}/fonts/obel-mono"
+        ;;
+    *) exit 0 ;;
+esac
+
+sha256_of() {
+    if command -v sha256sum >/dev/null 2>&1; then sha256sum -- "$1"; else shasum -a 256 -- "$1"; fi | awk '{ print $1 }'
+}
+
+needed=()
+for entry in "${FONTS[@]}"; do
+    read -r zip file sha <<<"$entry"
+    if [ ! -f "$dest/$file" ] || [ "$(sha256_of "$dest/$file")" != "$sha" ]; then
+        needed+=("$entry")
+    fi
+done
+if [ "${#needed[@]}" -eq 0 ]; then
+    echo "Obel Mono ${VERSION} is already installed in $dest."
+    exit 0
+fi
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+mkdir -p "$tmp/fonts"
+for entry in "${ZIPS[@]}"; do
+    read -r zip zip_sha <<<"$entry"
+    case " ${needed[*]} " in *" $zip "*) ;; *) continue ;; esac
+    echo "Downloading $zip..."
+    curl --fail --silent --show-error --proto '=https' --tlsv1.2 \
+        --connect-timeout 20 --retry 2 --output "$tmp/$zip" "$BASE/$zip"
+    actual="$(sha256_of "$tmp/$zip")"
+    if [ "$actual" != "$zip_sha" ]; then
+        echo "$zip sha256 $actual does not match the pinned $zip_sha. Nothing was installed." >&2
+        exit 1
+    fi
+    # zipfile, not unzip: member names hold [wght], which unzip treats as a pattern.
+    python3 -I - "$tmp/$zip" "${zip%.zip}/variable/" "$tmp/fonts" <<'PY'
+import os, sys, zipfile
+archive, prefix, out = sys.argv[1:]
+with zipfile.ZipFile(archive) as z:
+    for name in z.namelist():
+        if name.startswith(prefix) and name.endswith(".ttf") and "/" not in name[len(prefix):]:
+            with z.open(name) as src, open(os.path.join(out, name[len(prefix):]), "wb") as dst:
+                dst.write(src.read())
+PY
+done
+
+for entry in "${needed[@]}"; do
+    read -r zip file sha <<<"$entry"
+    actual="$(sha256_of "$tmp/fonts/$file")"
+    if [ "$actual" != "$sha" ]; then
+        echo "$file sha256 $actual does not match the pinned $sha. Nothing was installed." >&2
+        exit 1
+    fi
+done
+
+mkdir -p "$dest"
+for entry in "${needed[@]}"; do
+    read -r zip file sha <<<"$entry"
+    # Copy beside the final name, then rename, so readers never see half a font.
+    install -m 644 "$tmp/fonts/$file" "$dest/.$file.$$"
+    mv -f "$dest/.$file.$$" "$dest/$file"
+    echo "Installed $dest/$file"
+done
+if [ "$(uname -s)" = Linux ]; then
+    fc-cache -f "$dest"
+fi
+echo "Obel Mono ${VERSION} installed. Restart running terminals to pick it up."
+{{- end }}

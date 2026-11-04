@@ -9,6 +9,7 @@ unset COMMON_SH
 
 # Safe fallback if common.sh is temporarily missing
 export LOGFILE="${LOGFILE:-$HOME/.shellrc_log}"
+declare -F _shell_cached_init >/dev/null || _shell_cached_init() { return 1; }
 
 # Load Ghostty's shell integration early so nested shells keep prompt marks.
 if [ -n "${GHOSTTY_RESOURCES_DIR:-}" ] && [ -r "${GHOSTTY_RESOURCES_DIR}/shell-integration/bash/ghostty.bash" ]; then
@@ -23,9 +24,17 @@ fi
 # Silence bash deprecation warning (macOS prefers zsh)
 export BASH_SILENCE_DEPRECATION_WARNING=1
 
-# Load Homebrew
-if [ -x /opt/homebrew/bin/brew ]; then
-    eval "$(/opt/homebrew/bin/brew shellenv)"
+# Load Homebrew: inline `brew shellenv bash` output for the fixed /opt/homebrew
+# prefix, including its no-op guard. Spawning brew costs ~70 ms per shell.
+# Re-sync if `PATH=/usr/bin:/bin brew shellenv bash` output ever changes, but keep
+# ${PATH:+…}: brew's ${PATH+…} turns an empty PATH into a current-directory entry.
+if [ -x /opt/homebrew/bin/brew ] && [[ "$PATH:" != "/opt/homebrew/bin:/opt/homebrew/sbin:"* ]]; then
+    export HOMEBREW_PREFIX="/opt/homebrew"
+    export HOMEBREW_CELLAR="/opt/homebrew/Cellar"
+    export HOMEBREW_REPOSITORY="/opt/homebrew"
+    export PATH="/opt/homebrew/bin:/opt/homebrew/sbin${PATH:+:$PATH}"
+    [ -z "${MANPATH-}" ] || { export MANPATH="${MANPATH%"${MANPATH##*[!:]}"}"; export MANPATH=":${MANPATH#"${MANPATH%%[!:]*}"}"; }
+    export INFOPATH="/opt/homebrew/share/info:${INFOPATH:-}"
 fi
 {{- else if eq .chezmoi.os "linux" }}
 # === Linux-specific Configuration ===
@@ -38,7 +47,7 @@ fi
 alias ls='ls --color=auto'
 
 # Add Ruby gems to PATH (for user-installed gems)
-export PATH="$PATH:$HOME/.local/share/gem/ruby/3.4.0/bin"
+export PATH="${PATH:+$PATH:}$HOME/.local/share/gem/ruby/3.4.0/bin"
 
 # Tmux session helper - attach to or create session named 'T'
 t() {
@@ -50,11 +59,6 @@ t() {
         fi
     fi
 }
-
-# Load bash completion if available
-if [ -r "/usr/share/bash-completion/bash_completion" ]; then
-    . "/usr/share/bash-completion/bash_completion"
-fi
 {{- end }}
 
 # === Mise activation ===
@@ -66,7 +70,23 @@ fi
 if command -v remove_path_dir >/dev/null 2>&1; then
     remove_path_dir "$HOME/.local/share/omarchy/bin"
     unset -f remove_path_dir 2>/dev/null || true
+    unset path_entry path_new path_rest path_sep
 fi
+
+# Tool init runs after mise so it resolves the real binaries instead of the
+# mise shims (each shim exec costs a mise startup, including every prompt).
+# zoxide bakes _ZO_ECHO/_ZO_RESOLVE_SYMLINKS (true only when "1") into its init.
+_zo_variant=bash
+[ "${_ZO_ECHO-}" = 1 ] && _zo_variant=$_zo_variant.echo
+[ "${_ZO_RESOLVE_SYMLINKS-}" = 1 ] && _zo_variant=$_zo_variant.resolve
+if _shell_cached_init "$_zo_variant" zoxide init bash &&
+    . "$_shell_init_file" && [ "$_shell_init_ok" = 1 ]; then
+    :
+else
+    [ -n "${_shell_init_file-}" ] && rm -f -- "$_shell_init_file"
+    command -v zoxide >/dev/null && eval "$(zoxide init bash)"
+fi
+unset _zo_variant _shell_init_ok
 
 # Skip prompt/UI shell setup for non-interactive or TERM=dumb shells.
 # This keeps batch/login shells like `bash -lc` quiet for tools.
@@ -74,6 +94,13 @@ case "$-" in
     *i*) ;;
     *) return 0 2>/dev/null || true ;;
 esac
+{{- if eq .chezmoi.os "linux" }}
+
+# Load bash completion if available (interactive shells only)
+if [ -r "/usr/share/bash-completion/bash_completion" ]; then
+    . "/usr/share/bash-completion/bash_completion"
+fi
+{{- end }}
 
 if [ "${TERM:-}" = "dumb" ]; then
     return 0 2>/dev/null || true
@@ -82,7 +109,14 @@ fi
 # === Starship prompt ===
 if command -v starship >/dev/null; then
     export STARSHIP_CONFIG="$HOME/.config/starship/starship.toml"
-    eval "$(starship init bash)"
+    if _shell_cached_init bash starship init bash --print-full-init &&
+        . "$_shell_init_file" && [ "$_shell_init_ok" = 1 ]; then
+        :
+    else
+        [ -n "${_shell_init_file-}" ] && rm -f -- "$_shell_init_file"
+        eval "$(starship init bash)"
+    fi
+    unset _shell_init_ok
 fi
 
 # === Bash Options ===
@@ -138,4 +172,8 @@ y() {
 }
 
 # Logging
-printf '%s: Bash shell loaded\n' "$(date)" >>"$LOGFILE" 2>/dev/null || true
+if [ "${BASH_VERSINFO[0]:-0}" -ge 5 ]; then
+    printf '%(%a %b %e %H:%M:%S %Z %Y)T: Bash shell loaded\n' -1 >>"$LOGFILE" 2>/dev/null || true
+else
+    printf '%s: Bash shell loaded\n' "$(date)" >>"$LOGFILE" 2>/dev/null || true
+fi

@@ -85,10 +85,6 @@ raw = false
 [hooks]
 preinstall = "bash ${XDG_CONFIG_HOME:-$HOME/.config}/mise/hooks/preinstall"
 
-[env]
-# Tools installed by mise (e.g. Ruby builds needing `python`) resolve siblings.
-_.path = ["~/.local/share/mise/shims"]
-
 [settings.pipx]
 uvx = true
 

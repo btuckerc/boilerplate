@@ -15,58 +15,39 @@ export ZDOTDIR="$XDG_CONFIG_HOME/zsh"
 # Starship prompt configuration
 export STARSHIP_CONFIG="$HOME/.config/starship/starship.toml"
 
+# Native array edits below: zsh does not word-split ${PATH} on IFS, and quoted
+# "${(@)…}" keeps empty elements, so an inherited empty PATH component (current
+# dir) stays. An empty PATH ties to path=(''); clear it so prepends do not turn
+# it into such a component.
+[[ -n $PATH ]] || path=()
+
 # Make Homebrew and system admin tools visible in non-interactive macOS shells.
-if [ "$(uname -s)" = "Darwin" ]; then
+if [[ $OSTYPE == darwin* ]]; then
     for dir in /opt/homebrew/bin /opt/homebrew/sbin /usr/local/bin /usr/local/sbin; do
-        case ":$PATH:" in
-            *":$dir:"*) ;;
-            *) [ -d "$dir" ] && PATH="$dir:$PATH" ;;
-        esac
+        (( ${path[(Ie)$dir]} )) || [[ ! -d $dir ]] || path[1,0]=$dir
     done
     export PATH
 fi
 
 # Keep user-managed bins and shims ahead of OS package-manager bins.
-# Iterate from lowest to highest precedence because each directory is prepended.
-prepend_path_dir() {
-    path_dir="$1"
-    [ -d "$path_dir" ] || return 0
-
-    path_new="$path_dir"
-    path_old_ifs="$IFS"
-    IFS=:
-    for path_entry in ${PATH:-}; do
-        [ -n "$path_entry" ] || continue
-        [ "$path_entry" = "$path_dir" ] && continue
-        path_new="${path_new}:$path_entry"
-    done
-    IFS="$path_old_ifs"
-    PATH="$path_new"
-}
-
-remove_path_dir() {
-    path_dir="$1"
-    path_new=""
-    path_old_ifs="$IFS"
-    IFS=:
-    for path_entry in ${PATH:-}; do
-        [ -n "$path_entry" ] || continue
-        [ "$path_entry" = "$path_dir" ] && continue
-        path_new="${path_new:+$path_new:}$path_entry"
-    done
-    IFS="$path_old_ifs"
-    PATH="$path_new"
-}
-
-remove_path_dir "$HOME/.local/share/omarchy/bin"
-
-prepend_path_dir "$HOME/.local/share/mise/shims"
-prepend_path_dir "$HOME/.local/bin"
-unset dir path_dir path_entry path_new path_old_ifs
-unset -f prepend_path_dir remove_path_dir 2>/dev/null || true
+# Apply from lowest to highest precedence because each directory is prepended.
+path=("${(@)path:#$HOME/.local/share/omarchy/bin}")
+for dir in "$HOME/.local/share/mise/shims" "$HOME/.local/bin"; do
+    [[ -d $dir ]] && path=("$dir" "${(@)path:#$dir}")
+done
+unset dir
+# A lone empty element would export as PATH='' (no components); two keep the
+# current directory.
+(( ${#path} == 1 )) && [[ -z ${path[1]} ]] && path=('' '')
 
 # Load Cargo environment if available
 CARGODIR="$HOME/.cargo"
 if [ -f "$CARGODIR/env" ]; then
     . "$CARGODIR/env"
+fi
+
+# Login shells run /etc/zprofile next; on macOS its path_helper reorders PATH.
+# .zprofile restores the order captured here.
+if [[ $OSTYPE == darwin* && -o login ]]; then
+    _zshenv_path=$PATH
 fi

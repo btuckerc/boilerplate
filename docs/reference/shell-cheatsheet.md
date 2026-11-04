@@ -254,3 +254,24 @@ launchctl unload ~/Library/LaunchAgents/com.user.task.plist
   - `defaults write -g KeyRepeat -int 2`: Faster key repeat
   - `defaults write -g InitialKeyRepeat -int 15`: Faster initial key repeat
 
+## This Baseline's Shell Startup
+- **zsh files**: `~/.zshenv` (every zsh: XDG vars, `ZDOTDIR=~/.config/zsh`, PATH),
+  `$ZDOTDIR/.zprofile` (login only: undo macOS `path_helper` reordering so
+  `zsh -lc` finds mise and Homebrew tools before `/usr/bin`), `$ZDOTDIR/.zshrc`
+  (interactive only). zsh never reads `~/.zshrc`, `~/.zprofile` or `~/.zlogin`
+  here; installers that append to them are ignored, and `decent-angl-doctor`
+  reports such files. Move what they add into managed config.
+- **bash files**: `~/.bash_profile` sources `~/.bashrc`; both shells source
+  `~/.config/shell/common.sh`.
+- **Order**: mise activates before starship and zoxide, so they run the real
+  binaries instead of mise shims (every shim exec pays a mise startup).
+  compinit runs once, after all `fpath` additions.
+- **Init cache**: starship and zoxide init output is cached in
+  `~/.cache/shell-init` (private, regenerated when the binary changes).
+  It is used only when the directory and every parent up to `/` are safe from
+  other users (owned by you or root, group/other-writable only if sticky, no
+  allow ACLs); otherwise shells run the init commands directly.
+  `rm -rf ~/.cache/shell-init` is always safe.
+- **Keys**: Ctrl-R is zsh's own incremental history search and Tab is
+  `complete-word`; fzf shell key bindings are intentionally not loaded.
+- **Measure**: `time zsh -i -c exit`, or trace with `zsh -lixc exit 2>&1 | less`.

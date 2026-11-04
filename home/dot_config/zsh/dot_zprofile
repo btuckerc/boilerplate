@@ -1,0 +1,19 @@
+#!/bin/zsh
+# Managed by chezmoi - https://github.com/btuckerc/boilerplate
+# Zsh login shell configuration: runs after /etc/zprofile and before .zshrc.
+# Do not source .zshrc here; zsh already reads it for every interactive shell.
+
+# macOS /etc/zprofile runs path_helper, which moves /usr/bin and the other
+# system dirs ahead of the user, mise and Homebrew dirs .zshenv set up, so
+# `zsh -lc` tool shells would resolve system binaries first. Restore .zshenv's
+# order and keep any dirs path_helper added after it.
+if [[ -n ${_zshenv_path-} ]]; then
+    () {
+        local -aU p
+        p=("${(@s.:.)_zshenv_path}" "${path[@]}")
+        path=("${p[@]}")
+        # A lone empty element would export as PATH='' (no components).
+        (( ${#path} == 1 )) && [[ -z ${path[1]} ]] && path=('' '')
+    }
+    unset _zshenv_path
+fi

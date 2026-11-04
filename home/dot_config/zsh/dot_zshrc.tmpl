@@ -2,6 +2,10 @@
 # Managed by chezmoi - https://github.com/btuckerc/boilerplate
 # Zsh configuration file
 
+# brew shellenv, Ghostty and others prepend to fpath; keep it duplicate-free so
+# the completion dump's file count stays stable and compinit does not rebuild it.
+typeset -gU fpath
+
 # Source shared POSIX-compatible configuration
 COMMON_SH="${XDG_CONFIG_HOME:-$HOME/.config}/shell/common.sh"
 [ -f "$COMMON_SH" ] && . "$COMMON_SH"
@@ -9,6 +13,7 @@ unset COMMON_SH
 
 # Safe fallback if common.sh is temporarily missing
 export LOGFILE="${LOGFILE:-$HOME/.shellrc_log}"
+(( $+functions[_shell_cached_init] )) || _shell_cached_init() { return 1; }
 
 # Load Ghostty's shell integration early so tmux/exec'd shells keep prompt marks.
 if [[ -n $GHOSTTY_RESOURCES_DIR && -r "$GHOSTTY_RESOURCES_DIR"/shell-integration/zsh/ghostty-integration ]]; then
@@ -17,24 +22,27 @@ fi
 
 # === Zsh-Specific Configuration ===
 
-# Load Starship prompt early for proper initialization
-if [ "${TERM:-}" != "dumb" ] && command -v starship >/dev/null; then
-    export STARSHIP_SHELL="zsh"
-    export STARSHIP_CONFIG="$HOME/.config/starship/starship.toml"
-    eval "$(starship init zsh)"
-fi
-
 {{- if eq .chezmoi.os "darwin" }}
 # === macOS-specific Configuration ===
 
-# Load Homebrew
-if [ -x /opt/homebrew/bin/brew ]; then
-    eval "$(/opt/homebrew/bin/brew shellenv)"
+# Load Homebrew: inline `brew shellenv zsh` output for the fixed /opt/homebrew
+# prefix, including its no-op guard. Spawning brew costs ~70 ms per shell.
+# Re-sync if `PATH=/usr/bin:/bin brew shellenv zsh` output ever changes, but keep
+# ${PATH:+…}: brew's ${PATH+…} turns an empty PATH into a current-directory entry.
+if [ -x /opt/homebrew/bin/brew ] && [[ "$PATH:" != "/opt/homebrew/bin:/opt/homebrew/sbin:"* ]]; then
+    export HOMEBREW_PREFIX="/opt/homebrew"
+    export HOMEBREW_CELLAR="/opt/homebrew/Cellar"
+    export HOMEBREW_REPOSITORY="/opt/homebrew"
+    fpath[1,0]="/opt/homebrew/share/zsh/site-functions"
+    export FPATH
+    export PATH="/opt/homebrew/bin:/opt/homebrew/sbin${PATH:+:$PATH}"
+    [ -z "${MANPATH-}" ] || { export MANPATH="${MANPATH%"${MANPATH##*[!:]}"}"; export MANPATH=":${MANPATH#"${MANPATH%%[!:]*}"}"; }
+    export INFOPATH="/opt/homebrew/share/info:${INFOPATH:-}"
 fi
-export PATH="/opt/homebrew/opt/postgresql@16/bin:$PATH"
+export PATH="/opt/homebrew/opt/postgresql@16/bin${PATH:+:$PATH}"
 
 # Load docker
-export PATH="/Applications/Docker.app/Contents/Resources/bin:$PATH"
+export PATH="/Applications/Docker.app/Contents/Resources/bin${PATH:+:$PATH}"
 
 # Kitty shell integration
 if [ -n "$KITTY_INSTALLATION_DIR" ]; then
@@ -61,13 +69,20 @@ fi
 alias ls='ls --color=auto'
 
 # Add Ruby gems to PATH (for user-installed gems)
-export PATH="$PATH:$HOME/.local/share/gem/ruby/3.4.0/bin"
+export PATH="${PATH:+$PATH:}$HOME/.local/share/gem/ruby/3.4.0/bin"
 
 # Zsh syntax highlighting (if installed via package manager)
 if [ -f "/usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh" ]; then
     source "/usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"
 fi
 {{- end }}
+
+# Carapace exports its bin dir onto PATH unless PATH already has it. Doing that
+# after mise activation would defeat mise's skip of the first-prompt hook-env.
+if command -v carapace >/dev/null &&
+    [[ ":$PATH:" != *":${XDG_CONFIG_HOME:-$HOME/.config}/carapace/bin:"* ]]; then
+    path[1,0]="${XDG_CONFIG_HOME:-$HOME/.config}/carapace/bin"
+fi
 
 # === Mise activation ===
 if command -v mise >/dev/null; then
@@ -78,7 +93,28 @@ fi
 if command -v remove_path_dir >/dev/null 2>&1; then
     remove_path_dir "$HOME/.local/share/omarchy/bin"
     unfunction remove_path_dir 2>/dev/null || true
+    unset path_entry path_new path_rest path_sep
 fi
+
+# === Starship prompt ===
+# Prompt and tool init run after mise so they resolve the real binaries rather
+# than mise shims (every shim exec pays a mise startup, twice per prompt here).
+if [ "${TERM:-}" != "dumb" ] && command -v starship >/dev/null; then
+    export STARSHIP_SHELL="zsh"
+    export STARSHIP_CONFIG="$HOME/.config/starship/starship.toml"
+    if _shell_cached_init zsh starship init zsh --print-full-init &&
+        source "$_shell_init_file" && [[ $_shell_init_ok == 1 ]]; then
+        :
+    else
+        [[ -n ${_shell_init_file-} ]] && rm -f -- "$_shell_init_file"
+        eval "$(starship init zsh)"
+    fi
+    unset _shell_init_ok
+fi
+
+# Grok CLI completions. Its installer appends them to ~/.zshrc, which zsh never
+# reads with ZDOTDIR set; its binary is already linked into ~/.local/bin.
+[[ -d $HOME/.grok/completions/zsh ]] && fpath[1,0]="$HOME/.grok/completions/zsh"
 
 # === Zsh Modules ===
 zmodload zsh/complist
@@ -88,8 +124,23 @@ autoload -U colors && colors
 # === Carapace completions ===
 if command -v carapace >/dev/null; then
     export CARAPACE_BRIDGES='zsh,fish,bash'
-    source <(carapace _carapace)
+    source <(carapace _carapace zsh)
 fi
+
+# === Zoxide ===
+# After compinit so zoxide registers its `z` completion.
+# zoxide bakes _ZO_ECHO/_ZO_RESOLVE_SYMLINKS (true only when "1") into its init.
+_zo_variant=zsh
+[[ ${_ZO_ECHO-} == 1 ]] && _zo_variant+=.echo
+[[ ${_ZO_RESOLVE_SYMLINKS-} == 1 ]] && _zo_variant+=.resolve
+if _shell_cached_init "$_zo_variant" zoxide init zsh &&
+    source "$_shell_init_file" && [[ $_shell_init_ok == 1 ]]; then
+    :
+else
+    [[ -n ${_shell_init_file-} ]] && rm -f -- "$_shell_init_file"
+    command -v zoxide >/dev/null && eval "$(zoxide init zsh)"
+fi
+unset _zo_variant _shell_init_ok
 
 # === History Configuration ===
 setopt SHARE_HISTORY
@@ -225,4 +276,4 @@ _warn_icloud_dev_path
 {{- end }}
 
 # Logging
-printf '%s: Zsh shell loaded\n' "$(date)" >>"$LOGFILE" 2>/dev/null || true
+print -P -- '%D{%a %b %e %H:%M:%S %Z %Y}: Zsh shell loaded' >>"$LOGFILE" 2>/dev/null || true

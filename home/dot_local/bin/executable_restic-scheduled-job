@@ -15,6 +15,67 @@ timestamp_utc() {
     date -u '+%Y-%m-%dT%H:%M:%SZ'
 }
 
+# This kernel session's id; changes on every boot and only then. Fails unless it
+# reads a well-formed UUID (no fallback to wall-clock boot times).
+boot_id() {
+    case "$(uname -s)" in
+        Darwin) id="$(/usr/sbin/sysctl -n kern.bootsessionuuid 2>/dev/null)" || return 1 ;;
+        Linux) id="$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)" || return 1 ;;
+        *) return 1 ;;
+    esac
+    h='[0-9A-Fa-f]'
+    case "$id" in
+        $h$h$h$h$h$h$h$h-$h$h$h$h-$h$h$h$h-$h$h$h$h-$h$h$h$h$h$h$h$h$h$h$h$h) printf '%s\n' "$id" ;;
+        *) return 1 ;;
+    esac
+}
+
+# The scheduler before this one serialized on a restic-scheduler/lock directory
+# lease that the kernel lock cannot see or safely share, and no process scan can
+# recognize every job it started (stdin, copies, orphaned helpers). A reboot ends
+# all of them, so the first run of this scheduler records the boot it ran in, and
+# no run touches a repository until the host has booted since. Fixed, machine-local
+# path (not STATE_DIR or LOCK_PATH, so configuration cannot skip it); never roams.
+CUTOVER_RECORD="$HOME/.local/state/decent-angl/restic-scheduler/kernel-lock-v2-origin-boot"
+
+# Returns 0 once the host has rebooted since the record was made, 2 while it has not,
+# 1 (with a message) when the boot id or the record cannot be read or written.
+kernel_lock_cutover() {
+    if ! current="$(boot_id)"; then
+        echo "Cannot read this host's boot id (kern.bootsessionuuid or /proc/sys/kernel/random/boot_id)." >&2
+        return 1
+    fi
+    if [ ! -e "$CUTOVER_RECORD" ] && [ ! -L "$CUTOVER_RECORD" ]; then
+        # Publish complete contents without overwriting a concurrent first run's record.
+        tmp="$CUTOVER_RECORD.tmp.$$"
+        if mkdir -p "$(dirname "$CUTOVER_RECORD")" && printf '%s\n' "$current" >"$tmp"; then
+            ln "$tmp" "$CUTOVER_RECORD" 2>/dev/null || true
+        fi
+        rm -f "$tmp"
+    fi
+    # The '.' keeps trailing newlines that $(...) would strip, so only one UUID line passes;
+    # $(...) also drops NUL bytes, so the record must be exactly that line's 37 bytes too.
+    if ! origin="$(cat "$CUTOVER_RECORD" 2>/dev/null && echo .)"; then
+        echo "Cannot read or create the kernel-lock cutover record: $CUTOVER_RECORD" >&2
+        return 1
+    fi
+    nl='
+'
+    h='[0-9A-Fa-f]'
+    size=""
+    case "${origin%.}" in
+        $h$h$h$h$h$h$h$h-$h$h$h$h-$h$h$h$h-$h$h$h$h-$h$h$h$h$h$h$h$h$h$h$h$h"$nl")
+            origin="${origin%"$nl".}"
+            size="$(wc -c <"$CUTOVER_RECORD" 2>/dev/null | tr -d ' \t')"
+            ;;
+    esac
+    if [ "$size" != 37 ]; then
+        echo "Malformed kernel-lock cutover record (left as is): $CUTOVER_RECORD" >&2
+        return 1
+    fi
+    [ "$origin" != "$current" ] || return 2
+}
+
 CONFIG_FILE="${RESTIC_CONFIG_FILE:-$HOME/.config/decent-angl/restic.env}"
 if [ -f "$CONFIG_FILE" ]; then
     # shellcheck disable=SC1090
@@ -22,23 +83,33 @@ if [ -f "$CONFIG_FILE" ]; then
 fi
 
 PRINT_PLAN=0
+PREPARE_CUTOVER=0
 REPO_TARGET="${RESTIC_REPO_TARGET:-local}"
 JOB_NAME=""
 LOCK_WAIT_SECONDS="${RESTIC_SCHEDULE_LOCK_WAIT_SECONDS:-7200}"
-LOCK_PATH="${RESTIC_SCHEDULE_LOCK_PATH:-$HOME/.local/state/decent-angl/restic-scheduler/lock}"
+LOCK_PATH="${RESTIC_SCHEDULE_LOCK_PATH:-$HOME/.local/state/decent-angl/restic-scheduler/job.lock}"
 PASSWORD_FILE="${RESTIC_LOCAL_PASSWORD_FILE:-${RESTIC_PASSWORD_FILE:-$HOME/.local/share/decent-angl/secrets/restic.password}}"
 MACHINE_ID="${RESTIC_MACHINE_ID:-unknown}"
+STATE_DIR="${RESTIC_SCHEDULE_STATE_DIR:-$HOME/.local/state/decent-angl/restic-scheduler}"
+finished_at=""
 
 usage() {
     cat <<EOF
-Usage: restic-scheduled-job [--print-plan] [--repo-target local|offsite] <backup|restore-smoke|forget-prune|check> [args...]
+Usage: restic-scheduled-job [--print-plan] [--repo-target local|offsite] <backup|restore-smoke|forget-prune|check>
+       restic-scheduled-job --prepare-kernel-lock-migration
 EOF
 }
 
+# Options may follow the job name; nothing is passed through to the job helper, so a
+# run is always exactly the scheduled job on the validated target.
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --print-plan)
             PRINT_PLAN=1
+            shift
+            ;;
+        --prepare-kernel-lock-migration)
+            PREPARE_CUTOVER=1
             shift
             ;;
         --repo-target)
@@ -50,9 +121,13 @@ while [ "$#" -gt 0 ]; do
             shift 2
             ;;
         backup|restore-smoke|forget-prune|check)
+            if [ -n "$JOB_NAME" ]; then
+                echo "Only one job per run: $JOB_NAME, $1" >&2
+                usage >&2
+                exit 1
+            fi
             JOB_NAME="$1"
             shift
-            break
             ;;
         -h|--help|help)
             usage
@@ -66,75 +141,177 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 
+# Records the boot for the cutover at install time (restic-schedule-apply), so any
+# reboot after the upgrade clears it; never touches a repository.
+if [ "$PREPARE_CUTOVER" -eq 1 ]; then
+    status=0
+    kernel_lock_cutover || status=$?
+    case "$status" in
+        0) printf 'kernel_lock_cutover=done\n' ;;
+        2) printf 'kernel_lock_cutover=reboot-required\n' ;;
+        *) exit 1 ;;
+    esac
+    exit 0
+fi
+
 if [ -z "$JOB_NAME" ]; then
     usage >&2
     exit 1
 fi
 
-case "$JOB_NAME" in
-    backup)
-        JOB_BIN="$(find_bin "$HOME/.local/bin/restic-backup" "$(command -v restic-backup 2>/dev/null || true)")"
-        ;;
-    restore-smoke)
-        JOB_BIN="$(find_bin "$HOME/.local/bin/restic-restore-smoke" "$(command -v restic-restore-smoke 2>/dev/null || true)")"
-        ;;
-    forget-prune)
-        JOB_BIN="$(find_bin "$HOME/.local/bin/restic-forget-prune" "$(command -v restic-forget-prune 2>/dev/null || true)")"
-        ;;
-    check)
-        JOB_BIN="$(find_bin "$HOME/.local/bin/restic-check" "$(command -v restic-check 2>/dev/null || true)")"
-        ;;
+# restic-target-env's targets, canonical so a run is always recorded under the name the
+# doctor reads; an unknown target is an argument error, not a run.
+case "$REPO_TARGET" in
+    local|machine|primary) REPO_TARGET=local ;;
+    offsite) ;;
     *)
-        echo "Unknown job: $JOB_NAME" >&2
+        echo "Unknown repo target: $REPO_TARGET" >&2
+        usage >&2
         exit 1
         ;;
 esac
+TARGET_NAME="$REPO_TARGET"
 
-if [ -z "${JOB_BIN:-}" ]; then
-    echo "Scheduled restic job helper not found for '$JOB_NAME'." >&2
-    exit 1
-fi
+mkdir -p "$(dirname "$LOCK_PATH")" "$STATE_DIR"
 
-lock_parent="$(dirname "$LOCK_PATH")"
-mkdir -p "$lock_parent"
-
-clear_stale_lock() {
-    if [ ! -d "$LOCK_PATH" ]; then
-        return 0
-    fi
-    if [ ! -f "$LOCK_PATH/machine_id" ] || [ ! -f "$LOCK_PATH/pid" ]; then
-        return 0
-    fi
-    lock_machine_id="$(cat "$LOCK_PATH/machine_id" 2>/dev/null || true)"
-    lock_pid="$(cat "$LOCK_PATH/pid" 2>/dev/null || true)"
-    if [ -z "$lock_machine_id" ] || [ -z "$lock_pid" ]; then
-        return 0
-    fi
-    if [ "$lock_machine_id" = "$MACHINE_ID" ] && ! kill -0 "$lock_pid" 2>/dev/null; then
-        rm -rf "$LOCK_PATH"
+# The run record the doctor reads on every platform (systemd sends stdout to the journal).
+record_run() {
+    record="$STATE_DIR/last-run.$TARGET_NAME.$JOB_NAME"
+    if ! { printf 'finished_at=%s\noutcome=%s\nexit_code=%s\n' "$1" "$2" "$3" >"$record.tmp.$$" &&
+        mv -f "$record.tmp.$$" "$record"; }; then
+        echo "Could not record the run in $record" >&2
     fi
 }
 
-acquire_lock() {
-    deadline="$(( $(date +%s) + LOCK_WAIT_SECONDS ))"
-    while :; do
-        if mkdir "$LOCK_PATH" 2>/dev/null; then
-            printf '%s\n' "$MACHINE_ID" >"$LOCK_PATH/machine_id"
-            printf '%s\n' "$$" >"$LOCK_PATH/pid"
-            printf '%s\n' "$JOB_NAME" >"$LOCK_PATH/job"
-            printf '%s\n' "$(timestamp_utc)" >"$LOCK_PATH/started_at"
+finish() {
+    finished_at="${finished_at:-$(timestamp_utc)}"
+    printf 'finished_at=%s\n' "$finished_at"
+    printf 'outcome=%s\n' "$1"
+    printf 'exit_code=%s\n' "$2"
+    record_run "$finished_at" "$1" "$2"
+    exit "$2"
+}
+
+JOB_BIN="$(find_bin "$HOME/.local/bin/restic-$JOB_NAME" "$(command -v "restic-$JOB_NAME" 2>/dev/null || true)" || true)"
+if [ -z "$JOB_BIN" ]; then
+    echo "Scheduled restic job helper not found for '$JOB_NAME'." >&2
+    [ "$PRINT_PLAN" -eq 1 ] || record_run "$(timestamp_utc)" failed 1
+    exit 1
+fi
+
+RESTIC_MACHINE_BIN="$(find_bin "$HOME/.local/bin/restic-machine" "$(command -v restic-machine 2>/dev/null || true)" || true)"
+RESTIC_TARGET_ENV_BIN="$(find_bin "$HOME/.local/bin/restic-target-env" "$(command -v restic-target-env 2>/dev/null || true)" || true)"
+
+# Runs a command while holding the schedule lock, waiting up to $1 seconds; exits 75
+# without running it on timeout. A kernel lock (flock(1), or lockf(1) on macOS) is
+# released when its holder exits, so a crashed or killed run never leaves a stale lease.
+run_locked() {
+    wait_seconds="$1"
+    shift
+    if [ "$(uname -s)" = Darwin ]; then
+        if [ "$wait_seconds" -eq 0 ]; then
+            lockf -s -k -t 0 "$LOCK_PATH" "$@"
+        else
+            lockf -k -t "$wait_seconds" "$LOCK_PATH" "$@"
+        fi
+    elif [ "$wait_seconds" -eq 0 ]; then
+        flock -n -E 75 "$LOCK_PATH" "$@"
+    else
+        flock -w "$wait_seconds" -E 75 "$LOCK_PATH" "$@"
+    fi
+}
+
+# This machine's interface addresses (Linux ip, macOS ifconfig).
+local_addresses() {
+    { ip -o addr show 2>/dev/null || ifconfig -a 2>/dev/null; } |
+        awk '{ for (i = 1; i < NF; i++) if ($i == "inet" || $i == "inet6") { a = $(i + 1); sub(/[\/%].*/, "", a); print tolower(a) } }'
+}
+
+# The addresses a host name resolves to, in the system resolver's canonical spelling
+# (inet_ntop: one form per address, the same parse ssh's getaddrinfo applies), so
+# fd7a::1 and FD7A:0:0:0:0:0:0:1, or 127.1 and 127.0.0.1, compare equal.
+resolve_addresses() {
+    # Zone ids (fe80::1%en0) only scope a link-local address.
+    set -- "${1%%\%*}"
+    if command -v getent >/dev/null 2>&1; then
+        getent ahosts "$1" 2>/dev/null | awk '{ print $1 }'
+    elif command -v dscacheutil >/dev/null 2>&1; then
+        dscacheutil -q host -a name "$1" 2>/dev/null | awk '/^ipv?6?_?address:/ { print $2 }'
+    else
+        printf '%s\n' "$1"
+    fi | awk '{ a = tolower($1); if (a ~ /^::ffff:[0-9.]+$/) sub(/^::ffff:/, "", a); print a }'
+}
+
+# True for a name that is this machine itself: there is no network path to lose,
+# so a refused or dropped connection is a real fault the job must report.
+is_this_host() {
+    name="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+    name="${name%.}"
+    case "$name" in
+        ''|localhost|*.localhost|localhost.localdomain|127.*|0.0.0.0|::1|0:0:0:0:0:0:0:1|'['*) return 0 ;;
+    esac
+    node="$(uname -n | tr '[:upper:]' '[:lower:]')"
+    if [ "$name" = "$node" ] || [ "$name" = "${node%%.*}" ]; then
+        return 0
+    fi
+    addresses="$(resolve_addresses "$name")"
+    [ -n "$addresses" ] || return 1
+    mine="$(local_addresses)"
+    for address in $addresses; do
+        case "$address" in
+            127.*|::1) return 0 ;;
+        esac
+        if printf '%s\n' "$mine" | grep -Fqx -- "$address"; then
             return 0
         fi
-        clear_stale_lock
-        if [ ! -d "$LOCK_PATH" ]; then
-            continue
-        fi
-        if [ "$(date +%s)" -ge "$deadline" ]; then
-            echo "Timed out waiting for restic schedule lock: $LOCK_PATH" >&2
-            exit 1
-        fi
-        sleep 15
     done
+    return 1
+}
+
+# True only when an SFTP repository host is definitely unreachable at the network level
+# (laptop off the tailnet). A host that answers, even with a refusal, and anything it
+# cannot judge count as reachable, so the job runs and fails loudly instead of being skipped.
+remote_unreachable() {
+    case "$1" in
+        sftp://*) return 1 ;;
+        sftp:*) ;;
+        *) return 1 ;;
+    esac
+    destination="${1#sftp:}"
+    destination="${destination%%:*}"
+    host="${destination#*@}"
+    case "$host" in
+        ''|localhost|127.*|::1|'['*) return 1 ;;
+    esac
+    command -v nc >/dev/null 2>&1 || return 1
+    # Resolve with the repository's user, as restic's ssh will (Match user, ports).
+    ssh_config="$(ssh -G "$destination" 2>/dev/null)" || return 1
+    if printf '%s\n' "$ssh_config" | grep -Eq '^(proxycommand|proxyjump) '; then
+        return 1
+    fi
+    ssh_host="$(printf '%s\n' "$ssh_config" | awk '$1 == "hostname" { print $2; exit }')"
+    ssh_port="$(printf '%s\n' "$ssh_config" | awk '$1 == "port" { print $2; exit }')"
+    # macOS nc ignores -w while connecting; -G is its connect timeout.
+    case "$(uname -s)" in
+        Darwin) set -- -G 10 -w 10 ;;
+        *) set -- -w 10 ;;
+    esac
+    if probe="$(nc -z -v "$@" "${ssh_host:-$host}" "${ssh_port:-22}" 2>&1)"; then
+        return 1
+    fi
+    # Only a network-level failure (timeout, no route, name lookup) is unreachable; a
+    # refusal answered, and anything else (an nc that rejects its options) proves nothing.
+    # Every pattern holds a space, so a host name in nc's output cannot match one.
+    case "$probe" in
+        *[Rr]efused*) return 1 ;;
+        *[Tt]imed\ out*|*"No route to host"*|*"Network is unreachable"*|*"Host is down"*|\
+        *"Host is unreachable"*|*"nodename nor servname"*|*"Name or service not known"*|\
+        *"Temporary failure in name resolution"*|*"No address associated"*|*[Uu]nknown\ host*|\
+        *"Could not resolve"*) ;;
+        *) return 1 ;;
+    esac
+    # This machine (an alias with HostName 127.0.0.1, its own name or address) is never off the network.
+    ! is_this_host "${ssh_host:-$host}" && ! is_this_host "$host"
 }
 
 if [ "$PRINT_PLAN" -eq 1 ]; then
@@ -150,38 +327,112 @@ if [ "$PRINT_PLAN" -eq 1 ]; then
     fi
     printf 'lock_path=%s\n' "$LOCK_PATH"
     printf 'lock_wait_seconds=%s\n' "$LOCK_WAIT_SECONDS"
-    if [ "$#" -gt 0 ]; then
-        printf 'args=\n'
-        for arg in "$@"; do
-            printf '  %s\n' "$arg"
-        done
-    fi
     exit 0
 fi
 
 if [ ! -f "$PASSWORD_FILE" ]; then
     echo "Missing machine-local restic password file: $PASSWORD_FILE" >&2
     echo "Run 'restic-local-password sync' (op-secret, see machine-secrets), then try again." >&2
+    record_run "$(timestamp_utc)" failed 1
     exit 1
 fi
 
-acquire_lock
-cleanup() {
-    rm -rf "$LOCK_PATH"
-}
-trap cleanup EXIT INT TERM
+if [ -z "${RESTIC_MACHINE_BIN:-}" ] || [ -z "${RESTIC_TARGET_ENV_BIN:-}" ]; then
+    echo "restic-machine or restic-target-env helper not found." >&2
+    record_run "$(timestamp_utc)" failed 1
+    exit 1
+fi
+
+# Only what restic-target-env prints names the repository, never an inherited value.
+unset RESTIC_TARGET_REPO
+if ! target_env="$("$RESTIC_TARGET_ENV_BIN" --plan "$REPO_TARGET")"; then
+    record_run "$(timestamp_utc)" failed 1
+    exit 1
+fi
+eval "$target_env"
+
+# Both passes (the locked rerun reads this too) stop here until the host has rebooted
+# since the pre-kernel-lock scheduler last could have run.
+status=0
+kernel_lock_cutover || status=$?
+if [ "$status" -eq 2 ]; then
+    echo "Restic jobs stay off until this host reboots once: the pre-kernel-lock scheduler may still" >&2
+    echo "have a job running (see UPDATING.md, kernel-lock cutover)." >&2
+fi
+if [ "$status" -ne 0 ]; then
+    record_run "$(timestamp_utc)" failed 1
+    exit 1
+fi
+
+# First pass: report, preflight, then rerun this script under the schedule lock. The
+# marker tells a lock timeout (75 before the rerun started) from the job's own status.
+if [ -z "${RESTIC_SCHEDULE_LOCK_MARKER:-}" ]; then
+    printf 'restic_scheduled_job=%s\n' "$JOB_NAME"
+    printf 'machine_id=%s\n' "$MACHINE_ID"
+    printf 'repo_target=%s\n' "$TARGET_NAME"
+    started_at="$(timestamp_utc)"
+    printf 'started_at=%s\n' "$started_at"
+    # The doctor measures a monthly job that never runs from the first scheduled run.
+    first_run="$STATE_DIR/first-run.$TARGET_NAME"
+    if [ ! -e "$first_run" ]; then
+        printf '%s\n' "$started_at" >"$first_run.tmp.$$" && mv -f "$first_run.tmp.$$" "$first_run" || true
+    fi
+
+    # Skipped runs exit 0 so the scheduler stays green; the doctor checks last-success age.
+    if remote_unreachable "$RESTIC_TARGET_REPO"; then
+        printf 'skipped_reason=repository host unreachable\n'
+        finish skipped 0
+    fi
+
+    marker="$STATE_DIR/.lock-acquired.$$"
+    rm -f "$marker"
+    set -- env RESTIC_SCHEDULE_LOCK_MARKER="$marker" /bin/sh "$0" --repo-target "$REPO_TARGET" "$JOB_NAME"
+    status=0
+    run_locked 0 "$@" || status=$?
+    if [ "$status" -eq 75 ] && [ ! -e "$marker" ]; then
+        holder="$(cat "$LOCK_PATH" 2>/dev/null || true)"
+        echo "Waiting for restic schedule lock held by ${holder:-a job that is starting}" >&2
+        status=0
+        run_locked "$LOCK_WAIT_SECONDS" "$@" || status=$?
+    fi
+    if [ ! -e "$marker" ]; then
+        if [ "$status" -eq 75 ]; then
+            echo "Timed out waiting for restic schedule lock: $LOCK_PATH" >&2
+        else
+            echo "Could not take the restic schedule lock: $LOCK_PATH" >&2
+        fi
+        finish failed 1
+    fi
+    rm -f "$marker"
+    exit "$status"
+fi
+
+# Second pass: this process runs the job while the lock is held. The job helper does not
+# inherit the marker, so nothing it starts can pass as a locked run.
+: >"$RESTIC_SCHEDULE_LOCK_MARKER"
+unset RESTIC_SCHEDULE_LOCK_MARKER
+# Holder details for waiting jobs' messages; cleared on exit so they never go stale.
+printf 'job=%s pid=%s since=%s\n' "$JOB_NAME" "$$" "$(timestamp_utc)" >"$LOCK_PATH"
+trap ': >"$LOCK_PATH"' EXIT
 
 export RESTIC_PASSWORD_FILE="$PASSWORD_FILE"
 unset RESTIC_PASSWORD_COMMAND 2>/dev/null || true
 
-printf 'restic_scheduled_job=%s\n' "$JOB_NAME"
-printf 'machine_id=%s\n' "$MACHINE_ID"
-printf 'repo_target=%s\n' "$REPO_TARGET"
-printf 'started_at=%s\n' "$(timestamp_utc)"
+# Remove only stale repository locks (restic's age/dead-pid test) left by a crashed
+# or interrupted run; live locks stay and the job waits on them via --retry-lock.
+if ! "$RESTIC_MACHINE_BIN" --repo-target "$REPO_TARGET" unlock; then
+    echo "Stale restic lock cleanup failed; running the job anyway." >&2
+fi
 
 status=0
-"$JOB_BIN" --repo-target "$REPO_TARGET" "$@" || status=$?
+"$JOB_BIN" --repo-target "$REPO_TARGET" || status=$?
 
-printf 'finished_at=%s\n' "$(timestamp_utc)"
-printf 'exit_code=%s\n' "$status"
-exit "$status"
+if [ "$status" -eq 0 ]; then
+    stamp="$STATE_DIR/last-success.$TARGET_NAME.$JOB_NAME"
+    finished_at="$(timestamp_utc)"
+    if ! { printf '%s\n' "$finished_at" >"$stamp.tmp.$$" && mv -f "$stamp.tmp.$$" "$stamp"; }; then
+        echo "Could not record last success in $stamp" >&2
+    fi
+    finish success 0
+fi
+finish failed "$status"

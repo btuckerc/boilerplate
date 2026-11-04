@@ -48,10 +48,61 @@ def backup_jobs(state):
                     record["finished_at"] = line.split("=", 1)[1]
                 elif re.fullmatch(r"exit_code=\d+", line):
                     record["exit_code"] = int(line.split("=", 1)[1])
+                elif re.fullmatch(r"outcome=(success|failed|skipped)", line):
+                    record["outcome"] = line.split("=", 1)[1]
         except OSError:
             pass
+        # Written by restic-scheduled-job on every platform (systemd sends the log to the
+        # journal): the latest run's outcome, the last success, and when jobs first ran.
+        try:
+            for line in (state / f"restic-scheduler/last-run.local.{job}").read_text().splitlines():
+                if re.fullmatch(r"finished_at=\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", line):
+                    record["finished_at"] = line.split("=", 1)[1]
+                elif re.fullmatch(r"exit_code=\d+", line):
+                    record["exit_code"] = int(line.split("=", 1)[1])
+                elif re.fullmatch(r"outcome=(success|failed|skipped)", line):
+                    record["outcome"] = line.split("=", 1)[1]
+        except OSError:
+            pass
+        for key, name in (("last_success_at", f"last-success.local.{job}"), ("first_run_at", "first-run.local")):
+            try:
+                stamp = (state / f"restic-scheduler/{name}").read_text().strip()
+                if re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", stamp):
+                    record[key] = stamp
+            except OSError:
+                pass
         jobs[job] = record
     return jobs
+
+
+def backup_issues(backups, now, freshness=True):
+    issues = []
+    for name, job in backups.items():
+        if job.get("exit_code") not in (0, None):
+            issues.append(f"last backup job failed: {name}")
+    if not freshness:
+        return issues
+    # Daily backup; restore-smoke, forget-prune and check run monthly.
+    for name, job in backups.items():
+        limit_days = 3 if name == "backup" else 40
+        stamp = job.get("last_success_at")
+        if not stamp and job.get("exit_code") == 0 and job.get("outcome") != "skipped":
+            stamp = job.get("finished_at")
+        try:
+            age = (now - datetime.fromisoformat(stamp)).total_seconds()
+        except (TypeError, ValueError):
+            # A monthly job that has not run yet has no success; once it has run,
+            # skipped or failed runs alone never count as fresh, and one that never
+            # runs goes stale relative to the first scheduled run of any job.
+            if name == "backup" or any(key in job for key in ("outcome", "exit_code", "finished_at")):
+                issues.append(f"successful {name} timestamp unavailable")
+            elif job.get("first_run_at") and (
+                    now - datetime.fromisoformat(job["first_run_at"])).total_seconds() > limit_days * 86400:
+                issues.append(f"{name} has not run in the {limit_days} days since scheduled jobs started")
+            continue
+        if age > limit_days * 86400:
+            issues.append(f"last successful {name} is more than {limit_days} days old")
+    return issues
 
 
 def local_report():
@@ -121,17 +172,7 @@ def local_report():
             code, _ = run(["systemctl", "--user", "is-active", "--quiet", unit])
             services[unit] = {"active": code == 0}
     backups = backup_jobs(state)
-    issues = []
-    for name, job in backups.items():
-        if job.get("exit_code") not in (0, None):
-            issues.append(f"last backup job failed: {name}")
-    if not agent_host:
-        try:
-            last_backup = datetime.fromisoformat(backups["backup"]["finished_at"])
-            if (datetime.now(timezone.utc) - last_backup).total_seconds() > 3 * 86400:
-                issues.append("last completed backup is more than 3 days old")
-        except (KeyError, ValueError):
-            issues.append("completed backup timestamp unavailable")
+    issues = backup_issues(backups, datetime.now(timezone.utc), freshness=not agent_host)
     if not sync["status_ok"]:
         issues.append("sync status unavailable")
     for key in ("dirty", "live_drift", "pending"):

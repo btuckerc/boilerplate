@@ -89,6 +89,7 @@ class ResticCheckTest(unittest.TestCase):
             for name, content in {
                 'restic': '#!/bin/sh\nprintf "%s\\n" "$@"\n',
                 'restic-target-env': "#!/bin/sh\necho \"RESTIC_TARGET_REPO='/fixture'\"\n",
+                'restic-machine': (ROOT / 'home/dot_local/bin/executable_restic-machine').read_text(),
             }.items():
                 path = binary / name
                 path.write_text(content)
@@ -97,11 +98,13 @@ class ResticCheckTest(unittest.TestCase):
             password.write_text('fixture, not a credential')
             env = dict(os.environ, HOME=str(user), RESTIC_CONFIG_FILE=str(user / 'absent'),
                        RESTIC_PASSWORD_FILE=str(password), RESTIC_CHECK_READ_DATA_SUBSET='10%')
+            env.pop('RESTIC_SFTP_IDENTITY', None)
             for flags, expected in [([], ['--read-data-subset', '10%']), (['--full'], ['--read-data'])]:
                 result = subprocess.run(['sh', str(ROOT / 'home/dot_local/bin/executable_restic-check'), *flags],
                                         env=env, text=True, capture_output=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(result.stdout.splitlines(), ['-r', '/fixture', 'check', *expected])
+                self.assertEqual(result.stdout.splitlines(),
+                                 ['-r', '/fixture', '--retry-lock', '5m', 'check', *expected])
 
 
 if __name__ == '__main__':

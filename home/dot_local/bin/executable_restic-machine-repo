@@ -31,7 +31,7 @@ case "$machine_id" in
         printf '%s\n' 'sftp:admin@macmini.tail4d5aec.ts.net:/Users/admin/srv/restic/macbook'
         ;;
     macmini)
-        printf '%s\n' '/Users/admin/srv/restic/macmini'
+        printf '%s\n' 'sftp:admin@localhost:/Users/admin/srv/restic/macmini'
         ;;
     *)
         echo "Unable to determine restic repo for this machine." >&2

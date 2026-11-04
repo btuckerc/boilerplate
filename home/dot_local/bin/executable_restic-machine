@@ -83,4 +83,16 @@ fi
 target_env="$("$RESTIC_TARGET_ENV_BIN" "$REPO_TARGET")" || exit 1
 eval "$target_env"
 
-exec "$RESTIC_BIN" -r "$RESTIC_TARGET_REPO" "$@"
+# A dedicated key keeps unattended SFTP off the interactive agent; macmini uses one
+# to reach its own repository over loopback (launchd jobs lack TCC access to the
+# external volume, sshd has it).
+if [ -n "${RESTIC_SFTP_IDENTITY:-}" ]; then
+    case "$RESTIC_TARGET_REPO" in
+        sftp:*)
+            set -- -o "sftp.args=-i $RESTIC_SFTP_IDENTITY -o IdentitiesOnly=yes -o BatchMode=yes" "$@"
+            ;;
+    esac
+fi
+
+# Wait out a concurrent run's lock (scheduled job vs. interactive use) instead of failing.
+exec "$RESTIC_BIN" -r "$RESTIC_TARGET_REPO" --retry-lock 5m "$@"

@@ -17,18 +17,13 @@ if [ -f "$CONFIG_FILE" ]; then
     . "$CONFIG_FILE"
 fi
 
-RESTIC_BIN="$(find_bin \
-    "$HOME/.local/share/mise/shims/restic" \
-    "$HOME/.local/bin/restic" \
-    "/opt/homebrew/bin/restic" \
-    "/usr/local/bin/restic" \
-    "$(command -v restic 2>/dev/null || true)")"
+RESTIC_MACHINE_BIN="${RESTIC_MACHINE_BIN:-$HOME/.local/bin/restic-machine}"
 RESTIC_TARGET_ENV_BIN="$(find_bin \
     "$HOME/.local/bin/restic-target-env" \
     "$(command -v restic-target-env 2>/dev/null || true)")"
 
-if [ -z "${RESTIC_BIN:-}" ]; then
-    echo "restic CLI not found." >&2
+if [ ! -x "$RESTIC_MACHINE_BIN" ]; then
+    echo "restic-machine helper not found: $RESTIC_MACHINE_BIN" >&2
     exit 1
 fi
 
@@ -105,11 +100,8 @@ else
     exit 1
 fi
 
-if [ "$PRINT_PLAN" -eq 1 ]; then
-    target_env="$("$RESTIC_TARGET_ENV_BIN" --plan "$REPO_TARGET")" || exit 1
-else
-    target_env="$("$RESTIC_TARGET_ENV_BIN" "$REPO_TARGET")" || exit 1
-fi
+# Plan mode only names the target; restic-machine loads its credentials.
+target_env="$("$RESTIC_TARGET_ENV_BIN" --plan "$REPO_TARGET")" || exit 1
 eval "$target_env"
 
 if [ "$PRINT_PLAN" -eq 1 ]; then
@@ -126,7 +118,6 @@ if [ "$PRINT_PLAN" -eq 1 ]; then
 fi
 
 set -- \
-    -r "$RESTIC_TARGET_REPO" \
     backup \
     --exclude-caches \
     --host "$MACHINE_ID" \
@@ -142,4 +133,4 @@ while IFS= read -r arg || [ -n "$arg" ]; do
     set -- "$@" "$arg"
 done <"$pass_args_file"
 
-exec "$RESTIC_BIN" "$@"
+exec "$RESTIC_MACHINE_BIN" --repo-target "$REPO_TARGET" "$@"

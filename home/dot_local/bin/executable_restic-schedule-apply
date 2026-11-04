@@ -96,6 +96,18 @@ fi
 
 mkdir -p "$LOG_DIR"
 
+# Arm the one-time kernel-lock cutover now, so the next reboot clears it rather than
+# the first scheduled run arming it (see restic-scheduled-job).
+SCHEDULED_JOB_BIN="$(find_bin "$HOME/.local/bin/restic-scheduled-job" "$(command -v restic-scheduled-job 2>/dev/null || true)" || true)"
+if [ -z "$SCHEDULED_JOB_BIN" ]; then
+    echo "restic-scheduled-job not found." >&2
+    exit 1
+fi
+cutover="$("$SCHEDULED_JOB_BIN" --prepare-kernel-lock-migration)"
+if [ "$cutover" = "kernel_lock_cutover=reboot-required" ]; then
+    echo "Restic jobs start after this host's next reboot (one-time kernel-lock cutover)." >&2
+fi
+
 case "$OS_NAME" in
     Linux)
         SYSTEMCTL_BIN="$(find_bin "$(command -v systemctl 2>/dev/null || true)" "/usr/bin/systemctl")"

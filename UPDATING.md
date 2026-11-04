@@ -125,6 +125,43 @@ source and files; arbitrary hook side effects and native package changes may
 need explicit repair. Retain working backups and use the restore-smoke job to
 check recovery. Diagnose failed maintenance before running retention changes.
 
+Scheduled restic jobs (`restic-scheduled-job`) serialize on a per-host kernel
+lock (`lockf` on macOS, `flock` on Linux, released when the holder exits), clear
+only stale repository locks before each run (`restic unlock`, never
+`--remove-all`), and wait up to 5 minutes on a live lock. The previous scheduler
+serialized on a `restic-scheduler/lock` directory lease instead, which the kernel
+lock cannot see, and its jobs cannot all be recognized while they run (stdin,
+copies, orphaned helpers). The upgrade therefore needs one reboot per host: the
+first run of the new scheduler records the boot id (`kern.bootsessionuuid` on
+macOS, `/proc/sys/kernel/random/boot_id` on Linux) in the machine-local
+`~/.local/state/decent-angl/restic-scheduler/kernel-lock-v2-origin-boot`, and
+every job is recorded as failed, before touching a repository, until the host
+has booted since. An unreadable boot id or record also fails the run. After
+`chezmoi apply`, run `restic-schedule-apply` (it arms the record via
+`restic-scheduled-job --prepare-kernel-lock-migration`, which needs no password
+or repository), then reboot; a logout, reload or sleep does not count. Legacy
+leases are left alone. The record must not be copied between hosts. Rolling
+back to the lease scheduler and forward again needs the record deleted before
+the new scheduler returns, then another reboot. A job whose SFTP host does not answer
+(only an `nc` report of no route, timeout or DNS failure) logs `outcome=skipped`
+and exits 0; a host that refuses the connection, a probe failure `nc` reports any
+other way, or a host that is this machine (localhost, a loopback `HostName` alias,
+its own hostname or interface address, in any spelling the resolver accepts),
+always runs. A missing job helper is recorded as a failed run; an unknown
+`--repo-target`, or any argument the scheduler does not take (it passes none to
+the job helper), is a usage error and records nothing (`machine` and `primary`
+are recorded as `local`). In
+`~/.local/state/decent-angl/restic-scheduler/`, every run writes
+`last-run.<target>.<job>`, each success writes `last-success.<target>.<job>`,
+and the first run writes `first-run.<target>`. From these the doctor flags a
+backup older than 3 days, a monthly job older than 40, and a monthly job that
+has never succeeded once it ran or 40 days after the first run.
+The macmini reaches its own repository over loopback SFTP, because launchd jobs
+lack TCC access to the external volume. That needs a host-local key at
+`~/.ssh/restic-loopback` whose `authorized_keys` entry starts with
+`from="127.0.0.1,::1",restrict,command="internal-sftp"`, plus a pinned
+`localhost` host key in `~/.ssh/known_hosts`.
+
 Use `decent-angl-doctor --fleet --json` as input to an on-demand agent review.
 It emits selected state fields and counts, never raw configs, logs, or secrets.
 Keep mutation in reviewed commands. No Codex scheduled task is required.

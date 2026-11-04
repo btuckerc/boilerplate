@@ -15,7 +15,7 @@ description: Change the shared OMP baseline in chezmoi - upgrades, omp-baseline,
 
 ## Invariants
 
-- Pin OMP to the exact reviewed mise release (currently 18.12.1); do not combine
+- Pin OMP to the exact reviewed mise release (currently 18.16.0); do not combine
   the shared pin with `omp update`. Use `omp-baseline upgrade` to move the three
   pin sites together.
 - Prefer native OMP config and features. Keep native skill discovery enabled.
@@ -214,11 +214,15 @@ apply` every target that commit changed outside the manifest (such as
 `~/.local/share/decent-angl/skills`), then `omp-baseline apply`: it applies
 only manifest paths and syncs skills from the live canonical copies. After
 every pin move, treat live `omp models` as authoritative before keeping shared
-model IDs. OMP 18.12.1 is the reviewed release. Since 18.10.2 `task.structured`
+model IDs. OMP 18.16.0 is the reviewed release. Since 18.10.2 `task.structured`
 defaults off, which drops `yield` and output schemas unless the agent declares
 `structured: true`; both profiles set it true. 18.11-18.12.1 adds fail-closed
 agent tools, per-agent structured results, safer discovery roots, automatic
-prewalk, and the bundled `seance` agent. 18.10.4 removed Codex Code Mode,
+prewalk, and the bundled `seance` agent. 18.16.0 gives the bundled `scout`
+`ast_grep`, brings back per-call task models as the opt-in `task.perCallModel`
+(keep it off: `omp-agent-policy` fails closed otherwise) and lets an unserved
+thinking level alias through the catalog's `effortMap`, which the checker
+cannot see and so fails closed. 18.10.4 removed Codex Code Mode,
 18.8.2 per-call task model overrides. 18.3.0 deprecated
 the `hub` tool: use `wait`, `read proc://`, `write proc://<id>/kill` and
 `write agent://<id>`; RULES and skills use those forms.

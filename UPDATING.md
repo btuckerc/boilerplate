@@ -80,7 +80,7 @@ independent chezmoi clone.
   Never run `omp update`. Its manifest and setup hook pins must agree. Validate
   is read-only and includes the `omp-agent-policy` agent check against native
   `omp models --json` and `omp config list --json` evidence; its mirror is
-  pinned to one OMP version (18.12.1), so an upgrade re-verifies it first and a
+  pinned to one OMP version (18.16.0), so an upgrade re-verifies it first and a
   rollback reverts the upgrade commit with it (then `chezmoi apply` the reverted
   non-manifest targets before `omp-baseline apply`). It fails the default profile when
   `task.structured` is off (18.10.2+ default: no `yield`, schemas dropped). It certifies

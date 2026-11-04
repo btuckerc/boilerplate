@@ -21,7 +21,7 @@ REJECTED = (
     "Warning: models.yml validation failed \u2014 custom providers disabled\n"
     "Schema error: providers.llama.cpp.models.0.thinking.supportsDisplay: must be boolean (was a string)\n"
 )
-# `omp config list --json` values at the 18.12.6 schema defaults, for the settings the checker compares.
+# `omp config list --json` values at the 18.16.0 schema defaults, for the settings the checker compares.
 NATIVE_DEFAULTS = {
     "todo.enabled": True, "glob.enabled": True, "grep.enabled": True, "astGrep.enabled": False, "astEdit.enabled": True,
     "find.enabled": "auto", "debug.enabled": True, "launch.enabled": True, "checkpoint.enabled": False, "github.enabled": False,
@@ -32,7 +32,7 @@ NATIVE_DEFAULTS = {
     "advisor.continueSeverity": "concern", "lsp.requestTimeout": 10, "sharpshooter.minPromptLength": 16, "statusLine.segmentOptions": {},
     "enabledProviders": [], "task.prewalk": False, "task.agentPrewalk": {}, "prewalk.auto": "off", "prewalk.autoTarget": "@smol",
     "retry.enabled": True, "retry.modelFallback": True, "retry.usageAwareFallback": False, "task.structured": False,
-    "task.enableEffort": False, "modelRoles": {}, "task.agentModelOverrides": {}, "task.disabledAgents": [], "task.maxEffort": "max",
+    "task.enableEffort": False, "task.perCallModel": "off", "modelRoles": {}, "task.agentModelOverrides": {}, "task.disabledAgents": [], "task.maxEffort": "max",
     "disabledProviders": [], "extensions": [],
 }
 
@@ -67,7 +67,7 @@ class PolicyTests(unittest.TestCase):
         self.root = pathlib.Path(self.tmp.name)
         manifest = self.root / "home/dot_config/decent-angl/omp-baseline-manifest.tsv"
         manifest.parent.mkdir(parents=True)
-        manifest.write_text("# omp-version 18.12.6\n")
+        manifest.write_text("# omp-version 18.16.0\n")
         self.agent = self.root / "home/private_dot_omp/private_agent"
         (self.agent / "private_agents").mkdir(parents=True)
         self.config = self.agent / "private_config.yml"
@@ -122,7 +122,7 @@ class PolicyTests(unittest.TestCase):
         env = {**os.environ, "HOME": str(self.root / "home-temp")}
         return subprocess.run([BUN, str(CHECKER), "--root", str(self.root), *args], capture_output=True, text=True, env=env)
 
-    def evidence(self, models=None, models_file=None, profile="default", stderr="", version="18.12.6", native=None):
+    def evidence(self, models=None, models_file=None, profile="default", stderr="", version="18.16.0", native=None):
         """--catalog evidence as omp-baseline writes it: the native listing and settings, its stderr and what it covered."""
         models_file = models_file or self.agent / "private_models.yml"
         out = self.root / f"evidence-{next(self.serial)}.json"
@@ -249,11 +249,17 @@ class PolicyTests(unittest.TestCase):
         result = self.run_checker("--catalog", catalog, "--effort", "med", "--config", str(overlay))
         self.assertEqual(result.returncode, 1)
         self.assertIn("task.maxEffort=minimal", result.stderr)
-        # 18.12.6 ignores stale caller effort when its runtime gate is disabled.
+        # 18.16.0 ignores stale caller effort when its runtime gate is disabled.
         overlay.write_text("task:\n  enableEffort: false\n")
         result = self.run_checker("--catalog", catalog, "--effort", "med", "--config", str(overlay))
         self.assertNotIn("via caller-effort", result.stderr)
         self.assertIn("via selector-suffix", result.stderr)
+        # 18.16.0 task.perCallModel lets the caller pick a child's model; any mode but off fails closed.
+        for mode in ("eval", "on"):
+            overlay.write_text(f"task:\n  perCallModel: {mode}\n")
+            result = self.run_checker("--config", str(overlay))
+            self.assertEqual(result.returncode, 1)
+            self.assertIn(f'UNSUPPORTED task.perCallModel="{mode}"', result.stderr)
 
     def test_14_invalid_yaml_fails_closed(self):
         (self.agent / "private_agents/architect.md").write_text('---\nname: architect\ndescription: fallback\nmodel: openai-codex/gpt-6.1-sol\nthinking-level: xhigh\ntools: [read, grep\n---\n')
@@ -343,7 +349,7 @@ class PolicyTests(unittest.TestCase):
         def run(live_dir=live, args=(), at=None, **extra):
             catalog = self.evidence(models_file=live_dir / "models.yml")
             return subprocess.run(
-                [BUN, str(CHECKER), "--live", str(live_dir), "--omp-version", "omp/18.12.6", "--cwd", str(at or cwd), "--catalog", catalog, *args],
+                [BUN, str(CHECKER), "--live", str(live_dir), "--omp-version", "omp/18.16.0", "--cwd", str(at or cwd), "--catalog", catalog, *args],
                 capture_output=True, text=True, env={**env, **extra},
             )
         return cwd, run
@@ -703,6 +709,12 @@ class PolicyTests(unittest.TestCase):
         result = self.run_checker("--catalog", catalog, "--json")
         levels = {name: self.agent_report(result, name)["thinking"] for name in ("up", "floor", "flat", "odd")}
         self.assertEqual(levels, {"up": "medium", "floor": "low", "flat": "off", "odd": "high"})
+        # 18.16.0 may route an unserved level through thinking.effortMap, absent from the evidence.
+        self.assertEqual(result.returncode, 1)
+        errors = "\n".join(json.loads(result.stdout)["errors"])
+        for level, model in (("high", "steps"), ("minimal", "steps"), ("medium", "unsorted")):
+            self.assertIn(f"UNSUPPORTED thinking {level} is not served by llama.cpp/{model}", errors)
+        self.assertNotIn("served by llama.cpp/flat", errors)
 
     def test_25_catalog_evidence_must_match(self):
         models = self.agent / "private_models.yml"
@@ -711,7 +723,7 @@ class PolicyTests(unittest.TestCase):
         raw = self.root / "raw.json"
         raw.write_text('{"models": []}')
         for catalog, message in [
-            (self.evidence(version="18.4.4"), "was captured on omp 18.4.4, checking 18.12.6"),
+            (self.evidence(version="18.4.4"), "was captured on omp 18.4.4, checking 18.16.0"),
             (self.evidence(profile="local"), "was captured for profile local, checking default"),
             (stale, f"was captured from a different {models}"),
             (str(raw), "is not native catalog evidence"),
@@ -1017,7 +1029,7 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(report["mcp"], [])
         self.assertTrue(report["structured"])
         self.assertEqual(report["callable"], ["read", "grep", "glob", "yield"])
-        # v18.12.6 task/index.ts:781-785, structured-subagent.ts:403-405; bundled frontmatter
+        # v18.12.1 task/index.ts:781-785, structured-subagent.ts:403-405; bundled frontmatter
         # (prompts/agents/seance.md:1-6) does not opt in when task.structured is off.
         self.config.write_text(self.config.read_text().replace("  structured: true\n", "  structured: false\n"))
         report = self.agent_report(self.run_checker("--json"), "seance")

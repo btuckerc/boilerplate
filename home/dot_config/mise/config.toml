@@ -13,10 +13,10 @@ ruby = "3.4.11"
 
 # Coding harnesses. OMP and Codex pins are checked by check_baseline.py and
 # must match omp-baseline-manifest.tsv and run_onchange_after_04-setup-omp.
-"github:can1357/oh-my-pi" = "18.12.6"
-codex = "0.163.0"
+"github:can1357/oh-my-pi" = "18.16.0"
+codex = "0.166.0"
 herdr = "0.9.5"
-opencode = "1.19.4"
+opencode = "1.19.5"
 
 # CLI tools
 chezmoi = "2.73.3"

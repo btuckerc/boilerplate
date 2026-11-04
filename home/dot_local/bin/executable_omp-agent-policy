@@ -13,9 +13,9 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-// Rechecked against v18.12.6: fresh dispatch grants/discovery remain unchanged;
-// widget role fallback and the runtime task.enableEffort gate are mirrored below.
-const MIRRORED_OMP = ["18.12.6"];
+// Rechecked against v18.16.0: fresh dispatch grants/discovery remain unchanged apart from bundled scout's
+// ast_grep; per-call task models and effortMap clamping fail closed below.
+const MIRRORED_OMP = ["18.16.0"];
 const USAGE = `usage: omp-agent-policy (--root REPO | --live AGENT_DIR --omp-version VER) [options]
   --root REPO            chezmoi source tree; no HOME or cwd reads
   --live AGENT_DIR       deployed agent dir (e.g. ~/.omp/agent)
@@ -107,7 +107,7 @@ interface Agent {
 // task/agents.ts:46-72 plus prompts/agents/{scout,reviewer,security-reviewer,seance}.md frontmatter (no yield since
 // parseAgentFields stopped appending it; a structured dispatch adds it, task/executor.ts:4486).
 const BUNDLED: Agent[] = [
-	{ name: "scout", tools: ["read", "find", "grep", "glob", "web_search"], model: ["@smol"], thinking: "medium", source: "bundled", file: "<bundled>" },
+	{ name: "scout", tools: ["read", "find", "grep", "glob", "ast_grep", "web_search"], model: ["@smol"], thinking: "medium", source: "bundled", file: "<bundled>" },
 	{ name: "reviewer", tools: ["read", "find", "grep", "glob", "bash", "lsp", "web_search", "ast_grep"], spawns: ["scout"], model: ["@slow"], source: "bundled", file: "<bundled>" },
 	{ name: "security-reviewer", tools: ["read", "find", "grep", "glob", "lsp", "ast_grep"], source: "bundled", file: "<bundled>" },
 	{ name: "task", model: ["@task"], thinking: "auto", spawns: "*", source: "bundled", file: "<bundled>" },
@@ -1029,7 +1029,10 @@ const resolvePatterns = (v: string | string[] | undefined, settings: any) => pat
 /** config/model-resolver.ts:1091-1100 */
 const INHERITS = new Set(["default", "@default", "*", "pi/default", "@task", "pi/task"]);
 
-/** config/model-resolver.ts:1278-1310 (requestModel is a per-call override; not modelled). */
+/**
+ * config/model-resolver.ts:1332-1379. A per-call requestModel (task.perCallModel) outranks every layer here; the
+ * checker has no caller input to model it, so main() fails closed unless that setting is off.
+ */
 function candidatePatterns(agent: Agent, settings: any, parent: string): { patterns: string[]; via: string } {
 	const override = resolvePatterns(settings.task.agentModelOverrides?.[agent.name], settings);
 	if (override.length) return { patterns: override, via: "override" };
@@ -1091,11 +1094,15 @@ const modelOf = (catalog: any[] | undefined, id: string | undefined) => catalog?
 /** catalog/src/model-thinking.ts:23-28 getSupportedEfforts: the declared order, unfiltered. */
 const ladderOf = (m: any): string[] => (m?.reasoning ? (m.thinking ?? []) : []);
 
-/** catalog/src/model-thinking.ts:47-77 clampThinkingLevelForModel for a model present in the catalog. */
+/**
+ * catalog/src/model-thinking.ts:56-86 clampThinkingLevelForModel for a model present in the catalog. An unserved
+ * level may first follow thinking.effortMap (:67-71), which `omp models --json` omits, so that branch fails closed.
+ */
 function clampLevel(level: string, m: any): string | undefined {
 	if (!m?.reasoning) return undefined;
 	const levels = ladderOf(m);
 	if (levels.includes(level)) return level;
+	if (levels.length) errors.push(`UNSUPPORTED thinking ${level} is not served by ${m.provider}/${m.id}; native may alias it through thinking.effortMap, which models --json omits`);
 	const requested = EFFORTS.indexOf(level);
 	if (requested === -1) return undefined;
 	// The native loop stops at the first effort above the request, so an unsorted ladder clamps as declared.
@@ -1240,7 +1247,7 @@ function resolveThinking(agent: Agent, match: Match | undefined, settings: any, 
  * additional settings are included so native effective-value evidence covers the 18.12.1 contract.
  */
 const GATE_DEFAULTS: Record<string, unknown> = {
-	"task.enableEffort": false,
+	"task.enableEffort": false, "task.perCallModel": "off",
 	"todo.enabled": true, "glob.enabled": true, "grep.enabled": true, "astGrep.enabled": false, "astEdit.enabled": true,
 	"advisor.continueSeverity": "concern", "lsp.requestTimeout": 10, "sharpshooter.minPromptLength": 16, "statusLine.segmentOptions": {},
 	"find.enabled": "auto", "debug.enabled": true, "launch.enabled": true, "checkpoint.enabled": false, "github.enabled": false,
@@ -1579,6 +1586,8 @@ function main(): number {
 		: { catalog: undefined, modelsValid: false, native: undefined };
 	if (native) compareSettings(settings, native);
 	else if (!catalogFile) errors.push("UNVERIFIED settings merge not confirmed: needs native evidence (--catalog)");
+	// task/settings.ts:308-337: any mode but "off" lets a caller pick the child's model (and :level) per call.
+	if (gate(settings, "task.perCallModel") !== "off") errors.push(`UNSUPPORTED task.perCallModel=${canon(gate(settings, "task.perCallModel"))}: per-call models are not mirrored`);
 	const models = modelsValid && fs.existsSync(modelsFile) ? readSettingsFile(modelsFile) : {};
 	// main.ts:1953-1963 with config/settings.ts:1904-1913: non-empty PI_SMOL/SLOW/PLAN_MODEL replace those roles.
 	for (const role of ["smol", "slow", "plan"]) {

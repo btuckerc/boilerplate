@@ -153,6 +153,15 @@ def local_report():
     for name, service in services.items():
         if not service.get("loaded", service.get("active", False)) or service.get("last_exit") not in (None, 0):
             issues.append(f"service needs review: {name}")
+    # zsh reads only $ZDOTDIR's startup files. Installers that append to the
+    # $HOME copies (e.g. grok's PATH and completions) are silently ignored.
+    if shutil.which("zsh"):
+        code, zdotdir = run(["zsh", "-c", 'print -r -- "${ZDOTDIR:-$HOME}"'])
+        zdotdir = zdotdir.strip()
+        if code == 0 and zdotdir and Path(zdotdir) != user:
+            for name in (".zshrc", ".zprofile", ".zlogin"):
+                if (user / name).exists():
+                    issues.append(f"zsh ignores ~/{name} (ZDOTDIR={zdotdir}); move what it adds into managed config")
     return {"machine": machine, "os": platform.system(), "checked_at": datetime.now(timezone.utc).isoformat(),
             "sync": sync, "pins": pins, "codex": codex, "services": services,
             "backup_jobs": backups, "issues": issues}

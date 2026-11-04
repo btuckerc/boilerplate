@@ -969,20 +969,22 @@ PYLOCK
 }
 
 install_guard() {
-  local os uid plist unit_dir
+  local os plist unit_dir
   os="$(uname -s)"
   mkdir -p "$STATE_DIR"
   case "$os" in
     Darwin)
-      uid="$(id -u)"
-      plist="$HOME/Library/LaunchAgents/gg.angl.decent-angl-sync.plist"
-      mkdir -p "$(dirname "$plist")"
+      # decent-angl-launchd installs it as a LaunchAgent or, on a server, a LaunchDaemon.
+      plist="$STATE_DIR/gg.angl.decent-angl-sync.plist"
       cat >"$plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>Label</key><string>gg.angl.decent-angl-sync</string>
   <key>ProgramArguments</key><array><string>$HOME/.local/bin/decent-angl-sync</string><string>guard</string></array>
+  <key>UserName</key><string>$(id -un)</string>
+  <key>WorkingDirectory</key><string>$HOME</string>
+  <key>ProcessType</key><string>Background</string>
   <key>EnvironmentVariables</key><dict>
     <key>HOME</key><string>$HOME</string>
     <key>PATH</key><string>$HOME/.local/bin:$HOME/.local/share/mise/shims:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
@@ -993,9 +995,7 @@ install_guard() {
   <key>StandardErrorPath</key><string>$LOG_FILE</string>
 </dict></plist>
 EOF
-      chmod 600 "$plist"
-      launchctl bootout "gui/$uid/gg.angl.decent-angl-sync" >/dev/null 2>&1 || true
-      launchctl bootstrap "gui/$uid" "$plist" >/dev/null 2>&1 || echo "GUARD   launchd will load at next login"
+      "$HOME/.local/bin/decent-angl-launchd" install "$plist" || return 1
       ;;
     Linux)
       unit_dir="$HOME/.config/systemd/user"

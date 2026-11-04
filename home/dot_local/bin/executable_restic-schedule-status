@@ -22,7 +22,7 @@ com.decentangl.restic.forget-prune
 com.decentangl.restic.check
 "
 LAUNCHD_SOURCE_DIR="${RESTIC_LAUNCHD_SOURCE_DIR:-$HOME/.local/share/decent-angl/launchd}"
-LAUNCHD_TARGET_DIR="${RESTIC_LAUNCHD_TARGET_DIR:-$HOME/Library/LaunchAgents}"
+LAUNCHD_HELPER="${DECENT_ANGL_LAUNCHD:-$HOME/.local/bin/decent-angl-launchd}"
 
 printf 'os=%s\n' "$OS_NAME"
 printf 'password_file=%s\n' "$PASSWORD_FILE"
@@ -47,26 +47,26 @@ case "$OS_NAME" in
         done
         ;;
     Darwin)
-        uid="$(id -u)"
-        launchd_domain="user/$uid"
-        if launchctl print "gui/$uid" >/dev/null 2>&1; then
-            launchd_domain="gui/$uid"
+        launchd_domain="$("$LAUNCHD_HELPER" domain)"
+        if [ "$launchd_domain" = system ]; then
+            launchd_dir=/Library/LaunchDaemons
+        else
+            launchd_dir="$HOME/Library/LaunchAgents"
         fi
         printf 'launchd_source_dir=%s\n' "$LAUNCHD_SOURCE_DIR"
-        printf 'launchd_target_dir=%s\n' "$LAUNCHD_TARGET_DIR"
+        printf 'launchd_target_dir=%s\n' "$launchd_dir"
         printf 'launchd_domain=%s\n' "$launchd_domain"
         for label in $LAUNCHD_LABELS; do
             source_plist="$LAUNCHD_SOURCE_DIR/$label.plist"
-            target_plist="$LAUNCHD_TARGET_DIR/$label.plist"
+            target_plist="$launchd_dir/$label.plist"
             source_present=false
             installed=false
-            loaded=unknown
+            loaded=false
             if [ -f "$source_plist" ]; then
                 source_present=true
             fi
             if [ -f "$target_plist" ]; then
                 installed=true
-                loaded=false
             fi
             if launchctl print "$launchd_domain/$label" >/dev/null 2>&1; then
                 loaded=true

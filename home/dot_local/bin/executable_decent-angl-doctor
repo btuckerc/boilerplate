@@ -158,12 +158,30 @@ def local_report():
                       "compaction_override": c.get("model_auto_compact_token_limit")})
     services = {}
     if platform.system() == "Darwin":
+        # decent-angl-launchd: a home-server runs these as system daemons, others as login agents;
+        # older installs also used user/<uid>. A copy in another domain counts whether launchd still
+        # has it loaded or only its plist remains.
+        server = role.strip() == "home-server"
+        uid = os.getuid()
+        domain = "system" if server else f"gui/{uid}"
+        others = [f"gui/{uid}", f"user/{uid}"] if server else ["system", f"user/{uid}"]
+        stray_dir = user / "Library/LaunchAgents" if server else Path("/Library/LaunchDaemons")
+        # Any user can print system/ and its own user/<uid>; only root reaches gui/<uid> from ssh.
+        other_as = [] if not server else ["sudo", "-n"] if run(["sudo", "-n", "true"])[0] == 0 else None
         for label in ("gg.angl.decent-angl-sync", "gg.angl.omp-baseline", "com.decentangl.restic.backup",
                       "com.decentangl.restic.check", "com.decentangl.restic.restore-smoke",
                       "com.decentangl.restic.forget-prune"):
-            code, output = run(["launchctl", "print", f"gui/{os.getuid()}/{label}"])
+            code, output = run(["launchctl", "print", f"{domain}/{label}"])
             match = re.search(r"last exit code = (-?\d+)", output)
-            services[label] = {"loaded": code == 0, "last_exit": int(match.group(1)) if match else None}
+            if other_as is None:
+                stray_loaded = None
+            else:
+                stray_loaded = any(run([*other_as, "launchctl", "print", f"{other}/{label}"])[0] == 0
+                                   for other in others)
+            services[label] = {"domain": domain, "loaded": code == 0,
+                               "last_exit": int(match.group(1)) if match else None,
+                               "stray_copy": stray_loaded is True or (stray_dir / f"{label}.plist").exists(),
+                               "stray_unchecked": stray_loaded is None}
     else:
         for unit in ("decent-angl-sync.timer", "omp-baseline-guard.timer",
                      *(() if agent_host else ("decent-angl-restic-backup.timer", "decent-angl-restic-check.timer",
@@ -194,6 +212,10 @@ def local_report():
     for name, service in services.items():
         if not service.get("loaded", service.get("active", False)) or service.get("last_exit") not in (None, 0):
             issues.append(f"service needs review: {name}")
+        if service.get("stray_copy"):
+            issues.append(f"service also installed outside {service['domain']}: {name}")
+        elif service.get("stray_unchecked"):
+            issues.append(f"service domain check needs passwordless sudo: {name}")
     # zsh reads only $ZDOTDIR's startup files. Installers that append to the
     # $HOME copies (e.g. grok's PATH and completions) are silently ignored.
     if shutil.which("zsh"):

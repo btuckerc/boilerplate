@@ -162,6 +162,28 @@ lack TCC access to the external volume. That needs a host-local key at
 `from="127.0.0.1,::1",restrict,command="internal-sftp"`, plus a pinned
 `localhost` host key in `~/.ssh/known_hosts`.
 
+Headless macOS jobs (restic, the sync guard, the omp-baseline guard) are
+installed by `decent-angl-launchd install`, which picks the domain from the
+machine role. The home-server (macmini) runs them as system LaunchDaemons with
+`UserName` set to its admin account, so they keep running when no one or
+another account holds the console. Installing them needs passwordless or cached
+sudo (`sudo -v`); without it the install changes nothing and fails. The old
+login agent is disabled first (`launchctl disable user/<uid>/<label>`, which
+gui/<uid> shares and which works with no GUI session), so no later login loads
+it; its plist moves to `~/.local/state/decent-angl/launchd-retired/`, and any
+loaded copy (in gui/<uid>, or `user/<uid>` from older installs) is booted out.
+Laptops keep per-user LaunchAgents, and an install there re-enables the label
+and removes any stray daemon or `user/<uid>` copy. Both paths
+judge by what launchd has loaded (a service survives deletion of its plist) and
+fail if a bootout does not take effect within 10 seconds. The doctor flags a
+copy loaded or installed in the wrong domain; on the home-server that check
+needs passwordless sudo, and it says so when unavailable. Jobs that need GUI
+or TCC access (omp-serve, Obsidian, iMessage) stay login agents and stop while
+their user is logged out. Rollback: `sudo launchctl bootout system/<label>`,
+delete `/Library/LaunchDaemons/<label>.plist`, move the retired plist back to
+`~/Library/LaunchAgents/`, `launchctl enable user/<uid>/<label>`, and
+`launchctl bootstrap gui/<uid>` it at the next login.
+
 Use `decent-angl-doctor --fleet --json` as input to an on-demand agent review.
 It emits selected state fields and counts, never raw configs, logs, or secrets.
 Keep mutation in reviewed commands. No Codex scheduled task is required.

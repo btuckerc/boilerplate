@@ -28,7 +28,7 @@ decent-angl-restic-forget-prune.timer
 decent-angl-restic-check.timer
 "
 LAUNCHD_SOURCE_DIR="${RESTIC_LAUNCHD_SOURCE_DIR:-$HOME/.local/share/decent-angl/launchd}"
-LAUNCHD_TARGET_DIR="${RESTIC_LAUNCHD_TARGET_DIR:-$HOME/Library/LaunchAgents}"
+LAUNCHD_HELPER="${DECENT_ANGL_LAUNCHD:-$HOME/.local/bin/decent-angl-launchd}"
 LOG_DIR="${RESTIC_SCHEDULE_LOG_DIR:-$HOME/.local/state/decent-angl/restic-scheduler/logs}"
 
 usage() {
@@ -78,7 +78,7 @@ if [ "$PRINT_PLAN" -eq 1 ]; then
             ;;
         Darwin)
             printf 'launchd_source_dir=%s\n' "$LAUNCHD_SOURCE_DIR"
-            printf 'launchd_target_dir=%s\n' "$LAUNCHD_TARGET_DIR"
+            printf 'launchd_domain=%s\n' "$("$LAUNCHD_HELPER" domain 2>/dev/null || echo unknown)"
             printf 'log_dir=%s\n' "$LOG_DIR"
             ;;
         *)
@@ -125,25 +125,13 @@ case "$OS_NAME" in
             echo "Launchd source directory not found: $LAUNCHD_SOURCE_DIR" >&2
             exit 1
         fi
-        uid="$(id -u)"
-        launchd_domain="user/$uid"
-        if launchctl print "gui/$uid" >/dev/null 2>&1; then
-            launchd_domain="gui/$uid"
-        fi
-        mkdir -p "$LAUNCHD_TARGET_DIR"
         found_plist=0
         for source_plist in "$LAUNCHD_SOURCE_DIR"/com.decentangl.restic.*.plist; do
             if [ ! -f "$source_plist" ]; then
                 continue
             fi
             found_plist=1
-            plist_name="$(basename "$source_plist")"
-            plist_label="${plist_name%.plist}"
-            target_plist="$LAUNCHD_TARGET_DIR/$plist_name"
-            launchctl bootout "$launchd_domain" "$target_plist" >/dev/null 2>&1 || true
-            install -m 644 "$source_plist" "$target_plist"
-            launchctl bootstrap "$launchd_domain" "$target_plist"
-            launchctl enable "$launchd_domain/$plist_label" >/dev/null 2>&1 || true
+            "$LAUNCHD_HELPER" install "$source_plist"
         done
         if [ "$found_plist" -ne 1 ]; then
             echo "No rendered launchd plists found in $LAUNCHD_SOURCE_DIR" >&2

@@ -66,6 +66,12 @@ were preserved; native provider credentials/config were left in place. Previous
 runtime remains at `~/.local/lib/omp-serve.before-425565f`; original source link
 is retained in the backup directory. No accounts were migrated during this rollout.
 
+On Mini, omp-serve stays a per-user LaunchAgent (`gg.angl.omp-serve`), because
+a LaunchDaemon would lose GUI and computer-use access. It runs only while
+`admin` has a GUI login session. If another account takes the console (as
+`hermes` did on Nov 3), it stays down until `admin` logs back in, e.g. through
+fast user switching.
+
 The desktop settings/app overlays now stack above the sidebar. The current
 model badge opens a searchable model picker and shows reasoning effort.
 Confirmed native Astra selection and xhigh in Safari without invoking inference.

@@ -1,0 +1,152 @@
+#!/bin/sh
+# Installs a headless scheduled job where this machine's role needs it.
+# home-server (macmini) runs them as system LaunchDaemons with UserName, so they
+# keep running with no GUI login (another account may hold the console);
+# workstations keep per-user LaunchAgents. Only jobs without GUI or TCC needs
+# belong here.
+set -eu
+
+ROLE={{ get (get .decentangl.machines (get .decentangl "machine_id" | default "") | default dict) "role" | default "" | quote }}
+AGENT_DIR="$HOME/Library/LaunchAgents"
+DAEMON_DIR="${DECENT_ANGL_LAUNCHD_DAEMON_DIR:-/Library/LaunchDaemons}"
+RETIRED_DIR="$HOME/.local/state/decent-angl/launchd-retired"
+
+usage() {
+    cat <<'EOF'
+Usage: decent-angl-launchd <domain|install PLIST>
+
+  domain         Print the launchd domain this machine's jobs belong in.
+  install PLIST  Install and load PLIST there, retiring any copy in the other
+                 domain. A home-server needs passwordless sudo for this.
+EOF
+}
+
+domain() {
+    case "$ROLE" in
+        home-server) printf 'system\n' ;;
+        portable-macos-workstation) printf 'gui/%s\n' "$(id -u)" ;;
+        *)
+            echo "decent-angl-launchd: no launchd policy for role '${ROLE:-unknown}'." >&2
+            return 1
+            ;;
+    esac
+}
+
+need_sudo() {
+    if ! sudo -n true 2>/dev/null; then
+        echo "decent-angl-launchd: $1 needs sudo; run 'sudo -v', then rerun." >&2
+        return 1
+    fi
+}
+
+# as PRIV CMD...: run CMD directly (user) or through sudo (sudo).
+as() {
+    if [ "$1" = sudo ]; then
+        shift
+        sudo -n "$@"
+    else
+        shift
+        "$@"
+    fi
+}
+
+# Judged by what launchd has loaded, not by plist files: a service stays
+# loaded after its plist is deleted.
+loaded() {
+    as "$1" launchctl print "$2" >/dev/null 2>&1
+}
+
+# unload PRIV SERVICE: boot SERVICE out and wait until launchd drops it.
+unload() {
+    loaded "$1" "$2" || return 0
+    as "$1" launchctl bootout "$2" 2>/dev/null || true
+    tries=0
+    while loaded "$1" "$2"; do
+        tries=$((tries + 1))
+        if [ "$tries" -gt 10 ]; then
+            echo "decent-angl-launchd: $2 is still loaded after bootout." >&2
+            return 1
+        fi
+        sleep 1
+    done
+}
+
+install_job() {
+    plist="$1"
+    target="$(domain)"
+    plutil -lint -s "$plist" >/dev/null
+    label="$(plutil -extract Label raw -o - "$plist")"
+    case "$label" in
+        ''|*/*) echo "decent-angl-launchd: bad Label in $plist" >&2; return 1 ;;
+    esac
+    uid="$(id -u)"
+    if [ "$target" = system ]; then
+        user="$(plutil -extract UserName raw -o - "$plist" 2>/dev/null || true)"
+        if [ "$user" != "$(id -un)" ]; then
+            echo "decent-angl-launchd: $plist must set UserName to $(id -un) to run as a daemon." >&2
+            return 1
+        fi
+        need_sudo "loading $label as a LaunchDaemon"
+        # Disable the login agent first: gui/<uid> shares user/<uid>'s overrides,
+        # and user/<uid> exists with no GUI session, so from here launchd refuses
+        # to load the agent at any login, even one that read its plist earlier.
+        # Then retire the plist and unload what launchd already has (root can
+        # address gui/<uid> from ssh; older installs also used user/<uid>).
+        launchctl disable "user/$uid/$label"
+        if [ -e "$AGENT_DIR/$label.plist" ]; then
+            mkdir -p "$RETIRED_DIR"
+            mv -f "$AGENT_DIR/$label.plist" "$RETIRED_DIR/$label.plist"
+        fi
+        unload sudo "gui/$uid/$label"
+        unload sudo "user/$uid/$label"
+        unload sudo "system/$label"
+        sudo -n install -o root -g wheel -m 644 "$plist" "$DAEMON_DIR/$label.plist"
+        sudo -n launchctl enable "system/$label"
+        sudo -n launchctl bootstrap system "$DAEMON_DIR/$label.plist"
+        if ! loaded user "system/$label"; then
+            echo "decent-angl-launchd: $label is not loaded in system after bootstrap." >&2
+            return 1
+        fi
+        printf 'LAUNCHD %s loaded in system as %s\n' "$label" "$user"
+        return 0
+    fi
+    if [ -e "$DAEMON_DIR/$label.plist" ] || loaded user "system/$label"; then
+        need_sudo "removing the LaunchDaemon $label"
+        unload sudo "system/$label"
+        sudo -n rm -f "$DAEMON_DIR/$label.plist"
+    fi
+    mkdir -p "$AGENT_DIR"
+    # Older installs bootstrapped into user/<uid> when no GUI session existed.
+    unload user "user/$uid/$label"
+    unload user "$target/$label"
+    install -m 644 "$plist" "$AGENT_DIR/$label.plist"
+    # Undo a home-server install's disable (shared with gui/<uid>, settable without a GUI session).
+    launchctl enable "user/$uid/$label"
+    if launchctl print "$target" >/dev/null 2>&1; then
+        launchctl bootstrap "$target" "$AGENT_DIR/$label.plist"
+        if ! loaded user "$target/$label"; then
+            echo "decent-angl-launchd: $label is not loaded in $target after bootstrap." >&2
+            return 1
+        fi
+        printf 'LAUNCHD %s loaded in %s\n' "$label" "$target"
+    else
+        printf 'LAUNCHD %s installed; it loads at the next login\n' "$label"
+    fi
+}
+
+if [ "$(uname -s)" != Darwin ]; then
+    echo "decent-angl-launchd: launchd is macOS-only." >&2
+    exit 1
+fi
+case "${1:-}" in
+    domain) domain ;;
+    install)
+        if [ "$#" -ne 2 ]; then
+            usage >&2
+            exit 2
+        fi
+        install_job "$2"
+        ;;
+    -h|--help|help) usage ;;
+    *) usage >&2; exit 2 ;;
+esac

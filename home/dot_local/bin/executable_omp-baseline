@@ -456,6 +456,7 @@ portable_support_paths() {
 home/dot_config/decent-angl/omp-baseline-manifest.tsv
 home/.chezmoidata/decentangl.yaml
 home/dot_config/decent-angl/opnsense.env.tmpl
+home/dot_local/bin/executable_decent-angl-launchd.tmpl
 home/dot_config/mise/config.toml
 home/dot_local/bin/executable_omp-baseline
 home/dot_local/bin/executable_decent-angl-skills
@@ -1538,20 +1539,22 @@ upgrade() {
 }
 
 install_guard() {
-  local os uid plist unit_dir
+  local os plist unit_dir
   os="$HOST_OS"
   mkdir -p "$STATE_DIR"
   case "$os" in
     Darwin)
-      uid="$(id -u)"
-      plist="$HOME/Library/LaunchAgents/gg.angl.omp-baseline.plist"
-      mkdir -p "$(dirname "$plist")"
+      # decent-angl-launchd installs it as a LaunchAgent or, on a server, a LaunchDaemon.
+      plist="$STATE_DIR/gg.angl.omp-baseline.plist"
       cat >"$plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>Label</key><string>gg.angl.omp-baseline</string>
   <key>ProgramArguments</key><array><string>$HOME/.local/bin/omp-baseline</string><string>guard</string></array>
+  <key>UserName</key><string>$(id -un)</string>
+  <key>WorkingDirectory</key><string>$HOME</string>
+  <key>ProcessType</key><string>Background</string>
   <key>EnvironmentVariables</key><dict>
     <key>HOME</key><string>$HOME</string>
     <key>PATH</key><string>$HOME/.local/bin:$HOME/.local/share/mise/shims:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
@@ -1562,10 +1565,7 @@ install_guard() {
   <key>StandardErrorPath</key><string>$LOG_FILE</string>
 </dict></plist>
 EOF
-      chmod 600 "$plist"
-      launchctl bootout "gui/$uid/gg.angl.omp-baseline" >/dev/null 2>&1 || true
-      launchctl bootstrap "gui/$uid" "$plist" >/dev/null 2>&1 || \
-        printf 'GUARD   launchd will load at the next login\n'
+      "$HOME/.local/bin/decent-angl-launchd" install "$plist" || return 1
       ;;
     Linux)
       unit_dir="$HOME/.config/systemd/user"

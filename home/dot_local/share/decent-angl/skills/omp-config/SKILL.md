@@ -130,6 +130,16 @@ description: Change the shared OMP baseline in chezmoi - upgrades, omp-baseline,
   `auditor` and `sol` contracts in `omp-agent-policy`, `RELEASE_MODEL` in
   `omp-audit`, and the audit lane text above, after model-eval's admission
   controls pass.
+- Prompt cache and compaction (2026-10-30 replay of 74K Opus requests plus
+  Terminal-Bench 2.0 A/B): OAuth sessions default to 1h cache entries. nous
+  pilots `providers.cacheRetention: short` with `cacheWarming: idle` in its
+  host-local `host.yml` (replay: −11% Opus cache cost at list prices; the
+  subscription-quota effect is unverified). Keep it only if
+  `~/src/omp-lab/droid-1.0/cache_pilot.py` shows a lower cache $/M context;
+  otherwise delete the block. Keep the reserve-based compaction trigger: a
+  160K trigger saves cache reads but compacts 1.5x as often. A RULES batching
+  or PTC nudge changed neither multi-call share nor eval use across 142 trials,
+  so it stays out.
 - Keep `private_models.yml` focused on catalog overrides plus necessary tested
   custom providers; do not remove those providers under an override-only rule.
   Retain the custom `ghostty` theme.

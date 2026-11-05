@@ -38,7 +38,10 @@ installs only the agent toolchain there; the host-local
   Mac's forced command must be `env PEEKABOO_DISABLE_TOOLS=browser peekaboo
   mcp --bridge-socket <Peekaboo.app bridge.sock>`: the env var alone falls back
   to an ungranted local host, and the browser tool breaks Bridge startup.
-  Peekaboo.app must be running (login item) for screenshots.
+  Peekaboo.app must be running (login item) for screenshots. Keep the entry's
+  ssh `ConnectTimeout=3`: `omp -p` waits for MCP startup before its first
+  request, so a sleeping Mac cost every headless launch the full timeout
+  (10 s → 3.4 s to first request with 3).
 - `xdg-desktop-portal{,-gtk}.service` are user-masked (host-local, not
   chezmoi). `libwebkit2gtk-4.1-0` (Tauri builds) pulls them in, but with no
   display the GTK backend exits and the portal times out on every D-Bus

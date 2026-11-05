@@ -16,6 +16,8 @@ modelRoles:
   task: openai-codex/gpt-6-luna:medium
   # Scarce Anthropic weekly pool (capped at half of it); see RULES.md.
   fable: anthropic/claude-fable-5-1:medium
+  # Council seat only (`astra` agent); ~5x Sol per token on the Codex pool.
+  astra: openai-codex/gpt-6-astra:high
   # Web search: APIs only; scrapers blocked as of 2026-10-14. Exa (keyless)
   # leads, then the exact fallbacks under retry.fallbackChains.web. Firecrawl
   # and Parallel use keys from ~/.omp/agent/.env (`omp-env`) when present;

@@ -16,6 +16,8 @@ file	~/.omp/agent/agents/auditor.md	home/private_dot_omp/private_agent/private_a
 file	~/.omp/agent/agents/sol.md	home/private_dot_omp/private_agent/private_agents/sol.md
 file	~/.omp/agent/agents/fable.md	home/private_dot_omp/private_agent/private_agents/fable.md
 file	~/.omp/agent/agents/browser.md	home/private_dot_omp/private_agent/private_agents/browser.md
+file	~/.omp/agent/agents/astra.md	home/private_dot_omp/private_agent/private_agents/astra.md
+file	~/.omp/agent/agents/opus.md	home/private_dot_omp/private_agent/private_agents/opus.md
 file	~/.omp/agent/prompts/update.md	home/private_dot_omp/private_agent/private_prompts/update.md
 file	~/.omp/agent/themes/ghostty.json	home/private_dot_omp/private_agent/private_themes/ghostty.json
 file	~/.omp/agent/extensions/herdr-omp-agent-state.ts	home/private_dot_omp/private_agent/private_extensions/herdr-omp-agent-state.ts

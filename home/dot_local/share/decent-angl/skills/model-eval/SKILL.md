@@ -19,6 +19,7 @@ Decide whether a candidate model earns a lane. Adoption itself follows the
 | Release audit | `plan` → `auditor` | Codex | GPT-6.1 Sol xhigh |
 | Sustained frontier | `slow` | Anthropic | Opus high |
 | Escalation, second opinion | `fable` | Anthropic, capped at half | Fable medium (after Sol fails) |
+| Council seats | `architect`, `fable`, `astra`, `opus` | per seat | Sol xhigh, Fable medium, Astra high, Opus high |
 | Local worker | `nous`, `smol`, `tiny`, `commit` | nous GPU, no quota | Qwen3.8 27B |
 | Cloud worker | `task`, `vision` | Codex | Luna medium |
 
@@ -59,6 +60,13 @@ escalation, because it spreads load.
    seeded defect (for example a dropped validation branch in a real diff)
    must come back BLOCK with its file:line, and the same packet without the
    defect must not come back BLOCK.
+   For a council seat candidate, the candidate must pass that same seeded/clean
+   pair. Then blind-replay at least two archived runs from
+   `~/.local/state/council/` on that scratch seat agent: give it only
+   `packet.md` and `diff-r1.patch`. Score it afterwards against `ledger.md` and
+   `seats.tsv`: count the verified blocker/should findings the incumbent seats
+   missed, findings the ledger declined with evidence (false positives), and
+   usage.
 6. **Decide.** Write a one-line verdict per lane (adopt / trial / reject) with
    the deciding number. Then adopt through `omp-config`: change the IDs in
    `config.yml` roles/`enabledModels`, and for Anthropic models add a 272K

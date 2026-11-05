@@ -40,14 +40,16 @@ description: Change the shared OMP baseline in chezmoi - upgrades, omp-baseline,
   It trails GPT-6 Astra by 1–5 points on coding/agentic benchmarks at about 1/8
   the blended token price (model-eval benchmarks, 2026-09-29) and draws from the
   Codex pool, not the director's. Astra is a manual reserve; it stays in
-  `enabledModels`. Fable medium (`fable`, `@fable`) is only a second opinion
-  from a different model family after Sol fails. `@slow` is Opus high.
+  `enabledModels` for the read-only `astra` council seat (role `astra`). Fable
+  medium (`fable`, `@fable`) is only a second opinion from a different model
+  family after Sol fails, or a council seat. `@slow` is Opus high, also behind
+  the read-only `opus` seat. Seat lifecycle: the `council` skill.
   Escalation is scoped child delegation, not a parent-model switch. When to
   escalate, consult or audit is the RULES.md policy; this section covers only
   the mechanics.
-- The "Sol xhigh council" (the Sol high council until 2026-10-14) is one
-  `architect` at xhigh, and the release `auditor` (read-only, strict verdict
-  schema) is the same model and effort: both use `@plan:xhigh`, because the
+- The Sol high council is one `architect` at xhigh (the "Sol xhigh council"
+  in records from 2026-10-14 on). The release `auditor` (read-only, strict
+  verdict schema) is the same model and effort: both use `@plan:xhigh`, because the
   `plan` role's `:high` suffix beats a frontmatter `thinkingLevel`. Run release
   audits through `/review` or `omp-audit NAME PACKET CANDIDATE`, never a plain
   `task` call: an ordinary child inherits MCP servers and the xd:// write
@@ -123,7 +125,11 @@ description: Change the shared OMP baseline in chezmoi - upgrades, omp-baseline,
   then run `omp-baseline validate`. It checks role families and efforts, that
   every role model is discovered, and the Anthropic budget. Then confirm the
   exact `provider`/`model` in a fresh `omp -p --mode json` response; a fuzzy
-  match or successful exit alone does not prove the new model.
+  match or successful exit alone does not prove the new model. A Sol
+  generation also moves its deliberate exact pins together: the `architect`,
+  `auditor` and `sol` contracts in `omp-agent-policy`, `RELEASE_MODEL` in
+  `omp-audit`, and the audit lane text above, after model-eval's admission
+  controls pass.
 - Keep `private_models.yml` focused on catalog overrides plus necessary tested
   custom providers; do not remove those providers under an override-only rule.
   Retain the custom `ghostty` theme.

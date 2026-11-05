@@ -20,8 +20,9 @@ after one focused repair. `architect` (xhigh) supplies read-only advice; `sol` (
 a scoped difficult implementation/diagnosis. Clearly hard work may go directly
 to Sol. Missing context, credentials or tools require prerequisites, not a
 larger model. Workers return blockers to the director; no recursive escalation chains.
-Astra is a manual reserve used only on request. Fable (`fable` agent) is only a
-second opinion from a different model family after Sol fails. `omp-quota`
+Astra is a manual reserve used only on request or as a council seat. Fable
+(`fable` agent) is only a read-only second opinion from a different model
+family after Sol fails, or a council seat. `omp-quota`
 prints the remaining quota for both subscriptions on one line. RULES.md has
 the thresholds.
 In Codex, retain the current parent model unless explicitly configured otherwise.

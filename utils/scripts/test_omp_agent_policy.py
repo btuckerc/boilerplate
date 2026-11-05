@@ -78,6 +78,9 @@ class PolicyTests(unittest.TestCase):
             "  smol: llama.cpp/test:low\n"
             "  tiny: '@smol'\n"
             "  task: openai-codex/gpt-6-luna:medium\n"
+            "  fable: anthropic/claude-fable-test:medium\n"
+            "  slow: anthropic/claude-opus-5-5:high\n"
+            "  astra: openai-codex/gpt-6-astra:high\n"
             "task:\n  agentModelOverrides: {}\n  structured: true\n  enableEffort: true\n"
             "astGrep:\n  enabled: true\n"
             "tools:\n  xdev: true\n"
@@ -89,6 +92,8 @@ class PolicyTests(unittest.TestCase):
             "modelRoles": {
                 "default": "anthropic/claude-opus-5-5:high", "plan": "openai-codex/gpt-6.1-sol:high",
                 "smol": "llama.cpp/test:low", "tiny": "@smol", "task": "openai-codex/gpt-6-luna:medium",
+                "fable": "anthropic/claude-fable-test:medium", "slow": "anthropic/claude-opus-5-5:high",
+                "astra": "openai-codex/gpt-6-astra:high",
             },
             "astGrep.enabled": True, "retry.modelFallback": False, "task.structured": True,
         }
@@ -99,7 +104,10 @@ class PolicyTests(unittest.TestCase):
         self.add("scout", "llama.cpp/test", "low", ["read", "grep", "glob", "web_search", "yield"])
         self.add("sol", "@plan", "high")
         self.add("sonic", "llama.cpp/test", "low", ["read", "grep", "glob", "edit", "write", "yield"])
-        self.add("fable", "anthropic/claude-fable-test", "medium")
+        consult = ["read", "grep", "glob", "web_search", "yield"]
+        self.add("fable", "@fable", "medium", consult)
+        self.add("astra", "@astra", "high", consult)
+        self.add("opus", "@slow", "high", consult)
         (self.agent / "private_commands/private_review").mkdir(parents=True)
         shutil.copy(REVIEW, self.agent / "private_commands/private_review/index.ts")
 
@@ -112,6 +120,7 @@ class PolicyTests(unittest.TestCase):
     MODELS = [
         ("openai-codex", "gpt-6.1-sol", FULL),
         ("openai-codex", "gpt-6-luna", FULL),
+        ("openai-codex", "gpt-6-astra", FULL),
         ("anthropic", "claude-opus-5-5", FULL),
         ("anthropic", "claude-fable-test", FULL),
         ("llama.cpp", "test", ["low", "medium", "high"]),

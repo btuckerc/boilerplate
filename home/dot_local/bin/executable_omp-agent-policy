@@ -56,7 +56,9 @@ const CONTRACTS: Record<string, { model: string; thinking: string; tools?: strin
 	scout: { model: "^llama\\.cpp/", thinking: "low", tools: ["read", "grep", "glob", "web_search", "yield"], source: "user" },
 	sonic: { model: "^llama\\.cpp/", thinking: "low", tools: ["read", "grep", "glob", "edit", "write", "yield"], source: "user" },
 	task: { model: "openai-codex/gpt-6-luna", thinking: "medium", source: "bundled" },
-	fable: { model: "^anthropic/claude-fable-", thinking: "medium", source: "user" },
+	fable: { model: "^anthropic/claude-fable-", models: ["@fable"], thinking: "medium", tools: ["read", "grep", "glob", "web_search", "yield"], source: "user" },
+	astra: { model: "^openai-codex/gpt-[0-9]+(\\.[0-9]+)?-astra$", models: ["@astra"], thinking: "high", tools: ["read", "grep", "glob", "web_search", "yield"], source: "user" },
+	opus: { model: "^anthropic/claude-opus-", models: ["@slow"], thinking: "high", tools: ["read", "grep", "glob", "web_search", "yield"], source: "user" },
 };
 
 /** JSON with object keys sorted, so YAML key order does not matter. */

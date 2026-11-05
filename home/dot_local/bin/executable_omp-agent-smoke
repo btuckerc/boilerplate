@@ -28,7 +28,7 @@ const USAGE = `usage: omp-agent-smoke [--agents a,b,...] [--project-agents DIR] 
 // dotenv file), so the checked root is the dispatched root.
 const AGENT_DIR = path.join(os.homedir(), ".omp", "agent");
 
-const CONTRACT_AGENTS = ["architect", "auditor", "sol", "browser", "nous", "scout", "sonic", "task", "fable"];
+const CONTRACT_AGENTS = ["architect", "auditor", "sol", "browser", "nous", "scout", "sonic", "task", "fable", "astra", "opus"];
 
 interface Prediction {
 	name: string;

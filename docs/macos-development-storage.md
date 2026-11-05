@@ -54,6 +54,31 @@ A Git-index audit then caught 30,088 tracked files inside generated-looking path
 
 Historical dependency trees removed by the whole-Documents cleanup are not quarantined. They were limited to reproducible paths such as `node_modules`, `.next`, bytecode/test/lint/Turbo caches, structurally verified Python virtual environments (`pyvenv.cfg` present), Swift `.build` beside `Package.swift`, and Rust `target` beside `Cargo.toml`. Reinstall dependencies or rebuild those historical projects before use.
 
+## 2026-11-04 migration
+
+The remaining development trees, device backups, and game data were moved out of iCloud Documents. Every item was fully local (no dataless files) and on the same APFS volume, so each move was a single `rename(2)`: no bytes were copied and no iCloud archive was left behind. Before and after each move, file counts, byte totals, and every repository's `HEAD` and porcelain status were compared; all matched. The log is `~/.local/state/icloud-development-migration/20261104/moves.jsonl`.
+
+| Former path under `~/Documents` | New path | Compatibility symlink |
+| --- | --- | --- |
+| `GitHub` | `~/src/github` | yes |
+| `Codex` | `~/src/codex-app-workspaces` | yes; Codex.app keeps creating task workspaces through it |
+| `repos` | `~/src/repos` | yes |
+| `mole`, `notion-ai`, `StockModeler`, `rom_reader`, `PokeRNG`, `UNITY_BUILDS` | `~/src/<same name>` | no |
+| `Apps`, `Cursor`, `Games` | `~/src/apps`, `~/src/cursor`, `~/src/games` | no |
+| `random_usb/backups`, `random_usb/iPhone Backups` | `~/Archive/iphone-backups/random_usb-backups`, `~/Archive/iphone-backups/random_usb-iPhone Backups` | no |
+| `random_usb/games`, `valheim_server`, `old 3ds backup` | `~/Archive/games/random_usb-games`, `~/Archive/games/valheim_server`, `~/Archive/games/old 3ds backup` | no |
+| every `*.icloud-archive-2026072x` from the July migration | `~/Archive/icloud-migration-july-2026/Documents/<former relative path>` | no |
+
+`.claude.json`, Codex trust entries, and Codex saved workspace roots still name `~/Documents/GitHub/...` and `~/Documents/Codex/...`; the symlinks keep them valid. External Git worktrees for `jeopardy` resolve through `~/Documents/GitHub/jeopardy` → `~/src/github/jeopardy` → `~/src/jeopardy`. FileZilla's local tab path now points at `~/Archive/games/valheim_server`.
+
+`git fsck` passes in all 166 moved repositories except one inactive Codex snapshot (`2026-04-17-is-there-anything-available-to-make/boilerplate-pre-consolidation-2026-04-17`). That snapshot has an iCloud `refs/.DS_Store` and a tmux `tpm` submodule whose module directory never existed. Two iCloud conflict refs were moved into the repositories' `.git/icloud-artifacts/`: `py-finance` `refs/heads/main 2`, an ancestor of `main`, and `music-recs` `refs/remotes/origin/HEAD 2`. The dangling `origin/HEAD` symref in `music-recs` was deleted with `git remote set-head origin -d`.
+
+Restic already covers `~/src`. On the `macbook` it now also includes `~/Archive/iphone-backups`. The rest of `~/Archive` is local-only: the Fortnite packs can be downloaded again, and the July archives duplicate `~/src`.
+
+These stay in iCloud Documents on purpose: music and music-production material, `flipper` (its `Wav_Player` holds music), `career`, `cluewell` design documents, Obsidian vaults, photos, and personal files under `random_usb`.
+
+To reverse one move, stop its processes, remove its compatibility symlink if there is one, and rename the new path back to the former path.
+
 ## Future migrations
 
 1. Stop processes whose working directory is inside the source tree.
@@ -66,4 +91,4 @@ Do not bulk-delete the dated archives until active projects, dirty worktrees, lo
 
 ## Reversal
 
-For one project, stop its processes, remove only its compatibility symlink, and rename the corresponding dated `.icloud-archive-YYYYMMDD` directory back to the original name. Restore a quarantined generated tree only if it cannot be rebuilt; copy its matching relative path from the quarantine back into the restored project. Never run a recursive cleanup against `~/Documents`, `~/src`, or a variable that has not been resolved to one exact project path.
+For one July project, stop its processes, remove only its compatibility symlink, and rename the corresponding dated `.icloud-archive-YYYYMMDD` directory from `~/Archive/icloud-migration-july-2026/Documents/` back to the original path. Restore a quarantined generated tree only if it cannot be rebuilt; copy its matching relative path from the quarantine back into the restored project. Never run a recursive cleanup against `~/Documents`, `~/src`, or a variable that has not been resolved to one exact project path.

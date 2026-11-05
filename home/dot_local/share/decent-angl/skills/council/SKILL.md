@@ -42,7 +42,11 @@ the seats cannot be dispatched: say so and stop.
 
 Before round 1, fix known issues and run the checks: seats review the current
 work, never known-broken code. Seats read from the run directory
-`~/.local/state/council/<YYYY-MM-DD>-<slug>/`.
+`~/.local/state/council/<YYYY-MM-DD>-<slug>/` and, for context, the working
+tree, which must match the candidate until they return. If it does not, or
+you may edit before then, export each tree you build to a new directory
+(`mkdir <run>/tree-rN && git archive <tree> | tar -x -C <run>/tree-rN`) and
+point that round's seats there.
 
 - Candidate: a commit, or for uncommitted work a tree built without touching
   the user's index: `export GIT_INDEX_FILE=$(mktemp -u); git read-tree HEAD;
@@ -54,10 +58,14 @@ work, never known-broken code. Seats read from the run directory
   of scope, the tree id, the checks with raw output, and what stays untested.
   Pointers are labelled as pointers. Never include your reasoning, earlier
   reviews or scores, or secrets.
+- Size: about 400 changed lines of one concern is the human-review limit
+  (unverified for seats). For larger or mixed work, tell the user and suggest
+  splitting the work itself; never clip a diff silently.
 - Round 0 is an optional design question before any code exists: the packet
   holds the question, constraints and options. Seats answer in prose with
   their best approach, strongest objection and what to cut; no emphasis, no
-  schema.
+  schema. A design-only council ends there with the recommended approach, the
+  objections that stand and what to cut; scores and targets start in round 1.
 
 ## Rounds
 
@@ -103,8 +111,8 @@ target and has named what would raise it. Nit fixes, and wording fixes that
 keep the meaning, need no round. Message only those seats' existing agents
 (`write agent://<id>`) with the new tree id, `delta-rN.patch`, fresh check
 output and only their own ledger rows. Each marks its ids `resolved` or
-`open`, raises new findings only on changed code, and re-scores, naming the
-ids behind any change.
+`open`, raises new findings on changed code or any blocker or should it
+missed in scope, and re-scores, naming the ids behind any change.
 
 **Target.** "push a 9.5" or "to N" needs every seat at N or above; "+0.2"
 needs every seat 0.2 above its own round-1 score (10 counts as met). A seat
@@ -136,17 +144,28 @@ Council approval is advice: a high-consequence change still needs `/review`,
 and nothing here overrides an auditor BLOCK or UNVERIFIED.
 
 Report rounds, seat availability, fixed and declined findings with reasons,
-dissent, open items, and the diff size before and after. Add a score table,
-one row per seat and one column per round, under `## Council review` with a
-`Rounds: N` line; write `no score` when a seat gave none. It goes in the PR
+dissent, open items, and the diff size before and after. Remove the run's
+`tree-r*` exports. First append one row per seat that sat a scored round to
+the machine-local `~/.local/state/council/yield.tsv`, creating it with the
+tab-separated header
+`date slug seat model lines rounds alone shared declined cost_usd active_s`.
+lines is insertions plus deletions from `git diff --shortstat <base> <tree>`
+for round 1; alone and shared count its verified blockers and shoulds;
+declined counts its findings you rejected or downgraded; model comes from
+`history://<id>`; cost_usd sums `usage.cost.total` in the seat's
+`<id>.jsonl` beside the session's `local/` directory; active_s sums its
+task-result durations. From those rows and the task results, add a table
+under `## Council review` with a `Rounds: N` line: one row per seat, one
+column per round (score, duration and the cost added in `<id>.jsonl` after
+that round's message, or `no score`), then the total cost. It goes in the PR
 description (never a comment) only when the user asked to ship or update the
 PR, otherwise in the final reply.
 
 ## Changing seats
 
-A new candidate model arrives about every 18 days. It earns or keeps a seat
-only through the council lane in `model-eval`; a seat stays while it adds
-verified findings for its cost. A same-line upgrade is the generation upgrade
-in `omp-config`. A new line needs a role, a read-only agent file, contracts
-in `omp-agent-policy`, `omp-agent-smoke` and `omp-baseline`, a manifest row,
-and a row in the seat table above.
+A new candidate model arrives about every 18 days. Seats are added, dropped
+or upgraded only through the council lane in `model-eval`, which reads
+`yield.tsv`, and the user decides. A same-line upgrade is the generation
+upgrade in `omp-config`. A new line needs a role, a read-only agent file,
+contracts in `omp-agent-policy`, `omp-agent-smoke` and `omp-baseline`, a
+manifest row, and a row in the seat table above.

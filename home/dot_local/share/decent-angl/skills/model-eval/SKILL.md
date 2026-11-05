@@ -65,7 +65,10 @@ escalation, because it spreads load.
    seeded/clean packet pair with the council's round-1 brief: the seeded
    defect must come back as a blocker or should with its file:line, the clean
    packet must draw no blocker or should, and you verify every finding. Compare
-   verified findings, false positives and usage with the incumbent.
+   verified findings, false positives and usage with the incumbent. Weigh
+   incumbents with `~/.local/state/council/yield.tsv`: a seat whose last 5
+   scored runs on its current model raised no verified blocker or should
+   alone is a drop candidate; put it to the user with its cost.
 6. **Decide.** Write a one-line verdict per lane (adopt / trial / reject) with
    the deciding number. Then adopt through `omp-config`: change the IDs in
    `config.yml` roles/`enabledModels`, and for Anthropic models add a 272K

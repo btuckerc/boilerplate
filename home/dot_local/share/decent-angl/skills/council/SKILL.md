@@ -1,7 +1,7 @@
 ---
 name: council
-description: Multi-model review or design council that loops until the seats are satisfied. Use only when the user says "council", "full council" or "Sol high council"; seat names or a target score ("push a 9") in that request shape it. Never self-convene.
-argument-hint: "[full | seat names] [to N] [what to review or decide]"
+description: Multi-model review or design council that loops until the seats are satisfied. Use only when the user says "council", "full council" or "Sol high council"; seat names or a target ("push a 9.5", "+0.2") in that request shape it. Never self-convene.
+argument-hint: "[full | seat names] [to N | +D] [what to review or decide]"
 ---
 
 # Council
@@ -23,7 +23,7 @@ the seats cannot be dispatched: say so and stop.
 | Sol | `architect` | Breaker: make it fail | default |
 | Fable | `fable` | Simplifier: what to cut | default |
 | Astra | `astra` | Scenario: walk the real use end to end | `full council` or named |
-| Opus | `opus` | Skeptic: attack the packet's assumptions | `full council` or named; otherwise tiebreaker |
+| Opus | `opus` | Skeptic: attack the packet's assumptions | default |
 
 - "Sol high council" seats Sol alone. Named seats replace the default set.
 - Seats can read, grep, glob and web_search; they cannot run a shell, edit or
@@ -74,14 +74,16 @@ Each finding (ids <letter>-01, -02, ...): exact location, the concrete
 failure, and the evidence that would change your mind. blocker = the intended
 case is wrong or the contract is broken. should = a real defect within the
 intent, on any supported path. nit = anything else, including extra scope.
-Score: 10 nothing to fix or cut; 9 ship, nits only; 7-8 shoulds open;
-5-6 a blocker; below 5 wrong approach. APPROVE means no blocker or should.
+Score with one decimal, e.g. 8.6. The integer is the band: 10 nothing to fix
+or cut; 9 ship, nits only; 7-8 shoulds open; 5-6 a blocker; below 5 wrong
+approach. The tenth ranks the work within its band. APPROVE means no blocker
+or should.
 ```
 
 Pass this `outputSchema`:
 
 ```json
-{"type":"object","required":["score","verdict","top_risk","findings"],"properties":{"score":{"type":"integer","minimum":0,"maximum":10},"verdict":{"enum":["APPROVE","CHANGES"]},"top_risk":{"type":"string"},"findings":{"type":"array","items":{"type":"object","required":["id","severity","location","claim","fix"],"properties":{"id":{"type":"string"},"status":{"enum":["new","resolved","open"]},"severity":{"enum":["blocker","should","nit"]},"location":{"type":"string"},"claim":{"type":"string"},"fix":{"type":"string"}}}}}}
+{"type":"object","required":["score","verdict","top_risk","findings"],"properties":{"score":{"type":"number","minimum":0,"maximum":10},"verdict":{"enum":["APPROVE","CHANGES"]},"top_risk":{"type":"string"},"findings":{"type":"array","items":{"type":"object","required":["id","severity","location","claim","fix"],"properties":{"id":{"type":"string"},"status":{"enum":["new","resolved","open"]},"severity":{"enum":["blocker","should","nit"]},"location":{"type":"string"},"claim":{"type":"string"},"fix":{"type":"string"}}}}}}
 ```
 
 Check every finding yourself; you set the final severity. Agreement between
@@ -101,16 +103,19 @@ target and has named what would raise it. Nit fixes, and wording fixes that
 keep the meaning, need no round. Message only those seats' existing agents
 (`write agent://<id>`) with the new tree id, `delta-rN.patch`, fresh check
 output and only their own ledger rows. Each marks its ids `resolved` or
-`open`, raises new findings only on changed code, and re-scores.
+`open`, raises new findings only on changed code, and re-scores, naming the
+ids behind any change.
 
-**Target.** "push a 9" or "to N" makes every seat's score at N or above part
-of done. A fix, evidence the seat accepts, or a ruling can move a score;
-persuasion cannot. Ask a seat below target with nothing open, once, what
-would raise it; its answer is a finding like any other.
+**Target.** "push a 9.5" or "to N" needs every seat at N or above; "+0.2"
+needs every seat 0.2 above its own round-1 score (10 counts as met). A seat
+re-scores in the context where it judged the earlier work, so the step is a
+comparison, not a fresh guess. A fix, evidence the seat accepts, or a ruling
+can move a score; persuasion cannot. Ask a seat below target with nothing
+open, once, what would raise it; its answer is a finding like any other.
 
 **Tiebreak.** A blocker or should the seat still holds after answering your
 counter-evidence once, or one the seats disagree on, goes to one fresh
-`opus` (a separate agent if Opus is seated) with only the claim, the evidence
+`opus` agent, never a seat, with only the claim, the evidence
 and both arguments. You wrote the code, so never rule on your own decline. A
 ruling closes its item; pass it to the seat with the next message. Applying it
 needs no round unless it changes behavior outside that item.
@@ -122,8 +127,8 @@ agree just to end the loop.
 ## Stop and report
 
 A seat is satisfied when it approves, or when all it still holds are declined
-nits or ruled items (record that dissent); with a target it must also score
-at N or above. The council is **done** when every seated member is satisfied
+nits or ruled items (record that dissent); with a target it must also meet
+it. The council is **done** when every seated member is satisfied
 and no blocker or should is open, and **incomplete** when the budget ends or
 no round is warranted before then: show each open item with 2-3 lines per
 side and never imply approval.

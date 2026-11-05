@@ -39,16 +39,16 @@ description: Change the shared OMP baseline in chezmoi - upgrades, omp-baseline,
   implementation at high; both `@plan`, with no reserve model) is the default.
   It trails GPT-6 Astra by 1–5 points on coding/agentic benchmarks at about 1/8
   the blended token price (model-eval benchmarks, 2026-09-29) and draws from the
-  Codex pool, not the director's. Astra is a manual reserve; it stays in
-  `enabledModels` for the read-only `astra` council seat (role `astra`). Fable
-  medium (`fable`, `@fable`) is only a second opinion from a different model
-  family after Sol fails, or a council seat. `@slow` is Opus high, also behind
-  the read-only `opus` seat. Seat lifecycle: the `council` skill.
+  Codex pool, not the director's. Astra (role and agent `astra`), Fable medium
+  (agent `fable`, `@fable`) and the `opus` agent (Opus high via `@slow`) are
+  read-only consults; Astra stays in `enabledModels` for its role. Seat
+  lifecycle: the `council` skill.
   Escalation is scoped child delegation, not a parent-model switch. When to
   escalate, consult or audit is the RULES.md policy; this section covers only
   the mechanics.
-- The Sol high council is one `architect` at xhigh (the "Sol xhigh council"
-  in records from 2026-10-14 on). The release `auditor` (read-only, strict
+- The director's consult is one `architect` at xhigh (the "Sol xhigh council"
+  in records from 2026-10-14 on; "Sol high council" now triggers a one-seat
+  `council`). The release `auditor` (read-only, strict
   verdict schema) is the same model and effort: both use `@plan:xhigh`, because the
   `plan` role's `:high` suffix beats a frontmatter `thinkingLevel`. Run release
   audits through `/review` or `omp-audit NAME PACKET CANDIDATE`, never a plain

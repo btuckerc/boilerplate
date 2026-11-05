@@ -20,11 +20,8 @@ after one focused repair. `architect` (xhigh) supplies read-only advice; `sol` (
 a scoped difficult implementation/diagnosis. Clearly hard work may go directly
 to Sol. Missing context, credentials or tools require prerequisites, not a
 larger model. Workers return blockers to the director; no recursive escalation chains.
-Astra is a manual reserve used only on request or as a council seat. Fable
-(`fable` agent) is only a read-only second opinion from a different model
-family after Sol fails, or a council seat. `omp-quota`
-prints the remaining quota for both subscriptions on one line. RULES.md has
-the thresholds.
+When to use Astra, Fable or a council is RULES.md, with the quota thresholds;
+`omp-quota` prints both subscriptions' remaining quota on one line.
 In Codex, retain the current parent model unless explicitly configured otherwise.
 When a change needs a release audit, and why there is otherwise no review tax,
 is the RULES.md audit rule; this skill only routes workers.

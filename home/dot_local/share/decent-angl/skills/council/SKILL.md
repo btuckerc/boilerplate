@@ -1,15 +1,16 @@
 ---
 name: council
-description: Multi-model review or design council that loops until the seats are satisfied. Use only when the user says "council", "full council" or "Sol high council"; seat names in that request pick the seats. Never self-convene.
-argument-hint: "[full | seat names] [what to review or decide]"
+description: Multi-model review or design council that loops until the seats are satisfied. Use only when the user says "council", "full council" or "Sol high council"; seat names or a target score ("push a 9") in that request shape it. Never self-convene.
+argument-hint: "[full | seat names] [to N] [what to review or decide]"
 ---
 
 # Council
 
-Independent models review the same evidence. You, the director, verify each
-finding, make the fixes and reconvene until every seat is satisfied or the
-budget ends. Adapted from Theo Browne's tstack `council` and `sol-loop`
-(October 2026).
+Models from different families review the same evidence independently. You,
+the director, verify each finding, fix, and reconvene until every seat is
+satisfied or the budget ends. Adapted from Theo Browne's tstack `council` and
+`sol-loop`. Independent first opinions carry most of the value and reviewer
+precision is low, so verification is your job.
 
 First check the trigger. If the user did not say "council", stop: your own
 consult is the single `architect` described in RULES.md. Outside OMP (Codex),
@@ -25,53 +26,57 @@ the seats cannot be dispatched: say so and stop.
 | Opus | `opus` | Outcome | `full council` or named; otherwise tiebreaker |
 
 - "Sol high council" seats Sol alone. Named seats replace the default set.
-- Seats have read, grep, glob and web_search only: no shell, no edit, no file
-  write. They still inherit MCP and xd:// devices, as `architect` always has,
-  so the brief forbids those.
-- Model and effort come from the agent and the `config.yml` roles. Never pass
-  `effort`. Diversity comes from model family, effort and emphasis. Every seat
-  rejects or strips temperature.
-- Run `omp-quota` first and skip any seat whose pool is under 10%. A seat that
-  errors, times out, or served a model other than its role (the
-  `model_change` line in its `history://<id>`) is skipped too. Report the
-  skip, never substitute a model, and continue as an incomplete council.
-  `task.maxConcurrency` is 3, so a fourth seat starts late.
+- Seats can read, grep, glob and web_search; they cannot run a shell, edit or
+  write files. They still inherit MCP and xd:// devices, so the brief forbids
+  those.
+- Model and effort come from the agent files and `config.yml` roles; never
+  pass `effort`. No seat accepts a temperature: diversity is model family,
+  effort and emphasis.
+- Run `omp-quota` before each round and skip a seat whose pool is under 10%.
+  Also skip a seat that errors, times out, or served another model than its
+  role (the `model_change` line in `history://<id>`). Report each skip, never
+  substitute, and continue as an incomplete council. `task.maxConcurrency` is
+  3, so a fourth seat starts late.
 
 ## Packet
 
-Before the first round, fix known issues, address PR comments and run the
-checks. Seats review the current work, never known-broken code. The run
-directory `~/.local/state/council/<YYYY-MM-DD>-<slug>/` holds everything. It
-is machine-local and stays as the archive that `model-eval` replays, so never
-overwrite an earlier round's file.
+Before round 1, fix known issues and run the checks: seats review the current
+work, never known-broken code. Everything lives in the run directory
+`~/.local/state/council/<YYYY-MM-DD>-<slug>/`, which stays machine-local as
+the archive `model-eval` replays. Never overwrite an earlier round's file.
 
-- Candidate: snapshot the intended files without touching the user's index:
-  `export GIT_INDEX_FILE=$(mktemp -u); git read-tree HEAD; git add <paths>;
-  git write-tree; rm -f "$GIT_INDEX_FILE"; unset GIT_INDEX_FILE`. Write
-  `git diff <base> <tree>` to `<run>/diff-rN.patch` for round N. Repeat the
-  snapshot after each round: the same tree id proves that no seat changed the
-  work.
-- `packet.md` (frozen after round 1): the ask, acceptance criteria, explicit
-  out of scope, the tree id, the checks run with raw output, and what stays
-  untested. Add pointers only, labelled as pointers, not your reasoning. No
-  secrets.
-- Round 0 is a design question asked before any code exists. Its packet holds
-  the question, the constraints and the draft or options.
+- Candidate: a commit, or for uncommitted work a tree built without touching
+  the user's index: `export GIT_INDEX_FILE=$(mktemp -u); git read-tree HEAD;
+  git add <paths>; git write-tree; rm -f "$GIT_INDEX_FILE"; unset
+  GIT_INDEX_FILE`. Write `git diff <base> <tree>` to `diff-r1.patch`; from
+  round 2, rebuild the tree and write `git diff <previous tree> <tree>` to
+  `delta-rN.patch`.
+- `packet.md`, frozen after round 1: the ask, acceptance criteria, what is out
+  of scope, the tree id, the checks with raw output, and what stays untested.
+  Pointers are labelled as pointers. Never include your reasoning, earlier
+  reviews or scores, or secrets.
+- Round 0 is an optional design question before any code exists: the packet
+  holds the question, constraints and options. Seats answer in prose with
+  their best approach, strongest objection and what to cut; no emphasis, no
+  schema.
 
 ## Rounds
 
-Dispatch all seats in one `task` batch. Round 1 is independent. Use this
-brief:
+Dispatch all seats in one `task` batch; round 1 is independent. Brief, with a
+distinct id letter per seat:
 
 ```
-Council seat, round N. Review only; do not use MCP or xd:// devices.
-Packet: ~/.local/state/council/<run>/ (packet.md, diff-rN.patch, ledger.md).
+Council seat, round 1. Review only; do not use MCP or xd:// devices.
+Packet: ~/.local/state/council/<run>/packet.md and diff-r1.patch.
 Emphasis: <emphasis>. Still cover correctness, scope and user outcome.
-Name the single most likely way this ships broken or fails the user, and the
-evidence that would change your mind.
-blocker = the intended case is wrong or the contract is broken.
-should = a real defect within the intent. nit = anything else, including
-other paths, rare cases and extra scope.
+Judge from the code and evidence, not from other reviewers' findings.
+Name the single most likely way this ships broken or fails the user.
+Each finding (ids <letter>-01, -02, ...): exact location, the concrete
+failure, and the evidence that would change your mind. blocker = the intended
+case is wrong or the contract is broken. should = a real defect within the
+intent. nit = anything else, including other paths, rare cases and extra scope.
+Score: 10 nothing to fix or cut; 9 ship, nits only; 7-8 shoulds open;
+5-6 a blocker; below 5 wrong approach. APPROVE means no blocker or should.
 ```
 
 Pass this `outputSchema`:
@@ -80,59 +85,60 @@ Pass this `outputSchema`:
 {"type":"object","required":["score","verdict","top_risk","findings"],"properties":{"score":{"type":"integer","minimum":0,"maximum":10},"verdict":{"enum":["APPROVE","CHANGES"]},"top_risk":{"type":"string"},"findings":{"type":"array","items":{"type":"object","required":["id","severity","location","claim","fix"],"properties":{"id":{"type":"string"},"status":{"enum":["new","resolved","open"]},"severity":{"enum":["blocker","should","nit"]},"location":{"type":"string"},"claim":{"type":"string"},"fix":{"type":"string"}}}}}}
 ```
 
-Round 0 has no emphases and no schema. Each seat answers in prose with three
-parts: its best approach, its strongest objection to the draft, and what to
-cut.
-
-Check every finding yourself. You set the final severity.
+Check every finding yourself; you set the final severity. Agreement between
+seats is not proof.
 
 - Agree: make the smallest fix.
 - Disagree: give counter-evidence (file:line, a test, raw output). Settle a
   factual dispute by writing the test or the counterexample.
 - Nit or out of scope: decline it in one line and list it as follow-up.
 
-`ledger.md` holds one row per finding, with a neutral id (R1-03), severity,
-disposition and evidence. Keep seat attribution in
-`local://council-<slug>-seats.tsv`, where seats are not told to look, and
-copy it into the run directory when you stop.
+Keep the ledger, one row per finding (neutral id R1-03, severity,
+disposition, evidence), and the seat attribution in
+`local://council-<slug>-ledger.md` and `-seats.tsv`, where no seat looks. At
+stop, copy them into the run directory as `ledger.md` and `seats.tsv`.
 
-**Next round.** Hold one while any seat still says CHANGES and either it has
-a fix to confirm or an open blocker/should, or when behavior changed after a
-seat approved. Message each seat's existing agent with `write agent://<id>`.
-Send the new tree id, `diff-rN.patch`, the updated ledger, and its own ids.
-The seat repeats each of its ids with status `resolved` or `open`, and raises
-new findings only on changed code.
+**Next round.** Hold one while a seat has an open blocker or should or a fix
+to confirm, while behavior changed after it approved, or while it is below a
+target and has named what would raise it. Nit fixes, and wording fixes that
+keep the meaning, need no round. Message each seat's existing agent (`write
+agent://<id>`) with the new tree id, `delta-rN.patch` and only its own ledger
+rows. It marks each of its ids `resolved` or `open`, raises new findings only
+on changed code, and re-scores.
 
-**Tiebreak.** Some disputes cannot be settled by a test: a blocker or should
-that the seat still holds after it has answered your counter-evidence once,
-or where seats disagree. Take each one to one fresh `opus`, with only the
-claim, the evidence and both arguments. If Opus is seated, use a separate
-fresh agent. You wrote the code, so never rule on your own decline. A ruling
-closes its item. Applying a ruled fix needs no new round unless it changes
-behavior outside that item.
+**Target.** "push a 9" or "to N" makes every seat's score at N or above part
+of done. A fix, evidence the seat accepts, or a ruling can move a score;
+persuasion cannot. Ask a seat below target with nothing open, once, what
+would raise it; its answer is a finding like any other.
 
-**Budget.** At most 3 rounds, counting round 0, and 2 tiebreaks. Extend only
-when the user asks. If review grew the diff, cut first. Do not agree just to
-end the loop.
+**Tiebreak.** A blocker or should the seat still holds after answering your
+counter-evidence once, or one the seats disagree on, goes to one fresh
+`opus` (a separate agent if Opus is seated) with only the claim, the evidence
+and both arguments. You wrote the code, so never rule on your own decline. A
+ruling closes its item; pass it to the seat with the next message. Applying it
+needs no round unless it changes behavior outside that item.
+
+**Budget.** 3 rounds counting round 0, 5 with a target, and 2 tiebreaks.
+Extend only when the user asks. If review grew the diff, cut first. Never
+agree just to end the loop.
 
 ## Stop and report
 
-A seat is satisfied when it approves, or when everything it still holds is a
-declined nit or a ruled item. In that case record its dissent. The council is
-**done** when every seated member is satisfied and no blocker or should is
-open. It is **incomplete** when the budget ends, or no further round is
-warranted, before that. Then show each open item with 2-3 lines per side,
-and never imply approval. Council approval is advice: a high-consequence
-change still needs `/review`, and nothing here overrides an auditor BLOCK or
-UNVERIFIED.
+A seat is satisfied when it approves, or when all it still holds are declined
+nits or ruled items (record that dissent); with a target it must also score
+at N or above. The council is **done** when every seated member is satisfied
+and no blocker or should is open, and **incomplete** when the budget ends or
+no round is warranted before then: show each open item with 2-3 lines per
+side and never imply approval.
+Council approval is advice: a high-consequence change still needs `/review`,
+and nothing here overrides an auditor BLOCK or UNVERIFIED.
 
-Report the rounds, seat availability, fixed and declined findings with
-reasons, dissent, open items, and the diff size before and after. Add a score
-table with one row per seat and one column per round, under the heading
-`## Council review` and a `Rounds: N` line. Write `no score` when a seat gave
-none, and never invent one. Put it in the PR description (never a comment)
-only when the user asked to ship or update the PR. Otherwise it goes in the
-final reply.
+Report rounds, seat availability, fixed and declined findings with reasons,
+dissent, open items, and the diff size before and after. Add a score table,
+one row per seat and one column per round, under `## Council review` with a
+`Rounds: N` line; write `no score` when a seat gave none. It goes in the PR
+description (never a comment) only when the user asked to ship or update the
+PR, otherwise in the final reply.
 
 ## Changing seats
 

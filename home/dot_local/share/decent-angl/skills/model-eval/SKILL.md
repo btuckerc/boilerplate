@@ -60,13 +60,12 @@ escalation, because it spreads load.
    seeded defect (for example a dropped validation branch in a real diff)
    must come back BLOCK with its file:line, and the same packet without the
    defect must not come back BLOCK.
-   For a council seat candidate, the candidate must pass that same seeded/clean
-   pair. Then blind-replay at least two archived runs from
-   `~/.local/state/council/` on that scratch seat agent: give it only
-   `packet.md` and `diff-r1.patch`. Score it afterwards against `ledger.md` and
-   `seats.tsv`: count the verified blocker/should findings the incumbent seats
-   missed, findings the ledger declined with evidence (false positives), and
-   usage.
+   For a council seat candidate, use that scratch seat agent at the seat's
+   effort, not `omp-audit`. Give it and the incumbent seat the same realistic
+   seeded/clean packet pair with the council's round-1 brief: the seeded
+   defect must come back as a blocker or should with its file:line, the clean
+   packet must draw no blocker or should, and you verify every finding. Compare
+   verified findings, false positives and usage with the incumbent.
 6. **Decide.** Write a one-line verdict per lane (adopt / trial / reject) with
    the deciding number. Then adopt through `omp-config`: change the IDs in
    `config.yml` roles/`enabledModels`, and for Anthropic models add a 272K

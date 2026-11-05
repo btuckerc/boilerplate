@@ -18,12 +18,12 @@ the seats cannot be dispatched: say so and stop.
 
 ## Seats
 
-| Seat | Agent | Emphasis | Sits |
+| Seat | Agent | Emphasis (goes in the brief) | Sits |
 | --- | --- | --- | --- |
-| Sol | `architect` | Breaker | default |
-| Fable | `fable` | Simplifier | default |
-| Astra | `astra` | Outcome | `full council` or named |
-| Opus | `opus` | Outcome | `full council` or named; otherwise tiebreaker |
+| Sol | `architect` | Breaker: make it fail | default |
+| Fable | `fable` | Simplifier: what to cut | default |
+| Astra | `astra` | Scenario: walk the real use end to end | `full council` or named |
+| Opus | `opus` | Skeptic: attack the packet's assumptions | `full council` or named; otherwise tiebreaker |
 
 - "Sol high council" seats Sol alone. Named seats replace the default set.
 - Seats can read, grep, glob and web_search; they cannot run a shell, edit or
@@ -41,9 +41,8 @@ the seats cannot be dispatched: say so and stop.
 ## Packet
 
 Before round 1, fix known issues and run the checks: seats review the current
-work, never known-broken code. Everything lives in the run directory
-`~/.local/state/council/<YYYY-MM-DD>-<slug>/`, which stays machine-local as
-the archive `model-eval` replays. Never overwrite an earlier round's file.
+work, never known-broken code. Seats read from the run directory
+`~/.local/state/council/<YYYY-MM-DD>-<slug>/`.
 
 - Candidate: a commit, or for uncommitted work a tree built without touching
   the user's index: `export GIT_INDEX_FILE=$(mktemp -u); git read-tree HEAD;
@@ -74,7 +73,7 @@ Name the single most likely way this ships broken or fails the user.
 Each finding (ids <letter>-01, -02, ...): exact location, the concrete
 failure, and the evidence that would change your mind. blocker = the intended
 case is wrong or the contract is broken. should = a real defect within the
-intent. nit = anything else, including other paths, rare cases and extra scope.
+intent, on any supported path. nit = anything else, including extra scope.
 Score: 10 nothing to fix or cut; 9 ship, nits only; 7-8 shoulds open;
 5-6 a blocker; below 5 wrong approach. APPROVE means no blocker or should.
 ```
@@ -93,18 +92,16 @@ seats is not proof.
   factual dispute by writing the test or the counterexample.
 - Nit or out of scope: decline it in one line and list it as follow-up.
 
-Keep the ledger, one row per finding (neutral id R1-03, severity,
-disposition, evidence), and the seat attribution in
-`local://council-<slug>-ledger.md` and `-seats.tsv`, where no seat looks. At
-stop, copy them into the run directory as `ledger.md` and `seats.tsv`.
+Keep one ledger in `local://council-<slug>-ledger.md`: id, seat, severity,
+disposition, evidence.
 
 **Next round.** Hold one while a seat has an open blocker or should or a fix
 to confirm, while behavior changed after it approved, or while it is below a
 target and has named what would raise it. Nit fixes, and wording fixes that
-keep the meaning, need no round. Message each seat's existing agent (`write
-agent://<id>`) with the new tree id, `delta-rN.patch` and only its own ledger
-rows. It marks each of its ids `resolved` or `open`, raises new findings only
-on changed code, and re-scores.
+keep the meaning, need no round. Message only those seats' existing agents
+(`write agent://<id>`) with the new tree id, `delta-rN.patch`, fresh check
+output and only their own ledger rows. Each marks its ids `resolved` or
+`open`, raises new findings only on changed code, and re-scores.
 
 **Target.** "push a 9" or "to N" makes every seat's score at N or above part
 of done. A fix, evidence the seat accepts, or a ruling can move a score;
@@ -143,8 +140,8 @@ PR, otherwise in the final reply.
 ## Changing seats
 
 A new candidate model arrives about every 18 days. It earns or keeps a seat
-only through the council lane in `model-eval`, which replays archived runs.
-Keep one seat per model line (Sol, Fable, Astra, Opus). A same-line upgrade is
-the generation upgrade in `omp-config`. A new line needs a role, a read-only
-agent file, contracts in `omp-agent-policy`, `omp-agent-smoke` and
-`omp-baseline`, a manifest row, and a row in the seat table above.
+only through the council lane in `model-eval`; a seat stays while it adds
+verified findings for its cost. A same-line upgrade is the generation upgrade
+in `omp-config`. A new line needs a role, a read-only agent file, contracts
+in `omp-agent-policy`, `omp-agent-smoke` and `omp-baseline`, a manifest row,
+and a row in the seat table above.

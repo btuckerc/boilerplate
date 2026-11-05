@@ -106,8 +106,8 @@ task:
   # model, so it lowers architect.
   enableEffort: true
   showResolvedModelBadge: true
-  softRequestBudget: 40
-  maxRuntimeMs: 600000
+  softRequestBudget: 100
+  maxRuntimeMs: 1800000
   agentModelOverrides:
     sonic: "@smol"
     scout: "@smol"

@@ -56,7 +56,7 @@ async:
   enabled: false
 tools:
   xdev: false
-# A full-candidate xhigh audit can outlast the global 10-minute child cap; keep yield and caller schemas.
+# A full-candidate xhigh audit can outlast the global 30-minute child cap; keep yield and caller schemas.
 task:
   maxRuntimeMs: 2400000
   structured: true

@@ -86,7 +86,8 @@ description: Change the shared OMP baseline in chezmoi - upgrades, omp-baseline,
   rollback preset; 163,840 context / 8,192 output, text and image input, medium reasoning). Keep
   `retry.modelFallback: false` so local work never silently moves to cloud
   inference. Use task defaults (`eager: default`, recursion depth 1,
-  40-request soft budget, 10-minute runtime cap) and keep prewalk and
+  100-request soft budget, 30-minute runtime cap; raised from 40 / 10 minutes
+  on 2026-11-05 after workers kept hitting the cap) and keep prewalk and
   background advisors off.
 - Native nous handles bounded implementations with explicit contracts, mechanical
   transforms and extraction under the `local-workers` acceptance protocol.

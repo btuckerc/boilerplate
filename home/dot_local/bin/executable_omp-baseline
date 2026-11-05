@@ -831,8 +831,8 @@ check_thinking_and_loop_policy() {
   check_policy_scalar task.maxConcurrency 3 "$source_config" || failures=1
   check_policy_scalar task.maxRecursionDepth 1 "$source_config" || failures=1
   check_policy_scalar task.eager default "$source_config" || failures=1
-  check_policy_scalar task.softRequestBudget 40 "$source_config" || failures=1
-  check_policy_scalar task.maxRuntimeMs 600000 "$source_config" || failures=1
+  check_policy_scalar task.softRequestBudget 100 "$source_config" || failures=1
+  check_policy_scalar task.maxRuntimeMs 1800000 "$source_config" || failures=1
   check_policy_scalar compaction.thresholdTokens -1 "$source_config" || failures=1
   check_policy_scalar compaction.thresholdPercent -1 "$source_config" || failures=1
   check_policy_scalar compaction.midTurnEnabled true "$source_config" || failures=1

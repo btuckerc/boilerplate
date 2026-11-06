@@ -22,6 +22,7 @@ file	~/.omp/agent/prompts/update.md	home/private_dot_omp/private_agent/private_p
 file	~/.omp/agent/themes/ghostty.json	home/private_dot_omp/private_agent/private_themes/ghostty.json
 file	~/.omp/agent/extensions/herdr-omp-agent-state.ts	home/private_dot_omp/private_agent/private_extensions/herdr-omp-agent-state.ts
 file	~/.omp/agent/extensions/cwd-basename-status.ts	home/private_dot_omp/private_agent/private_extensions/cwd-basename-status.ts
+file	~/.omp/agent/extensions/fleet-status.ts	home/private_dot_omp/private_agent/private_extensions/fleet-status.ts
 file	~/.omp/profiles/local/agent/config.yml	home/private_dot_omp/private_profiles/local/private_agent/private_config.yml
 file	~/.omp/profiles/local/agent/models.yml	home/private_dot_omp/private_profiles/local/private_agent/private_models.yml
 file	~/.omp/profiles/local/agent/RULES.md	home/private_dot_omp/private_profiles/local/private_agent/RULES.md

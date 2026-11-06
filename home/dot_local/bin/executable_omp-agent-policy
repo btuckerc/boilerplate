@@ -137,6 +137,7 @@ const SESSION_MANAGED = ["manage_skill", "learn", "context_notes", "new_context"
 const REVIEWED_EXTENSIONS: Record<string, string> = {
 	"4f1383723945fa2b8e202578590c574c8fedb07f72e52e3699866c471d821188": "cwd-basename-status.ts",
 	"e3c650752bb9c2eb8bc1eecc9ce845c27434f6b7331af161353dd06ca6de48b7": "herdr-omp-agent-state.ts",
+	"67e8495bed124e93779bb4a764aa4a80913e59f3ce4e43a33044e9855609bf48": "fleet-status.ts",
 };
 /**
  * Reviewed custom command module, by sha256. Native loader discovery: extensibility/custom-commands/loader.ts:87-143,155-179,205-229,

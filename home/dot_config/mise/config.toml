@@ -1,7 +1,7 @@
 [tools]
 # Exact pins keep every host identical. Bump with `mise outdated`, edit here,
-# publish, then `mise install` on each host. Bare names use mise's registry
-# default backend (aqua release binaries unless noted).
+# then publish with `decent-angl-sync reconcile`; host guards install the pins.
+# Bare names use mise's registry default backend (aqua binaries unless noted).
 
 # Runtimes: stay on current LTS/stable lines; take major bumps deliberately.
 python = "3.13.17"
@@ -11,8 +11,8 @@ node = "24.22.1"
 go = "1.27.3"
 ruby = "3.4.11"
 
-# Coding harnesses. OMP and Codex pins are checked by check_baseline.py and
-# must match omp-baseline-manifest.tsv and run_onchange_after_04-setup-omp.
+# Coding harness pins are checked by check_baseline.py.
+# The OMP pin must match omp-baseline-manifest.tsv.
 "github:can1357/oh-my-pi" = "18.16.0"
 codex = "0.166.0"
 herdr = "0.9.5"

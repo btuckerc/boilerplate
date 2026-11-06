@@ -16,14 +16,20 @@ description: Change the shared OMP baseline in chezmoi - upgrades, omp-baseline,
 ## Invariants
 
 - Pin OMP to the exact reviewed mise release (currently 18.16.0); do not combine
-  the shared pin with `omp update`. Use `omp-baseline upgrade` to move the three
+  the shared pin with `omp update`. Use `omp-baseline upgrade` to move the two
   pin sites together.
 - Prefer native OMP config and features. Keep native skill discovery enabled.
-- Use independent native OAuth logins per machine (Codex, Anthropic); never
-  copy refresh credentials. Account count and quota state are machine-local.
-  A host without an Anthropic login cannot run the shared Opus default: run
-  `omp auth-broker login anthropic` there before `omp-baseline pull`. The
-  Codex pool is session-sticky and quota-aware; use `/session pin` when needed.
+- Every host's OAuth logins (Codex, Anthropic, others) live on the one auth
+  broker on nous (`omp-auth-broker.service`, tailnet port 8747). Other hosts
+  are clients through host-local `OMP_AUTH_BROKER_URL` in
+  `~/.omp/agent/.env` and `~/.omp/auth-broker.token`, both copied from nous and
+  never committed. Never log in locally: two holders of one refresh token
+  rotate it away from each other (the Mac lost its logins daily that way), so
+  `omp-baseline validate` fails on any local OAuth row. Add accounts on the broker (the
+  `platform-ops` nous reference); move a stray local login with `omp
+  auth-broker migrate --from-local --include-oauth`, then delete the local
+  `oauth` rows. The Codex pool is session-sticky and quota-aware; use
+  `/session pin` when needed.
 - Default routing is Claude Opus high as director (raised from medium on
   2026-10-08: weekly Anthropic use was ~19% on medium; high costs ~1.7–2.8x
   per prompt through more tool calls, not longer thinking). Drop back to
@@ -171,15 +177,19 @@ description: Change the shared OMP baseline in chezmoi - upgrades, omp-baseline,
 ## Workflow
 
 1. Inspect Git state, the mise pin, `omp --version`, and source/live paths.
-2. Review release and provider compatibility, then edit the canonical checkout.
-3. Apply targeted files; run `mise install` and `mise reshim` when the pin moves.
-4. Validate parsed config, native Codex provider/model discovery, local-provider
-   discovery, Python setup, and native skill discovery in a new OMP session.
-5. Run `omp-baseline validate --strict`. Validate only observes; `omp-baseline
-   repair` (or apply) fixes runtime permissions. Commit and publish only when the user
-   asks. An uncommitted pin is local only. The native guard defers dirty source
-   files and never publishes or stashes them; scheduled apply leaves those files
-   untouched. After publish, other hosts run `omp-baseline pull`.
+2. Review release and provider compatibility, then edit in a worktree of the
+   canonical checkout (`decent-angl-config`); preview with
+   `chezmoi -S <worktree> diff`.
+3. Check the candidate: `omp-baseline check-source <worktree>` runs the agent
+   policy and native probes with the candidate's own pinned omp.
+4. Commit only when the user asks. Land with `git merge --ff-only`, then
+   `decent-angl-sync reconcile` publishes, applies and installs a moved pin;
+   other hosts converge through their own guard.
+5. Validate parsed config, native Codex provider/model discovery, local-provider
+   discovery, Python setup, and native skill discovery in a new OMP session, then
+   run `omp-baseline validate --strict`. Validate only observes; `omp-baseline
+   repair` (or apply) fixes runtime permissions. The native guard defers dirty
+   source files and never publishes or stashes them.
 
 The hourly OMP guard checks the focused baseline without overwriting source.
 It also compares the published pin to GitHub latest and writes
@@ -191,15 +201,16 @@ The whole-tree guard owns Git reconciliation.
 ## Upgrade
 
 Do not run `omp update`. That mutates the live binary off the shared pin.
-The three pin sites must move together:
+The two pin sites must move together:
 
 - `home/dot_config/decent-angl/omp-baseline-manifest.tsv` (`# omp-version`)
 - `home/dot_config/mise/config.toml`
-- `home/run_onchange_after_04-setup-omp.sh.tmpl`
 
-Preconditions: those three files are Git-clean. Other dirty work in
-`~/src/boilerplate` is fine and must be preserved. `upgrade` refuses dirty pin
-files. Auth, `agent.db`, `.env`, and sessions stay machine-local.
+Preconditions: those two files are Git-clean. `upgrade` edits
+`~/src/boilerplate` itself, not a worktree, because it applies the pins live from
+the chezmoi source: like `decent-angl-sync capture`, it is an exception to the worktree rule, so commit its
+result promptly. Other dirty work there is preserved. `upgrade` refuses dirty
+pin files. Auth, `agent.db`, `.env`, and sessions stay machine-local.
 
 ```sh
 omp-baseline check-upstream
@@ -216,18 +227,19 @@ OMP config/discovery checks. It does not commit, reconcile, or fail closed on
 an unrelated skill audit (opnsense, Omarchy, …). A failed OMP install or
 `check_omp_config` restores the previous pin.
 
-After a green pin install, review the three-file diff and any config changes
-required by the release notes. Commit and publish only when requested. Scheduled
-apply defers dirty source files without stashing them; it skips run_* hooks. On
-every other host: `omp-baseline pull` (reconcile + `mise install` missing pins).
+After a green pin install, review the two-file diff and any config changes
+required by the release notes. Commit and publish only when requested, using
+`decent-angl-sync reconcile`. Scheduled apply defers dirty source files without
+stashing them; OMP and companion mise pins install without run_* hooks. Other
+hosts converge through their own 15-minute guard; no per-host step is needed.
 `omp-baseline fleet` checks t14, macbook, and macmini.
 
-Roll back by reverting the upgrade commit (the pins and the version-pinned
-`omp-agent-policy`/`omp-agent-smoke` mirror move together), then `chezmoi
-apply` every target that commit changed outside the manifest (such as
-`~/.local/bin/omp-baseline` and canonical skills under
-`~/.local/share/decent-angl/skills`), then `omp-baseline apply`: it applies
-only manifest paths and syncs skills from the live canonical copies. After
+Roll back by reverting the upgrade commit in a worktree (the pins and the
+version-pinned `omp-agent-policy`/`omp-agent-smoke` mirror move together),
+previewing with `chezmoi -S <worktree> diff`, landing the revert with
+`git merge --ff-only`, and running `decent-angl-sync
+reconcile`: it applies every changed target, then runs `omp-baseline apply`,
+which installs the reverted pin and syncs skills. After
 every pin move, treat live `omp models` as authoritative before keeping shared
 model IDs. OMP 18.16.0 is the reviewed release. Since 18.10.2 `task.structured`
 defaults off, which drops `yield` and output schemas unless the agent declares

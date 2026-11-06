@@ -27,7 +27,7 @@ from typing import Any
 
 AGENT_ID = "omp"
 AGENT_NAME = "Oh My Pi"
-AUTH_HELP = "Run `/login openai-codex` in OMP to restore Codex usage."
+AUTH_HELP = "Add the Codex account on the nous auth broker (omp-config skill) to restore Codex usage."
 CODEX_PROVIDER = "openai-codex"
 SCAN_REUSE_SECONDS = 20
 LIMITS_ONLY_REUSE_SECONDS = 900
@@ -351,7 +351,7 @@ def probe_limits(force: bool) -> dict[str, Any]:
   if not omp:
     return {
       "ok": False,
-      "helpText": "omp not found in PATH. Install Oh My Pi, then run OMP `/login openai-codex`.",
+      "helpText": "omp not found in PATH. Install Oh My Pi and make it a nous auth-broker client.",
     }
 
   if force:
@@ -388,7 +388,7 @@ def probe_limits(force: bool) -> dict[str, Any]:
   if completed.returncode != 0:
     return {
       "ok": False,
-      "helpText": "omp usage failed. Run OMP `/login openai-codex`. Local Codex stats are still shown.",
+      "helpText": "omp usage failed. Check the nous auth broker (omp auth-broker status). Local Codex stats are still shown.",
     }
 
   try:

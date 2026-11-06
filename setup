@@ -74,8 +74,8 @@ main() {
             log "Checkout: $CANONICAL_ROOT, cloned only if missing."
             log "Source: $SOURCE_LINK -> $CANONICAL_ROOT; old source preserved if needed."
             log "Install chezmoi if absent, initialize host data, apply preferences and setup hooks."
-            log "Hooks install native prerequisites, mise tools, OMP, and native drift guards."
-            log "Verify CLI versions and shared skills. Account logins remain machine-local."
+            log "Hooks install native prerequisites, mise tools, and the sync guard; omp-baseline links skills and its guard."
+            log "Verify CLI versions and shared skills. OMP logins live on the nous auth broker."
             return ;;
         -h|--help)
             log "Usage: ./setup [--plan]. Run from ~/src/boilerplate."
@@ -88,11 +88,13 @@ main() {
     install_chezmoi
     log "Applying dotfiles from $CANONICAL_ROOT"
     chezmoi init --source="$CANONICAL_ROOT" --apply
+    # What reconcile's live apply does, minus validation: a fresh host is not yet a broker client.
+    OMP_BASELINE_SOURCE_APPLIED=1 OMP_BASELINE_SKIP_VALIDATE=1 "$HOME/.local/bin/omp-baseline" apply
     # Verify required tools instead of treating a skipped install as success.
     mise -C "$HOME" exec -- codex --version
     mise -C "$HOME" exec -- omp --version
     "$HOME/.local/bin/decent-angl-skills" validate
-    log "Bootstrap complete. Open a new shell; authenticate accounts locally."
+    log "Bootstrap complete. Open a new shell; make OMP a nous auth-broker client (omp-config skill)."
 }
 
 main "$@"

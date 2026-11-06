@@ -32,7 +32,7 @@ Usage: omp-baseline <status|validate|check-source ROOT|repair|apply|pull|check-u
   apply           Apply the local published source, install its exact pin, repair, validate.
   pull            Reconcile the complete published baseline, then validate OMP.
   check-upstream  Compare the published pin to GitHub latest. Write omp-upstream.
-  upgrade [VER]   Move the three pin sites to VER or GitHub latest, install, check OMP.
+  upgrade [VER]   Move the two pin sites to VER or GitHub latest, install, check OMP.
                   Does not commit, reconcile, or fail closed on unrelated skill audits.
                   --dry-run prints the plan only.
   guard           Validate local OMP state without overwriting source.
@@ -169,8 +169,23 @@ probe_copy_credentials_env() {
     }' "$1" >"$2")
 }
 
+# A scratch copy of agent.db $1 drops OAuth logins: a probe that refreshed one would rotate the
+# refresh token server-side and strand the live store's copy. API-key rows stay.
+probe_clear_oauth() {
+  python3 - "$1" <<'PY'
+import sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+try:
+    if db.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'auth_credentials'").fetchone():
+        db.execute("DELETE FROM auth_credentials WHERE credential_type = 'oauth'")
+        db.commit()
+finally:
+    db.close()
+PY
+}
+
 # omp 18.12.1 AgentStorage.getSettings() reads agent.db's `settings` table (session/agent-storage.ts:484-491), so
-# a source-only copy of agent.db $1 drops its rows and keeps the credentials.
+# a source-only copy of agent.db $1 drops its rows too.
 probe_clear_settings() {
   python3 - "$1" <<'PY'
 import sqlite3, sys
@@ -313,6 +328,11 @@ probe_home() {
       return 1
     fi
   done
+  if [ -f "$PROBE_HOME/.omp/agent/agent.db" ] && ! probe_clear_oauth "$PROBE_HOME/.omp/agent/agent.db"; then
+    printf 'PROBE   could not clear OAuth logins from the agent.db copy\n' >&2
+    cleanup_probe_home
+    return 1
+  fi
   if [ "$PROBE_SOURCE_ONLY" = true ]; then
     if [ -f "$PROBE_HOME/.omp/agent/agent.db" ] && ! probe_clear_settings "$PROBE_HOME/.omp/agent/agent.db"; then
       printf 'PROBE   could not clear settings from the agent.db copy\n' >&2
@@ -463,8 +483,6 @@ home/dot_local/bin/executable_decent-angl-skills
 home/dot_local/bin/executable_omp-env
 home/dot_local/bin/executable_opnsense-api
 home/dot_local/bin/executable_opnsense-store-secret
-home/run_onchange_after_04-setup-omp.sh.tmpl
-home/run_onchange_after_05-apply-omp-baseline.sh.tmpl
 EOF
 }
 
@@ -565,25 +583,17 @@ check_manifest_status() {
     esac
 
     # A failed probe is not a clean diff: empty stdout from a failed chezmoi
-    # must never print OK. Inside a chezmoi run_ hook (OMP_BASELINE_IN_CHEZMOI=1)
-    # chezmoi holds its persistent-state lock, so a nested chezmoi diff can only
-    # fail ("timeout obtaining persistent state lock"): the drift probe is
-    # reported deferred, neither OK nor failed. decent-angl-sync reconcile and the
-    # hourly guard rerun validate once chezmoi has exited.
+    # must never print OK.
     local diff_rc=0
-    if [ "${OMP_BASELINE_IN_CHEZMOI:-0}" = 1 ]; then
-      printf 'LIVE    deferred %s (inside chezmoi apply; rerun validate after it)\n' "$live_path"
+    diff_output="$(cm diff "$live_path" 2>/dev/null)" || diff_rc=$?
+    if [ "$diff_rc" -ne 0 ]; then
+      printf 'LIVE    probe failed (chezmoi diff exit %s) %s\n' "$diff_rc" "$live_path" >&2
+      failures=1
+    elif [ -n "$diff_output" ]; then
+      printf 'LIVE    drift %s\n' "$live_path" >&2
+      failures=1
     else
-      diff_output="$(cm diff "$live_path" 2>/dev/null)" || diff_rc=$?
-      if [ "$diff_rc" -ne 0 ]; then
-        printf 'LIVE    probe failed (chezmoi diff exit %s) %s\n' "$diff_rc" "$live_path" >&2
-        failures=1
-      elif [ -n "$diff_output" ]; then
-        printf 'LIVE    drift %s\n' "$live_path" >&2
-        failures=1
-      else
-        printf 'OK      %s\n' "$live_path"
-      fi
+      printf 'OK      %s\n' "$live_path"
     fi
 
     if [ "$kind" = exec ] && [ ! -x "$live_path" ]; then
@@ -878,20 +888,18 @@ check_thinking_and_loop_policy() {
 }
 
 check_omp_config() {
-  local failures=0 pin source_pin setup_pin output omp_path
-  # Read whole sed outputs (no `| head`) so each read keeps its own status.
+  local failures=0 pin source_pin output omp_path
+  # Read whole sed outputs so each read keeps its own status.
   if ! pin="$(expected_version)" ||
-    ! source_pin="$(sed -n 's/^"github:can1357\/oh-my-pi"[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$REPO_ROOT/home/dot_config/mise/config.toml")" ||
-    ! setup_pin="$(sed -n 's/^OMP_VERSION="\([^"]*\)".*/\1/p' "$REPO_ROOT/home/run_onchange_after_04-setup-omp.sh.tmpl")"; then
-    printf 'PIN     probe failed (manifest, mise config or setup script unreadable)\n' >&2
+    ! source_pin="$(sed -n 's/^"github:can1357\/oh-my-pi"[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$REPO_ROOT/home/dot_config/mise/config.toml")"; then
+    printf 'PIN     probe failed (manifest or mise config unreadable)\n' >&2
     failures=1
   else
     source_pin="${source_pin%%$'\n'*}"
-    setup_pin="${setup_pin%%$'\n'*}"
-    if [ -n "$pin" ] && [ "$pin" = "$source_pin" ] && [ "$pin" = "$setup_pin" ]; then
+    if [ -n "$pin" ] && [ "$pin" = "$source_pin" ]; then
       printf 'PIN     %s everywhere\n' "$pin"
     else
-      printf 'PIN     manifest=%s mise=%s setup=%s\n' "$pin" "$source_pin" "$setup_pin" >&2
+      printf 'PIN     manifest=%s mise=%s\n' "$pin" "$source_pin" >&2
       failures=1
     fi
   fi
@@ -1014,6 +1022,11 @@ probe_profile() {
       return 1
     fi
   done
+  if [ -f "$root/agent/agent.db" ] && ! probe_clear_oauth "$root/agent/agent.db"; then
+    printf 'PROBE   could not clear OAuth logins from the profile agent.db copy\n' >&2
+    rm -rf "$root"
+    return 1
+  fi
 }
 
 # omp-agent-policy --catalog evidence from native runs in probe profile PROBE
@@ -1156,7 +1169,7 @@ check_agent_policy() {
 # checker and native evidence from the installed omp, which must be ROOT's pin.
 # Nothing live but credentials and model caches enters the probe HOME.
 check_source() {
-  local root pin actual checker
+  local root pin actual checker pin_dir
   # Absolute: policy_checker runs from the scratch cwd.
   root="$(cd "$1" 2>/dev/null && pwd -P)" || {
     printf 'AGENT   source root %s not found\n' "$1" >&2
@@ -1173,6 +1186,13 @@ check_source() {
     return 1
   fi
   actual="$(omp --version 2>/dev/null)" || actual=""
+  # A publisher may still run the previous release: check the candidate with its own pinned one.
+  if [ "$actual" != "omp/$pin" ] && command -v mise >/dev/null 2>&1 &&
+    mise -C "$HOME" install "github:can1357/oh-my-pi@$pin" >&2 &&
+    pin_dir="$(mise -C "$HOME" where "github:can1357/oh-my-pi@$pin")" && [ -x "$pin_dir/omp" ]; then
+    PATH="$pin_dir:$PATH"
+    actual="$(omp --version 2>/dev/null)" || actual=""
+  fi
   if [ "$actual" != "omp/$pin" ]; then
     printf 'VERSION installed %s, source pin omp/%s; install the pin first\n' "${actual:-missing}" "$pin" >&2
     return 1
@@ -1204,6 +1224,67 @@ quarantine_legacy_wrapper() {
   fi
 }
 
+# Only these live agent dirs supply credentials to the scratch probes.
+check_local_oauth() {
+  python3 - "$HOME/.omp/agent/agent.db" "$HOME/.omp/profiles/local/agent/agent.db" <<'PY'
+from pathlib import Path
+import os, shutil, sqlite3, sys, tempfile
+
+def state(path):
+    """Identity of a live file; a WAL reset rewrites its header salts."""
+    try:
+        st = os.stat(path)
+        with open(path, "rb") as f:
+            return st.st_ino, st.st_size, st.st_mtime_ns, f.read(32)
+    except FileNotFoundError:
+        return None
+
+failures = 0
+for name in sys.argv[1:]:
+    path = Path(name)
+    wal = Path(str(path) + "-wal")
+    if not path.is_file():
+        continue
+    try:
+        # Even mode=ro may create a WAL shared-memory file. Inspect a copy so
+        # live files stay untouched; immutable=1 would miss committed WAL rows.
+        with tempfile.TemporaryDirectory(prefix="omp-baseline-auth-") as scratch:
+            copied = Path(scratch) / "agent.db"
+            # A checkpoint between the two copies could hide a WAL-only row:
+            # accept the pair only when neither live file changed meanwhile.
+            for _ in range(5):
+                before = state(path), state(wal)
+                shutil.copyfile(path, copied)
+                Path(str(copied) + "-wal").unlink(missing_ok=True)
+                if before[1] is not None:
+                    try:
+                        shutil.copyfile(wal, str(copied) + "-wal")
+                    except FileNotFoundError:
+                        continue
+                if (state(path), state(wal)) == before:
+                    break
+            else:
+                raise OSError("agent.db kept changing while copied")
+            db = sqlite3.connect(copied.as_uri() + "?mode=ro", uri=True)
+            try:
+                count = 0
+                if db.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'auth_credentials'").fetchone():
+                    count = db.execute("SELECT count(*) FROM auth_credentials WHERE credential_type = 'oauth'").fetchone()[0]
+            finally:
+                db.close()
+    except (OSError, sqlite3.Error):
+        print(f"AUTH    probe failed in {path}", file=sys.stderr)
+        failures = 1
+        continue
+    if count:
+        print(f"AUTH    {count} local OAuth login(s) in {path}; logins belong on the nous broker", file=sys.stderr)
+        failures = 1
+    else:
+        print(f"AUTH    no local OAuth logins in {path}")
+sys.exit(failures)
+PY
+}
+
 # Observational: native omp probes run against a scratch HOME (omp_probe) that
 # is removed when the subshell exits.
 validate() {
@@ -1227,6 +1308,7 @@ validate_checks() {
   check_omp_config || failures=1
   check_agent_policy || failures=1
   check_runtime_permissions || failures=1
+  check_local_oauth || failures=1
   skill_manager="$HOME/.local/bin/decent-angl-skills"
   [ -x "$skill_manager" ] || skill_manager="$REPO_ROOT/home/dot_local/bin/executable_decent-angl-skills"
   if DECENT_ANGL_REPO_ROOT="$REPO_ROOT" bash "$skill_manager" validate; then
@@ -1269,8 +1351,8 @@ apply_local() {
     esac
   done < <(iter_manifest)
 
-  install -d -m 700 "$HOME/.omp" "$HOME/.omp/agent"
-  if [ "${OMP_BASELINE_IN_CHEZMOI:-0}" != 1 ] && [ "${#paths[@]}" -gt 0 ]; then
+  harden_runtime_permissions
+  if [ "${OMP_BASELINE_SOURCE_APPLIED:-0}" != 1 ] && [ "${#paths[@]}" -gt 0 ]; then
     cm apply --force "${paths[@]}"
   fi
   skill_manager="$HOME/.local/bin/decent-angl-skills"
@@ -1282,11 +1364,12 @@ apply_local() {
     if [ "$(omp --version 2>/dev/null || true)" != "omp/$pin" ]; then
       mise install "github:can1357/oh-my-pi@$pin"
     fi
-    # Companion pins live in the same mise file (gh, etc.).
+    # Companion pins live in the same global mise file (gh, etc.); resolve them from HOME, not the
+    # caller's project, whose own pins would shadow the fleet's.
     if [ "$(machine_role)" = agent-host ]; then
-      mise install "${AGENT_HOST_TOOLS[@]}"
+      mise -C "$HOME" install "${AGENT_HOST_TOOLS[@]}"
     else
-      mise install
+      mise -C "$HOME" install
     fi
     mise reshim
   fi
@@ -1298,7 +1381,9 @@ apply_local() {
   if [ "${OMP_BASELINE_SKIP_VALIDATE:-0}" = 1 ]; then
     return 0
   fi
-  validate
+  # The hourly guard runs this same validate; a pass here clears its stale drift marker.
+  validate || return
+  rm -f "$MARKER"
 }
 
 pull_published() {
@@ -1307,7 +1392,7 @@ pull_published() {
     printf 'decent-angl-sync is unavailable; apply the complete shared baseline first.\n' >&2
     return 127
   fi
-  "$fleet_sync" reconcile --with-scripts
+  "$fleet_sync" reconcile
   # A pre-upgrade `pull` still has the old validator in memory. Re-exec
   # the applied binary so new pin, OS-scope, and policy checks run.
   # Do not expand an empty array under `set -u`; macOS bash 3.2 treats that
@@ -1385,25 +1470,19 @@ set_pin_sites() {
     "$REPO_ROOT/home/dot_config/mise/config.toml" \
     '^"github:can1357/oh-my-pi"[[:space:]]*=' \
     "\"github:can1357/oh-my-pi\" = \"${version}\"" || return 1
-  rewrite_one_pin_line \
-    "$REPO_ROOT/home/run_onchange_after_04-setup-omp.sh.tmpl" \
-    '^OMP_VERSION=' \
-    "OMP_VERSION=\"${version}\"" || return 1
 }
 
 restore_pin_sites() {
   git -C "$REPO_ROOT" checkout -- \
     home/dot_config/decent-angl/omp-baseline-manifest.tsv \
-    home/dot_config/mise/config.toml \
-    home/run_onchange_after_04-setup-omp.sh.tmpl
+    home/dot_config/mise/config.toml
 }
 
 require_clean_pin_files() {
   local dirty
   dirty="$(git -C "$REPO_ROOT" status --porcelain=v1 -- \
     home/dot_config/decent-angl/omp-baseline-manifest.tsv \
-    home/dot_config/mise/config.toml \
-    home/run_onchange_after_04-setup-omp.sh.tmpl)"
+    home/dot_config/mise/config.toml)"
   if [ -n "$dirty" ]; then
     printf 'UPGRADE pin files are dirty; commit or discard them first.\n%s\n' "$dirty" >&2
     return 1
@@ -1411,7 +1490,7 @@ require_clean_pin_files() {
 }
 
 apply_pin_files_live() {
-  [ "${OMP_BASELINE_IN_CHEZMOI:-0}" = 1 ] && return 0
+  [ "${OMP_BASELINE_SOURCE_APPLIED:-0}" = 1 ] && return 0
   cm apply --force \
     "$HOME/.config/decent-angl/omp-baseline-manifest.tsv" \
     "$HOME/.config/mise/config.toml"
@@ -1475,7 +1554,7 @@ upgrade() {
 
   if [ "$dry" = true ]; then
     printf 'PIN     %s -> %s\n' "$pin" "$target"
-    printf 'FILES   manifest mise setup-omp\n'
+    printf 'FILES   manifest mise\n'
     if [ "$pin" = "$target" ]; then
       printf 'UPGRADE already on %s\n' "$target"
     else
@@ -1535,8 +1614,8 @@ upgrade() {
 
   rm -f "$UPSTREAM_MARKER"
   printf 'UPGRADE %s -> %s\n' "$pin" "$target"
-  printf 'NEXT    omp-baseline validate --strict, commit the three pin files, then decent-angl-sync reconcile --with-scripts\n'
-  printf 'NEXT    other hosts: omp-baseline pull. This process stays on the old binary until a new session.\n'
+  printf 'NEXT    omp-baseline validate --strict, commit the two pin files, then decent-angl-sync reconcile\n'
+  printf 'NEXT    other hosts converge through their own 15-minute guard. This process stays on the old binary until a new session.\n'
 }
 
 install_guard() {

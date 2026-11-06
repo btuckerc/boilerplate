@@ -20,16 +20,15 @@ Codex, and shared skills. Account logins and OS permission prompts remain local.
 
 ## Daily workflow
 
-1. Edit the relevant source under `home/`.
-2. Preview and apply the target, for example:
+1. Author in a worktree of this checkout:
+   `git -C ~/src/boilerplate worktree add ~/src/boilerplate-wt/<task>`.
+   Uncommitted edits in `~/src/boilerplate` itself hold back applies.
+2. Preview: `chezmoi -S ~/src/boilerplate-wt/<task> diff`.
+3. Review and commit there, then land with `git merge --ff-only` in
+   `~/src/boilerplate`.
+4. Publish and apply the committed baseline:
    ```sh
-   chezmoi diff
-   chezmoi apply ~/.zshrc
-   ```
-3. Review and commit the intended source changes.
-4. Publish the committed baseline:
-   ```sh
-   decent-angl-sync publish
+   decent-angl-sync reconcile
    ```
 
 On another host, `decent-angl-sync reconcile` publishes reviewed local commits
@@ -42,8 +41,8 @@ publish/apply, recovery, and validation workflow.
 `mise` owns language runtimes and CLI tools through exact pins in
 [`home/dot_config/mise/config.toml`](home/dot_config/mise/config.toml). Homebrew
 owns system packages, libraries, and GUI applications listed in
-[`home/Brewfile`](home/Brewfile); do not duplicate mise tools there. Install a
-changed pin explicitly on each host with `mise install TOOL@VERSION`.
+[`home/Brewfile`](home/Brewfile); do not duplicate mise tools there. Changed
+pins install through `decent-angl-sync reconcile` and each host's guard.
 
 ## Herdr
 
@@ -61,7 +60,7 @@ macOS Ghostty uses [Obel Mono](https://typographic.systems/obel-mono) 1.000
 16% to keep Meslo's line rhythm. `run_onchange_after_07-install-obel-mono`
 installs pinned, hash-checked TTFs on macOS and Linux desktops, into
 `~/Library/Fonts` or `~/.local/share/fonts/obel-mono`; existing hosts get it
-through `omp-baseline pull` or `decent-angl-sync reconcile --with-scripts`.
+through `decent-angl-sync reconcile --with-scripts` (the reviewed font hook).
 The always-masked "Obel Mono Masked" family is installed for apps without font
 feature settings. Linux Ghostty and kitty stay on JetBrains Mono until Obel
 Mono is verified on screen there. macOS kitty keeps Meslo because CoreText does
@@ -107,8 +106,9 @@ Useful verified gotchas:
 
 - `~/.local/share/chezmoi` must point to `~/src/boilerplate`; on an existing
   host, `decent-angl-sync adopt-source` preserves the old source before linking.
-- The guard excludes `run_*` hooks. Use `decent-angl-sync reconcile --with-scripts`
-  for a reviewed hook installation; ordinary `executable_*` files still apply.
+- The guard excludes `run_*` hooks but runs `omp-baseline apply` once per revision,
+  installing OMP and companion mise pins. Use `decent-angl-sync reconcile --with-scripts`
+  only for reviewed hook installations, such as fonts or native prerequisites.
 - Working edits are never deployed: ordinary targets are held back, while edits
   to shared chezmoi inputs defer the whole apply. Inspect `decent-angl-sync status`.
 - Secrets, auth, history, caches, and databases stay machine-local; do not add

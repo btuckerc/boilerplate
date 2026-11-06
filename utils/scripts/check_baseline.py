@@ -22,8 +22,6 @@ def check(root):
     omp = tools["github:can1357/oh-my-pi"]
     manifest = (home / "dot_config/decent-angl/omp-baseline-manifest.tsv").read_text()
     assert re.search(r"^# omp-version\s+" + re.escape(omp) + r"$", manifest, re.M), "OMP manifest pin differs"
-    setup = (home / "run_onchange_after_04-setup-omp.sh.tmpl").read_text()
-    assert f"OMP_VERSION=\"{omp}\"" in setup, "OMP setup pin differs"
 
     count = 0
     for path in (home / "dot_local/bin").glob("executable_*"):

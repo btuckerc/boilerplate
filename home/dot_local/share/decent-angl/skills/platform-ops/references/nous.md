@@ -48,7 +48,9 @@ installs only the agent toolchain there; the host-local
   activation (headless Chrome, Node CLIs). Masked, activation fails immediately.
 - Mac shell: `ssh mac` (host-local `~/.ssh/config`, key
   `~/.ssh/id_ed25519_fleet`, authorized on the Mac with `from=` nous's
-  tailnet IP). nous has no GitHub credentials; the Mac publishes.
+  tailnet IP). nous publishes boilerplate to GitHub through a repo-scoped
+  deploy key (`~/.ssh/boilerplate_deploy`, host alias `github-boilerplate`,
+  the push URL of `origin`); `master` refuses force-pushes and deletion.
 
 OMP Serve runs from `~/.local/share/omp-serve-pilot/` using the active
 `~/.local/share/omp-serve-central/agent` profile. Preserve its cloud roles,

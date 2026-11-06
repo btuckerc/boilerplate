@@ -10,10 +10,18 @@ commit; no mutable live filesystem silently wins.
 
 ## Invariants
 
-- The editable checkout is `~/src/boilerplate`. Exported snapshots are for
+- The canonical checkout is `~/src/boilerplate`. Exported snapshots are for
   validation only; never apply or author changes from them.
 - `~/.local/share/chezmoi` resolves to that checkout. `adopt-source` preserves
   and replaces an old independent source tree.
+- Author in a worktree (`git -C ~/src/boilerplate worktree add
+  ~/src/boilerplate-wt/<task>`), preview with `chezmoi -S <worktree> diff`,
+  commit there, then `merge --ff-only` into the
+  checkout. Drafts in the checkout itself hold back or defer every apply on
+  that host; only live-state capture (`decent-angl-sync capture`,
+  `omarchy-roaming-sync sync`) and `omp-baseline upgrade` write there, so
+  commit their result promptly. nous publishes through a repo-scoped deploy key; the
+  Mac through its own SSH key.
 - Publish reviewed commits, not working files. Unrelated dirty edits are fine:
   `publish` validates an exported HEAD and pushes that exact commit. It leaves
   the index, working tree, and live files alone. Review all outgoing commits.
@@ -23,11 +31,12 @@ commit; no mutable live filesystem silently wins.
   sources hold back their own targets; edits overlapping incoming commits or
   touching shared inputs (`.chezmoidata`, `.chezmoitemplates`, `.chezmoiignore`,
   shared skills) defer the whole apply. Guard never publishes; `reconcile`
-  publishes reviewed commits first. A full apply reports converged only after
-  live `omp-baseline validate` passes, once per revision; a failure leaves
-  `config-drift`.
-- `--exclude scripts` skips chezmoi `run_*` hooks. Ordinary `executable_*`
-  files still deploy. Use `reconcile --with-scripts` only for reviewed hooks.
+  publishes reviewed commits first. A full apply runs live `omp-baseline apply`
+  once per revision to install OMP and companion mise pins and validate; a failure
+  leaves `config-drift`. Other hosts converge through their own 15-minute guard.
+- `--exclude scripts` skips chezmoi `run_*` hooks, not automatic pin installs.
+  Ordinary `executable_*` files still deploy. Use `reconcile --with-scripts`
+  only for reviewed hooks such as fonts or native prerequisites.
   Check the destination and PATH before diagnosing a missing wrapper.
 
 - Secrets and runtime state stay outside Git. Use `machine-secrets`. The
@@ -37,12 +46,14 @@ commit; no mutable live filesystem silently wins.
 ## Workflow
 
 Start with `decent-angl-sync status` or `decent-angl-doctor --fleet`. If
-`source=split`, run `adopt-source`. Stage only the completed task's paths or
-hunks, inspect the staged diff, and commit intentionally. Other dirty work
-does not prevent `decent-angl-sync publish`, which checks the exported commit's
-OMP agent policy (`omp-baseline check-source`). The installed omp must equal the
-commit's pin; before a pin bump is installed, run
-`mise exec github:can1357/oh-my-pi@<pin> -- decent-angl-sync publish`. A
+`source=split`, run `adopt-source`. In the worktree, preview with
+`chezmoi -S <worktree> diff`, stage only the completed task's paths or hunks,
+inspect the staged diff, commit intentionally, land with `git merge --ff-only`,
+then run `decent-angl-sync reconcile`: it publishes, applies and installs pins.
+`decent-angl-sync publish` alone pushes without applying. Other dirty work in
+the checkout does not block publication, which checks the exported commit's
+OMP agent policy (`omp-baseline check-source`) with the commit's exact pinned
+OMP release, installing it into mise when the host still runs another. A
 release-audited publish sets `DECENT_ANGL_PUBLISH_RECEIPT` (the omp-audit
 `result.json` whose candidate is the outgoing commit) and
 `DECENT_ANGL_PUBLISH_PACKET` (its packet, with one `Audited-Range: BASE..COMMIT`
@@ -60,12 +71,14 @@ Capture an intentional live-file change with:
 decent-angl-sync capture ~/.config/example/file
 ```
 
-Review the source diff and platform scope, validate, commit intentionally, then
-run `decent-angl-sync publish`. Never capture secrets or runtime state.
+Like `omp-baseline upgrade`, `capture` writes into `~/src/boilerplate` itself,
+so review, validate and commit its result there promptly, then run
+`decent-angl-sync reconcile`. Never capture secrets or runtime state.
 
-For source edits, validate affected platforms, then publish. Use
-`python3 utils/scripts/check_baseline.py` and the sync regression tests for
-sync changes. Record offline hosts as unverified. Publishing scans outgoing
+For source edits, validate affected platforms in the worktree before landing,
+then reconcile. Use `python3 utils/scripts/check_baseline.py` and the sync
+regression tests for sync changes. Record offline hosts as unverified.
+Publishing scans outgoing
 history for credential paths (raw names, any encoding) and signatures, refuses
 if a scan errors or ripgrep does not work, and checks the committed source
 skills. Runtime paths are whatever `private_agent/.chezmoiignore` and

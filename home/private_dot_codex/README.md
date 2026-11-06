@@ -4,11 +4,13 @@ This directory is the shared Codex baseline managed by chezmoi.
 
 ## Canonical Paths
 
-- Working repo: `~/src/boilerplate/home/private_dot_codex/`
+- Canonical source: `~/src/boilerplate/home/private_dot_codex/` (author in a worktree of it)
 - Applied source: `~/.local/share/chezmoi/home/private_dot_codex/` (the same tree via symlink)
 - Live config: `~/.codex/`
 
-Edit the source tree, then apply targeted files with `chezmoi`.
+Edit the source in a worktree, preview with `chezmoi -S <worktree> diff`, commit,
+land, and run `decent-angl-sync reconcile` (see the repository README's daily
+workflow).
 
 ## Astra policy across accounts
 
@@ -100,14 +102,14 @@ not installed. It never falls back to an arbitrary installed version.
 app has its own bundled runtime; changing the CLI pin does not upgrade the
 desktop app.
 
-For an upgrade, check the official changelog and npm `@openai/codex` stable tag,
-install that exact version with `mise install codex@VERSION`, update the one source
-pin, apply `~/.config/mise/config.toml`, and verify `codex-baseline --version` and
-all T3 provider health checks. Commit and publish via `decent-angl-sync publish`.
-Unrelated working edits may remain. Each fleet host must install the new pin.
-The wrapper is an ordinary managed executable and deploys even when chezmoi
-`run_*` hooks are excluded. Use a targeted apply for an actively edited checkout,
-or `decent-angl-sync reconcile` on a clean host.
+For an upgrade, check the official changelog and npm `@openai/codex` stable tag.
+In a worktree, set the one source pin to that exact version, preview with
+`chezmoi -S <worktree> diff`, commit, land with `git merge --ff-only`, and run
+`decent-angl-sync reconcile`: it applies the pin and installs it. Then verify
+`codex-baseline --version` and all T3 provider health checks. Other hosts install
+the new pin through their own guard (nous, an agent host, installs only its
+agent-host tool list). The wrapper is an ordinary managed executable and deploys
+even when chezmoi `run_*` hooks are excluded.
 No automatic release updater is installed. A reviewed exact pin keeps machines
 consistent; a floating `latest` choice changes independently on each machine.
 

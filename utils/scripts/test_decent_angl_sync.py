@@ -87,11 +87,11 @@ case "$cmd" in
 esac
 ''')
         self.executable(self.user / ".local/bin/decent-angl-skills", "#!/bin/sh\nexit 0\n")
-        # The deployed omp-baseline: live validate logs each run and fails on FAIL_LIVE_VALIDATE.
+        # The deployed omp-baseline: apply installs pins and validates once per revision.
         self.executable(self.user / ".local/bin/omp-baseline", '''#!/bin/sh
-[ "$1" = validate ] || exit 17
-echo validate >>"$HOME/live-validate.log"
-[ -z "$FAIL_LIVE_VALIDATE" ] || { echo "MISSING scout expected user definition" >&2; exit 1; }
+[ "$1" = apply ] && [ "$OMP_BASELINE_SOURCE_APPLIED" = 1 ] || exit 17
+echo apply >>"$HOME/live-apply.log"
+[ -z "$FAIL_LIVE_APPLY" ] || { echo "MISSING scout expected user definition" >&2; exit 1; }
 ''')
 
     def command(self, *args, check=True, **kwargs):
@@ -142,6 +142,25 @@ echo validate >>"$HOME/live-validate.log"
         self.run_sync("publish")
         self.assertEqual(self.remote_head(), self.git("rev-parse", "HEAD").stdout.strip())
         self.assertFalse((self.root / "hook-ran").exists())
+
+    def test_terminal_publish_never_pages(self):
+        # On a terminal, git pages diff --check; a LESS without F waited for q even on empty output.
+        import pty
+        sentinel = self.root / "paged"
+        for name in ("GIT_PAGER", "PAGER"):
+            self.env.pop(name, None)
+        self.env.update(GIT_CONFIG_COUNT="1", GIT_CONFIG_KEY_0="core.pager",
+                        GIT_CONFIG_VALUE_0=f"touch '{sentinel}'; cat")
+        self.outgoing()
+        primary, secondary = pty.openpty()
+        try:
+            result = subprocess.run(["bash", str(SCRIPT), "publish"], env=self.env, stdin=secondary,
+                                    stdout=secondary, stderr=subprocess.PIPE, text=True, timeout=60)
+        finally:
+            os.close(secondary)
+            os.close(primary)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(sentinel.exists())
 
     def test_new_directories_created_without_changing_existing_modes(self):
         import json
@@ -495,20 +514,22 @@ echo validate >>"$HOME/live-validate.log"
         self.assertTrue((self.user / "apply.log").exists())
         self.assertEqual((self.state / "config-applied-commit").read_text().strip(), self.initial)
 
-    def test_live_validate_gates_convergence_once_per_revision(self):
-        # Reconcile skips the run_ hook that calls omp-baseline apply, so it screens the live result itself.
-        self.env["FAIL_LIVE_VALIDATE"] = "1"
+    def test_live_apply_gates_convergence_once_per_revision(self):
+        # Pin installation does not depend on chezmoi run_ hooks. An older guard's
+        # validate-only receipt for this revision does not count as an apply.
+        (self.state / "config-validated-commit").write_text(self.initial + "\n")
+        self.env["FAIL_LIVE_APPLY"] = "1"
         result = self.run_sync("guard", success=False)
-        self.assertIn("Live omp-baseline validate failed", result.stdout)
+        self.assertIn("Live omp-baseline apply failed", result.stdout)
         self.assertNotIn("CONFIG  converged", result.stdout)
         self.assertTrue((self.state / "config-drift").exists())
-        self.assertFalse((self.state / "config-validated-commit").exists())
-        del self.env["FAIL_LIVE_VALIDATE"]
+        self.assertFalse((self.state / "config-live-applied-commit").exists())
+        del self.env["FAIL_LIVE_APPLY"]
         self.assertIn("CONFIG  converged", self.run_sync("reconcile").stdout)
         self.assertFalse((self.state / "config-drift").exists())
-        self.assertEqual((self.state / "config-validated-commit").read_text().strip(), self.initial)
+        self.assertEqual((self.state / "config-live-applied-commit").read_text().strip(), self.initial)
         self.run_sync("guard")
-        self.assertEqual((self.user / "live-validate.log").read_text().splitlines(), ["validate", "validate"])
+        self.assertEqual((self.user / "live-apply.log").read_text().splitlines(), ["apply", "apply"])
         (self.user / ".local/bin/omp-baseline").unlink()
         self.outgoing()
         self.run_sync("publish")

@@ -8,7 +8,7 @@ set -eu
 # upstream self-updater against a version-pinned binary.
 case "${1:-}" in
   upgrade|update)
-    echo "OpenCode is pinned by the shared mise baseline. Update opencode in ~/src/boilerplate/home/dot_config/mise/config.toml, apply it, then run mise install opencode." >&2
+    echo "OpenCode is pinned by the shared mise baseline. In a worktree of ~/src/boilerplate, change the opencode pin in home/dot_config/mise/config.toml, preview with chezmoi -S <worktree> diff, and commit; land it with git merge --ff-only, then run decent-angl-sync reconcile." >&2
     exit 2
     ;;
 esac

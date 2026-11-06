@@ -99,9 +99,14 @@ install_job() {
         fi
         unload sudo "gui/$uid/$label"
         unload sudo "user/$uid/$label"
+        # Clear any disable override first: it survives while the job stays loaded.
+        sudo -n launchctl enable "system/$label"
+        if cmp -s "$plist" "$DAEMON_DIR/$label.plist" && loaded user "system/$label"; then
+            printf 'LAUNCHD %s unchanged in system\n' "$label"
+            return 0
+        fi
         unload sudo "system/$label"
         sudo -n install -o root -g wheel -m 644 "$plist" "$DAEMON_DIR/$label.plist"
-        sudo -n launchctl enable "system/$label"
         sudo -n launchctl bootstrap system "$DAEMON_DIR/$label.plist"
         if ! loaded user "system/$label"; then
             echo "decent-angl-launchd: $label is not loaded in system after bootstrap." >&2
@@ -118,10 +123,15 @@ install_job() {
     mkdir -p "$AGENT_DIR"
     # Older installs bootstrapped into user/<uid> when no GUI session existed.
     unload user "user/$uid/$label"
+    # Undo a disable (a home-server install's, or a manual one that left the job loaded); the
+    # override is shared with gui/<uid> and settable without a GUI session.
+    launchctl enable "user/$uid/$label"
+    if cmp -s "$plist" "$AGENT_DIR/$label.plist" && loaded user "$target/$label"; then
+        printf 'LAUNCHD %s unchanged in %s\n' "$label" "$target"
+        return 0
+    fi
     unload user "$target/$label"
     install -m 644 "$plist" "$AGENT_DIR/$label.plist"
-    # Undo a home-server install's disable (shared with gui/<uid>, settable without a GUI session).
-    launchctl enable "user/$uid/$label"
     if launchctl print "$target" >/dev/null 2>&1; then
         launchctl bootstrap "$target" "$AGENT_DIR/$label.plist"
         if ! loaded user "$target/$label"; then

@@ -143,6 +143,46 @@ class LaunchdHelperTest(unittest.TestCase):
                                    f'launchctl enable {self.system}',
                                    f'launchctl bootstrap system {self.daemons}/{LABEL}.plist'])
 
+    def test_unchanged_loaded_job_is_not_restarted(self):
+        for role, directory, service in (('home-server', self.daemons, self.system),
+                                          ('portable-macos-workstation', self.agents, self.gui)):
+            with self.subTest(role=role):
+                # Run each role from a fresh load, retiring the previous domain.
+                result, _ = self.run_helper(role, 'install', str(self.source))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.log.write_text('')
+                result, calls = self.run_helper(role, 'install', str(self.source))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn('unchanged', result.stdout)
+                self.assertTrue(self.is_loaded(service))
+                self.assertFalse([c for c in calls if ' bootout ' in c or ' bootstrap ' in c], calls)
+                # A changed definition must still replace the loaded job.
+                (directory / f'{LABEL}.plist').write_text('stale')
+                self.log.write_text('')
+                result, calls = self.run_helper(role, 'install', str(self.source))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(f'launchctl bootout {service}', calls)
+                self.assertTrue(any(' bootstrap ' in c for c in calls), calls)
+
+    def test_unchanged_unloaded_job_is_loaded(self):
+        for role, directory, service in (('home-server', self.daemons, self.system),
+                                          ('portable-macos-workstation', self.agents, self.gui)):
+            with self.subTest(role=role):
+                (directory / f'{LABEL}.plist').write_text(self.source.read_text())
+                result, calls = self.run_helper(role, 'install', str(self.source))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertTrue(self.is_loaded(service))
+                self.assertTrue(any(' bootstrap ' in c for c in calls), calls)
+
+    def test_reinstall_reenables_a_disabled_but_loaded_agent(self):
+        result, _ = self.run_helper('portable-macos-workstation', 'install', str(self.source))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        subprocess.run([self.root / 'bin/launchctl', 'disable', self.legacy_user], env=self.env, check=True)
+        result, _ = self.run_helper('portable-macos-workstation', 'install', str(self.source))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('unchanged', result.stdout)
+        self.assertFalse((self.state / f'disabled_{LABEL}').exists())
+
     def login(self):
         subprocess.run([self.root / 'bin/launchctl', 'fake-login'], env=self.env, check=True)
 

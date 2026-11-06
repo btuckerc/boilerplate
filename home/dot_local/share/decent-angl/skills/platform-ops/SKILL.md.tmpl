@@ -11,7 +11,9 @@ description: This machine's OS, desktop, hardware, network, power, or services, 
 
 ## Ownership
 
-- Shared and durable: edit `~/src/boilerplate/home/...`, apply, and reconcile.
+- Shared and durable: edit `home/...` in a worktree of `~/src/boilerplate`,
+  preview with `chezmoi -S <worktree> diff`, commit, land, and reconcile
+  (`decent-angl-config`).
 - Machine-local or OS-owned: change the live setting on the target host.
 - Home router, firewall, DHCP, or DNS appliance state: use `opnsense`.
 - Inspect where a value lives before deciding ownership.
@@ -27,5 +29,5 @@ For the inference-only host `nous`, read [references/nous.md](references/nous.md
 ## Completion
 
 Re-read each changed setting or file. For shared changes, verify rendered live
-output after a targeted apply. Report any required logout, reconnect, reload,
+output after reconcile applies the landed commit. Report any required logout, reconnect, reload,
 or restart.

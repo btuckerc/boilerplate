@@ -11,14 +11,22 @@ OMP-native directories in
 
 ## Add a skill
 
+`add`, `update` and `audit-source` write and check `~/src/boilerplate` unless
+`DECENT_ANGL_REPO_ROOT` names another checkout. Prefix each of them with
+`DECENT_ANGL_REPO_ROOT=<worktree>` (a worktree per `decent-angl-config`); never
+export it, since `decent-angl-sync` reads it too and refuses a split source.
+
 1. Stage a complete skill directory outside the repo.
-2. Run `decent-angl-skills add DIR [UPSTREAM]`.
-3. Review the Git diff, then run `decent-angl-skills audit-source`.
-4. Commit and run `decent-angl-sync reconcile`.
+2. Run `DECENT_ANGL_REPO_ROOT=<worktree> decent-angl-skills add DIR [UPSTREAM]`.
+3. Review the Git diff, then run
+   `DECENT_ANGL_REPO_ROOT=<worktree> decent-angl-skills audit-source`.
+4. Preview with `chezmoi -S <worktree> diff`, commit, land with
+   `git merge --ff-only`, and run `decent-angl-sync reconcile`.
 
 To refresh a vendored skill, stage the reviewed replacement and run
-`decent-angl-skills update DIR UPSTREAM`. The command validates before swapping
-and restores the previous source if the full audit fails.
+`DECENT_ANGL_REPO_ROOT=<worktree> decent-angl-skills update DIR UPSTREAM`, then
+steps 3-4. The command validates before swapping and restores the previous
+source if the full audit fails.
 
 For a first-party skill, create one directory containing `SKILL.md` and any
 referenced resources, then audit it. Never edit generated views or discovery
@@ -27,8 +35,8 @@ links.
 Every file under `references/` must appear in `SKILL.md` as
 `(references/name.md)`. `decent-angl-skills validate` and `sync` audit the
 live dest under `~/.local/share/decent-angl/skills/`. `sync` does not copy
-source to dest; that is chezmoi. After a source edit, targeted
-`chezmoi apply` of the dest skill directory, then `decent-angl-skills sync`.
+source to dest; that is chezmoi. Reconcile applies the landed dest skill
+directory, then runs `decent-angl-skills sync`.
 A dest `references/` file without a dest SKILL.md link is
 `undisclosed reference` even when source is already linked. That dest drift
 is what blocks `--strict`, not an unlinked source file.

@@ -174,7 +174,8 @@ statusLine:
   transparent: true
   leftSegments:
     - model
-    # Directory basename from extensions/cwd-basename-status.ts.
+    # Directory basename (extensions/cwd-basename-status.ts) and fleet guard
+    # markers (extensions/fleet-status.ts).
     - status
   rightSegments:
     - token_rate

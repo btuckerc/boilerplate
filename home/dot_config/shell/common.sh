@@ -58,7 +58,8 @@ unset -f prepend_path_dir 2>/dev/null || true
 
 # === Pager Configuration ===
 export MANPAGER="less -R --use-color -Dd+r -Du+b"
-export LESS="R --use-color -Dd+r -Du+b"
+# F: quit at once when output fits one screen (git's own default, lost once LESS is set).
+export LESS="FR --use-color -Dd+r -Du+b"
 
 # === FZF Configuration ===
 export FZF_DEFAULT_OPTS="--style minimal --color 16 --layout=reverse --height 30% --preview='bat -p --color=always {}'"

@@ -19,6 +19,6 @@ Do not run `omp update`. That command installs an unreviewed binary and fights t
 9. Stop unless the user asked to publish. An uncommitted pin is local only.
    Scheduled apply defers dirty source files without stashing them, so the fleet
    stays on the old pin until you commit.
-10. When publishing: commit the pin files plus catalog/config follow-ups, then `decent-angl-sync reconcile --with-scripts`. Other hosts: `omp-baseline pull`.
+10. When publishing: commit the pin files plus catalog/config follow-ups, then `decent-angl-sync reconcile`. Other hosts converge through their own 15-minute guard; no per-host step is needed.
 
-Report pin before and after, the three pin-file diff, catalog ID changes, validate result, and whether the pin is published.
+Report pin before and after, the two pin-file diff, catalog ID changes, validate result, and whether the pin is published.

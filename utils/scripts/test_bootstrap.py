@@ -27,7 +27,8 @@ class BootstrapTest(unittest.TestCase):
         self.env = dict(os.environ, HOME=str(self.user), XDG_STATE_HOME=str(self.user / '.local/state'),
                         BOILERPLATE_ROOT=str(self.repo), BOILERPLATE_SOURCE_LINK=str(self.source),
                         CHEZMOI_BIN_DIR=str(self.bin))
-        for name, fail in [('chezmoi', 'FAIL_APPLY'), ('mise', 'FAIL_TOOLS'), ('decent-angl-skills', 'FAIL_SKILLS')]:
+        for name, fail in [('chezmoi', 'FAIL_APPLY'), ('omp-baseline', 'FAIL_BASELINE'), ('mise', 'FAIL_TOOLS'),
+                           ('decent-angl-skills', 'FAIL_SKILLS')]:
             file = self.bin / name
             file.write_text(f'''#!/bin/sh
 if [ "$1" = --version ]; then exit 0; fi
@@ -70,7 +71,7 @@ exit "${{{fail}:-0}}"
         p = self.setup()
         self.assertEqual(p.returncode, 44)
         self.assertNotIn('Bootstrap complete', p.stdout)
-        self.assertEqual((self.user / 'calls').read_text(), 'chezmoi\nmise\n')
+        self.assertEqual((self.user / 'calls').read_text(), 'chezmoi\nomp-baseline\nmise\n')
 
     def test_alternate_checkout_is_refused_before_mutation(self):
         self.env['BOILERPLATE_ROOT'] = str(self.root / 'different')

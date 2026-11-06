@@ -16,7 +16,8 @@ description: Change the shared Codex baseline in chezmoi - config.toml, model-po
 
 ## Invariants
 
-- Edit the canonical checkout, not `{{ .decentangl.defaults.codex_home }}/`.
+- Edit source in a worktree of the canonical checkout (`decent-angl-config`),
+  never `{{ .decentangl.defaults.codex_home }}/`.
 - Keep auth, history, caches, sqlite files, logs, and project trust local.
 - T3 Code extra accounts use an empty shadow home under `~/.codex-t3/`.
   Never copy `~/.codex` into it. Login with `codex-t3-second login`.
@@ -32,8 +33,10 @@ description: Change the shared Codex baseline in chezmoi - config.toml, model-po
 
 ## Workflow
 
-1. Run `decent-angl-sync status`, then edit `~/src/boilerplate/home/...`.
-2. Apply targeted files with `chezmoi apply`.
-3. Verify rendered files and `codex --version`, then publish through
-   `decent-angl-sync publish`. It validates the exported snapshot's OMP agent
-   policy; unrelated dirty work does not block publication of reviewed commits.
+1. Run `decent-angl-sync status`, then edit `home/...` in a worktree
+   (`git -C ~/src/boilerplate worktree add ~/src/boilerplate-wt/<task>`).
+2. Preview with `chezmoi -S ~/src/boilerplate-wt/<task> diff`.
+3. Commit, land with `git merge --ff-only` in `~/src/boilerplate`, then run
+   `decent-angl-sync reconcile`: it validates the committed snapshot's OMP
+   agent policy, publishes, and applies. Verify rendered files and
+   `codex --version`.

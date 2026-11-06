@@ -8,6 +8,8 @@ set -euo pipefail
 export LC_ALL=C
 # Scans must see the history a push transfers; pack transfer ignores refs/replace, so Git here does too.
 export GIT_NO_REPLACE_OBJECTS=1
+# Unattended runs never wait on a pager, whatever LESS or core.pager the caller set.
+export GIT_PAGER=cat
 
 REPO_ROOT="${DECENT_ANGL_REPO_ROOT:-$HOME/src/boilerplate}"
 SOURCE_LINK="${DECENT_ANGL_SOURCE_LINK:-$HOME/.local/share/chezmoi}"
@@ -20,7 +22,9 @@ MARKER="$STATE_DIR/config-drift"
 LOG_FILE="$STATE_DIR/config-sync.log"
 LOCK_FILE="$STATE_DIR/config-sync.flock"
 PENDING="$STATE_DIR/config-pending"
-VALIDATED="$STATE_DIR/config-validated-commit"
+# Receipt of live_apply. Not config-validated-commit: an older guard writes that after validating
+# only, so honoring it would skip pin installation for the revision it records.
+LIVE_APPLIED="$STATE_DIR/config-live-applied-commit"
 VALIDATION_ROOT="${DECENT_ANGL_VALIDATION_ROOT:-$HOME/src/boilerplate-work}"
 GUARD_MODE=false
 WITH_SCRIPTS=false
@@ -37,7 +41,7 @@ Usage: decent-angl-sync <status|validate|publish|adopt-source|reconcile|guard|ca
   adopt-source           Preserve the old chezmoi clone and link it to the repo.
   publish                Validate and push committed HEAD; leave local edits/live files alone.
   reconcile              Publish reviewed commits, fast-forward, apply committed state, and
-                         run live omp-baseline validate once per fully applied revision.
+                         install pinned tools and validate once per fully applied revision.
   guard                  Scheduled reconcile that never publishes.
   capture TARGET...      Explicitly add live targets to the canonical source.
   install-guard          Install the 15-minute launchd/systemd user guard.
@@ -620,20 +624,19 @@ baseline_check() {
   python3 "$REPO_ROOT/utils/scripts/check_baseline.py" "$REPO_ROOT" || return 1
 }
 
-# live_validate REV: after a full apply, the deployed omp-baseline screens the live result (agent
-# policy, plugin roots, pins): reconcile without --with-scripts skips the run_ hook that calls it.
+# live_apply REV: after a full apply, reconcile installs and screens the live OMP baseline.
 # Once per revision; omp-baseline's hourly guard screens between revisions. Failures retry next run.
-live_validate() {
+live_apply() {
   local tool="$HOME/.local/bin/omp-baseline" output
-  [[ "$(cat "$VALIDATED" 2>/dev/null || true)" != "$1" ]] || return 0
+  [[ "$(cat "$LIVE_APPLIED" 2>/dev/null || true)" != "$1" ]] || return 0
   [[ -x "$tool" ]] || { echo "Missing live omp-baseline: $tool" >&2; return 1; }
-  if ! output="$("$tool" validate 2>&1)"; then
+  if ! output="$(OMP_BASELINE_SOURCE_APPLIED=1 "$tool" apply 2>&1)"; then
     printf '%s\n' "$output" >&2
-    printf 'Live omp-baseline validate failed after applying %s; not converged. A pin change needs reconcile --with-scripts.\n' "${1:0:12}" >&2
+    printf 'Live omp-baseline apply failed after applying %s; not converged.\n' "${1:0:12}" >&2
     return 1
   fi
-  printf 'LIVE    omp-baseline validate passed\n'
-  printf '%s\n' "$1" >"$VALIDATED"
+  printf 'LIVE    omp-baseline apply passed\n'
+  printf '%s\n' "$1" >"$LIVE_APPLIED"
 }
 
 apply_tree() {
@@ -907,7 +910,7 @@ reconcile() {
   if (( ${#APPLY_TARGETS[@]} > 0 )); then
     defer_apply "Applied ${revision:0:12}; edited targets held until committed."
   else
-    live_validate "$revision" || return 1
+    live_apply "$revision" || return 1
     rm -f "$PENDING" || return 1
     printf 'CONFIG  converged %s\n' "${revision:0:12}"
   fi

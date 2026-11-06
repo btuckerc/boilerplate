@@ -1,32 +1,40 @@
 # Updating the fleet
 
-Edit `~/src/boilerplate`, review and commit the intended changes, then publish.
-MacBook, Mac Mini, and T14 share published `master`; any host may author.
-`~/.local/share/chezmoi` must resolve to that checkout.
+Author in a worktree (`git -C ~/src/boilerplate worktree add
+~/src/boilerplate-wt/<task>`), preview with `chezmoi -S <worktree> diff`, commit
+there, land with `git merge --ff-only` in `~/src/boilerplate`, then
+`decent-angl-sync reconcile` publishes and applies.
+nous, MacBook, Mac Mini, and T14 share published `master`; nous and the MacBook
+can publish.
+`~/.local/share/chezmoi` must resolve to `~/src/boilerplate`.
 
 ## Inspect and publish
 
 ```sh
-cd ~/src/boilerplate
+cd ~/src/boilerplate-wt/<task>
 decent-angl-doctor --fleet
 git status --short
 git diff
+chezmoi -S "$PWD" diff
 python3 utils/scripts/check_baseline.py
-decent-angl-skills audit-source
+DECENT_ANGL_REPO_ROOT="$PWD" decent-angl-skills audit-source
 ```
 
-Stage explicit paths or hunks, inspect `git diff --cached`, and commit. Review
-all outgoing commits, including earlier unpublished work. Then:
+Stage explicit paths or hunks, inspect `git diff --cached`, and commit in the
+worktree. Land with `git merge --ff-only <branch>` in `~/src/boilerplate`,
+review all outgoing commits, including earlier unpublished work, then publish
+and apply:
 
 ```sh
-decent-angl-sync publish
+decent-angl-sync reconcile
 ```
 
-Publication validates an exported committed HEAD, scans outgoing history for
-credential signatures and forbidden runtime paths, and pushes that exact SHA.
-Unrelated staged, unstaged, or untracked edits may remain. It does not apply live
-files or include uncommitted changes. The scanner is a guardrail, not proof that
-arbitrary data is safe to publish.
+`decent-angl-sync publish` alone validates an exported committed HEAD, scans
+outgoing history for credential signatures and forbidden runtime paths, and
+pushes that exact SHA without applying live files; reconcile runs it first.
+Unrelated staged, unstaged, or untracked edits may remain; uncommitted changes
+are never included. The scanner is a guardrail, not proof that arbitrary data
+is safe to publish.
 
 ## Apply on a host
 
@@ -62,27 +70,30 @@ output is available with `--json`; `--strict` exits nonzero when review is neede
 Chezmoi `--exclude scripts` skips `run_*` hooks. Ordinary `executable_*` files
 still deploy. Reconcile excludes hooks by default. For reviewed installation or
 service hooks, use `decent-angl-sync reconcile --with-scripts` on a clean host.
-A changed mise pin needs `mise install TOOL@VERSION` on each host; the ordinary
-guard deliberately does not install tool upgrades.
+Reconcile runs `omp-baseline apply` once per revision, installing OMP and companion
+mise pins automatically. Other hosts converge through their own 15-minute guard;
+no per-host install or hook run is needed for pin upgrades.
 
-For a change under active development, preview with `chezmoi diff` and apply the
-explicit targets. Do not use broad `--force` to clear conflicts. If live state
-contains intended changes, capture those targets with `decent-angl-sync capture`
-and review the source diff. Secrets, auth, history, caches, and databases remain
-machine-local. Use `decent-angl-sync adopt-source` to preserve and replace an old
-independent chezmoi clone.
+For a change under active development, preview the worktree with
+`chezmoi -S ~/src/boilerplate-wt/<task> diff`; live files change only when
+reconcile applies the landed commit. Do not use broad `--force` to clear
+conflicts. If live state contains intended changes, capture those targets with
+`decent-angl-sync capture` (it writes into `~/src/boilerplate` itself; commit
+promptly) and review the source diff. Secrets, auth, history, caches, and
+databases remain machine-local. Use `decent-angl-sync adopt-source` to preserve
+and replace an old independent chezmoi clone.
 
 ## Tool and skill changes
 
 - Choose and test exact mise pins in `home/dot_config/mise/config.toml`.
   Check upstream release notes and backend metadata before choosing a version.
 - Use `omp-baseline upgrade` and `omp-baseline validate --strict` for OMP.
-  Never run `omp update`. Its manifest and setup hook pins must agree. Validate
+  Never run `omp update`. Its manifest and mise pins must agree. Validate
   is read-only and includes the `omp-agent-policy` agent check against native
   `omp models --json` and `omp config list --json` evidence; its mirror is
   pinned to one OMP version (18.16.0), so an upgrade re-verifies it first and a
-  rollback reverts the upgrade commit with it (then `chezmoi apply` the reverted
-  non-manifest targets before `omp-baseline apply`). It fails the default profile when
+  rollback reverts the upgrade commit with it (then `decent-angl-sync reconcile`
+  applies the reverted targets before `omp-baseline apply`). It fails the default profile when
   `task.structured` is off (18.10.2+ default: no `yield`, schemas dropped). It certifies
   static policy for a fresh depth-1 dispatch and defers the serving model (auth
   fallback) and MCP proxies to `omp-agent-smoke`. An unreviewed `OMP_*`/`PI_*`
@@ -119,8 +130,9 @@ They do not provision a fresh operating system. A fresh-host acceptance test
 must also verify shell startup, tool installation, host data, native jobs, and
 local authentication on macOS and Linux.
 
-Rollback a published change with a reviewed `git revert`, then publish and
-reconcile. Install the restored tool pin where required. This restores managed
+Roll back a published change with a reviewed `git revert` in a worktree; preview
+with `chezmoi -S <worktree> diff`, land it with `git merge --ff-only`, then
+reconcile, which installs the restored tool pin. This restores managed
 source and files; arbitrary hook side effects and native package changes may
 need explicit repair. Retain working backups and use the restore-smoke job to
 check recovery. Diagnose failed maintenance before running retention changes.

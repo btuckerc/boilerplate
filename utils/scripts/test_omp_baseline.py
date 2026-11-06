@@ -197,6 +197,24 @@ fi
         self.assertIn("checker missing", result.stderr)
         self.assertEqual([], list(scratch.iterdir()))
 
+    def test_check_source_runs_the_candidate_pin(self):
+        # A publisher still on the previous release checks the candidate with its pinned one.
+        root = self.source_root()
+        pinned = self.root / "pinned"
+        pinned.mkdir()
+        (pinned / "omp").write_text((self.bin / "omp").read_text()
+                                    .replace("${VERSION_OUT:-omp/18.12.1}", "omp/18.12.1")
+                                    .replace('echo "PROBE $HOME', 'echo "PROBE pinned $HOME'))
+        (pinned / "omp").chmod(0o755)
+        (self.bin / "mise").write_text((self.bin / "mise").read_text().replace(
+            '[ "$1" = exec ]', f'[ "$1" = -C ] && shift 2\ncase "$1" in install) exit 0 ;; where) echo "{pinned}"; exit 0 ;; esac\n[ "$1" = exec ]', 1))
+        log = self.root / "omp.log"
+        result = self.run_baseline("check-source", str(root), VERSION_OUT="omp/18.4.4",
+                                   POLICY_LOG=str(self.root / "policy.log"), STUB_LOG=str(log))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("VERSION omp/18.12.1 matches the source pin", result.stdout)
+        self.assertIn("PROBE pinned ", log.read_text())
+
     def snapshot(self):
         """Contents, modes and (where supported) file attributes under ~/.omp."""
         state = {}
@@ -214,15 +232,6 @@ fi
         result = self.run_baseline("status", FAIL_DIFF="1")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("LIVE    probe failed (chezmoi diff exit 1)", result.stderr)
-        self.assertNotIn("OK      ", result.stdout)
-
-    def test_drift_probe_inside_chezmoi_hook_is_deferred(self):
-        # Inside a chezmoi run_ hook chezmoi holds its state lock, so a nested diff exits 1
-        # ("timeout obtaining persistent state lock"): the probe is deferred, never OK or failed.
-        result = self.run_baseline("status", FAIL_DIFF="1", OMP_BASELINE_IN_CHEZMOI="1")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn(f"LIVE    deferred {self.home}/.omp/agent/RULES.md (inside chezmoi apply", result.stdout)
-        self.assertNotIn("probe failed", result.stderr)
         self.assertNotIn("OK      ", result.stdout)
 
     def test_successful_empty_diff_is_clean(self):
@@ -253,6 +262,106 @@ fi
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("SECRET  chezmoi owns runtime paths\n.omp/agent/agent.db", result.stderr)
         self.assertNotIn("chezmoi boundary clean", result.stdout)
+
+    def test_probe_copies_drop_oauth_and_keep_api_keys(self):
+        root = self.source_root()
+        for rel in (".omp/agent", ".omp/profiles/local/agent"):
+            agent = self.home / rel
+            agent.mkdir(parents=True, exist_ok=True)
+            with sqlite3.connect(agent / "agent.db") as db:
+                db.execute("CREATE TABLE auth_credentials (credential_type TEXT, data TEXT)")
+                db.executemany("INSERT INTO auth_credentials VALUES (?, ?)",
+                               [("oauth", "refresh-secret"), ("api_key", "key-secret")])
+                db.execute("CREATE TABLE settings (key TEXT, value TEXT)")
+                db.execute("INSERT INTO settings VALUES ('theme', 'dark')")
+        omp = self.bin / "omp"
+        omp.write_text(omp.read_text().replace('[ "$1" = --profile ] && shift 2', '''agent="$HOME/.omp/agent"
+[ "$1" = --profile ] && agent="$HOME/.omp/profiles/$2/agent"
+python3 - "$agent/agent.db" >>"$CREDS_LOG" <<'PY'
+import sqlite3, sys
+with sqlite3.connect(sys.argv[1]) as db:
+    types = [row[0] for row in db.execute("SELECT credential_type FROM auth_credentials ORDER BY credential_type")]
+    settings = db.execute("SELECT count(*) FROM settings").fetchone()[0]
+print(sys.argv[1], ",".join(types), settings)
+PY
+[ "$1" = --profile ] && shift 2'''))
+        log = self.root / "credentials.log"
+        env = dict(POLICY_LOG=str(self.root / "policy.log"), STUB_LOG=str(self.root / "omp.log"),
+                   CREDS_LOG=str(log))
+        # validate copies the live default and local DBs into source and live profiles.
+        result = self.run_baseline("validate", OMP_BASELINE_REPO_ROOT=str(root), **env)
+        self.assertNotEqual(result.returncode, 0)  # Other fixture checks deliberately fail.
+        rows = log.read_text().splitlines()
+        for profile in ("/agent/agent.db", "/profiles/src-default/agent/agent.db",
+                        "/profiles/src-local/agent/agent.db", "/profiles/local/agent/agent.db"):
+            self.assertTrue(any(profile in row for row in rows), (profile, rows, result.stderr))
+        for row in rows:
+            self.assertEqual(row.split()[1:], ["api_key", "1"])
+        # check-source alone also drops the settings rows.
+        log.write_text("")
+        result = self.run_baseline("check-source", str(root), **env)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        rows = log.read_text().splitlines()
+        self.assertTrue(rows)
+        for row in rows:
+            self.assertEqual(row.split()[1:], ["api_key", "0"])
+        for rel in (".omp/agent", ".omp/profiles/local/agent"):
+            with sqlite3.connect(self.home / rel / "agent.db") as db:
+                self.assertEqual(db.execute("SELECT count(*) FROM auth_credentials").fetchone()[0], 2)
+                self.assertEqual(db.execute("SELECT count(*) FROM settings").fetchone()[0], 1)
+
+    def test_validate_local_oauth_check_is_read_only(self):
+        # Other validation checks fail in this fixture; isolate the AUTH result.
+        result = self.run_baseline("validate")
+        self.assertNotIn("AUTH    ", result.stderr)
+        for rel in (".omp/agent", ".omp/profiles/local/agent"):
+            with self.subTest(agent=rel):
+                path = self.home / rel / "agent.db"
+                path.parent.mkdir(parents=True, exist_ok=True)
+                with sqlite3.connect(path) as db:
+                    db.execute("CREATE TABLE auth_credentials (credential_type TEXT, data TEXT)")
+                    db.executemany("INSERT INTO auth_credentials VALUES (?, ?)",
+                                   [("oauth", "refresh-secret"), ("api_key", "key-secret")])
+                before = self.snapshot()
+                result = self.run_baseline("validate")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(f"AUTH    1 local OAuth login(s) in {path}; logins belong on the nous broker",
+                              result.stderr)
+                self.assertNotIn("refresh-secret", result.stdout + result.stderr)
+                self.assertNotIn("key-secret", result.stdout + result.stderr)
+                self.assertEqual(before, self.snapshot())
+                with sqlite3.connect(path) as db:
+                    db.execute("DELETE FROM auth_credentials WHERE credential_type = 'oauth'")
+                result = self.run_baseline("validate")
+                self.assertNotIn("AUTH    ", result.stderr)
+                self.assertIn(f"AUTH    no local OAuth logins in {path}", result.stdout)
+                with sqlite3.connect(path) as db:
+                    db.execute("DROP TABLE auth_credentials")
+                result = self.run_baseline("validate")
+                self.assertNotIn("AUTH    ", result.stderr)
+                self.assertIn(f"AUTH    no local OAuth logins in {path}", result.stdout)
+
+    def test_validate_oauth_in_wal_does_not_create_live_shm(self):
+        path = self.home / ".omp/agent/agent.db"
+        # Leave a committed WAL without a shared-memory file, as a crashed writer can.
+        subprocess.run(["python3", "-c", """
+import os, sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+db.execute("CREATE TABLE auth_credentials (credential_type TEXT, data TEXT)")
+db.commit()
+db.execute("PRAGMA journal_mode=WAL")
+db.execute("INSERT INTO auth_credentials VALUES ('oauth', 'refresh-secret')")
+db.commit()
+os._exit(0)
+""", str(path)], check=True)
+        Path(str(path) + "-shm").unlink()
+        self.assertTrue(Path(str(path) + "-wal").is_file())
+        before = self.snapshot()
+        result = self.run_baseline("validate")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(f"AUTH    1 local OAuth login(s) in {path}; logins belong on the nous broker",
+                      result.stderr)
+        self.assertEqual(before, self.snapshot())
 
     def test_validate_reports_but_never_changes_modes_and_repair_fixes(self):
         agent = self.home / ".omp/agent"
@@ -354,7 +463,7 @@ fi
         checker = self.repo / "home/dot_local/bin/executable_omp-agent-policy"
         checker.parent.mkdir(parents=True)
         checker.write_text("")
-        self.run_baseline("validate", BUN_ENV_LOG=str(log), OMP_BASELINE_IN_CHEZMOI="1")
+        self.run_baseline("validate", BUN_ENV_LOG=str(log), OMP_BASELINE_SOURCE_APPLIED="1")
         self.assertIn("ran", log.read_text())
         self.assertNotIn("OMP_BASELINE_", log.read_text())
 
@@ -376,7 +485,7 @@ fi
         extension = self.root / "sentinel.ts"
         extension.write_text(f'import * as fs from "node:fs";\nexport default function () {{ fs.writeFileSync({str(sentinel)!r}, "ran"); }}\n')
         (agent / "config.yml").write_text(f"cycleOrder: [default, fable, task]\nextensions: [{extension}]\n")
-        (agent / "agent.db").write_text("db\n")
+        sqlite3.connect(agent / "agent.db").close()
         (agent / "agent.db").chmod(0o644)
         agent.chmod(0o755)
         (self.home / ".omp").chmod(0o755)
@@ -477,7 +586,6 @@ fi
         pins = {
             "home/dot_config/decent-angl/omp-baseline-manifest.tsv": "# omp-version\t18.4.4\n",
             "home/dot_config/mise/config.toml": '[tools]\n"github:can1357/oh-my-pi" = "18.4.4"\n',
-            "home/run_onchange_after_04-setup-omp.sh.tmpl": 'OMP_VERSION="18.4.4"\n',
         }
         for rel, text in pins.items():
             (self.repo / rel).parent.mkdir(parents=True, exist_ok=True)

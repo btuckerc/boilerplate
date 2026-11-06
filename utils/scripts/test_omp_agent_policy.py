@@ -895,6 +895,11 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.agent_report(result, "sol")["mcp"], ["forced", "proj", "user"])
         self.assertNotIn("mcp:proj", self.agent_report(result, "sol")["callable"])
+        # Native expands ${VAR} in server values before reading `enabled` (discovery/builtin.ts:134-151); names and the
+        # user lists stay raw, so an environment key can only switch a listed server off and the superset must not move.
+        (cwd / ".omp/mcp.json").write_text(json.dumps({"mcpServers": {"proj": {"command": "x", "enabled": "${PI_SESSION_ID}"}}}))
+        for value in ("false", "true"):
+            self.assertEqual(self.agent_report(run(args=["--json"], PI_SESSION_ID=value), "sol")["mcp"], ["forced", "proj", "user"])
         # A foreign user source is opt-in; a foreign project source is read unless its provider is disabled.
         (home / ".cursor").mkdir()
         (home / ".cursor/mcp.json").write_text("{}")

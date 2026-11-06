@@ -247,9 +247,10 @@ const MIRRORED_ENV = new Set(["PI_CONFIG_FILES", "PI_SMOL_MODEL", "PI_SLOW_MODEL
  * Verified not to reach agent discovery, model, thinking or tools at the pinned tag: eval-kernel plumbing a
  * session exports to child shells (eval/executor-base.ts:312-361, read only by eval/py/prelude.py), the bash
  * tool's call identity (tools/bash.ts:700-704, written for scripts and read nowhere in OMP) and the
- * auth-broker endpoint (ai/src/auth-broker/discover.ts:324-361, credentials only). Other OMP_/PI_ keys in the
- * effective environment fail closed, including relocation keys PI_CONFIG_DIR, PI_CODING_AGENT_DIR,
- * OMP_PROFILE and PI_PROFILE (utils/src/dirs.ts:43-110,306-315,478-525).
+ * auth-broker endpoint (ai/src/auth-broker/discover.ts:324-361, credentials only). Like any variable, they can
+ * be interpolated into MCP server values (discovery/builtin.ts:134-151), which only switches a server off inside
+ * the superset mcpServers reports. Other OMP_/PI_ keys in the effective environment fail closed, including
+ * relocation keys PI_CONFIG_DIR, PI_CODING_AGENT_DIR, OMP_PROFILE and PI_PROFILE (utils/src/dirs.ts:43-110,306-315,478-525).
  */
 const INERT_ENV = new Set([
 	"PI_ARTIFACTS_DIR", "PI_EVAL_LOCAL_ROOTS", "PI_SESSION_FILE", "PI_TOOL_BRIDGE_URL", "PI_TOOL_BRIDGE_TOKEN", "PI_TOOL_BRIDGE_SESSION", "PI_REQUEST_COMPRESSION",

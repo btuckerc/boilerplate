@@ -254,5 +254,3 @@ def test_sigterm_kills_a_command_candidate_before_exiting(tmp_path):
     while Path(f"/proc/{server_pid}").exists() and time.monotonic() < deadline:
         time.sleep(0.05)
     assert not Path(f"/proc/{server_pid}").exists()
-
-

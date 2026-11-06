@@ -57,7 +57,3 @@ def test_vision_items_seed_and_request_construction(tmp_path):
     assert row["pass"]
     parts = ctx.body["messages"][0]["content"]
     assert any(x["type"] == "image_url" and x["image_url"]["url"].startswith("data:image/png;base64,") for x in parts)
-
-
-
-

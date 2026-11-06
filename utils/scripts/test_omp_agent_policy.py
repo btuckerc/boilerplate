@@ -857,7 +857,8 @@ class PolicyTests(unittest.TestCase):
 
     def test_30_environment_screen(self):
         cwd, run = self.live_fixture()
-        self.assertEqual(run(PI_SESSION_FILE="/x.jsonl", PI_AUTH_BROKER_URL="http://x").returncode, 0)
+        # An OMP bash tool call exports its session identity; reconcile run from a session must still certify.
+        self.assertEqual(run(PI_SESSION_ID="s", PI_SESSION_FILE="/x.jsonl", PI_TOOL_CALL_ID="c", PI_AUTH_BROKER_URL="http://x").returncode, 0)
         self.assertEqual(run(PI_REQUEST_COMPRESSION="0").returncode, 0)
         self.assertIn("UNSUPPORTED env PI_CODEX_ZSTD is set", run(PI_CODEX_ZSTD="0").stderr)
         result = run(PI_FROBNICATE="1")

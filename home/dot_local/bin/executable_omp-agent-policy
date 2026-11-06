@@ -245,13 +245,15 @@ const DEFAULTS = {
 const MIRRORED_ENV = new Set(["PI_CONFIG_FILES", "PI_SMOL_MODEL", "PI_SLOW_MODEL", "PI_PLAN_MODEL", "PI_PY", "PI_JS"]);
 /**
  * Verified not to reach agent discovery, model, thinking or tools at the pinned tag: eval-kernel plumbing a
- * session exports to child shells (eval/executor-base.ts:312-361, read only by eval/py/prelude.py) and the
+ * session exports to child shells (eval/executor-base.ts:312-361, read only by eval/py/prelude.py), the bash
+ * tool's call identity (tools/bash.ts:700-704, written for scripts and read nowhere in OMP) and the
  * auth-broker endpoint (ai/src/auth-broker/discover.ts:324-361, credentials only). Other OMP_/PI_ keys in the
  * effective environment fail closed, including relocation keys PI_CONFIG_DIR, PI_CODING_AGENT_DIR,
  * OMP_PROFILE and PI_PROFILE (utils/src/dirs.ts:43-110,306-315,478-525).
  */
 const INERT_ENV = new Set([
 	"PI_ARTIFACTS_DIR", "PI_EVAL_LOCAL_ROOTS", "PI_SESSION_FILE", "PI_TOOL_BRIDGE_URL", "PI_TOOL_BRIDGE_TOKEN", "PI_TOOL_BRIDGE_SESSION", "PI_REQUEST_COMPRESSION",
+	"PI_SESSION_ID", "PI_TOOL_CALL_ID",
 	"OMP_AUTH_BROKER_URL", "OMP_AUTH_BROKER_TOKEN", "PI_AUTH_BROKER_URL", "PI_AUTH_BROKER_TOKEN",
 ]);
 /** Non-prefixed keys that move what OMP reads: claude config (config/claude-paths.ts:10-17) and XDG state (utils/src/dirs.ts:318-449). */

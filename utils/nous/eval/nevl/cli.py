@@ -45,6 +45,7 @@ def main(argv: list[str] | None = None) -> int:
 
     for name, text in (("resume", "continue a run"), ("grade", "grade a run's rows"), ("show", "run status")):
         sub.add_parser(name, help=text).add_argument("run_id")
+    sub.add_parser("recover", help="resume the runs the last reboot interrupted (boot unit)")
 
     p = sub.add_parser("compare", help="compare two candidates of one run")
     p.add_argument("run_id")
@@ -121,6 +122,24 @@ def cmd_resume(args) -> int:
     return _start_and_compare(store.Run.open(args.run_id))
 
 
+def cmd_recover(args) -> int:
+    """At boot (nous-eval-recover.service): resume what the reboot interrupted, once production
+    answers, because the host guards check production before a lease."""
+    runs = store.interrupted(store.boot_time())
+    if not runs:
+        print("no run was interrupted by the last reboot")
+        return 0
+    healthy, detail = guards.production_health(timeout_s=3600)  # a cold vLLM compile takes ~10 min
+    if not healthy:
+        print(f"production not healthy after boot ({detail}); not resuming {runs}", file=sys.stderr)
+        return 1
+    status = 0
+    for run_id in runs:
+        print(f"resuming {run_id}", flush=True)
+        status = _start_and_compare(store.Run.open(run_id)) or status
+    return status
+
+
 def _start_and_compare(run: store.Run) -> int:
     status = start(run)
     done = run.done()
@@ -188,6 +207,7 @@ def cmd_watch(args) -> int:
 
 
 COMMANDS = {"preflight": cmd_preflight, "run": cmd_run, "plan": cmd_plan, "resume": cmd_resume,
+            "recover": cmd_recover,
             "grade": cmd_grade, "show": cmd_show, "compare": cmd_compare, "ls": cmd_ls,
             "incumbent": cmd_incumbent, "fetch": cmd_fetch, "build": cmd_build,
             "canary": lambda args: build.canary(), "watch": cmd_watch,

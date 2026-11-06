@@ -28,6 +28,17 @@ systemd-run --user --unit nevl-t2 --working-directory=$PWD \
 journalctl --user -u nevl-t2 -o cat -f
 ```
 
+A reboot (a power loss) ends the unit but not the run: rows are durable.
+`nous-eval-recover.service` starts at boot, waits until production answers,
+then resumes every run that had written a row in the day before boot and has
+no `done.json` (ledger M51). A run you stopped on purpose has no `done.json`
+either; after a reboot within a day it resumes too. Install once:
+
+```sh
+install -m 0644 utils/nous/eval/systemd/nous-eval-recover.service ~/.config/systemd/user/
+systemctl --user daemon-reload && systemctl --user enable nous-eval-recover.service
+```
+
 `--set KEY=VALUE` needs `-c`: each candidate runs both as-is and with the
 override, and each variant is compared with the incumbent and its base. On
 `llama-router`, the override edits the preset section; on `serve`, it edits

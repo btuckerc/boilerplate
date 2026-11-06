@@ -296,6 +296,6 @@ tests = ["serve/test_serve.py::test_spec_args_replace_the_image_cmd_as_docker_ru
 
 [[mistake]]
 id = "M51"
-what = "a power loss at 05:16 UTC on 2026-11-06 killed a 15-hour tune sweep (3 of 12 blocks done) and its transient user unit; nothing would have resumed or reported it, so the sweep would have sat unnoticed until someone looked. rows.jsonl survived intact and resume continued it. The weekly watch now reports any started run with no done.json and no row for 6 hours as an open item with its resume command"
+what = "a power loss at 05:16 UTC on 2026-11-06 (a storm) killed a 15-hour tune sweep (3 of 12 blocks done) and its transient user unit; nothing would have resumed or reported it. rows.jsonl survived intact and resume continued it. nous-eval-recover.service (user, at boot) now resumes every run the reboot cut short once production answers, and the weekly watch reports any started run with no done.json and no row for 6 hours"
 guards = []
-tests = ["test_watch.py::test_a_started_run_that_went_quiet_without_finishing_is_open"]
+tests = ["test_store.py::test_a_reboot_resumes_only_the_runs_it_cut_short", "test_watch.py::test_a_started_run_that_went_quiet_without_finishing_is_open"]

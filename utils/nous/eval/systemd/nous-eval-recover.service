@@ -1,0 +1,16 @@
+[Unit]
+Description=nous-eval: resume the eval runs the last reboot interrupted (power loss)
+Documentation=file:///home/tux/src/boilerplate/docs/nous-eval.md
+
+[Service]
+# exec, not oneshot: a resumed run takes hours and must not hold up the user manager's start.
+Type=exec
+# The unit PATH from nevl/guards.py (UNIT_PATH): mise Python first, for Pillow.
+Environment=PATH=/home/tux/.local/share/mise/shims:/home/tux/.local/bin:/usr/local/bin:/usr/bin:/bin
+WorkingDirectory=%h/src/boilerplate/utils/nous/eval
+ExecStart=%h/src/boilerplate/utils/nous/eval/nous-eval recover
+Nice=5
+
+[Install]
+# Started at boot by the lingering user manager.
+WantedBy=default.target

@@ -1,6 +1,8 @@
+import os
+
 import pytest
 
-from nevl.store import Run, list_runs
+from nevl.store import Run, boot_time, interrupted, list_runs
 
 
 def plan(run_id):
@@ -52,3 +54,24 @@ def test_runs_are_created_once(tmp_path):
     Run.create(plan("r1"), tmp_path)
     with pytest.raises(FileExistsError):
         Run.create(plan("r1"), tmp_path)
+
+
+def test_a_reboot_resumes_only_the_runs_it_cut_short(tmp_path):
+    """Started, unfinished, last row in the day before boot (ledger M51)."""
+    boot = 1e9
+    for name, rows, done, written in (("a-cut", True, False, boot - 600), ("b-cut", True, False, boot - 7200),
+                                      ("finished", True, True, boot - 600), ("never-started", False, False, 0),
+                                      ("since-boot", True, False, boot + 60), ("last-week", True, False, boot - 7 * 86400)):
+        path = tmp_path / "runs" / name
+        path.mkdir(parents=True)
+        if rows:
+            (path / "rows.jsonl").write_text("{}\n")
+            os.utime(path / "rows.jsonl", (written, written))
+        if done:
+            (path / "done.json").write_text("{}")
+    assert interrupted(boot, tmp_path) == ["a-cut", "b-cut"]
+
+
+def test_boot_time_is_read_from_proc_stat(tmp_path):
+    (tmp_path / "stat").write_text("cpu  1 2 3\nbtime 1793942340\nprocesses 9\n")
+    assert boot_time(tmp_path / "stat") == 1793942340.0

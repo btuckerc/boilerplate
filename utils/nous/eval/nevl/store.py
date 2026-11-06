@@ -123,6 +123,24 @@ def list_runs(base: Path | None = None) -> list[dict]:
         return [dict(r) for r in db.execute("SELECT * FROM runs ORDER BY created")]
 
 
+INTERRUPT_WINDOW_S = 24 * 3600
+
+
+def boot_time(stat: Path = Path("/proc/stat")) -> float:
+    return float(next(line.split()[1] for line in stat.read_text().splitlines() if line.startswith("btime ")))
+
+
+def interrupted(boot: float, base: Path | None = None) -> list[str]:
+    """Runs a reboot cut short: started (rows.jsonl), never finished (no done.json), last row
+    written in the day before boot. No process survives a reboot, so none of them is live, and
+    runs started since boot are left alone (ledger M51). Oldest first: run ids sort by start time."""
+    found = []
+    for rows in sorted(((base or root()) / "runs").glob("*/rows.jsonl")):
+        if not (rows.parent / "done.json").exists() and boot - INTERRUPT_WINDOW_S < rows.stat().st_mtime < boot:
+            found.append(rows.parent.name)
+    return found
+
+
 def _read_jsonl(path: Path) -> list[dict]:
     """Parse rows; a torn line from a killed lease is skipped (its item reruns on resume)."""
     if not path.exists():

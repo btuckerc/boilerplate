@@ -863,11 +863,11 @@ check_thinking_and_loop_policy() {
   if ! source_provider="$(awk '
     /^providers:/ { in_providers=1; next }
     in_providers && /^[^[:space:]#]/ { exit }
-    in_providers && $1 ~ /^llama\.cpp:$/ { print $1 }
+    in_providers && $1 ~ /^vllm:$/ { print $1 }
   ' "$source_models")"; then
     printf 'CONFIG  source providers probe failed (read %s)\n' "$source_models" >&2
     failures=1
-  elif printf '%s\n' "$source_provider" | grep -q '^llama.cpp:'; then
+  elif printf '%s\n' "$source_provider" | grep -q '^vllm:'; then
     printf 'CONFIG  local inference provider present\n'
   else
     printf 'CONFIG  local inference provider missing\n' >&2
@@ -916,7 +916,7 @@ check_omp_config() {
       (.value.plan | test("^openai-codex/gpt-[0-9]+(\\.[0-9]+)?-sol:high$")) and
       (.value.task | test("^openai-codex/gpt-[0-9]+(\\.[0-9]+)?-luna:medium$")) and
       (.value.vision == .value.task) and
-      (.value.smol | test("^llama\\.cpp/Qwen[^:]+:low$")) and
+      (.value.smol | test("^vllm/Qwen[^:]+:low$")) and
       (.value.commit == .value.smol) and
       (.value.tiny == .value.smol)
     ' >/dev/null; then
@@ -955,7 +955,7 @@ check_omp_config() {
   fi
 
   local source_models="$REPO_ROOT/home/private_dot_omp/private_agent/private_models.yml" catalog catalog_rc
-  if grep -q '^  llama.cpp:' "$source_models" && grep -q 'Qwen3.8-27B-RVN-Heretic-Q4_K_M' "$source_models"; then
+  if grep -q '^  vllm:' "$source_models" && grep -q 'Qwen3.8-27B-Swift-Heretic-MXFP4' "$source_models"; then
     printf 'CONFIG  promoted local catalog configured\n'
   else
     printf 'CONFIG  promoted local catalog missing\n' >&2
@@ -964,20 +964,20 @@ check_omp_config() {
   # A failed or empty probe is an error; only a working probe without the entry
   # is the nonfatal readiness gap.
   catalog_rc=0
-  if ! catalog="$(omp_probe models llama.cpp --json --no-extensions 2>/dev/null)"; then
+  if ! catalog="$(omp_probe models vllm --json --no-extensions 2>/dev/null)"; then
     catalog_rc=probe
   else
     # jq -e exits 1 only for an absent entry; any other nonzero status is a failed probe.
-    printf '%s' "$catalog" | jq -e '.models | if type == "array" then map(.id) | index("Qwen3.8-27B-RVN-Heretic-Q4_K_M") else error("no models array") end' >/dev/null 2>&1 || catalog_rc=$?
+    printf '%s' "$catalog" | jq -e '.models | if type == "array" then map(.id) | index("Qwen3.8-27B-Swift-Heretic-MXFP4") else error("no models array") end' >/dev/null 2>&1 || catalog_rc=$?
   fi
   if [ "$catalog_rc" != 0 ] && [ "$catalog_rc" != 1 ]; then
-    printf 'MODEL   probe failed (omp models llama.cpp --json)\n' >&2
+    printf 'MODEL   probe failed (omp models vllm --json)\n' >&2
     failures=1
   elif [ "$catalog_rc" = 0 ]; then
-    printf 'MODEL   Qwen3.8 local catalog entry\n'
-  elif grep -q 'Qwen3.8-27B-RVN-Heretic-Q4_K_M' "$source_models"; then
+    printf 'MODEL   Swift Heretic Qwen local catalog entry\n'
+  elif grep -q 'Qwen3.8-27B-Swift-Heretic-MXFP4' "$source_models"; then
     # Nonfatal: the server may be down or remote, but say what is unproven.
-    printf 'READY   llama.cpp discovery unavailable (Qwen3.8 configured; runtime readiness unverified)\n'
+    printf 'READY   vLLM discovery unavailable (Qwen3.8 configured; runtime readiness unverified)\n'
   else
     printf 'MODEL   Qwen3.8 absent from local catalog and source\n' >&2
     failures=1

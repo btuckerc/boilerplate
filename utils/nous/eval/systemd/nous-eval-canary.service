@@ -1,0 +1,12 @@
+[Unit]
+Description=nous-eval canary: build llama.cpp origin/master, measure it against production
+Documentation=file:///home/tux/src/boilerplate/docs/nous-eval.md
+
+[Service]
+Type=oneshot
+# The unit PATH from nevl/guards.py (UNIT_PATH): mise Python first, for Pillow.
+Environment=PATH=/home/tux/.local/share/mise/shims:/home/tux/.local/bin:/usr/local/bin:/usr/bin:/bin
+WorkingDirectory=%h/src/boilerplate/utils/nous/eval
+ExecStart=%h/src/boilerplate/utils/nous/eval/nous-eval canary
+TimeoutStartSec=30h
+Nice=5

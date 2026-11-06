@@ -1,0 +1,10 @@
+[Unit]
+Description=Weekly nous-eval canary (production yields the GPU for up to ~4 hours)
+
+[Timer]
+# No Persistent=: a missed Sunday night must not take the GPU at boot, mid-day.
+OnCalendar=Sun *-*-* 03:00:00
+RandomizedDelaySec=15min
+
+[Install]
+WantedBy=timers.target

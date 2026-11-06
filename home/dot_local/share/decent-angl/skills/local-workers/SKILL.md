@@ -39,14 +39,12 @@ OMP may add messaging tools to a non-read-only child. Give exact input/output pa
 ask for the result via `write`/`yield`; the parent runs checks because the
 worker may not have the required verification command or tool.
 
-`nous-worker` defaults to the promoted **Qwen3.8-27B-RVN-Heretic-Q4_K_M** (Heretic-abliterated Qwen3.8 27B) on the
-serial nous llama.cpp service (163,840 context / 8,192 output, text and
-image input, medium reasoning). **Ornith**, **Nemotron** and **Gemma** remain explicit smaller or
-experimental choices at their 16K profiles. Bonsai is retired from the active
-launcher and catalog; historical evaluation records and host weights are
-unchanged. They are supervised workers, not replacements for the director's
-design and acceptance decisions or a blanket substitute for Luna. A local pass
-is evidence for the checked contract only; the parent reviews the artifact too.
+`nous-worker` defaults to `Qwen3.8-27B-Swift-Heretic-MXFP4` on the nous vLLM
+service (163,840 context / 8,192 output, text and image input, medium reasoning).
+The local worker has no selectable smaller-model aliases. It is supervised, not
+a replacement for the director's design and acceptance decisions or a blanket
+substitute for Luna. A local pass is evidence for the checked contract only;
+the parent reviews the artifact too.
 
 ## Bounded local-worker protocol
 
@@ -119,12 +117,11 @@ nous-worker --dir /absolute/task-directory 'Task, allowed files, constraints, ex
 nous-worker --dir /absolute/task-directory --session SESSION_ID 'Bounded follow-up.'
 ```
 
-Use `--model ornith`, `--model nemotron`, or `--model gemma` explicitly,
-including when resuming those sessions. `--read-only` supports analysis. Prompts may come from stdin.
-Workers receive the task and directory context, not the parent conversation.
-Supply the relevant paths, observed input/schema, acceptance criteria and
-expected return format; do not copy the whole thread. Include only the project
-rules needed for that task, and keep the parent responsible for validation.
+`--read-only` supports analysis. Prompts may come from stdin. Workers receive the
+task and directory context, not the parent conversation. Supply the relevant
+paths, observed input/schema, acceptance criteria and expected return format;
+do not copy the whole thread. Include only the project rules needed for that
+task, and keep the parent responsible for validation.
 
 The launcher returns a compact summary, session ID and evidence directory;
 full events stay on disk (`--format json` opts into raw events). Read only the

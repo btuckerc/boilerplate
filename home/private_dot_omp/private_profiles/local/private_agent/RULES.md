@@ -1,6 +1,6 @@
 # Local lane rules
 
-- Every model here is the local Qwen on nous; there is no cloud model to escalate to. The llama.cpp server has one slot, so subagents take turns on the GPU: delegate only work that splits into independent slices, give each a scoped brief with an acceptance command, and verify results yourself.
+- Every model here is the local Qwen on nous; there is no cloud model to escalate to. vLLM batches up to 8 sequences; subagents can run concurrently within the shared VRAM KV pool, so keep concurrency bounded at 4 and delegate only work that splits into independent slices, with a scoped brief and acceptance command.
 - Never commit or push unless the user explicitly asks.
 - Keep credentials and machine-local runtime state out of Git and chezmoi.
 - Preserve unrelated user changes in dirty worktrees.

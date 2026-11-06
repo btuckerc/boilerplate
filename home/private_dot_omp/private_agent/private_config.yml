@@ -10,9 +10,9 @@ modelRoles:
   # Cloud vision: the local model takes image input, but no visual acceptance
   # has been demonstrated on it.
   vision: openai-codex/gpt-6-luna:medium
-  commit: llama.cpp/Qwen3.8-27B-RVN-Heretic-Q4_K_M:low
-  smol: llama.cpp/Qwen3.8-27B-RVN-Heretic-Q4_K_M:low
-  tiny: llama.cpp/Qwen3.8-27B-RVN-Heretic-Q4_K_M:low
+  commit: vllm/Qwen3.8-27B-Swift-Heretic-MXFP4:low
+  smol: vllm/Qwen3.8-27B-Swift-Heretic-MXFP4:low
+  tiny: vllm/Qwen3.8-27B-Swift-Heretic-MXFP4:low
   task: openai-codex/gpt-6-luna:medium
   # Scarce Anthropic weekly pool (capped at half of it); see RULES.md.
   fable: anthropic/claude-fable-5-1:medium
@@ -27,7 +27,7 @@ modelRoles:
 modelProviderOrder:
   - anthropic
   - openai-codex
-  - llama.cpp
+  - vllm
   - openrouter
 
 cycleOrder:
@@ -41,7 +41,7 @@ enabledModels:
   - openai-codex/gpt-6.1-sol
   - openai-codex/gpt-6-astra
   - openai-codex/gpt-6-luna
-  - llama.cpp/*
+  - vllm/*
   - openrouter/z-ai/glm-5.3-flash
   - openrouter/z-ai/glm-5.3
   - openrouter/moonshotai/kimi-k3

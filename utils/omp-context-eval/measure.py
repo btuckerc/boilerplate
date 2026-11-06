@@ -9,7 +9,7 @@ SERVER = pathlib.Path(__file__).with_name("capture_server.py")
 
 def _remote_counts(texts: list[str], host: str) -> tuple[list[int] | None, str]:
     body = json.dumps({"texts": texts}, ensure_ascii=False).encode()
-    script = ("import json,sys,urllib.request;d=json.load(sys.stdin);m=json.load(urllib.request.urlopen('http://127.0.0.1:8080/v1/models',timeout=3));l=next((x for x in m.get('data',[]) if x.get('status',{}).get('value')=='loaded'),None);a=(l or {}).get('status',{}).get('args',[]);p=a[a.index('--port')+1] if '--port' in a else '60053';o=[]\nfor t in d['texts']:\n r=urllib.request.Request('http://127.0.0.1:'+p+'/tokenize',data=json.dumps({'content':t}).encode(),headers={'content-type':'application/json'});o.append(len(json.load(urllib.request.urlopen(r,timeout=10))['tokens']))\nprint(json.dumps({'model':(l or {}).get('id','unknown'),'port':p,'counts':o}))")
+    script = ("import json,sys,urllib.request;d=json.load(sys.stdin);p='8080';o=[]\nfor t in d['texts']:\n r=urllib.request.Request('http://127.0.0.1:'+p+'/tokenize',data=json.dumps({'model':'Qwen3.8-27B-Swift-Heretic-MXFP4','prompt':t}).encode(),headers={'content-type':'application/json'});o.append(json.load(urllib.request.urlopen(r,timeout=10))['count'])\nprint(json.dumps({'model':'Qwen3.8-27B-Swift-Heretic-MXFP4','port':p,'counts':o}))")
     enc = base64.b64encode(script.encode()).decode(); cmd = f'''python3 -c "import base64;exec(base64.b64decode('{enc}'))"'''
     try:
         p = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", host, cmd], input=body, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30, check=True)

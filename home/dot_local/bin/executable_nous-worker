@@ -14,10 +14,7 @@ import time
 import urllib.request
 
 MODELS = {
-    "qwen": "nous/Qwen3.8-27B-RVN-Heretic-Q4_K_M",
-    "ornith": "nous/Ornith-1.5-9B-Q5_K_M",
-    "nemotron": "nous/Nemotron-9B-OpenCode.Q6_K",
-    "gemma": "nous/gemma-4-12B-it-Q4_0",
+    "qwen": "nous/Qwen3.8-27B-Swift-Heretic-MXFP4",
 }
 
 
@@ -52,7 +49,7 @@ def stop_worker(process):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model", choices=MODELS, default="qwen", help="Default: qwen; smaller models remain explicit choices")
+    parser.add_argument("--model", choices=MODELS, default="qwen", help="Model: qwen (default)")
     parser.add_argument("--dir", type=Path, required=True)
     parser.add_argument("--session", help="Resume the exact worker session ID")
     parser.add_argument("--read-only", action="store_true")

@@ -120,6 +120,8 @@ def main():
     ap.add_argument("--label", help="short public lease label (default: command basename)")
     ap.add_argument("--env", action="append", default=[], metavar="NAME=VALUE")
     ap.add_argument("--directory", default=os.getcwd())
+    ap.add_argument("--slice", choices=["llama.slice"],
+                    help="run the lease in production's CPU reservation (benchmarks)")
     ap.add_argument("--watchdog", action="store_true")
     ap.add_argument("--restore", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--placeholder-state", action="store_true", help=argparse.SUPPRESS)
@@ -166,6 +168,8 @@ def main():
         options = ["--runtime", str(args.runtime), "--directory", args.directory]
         if args.label is not None:
             options += ["--label", args.label]
+        if args.slice is not None:
+            options += ["--slice", args.slice]
         for key, value in environment.items():
             options += ["--env", key + "=" + value]
         os.execv("/usr/bin/sudo", ["sudo", "-n", SELF, *options, "--", *args.command])
@@ -190,6 +194,8 @@ def main():
                "-p", "ExecStopPost=+" + SELF + " --restore",
                "-p", "RuntimeMaxSec=" + str(args.runtime), "-p", "TimeoutStopSec=15s",
                "-p", "KillMode=control-group"]
+        if args.slice is not None:
+            cmd += ["--slice=" + args.slice]
         for key, value in environment.items():
             cmd += ["--setenv=" + key + "=" + value]
         # The service (including its cleanup) belongs to PID 1, not this caller.

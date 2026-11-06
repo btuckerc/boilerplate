@@ -1,22 +1,22 @@
 # Managed by chezmoi. `omp-local` (omp --profile local): every role runs on
-# the local Heretic Qwen on nous. No cloud provider has credentials or is
+# the local Swift Heretic Qwen on nous. No cloud provider has credentials or is
 # enabled here, so nothing in this profile can reach paid inference.
 modelRoles:
-  default: llama.cpp/Qwen3.8-27B-RVN-Heretic-Q4_K_M:medium
-  slow: llama.cpp/Qwen3.8-27B-RVN-Heretic-Q4_K_M:xhigh
-  plan: llama.cpp/Qwen3.8-27B-RVN-Heretic-Q4_K_M:xhigh
-  vision: llama.cpp/Qwen3.8-27B-RVN-Heretic-Q4_K_M:medium
-  task: llama.cpp/Qwen3.8-27B-RVN-Heretic-Q4_K_M:medium
-  commit: llama.cpp/Qwen3.8-27B-RVN-Heretic-Q4_K_M:low
-  smol: llama.cpp/Qwen3.8-27B-RVN-Heretic-Q4_K_M:low
-  tiny: llama.cpp/Qwen3.8-27B-RVN-Heretic-Q4_K_M:low
+  default: vllm/Qwen3.8-27B-Swift-Heretic-MXFP4:medium
+  slow: vllm/Qwen3.8-27B-Swift-Heretic-MXFP4:xhigh
+  plan: vllm/Qwen3.8-27B-Swift-Heretic-MXFP4:xhigh
+  vision: vllm/Qwen3.8-27B-Swift-Heretic-MXFP4:medium
+  task: vllm/Qwen3.8-27B-Swift-Heretic-MXFP4:medium
+  commit: vllm/Qwen3.8-27B-Swift-Heretic-MXFP4:low
+  smol: vllm/Qwen3.8-27B-Swift-Heretic-MXFP4:low
+  tiny: vllm/Qwen3.8-27B-Swift-Heretic-MXFP4:low
   # Inference stays local, but web searches contact third parties: keyless
   # APIs first (scrapers blocked as of 2026-10-14), Exa then the exact
   # fallbacks under retry.fallbackChains.web. No search credentials.
   web: web/exa
 
 enabledModels:
-  - llama.cpp/*
+  - vllm/*
 
 # Foreign discovery adapters plus every cloud model provider.
 disabledProviders:
@@ -59,9 +59,9 @@ retry:
     web: [web/firecrawl, web/parallel]
 
 task:
-  # One llama.cpp slot: children interleave on the GPU rather than run in
-  # parallel; the 48 GiB prompt cache keeps two of them from re-prefilling.
-  maxConcurrency: 2
+  # vLLM batches up to 8 sequences; cap child concurrency at 4 to avoid
+  # exhausting the shared 386,677-token VRAM KV pool.
+  maxConcurrency: 4
   maxRecursionDepth: 1
   eager: default
   enableLsp: false

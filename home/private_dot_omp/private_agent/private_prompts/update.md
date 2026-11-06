@@ -10,7 +10,7 @@ Do not run `omp update`. That command installs an unreviewed binary and fights t
 3. Run `omp-baseline check-upstream`.
 4. Read the target GitHub release notes.
 5. Run `omp-baseline upgrade --dry-run`, then `omp-baseline upgrade VERSION`.
-6. Re-read live `omp models`. Treat discovered Codex and llama.cpp IDs as
+6. Re-read live `omp models`. Treat discovered Codex and vLLM IDs as
    authoritative; rewrite dead catalog IDs in `config.yml`, `models.yml`, and
    `omp-baseline` checks. Keep OpenRouter models manual-only. Bonsai is
    historical-only and must not be restored to the active catalog or launcher.

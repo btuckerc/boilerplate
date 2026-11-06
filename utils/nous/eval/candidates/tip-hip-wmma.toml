@@ -1,0 +1,11 @@
+# llama.cpp 61d447234, HIP with rocWMMA flash attention.
+label = "tip-hip-wmma"
+engine = "/home/tux/.local/opt/llama-61d447234-hip-wmma/bin/llama-server"
+preset = "/home/tux/.config/llama/models.ini"
+# HIP sees only the R9700 as ROCm0; the preset's Vulkan device names do not apply.
+# One HW queue: see nevl/build.py candidate_toml (ledger M44).
+[env]
+GPU_MAX_HW_QUEUES = "1"
+[overrides]
+device = "ROCm0"
+device-draft = "ROCm0"

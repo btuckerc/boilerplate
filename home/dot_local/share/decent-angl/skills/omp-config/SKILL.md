@@ -81,28 +81,26 @@ description: Change the shared OMP baseline in chezmoi - upgrades, omp-baseline,
   Coarse `med` selects high on every cloud model. Keep local implementation
   medium; lower effort is not automatically faster. Recheck mappings against
   native discovery after catalog changes.
-- Native `llama.cpp` serves the promoted worker, the Heretic-abliterated
-  Qwen3.8-27B-RVN-Heretic-Q4_K_M since 2026-10-09 (stock UD-Q4_K_XL is the
-  rollback preset; 163,840 context / 8,192 output, text and image input, medium reasoning). Keep
-  `retry.modelFallback: false` so local work never silently moves to cloud
-  inference. Use task defaults (`eager: default`, recursion depth 1,
-  100-request soft budget, 30-minute runtime cap; raised from 40 / 10 minutes
-  on 2026-11-05 after workers kept hitting the cap) and keep prewalk and
-  background advisors off.
-- Native nous handles bounded implementations with explicit contracts, mechanical
-  transforms and extraction under the `local-workers` acceptance protocol.
-  The `task` agent is the cloud worker; uncertain design stays with Opus or Sol.
-  Smaller llama.cpp models remain explicit choices. Keep the OpenCode
-  `nous-worker` Codex/T3 path available with fresh briefs and its full privacy
-  bounds. Bonsai is retired from the active catalog and launcher; historical
-  records and host weights remain untouched. All inference stays on nous or
-  cloud; do not add Mac background inference or model downloads.
+- The nous production provider is native `vllm`, serving only
+  `Qwen3.8-27B-Swift-Heretic-MXFP4` (163,840 context / 8,192 output, text and
+  image input, medium reasoning). Keep `retry.modelFallback: false` so local
+  work never silently moves to cloud inference. Use task defaults (`eager:
+  default`, recursion depth 1, 100-request soft budget, 30-minute runtime cap)
+  and keep prewalk and background advisors off.
+- Native nous handles bounded implementations with explicit contracts,
+  mechanical transforms and extraction under the `local-workers` acceptance
+  protocol. vLLM batches up to 8 sequences; the shared 386,677-token VRAM KV
+  pool replaces the old serialized slot/host prompt cache, so bound task
+  concurrency at 4. The `task` agent is the cloud worker; uncertain design
+  stays with Opus or Sol. Keep the OpenCode `nous-worker` path available with
+  fresh briefs and its privacy bounds. All inference stays on nous or cloud;
+  do not add Mac background inference or model downloads.
 - `omp-local` (`omp --profile local`, source
   `home/private_dot_omp/private_profiles/local/`) is Tucker's fully local lane:
-  every role runs on the promoted Heretic Qwen, every cloud provider is
+  every role runs on the promoted Swift Heretic Qwen, every cloud provider is
   disabled, and it has its own short `RULES.md`; skills, extensions and themes
-  are symlinked from the default profile. Keep its `models.yml` llama.cpp block
-  in step with the default one. Cloud sessions do not route work to it.
+  are symlinked from the default profile. Keep its `models.yml` vLLM block in
+  step with the default one. Cloud sessions do not route work to it.
 - Keep local child agents background-capable for native steering. At natural
   model/tool boundaries, the director may send one failed-check repair, then
   cancel/escalate a remaining failure or budget overrun; ordinary clarification
@@ -146,7 +144,7 @@ description: Change the shared OMP baseline in chezmoi - upgrades, omp-baseline,
   Retain the custom `ghostty` theme.
 - User agents live in `home/private_dot_omp/private_agent/private_agents/`. They use
   `@smol` / `@task` aliases where possible, with local agents explicitly
-  pinned to their discovered `llama.cpp` model. Keep model-specific thinking
+  pinned to their discovered `vllm` model. Keep model-specific thinking
   settings compatible with the selected provider. A selector suffix outranks
   `thinkingLevel`, and a bare `@default` inherits the parent's suffix: write the
   effort into the selector (`@default:medium`). `omp-baseline validate` runs

@@ -424,6 +424,99 @@ placeholder was down during such leases; fixed and verified (HTTP 503 with
 since September 26 production loaded no model other than Qwen, and
 `sleep-idle-seconds` already defaults to disabled.
 
+### November 5: models that fit in VRAM (round 26)
+
+Candidates are the top small open models on Artificial Analysis' Progress
+Index (checked November 4), against the promoted Heretic worker in the same
+session. Same harness (`bench.py`, `edit.py`, LCB60 at the 8,192-token cap,
+Qwen sampling, `reasoning_effort` medium), one `llama-yield` lease per model,
+`round26.sh`. Speculation: each model's best available drafter (DFlash2 for
+Qwen3.8 and Muse Glimmer, embedded MTP for Qwen3.6 and Nemotron, `ngram-mod`
+only for Nanbeige and K2). Nanbeige and K2 have full-attention KV (~200
+KiB/token f16), so 64K q8_0 KV. K2 Horizon's `k2-horizon` arch needs
+llama.cpp master 3de52ac38 (`~/.local/opt/llama-3de52ac38-vulkan`); every
+other model ran on production f805c57a2.
+
+| Model (GGUF) | Prose / code / edits t/s | 60K prefill / decode | 120K recall | VRAM peak | LCB60 | Truncated |
+| --- | ---: | ---: | --- | ---: | ---: | ---: |
+| Heretic Qwen3.8-27B Q4_K_M (incumbent) | 73 / 93 / 106 | 829 / 76 | correct (63 t/s) | 30.8 GB | 26 | 34 |
+| K2 Horizon MoVA 36B A4B Q4_K_M | 107 / 113 / 197 | 1,434 / 50 | not run (64K ctx) | 28.2 GB | 33 | 12 |
+| Muse Glimmer 30B UD-Q4_K_XL | 70 / 89 / 137 | 896 / 101 | correct (69 t/s) | 19.6 GB | 29 | 19 |
+| Nanbeige4.3-33B Q4_K_M (dense) | 28 / 32 / 33 | 565 / 21 | not run (64K ctx) | 27.1 GB | 16 | 43 |
+| Nemotron 3.5 Lightning 30B A3B UD-Q4_K_XL | 174 / 190 / 204 | 3,713 / 181 | correct (163 t/s) | 26.3 GB | 11 | 49 |
+| Qwen3.6-35B-A3B UD-Q4_K_XL | 184 / 205 / 201 | 3,014 / 172 | correct (149 t/s) | 26.1 GB | 7 | 53 |
+
+At this cap LCB60 mostly measures token efficiency: of answers that finished,
+Heretic passed 25/26, Nanbeige 16/17, Nemotron 11/11 and Qwen3.6 7/7.
+The stock UD-Q4_K_XL scored 31 on October 2, so Heretic's 26 may be an
+abliteration cost (one seed, not re-tested). K2 Horizon at
+`reasoning_effort=medium` opens `<ifm|think_fast>` but closes
+`</ifm|think>` (46 of 60 replies), so the 3de52ac38 parser left every reply
+in `reasoning_content` (first run: empty content, 2/60). The rerun used
+`--reasoning-format none`, with grading on the last code block. All 33 passes
+finished before the cap. Production would need this parser workaround or a
+fix, plus the newer llama.cpp. Nanbeige's 60K recall passed. Its token budget
+(AA: 158K output tokens per task) does not fit an 8K cap at 28 t/s.
+
+Decision: no change. K2 Horizon is the only candidate ahead on both LCB60 and
+speed. Before promotion it would need the reasoning-tag fix, a longer-context
+check and the OMP agentic repair gate. Its 50 t/s decode at 60K is below the
+incumbent's 76. Glimmer gains 3 problems at lower speed. Qwen3.6 and Nemotron
+are 2.5× faster but finish too few problems in 8K. The other four GGUFs and
+their drafters were deleted on November 5. K2 is kept at
+`/srv/models/.eval-r26/candidates/` because the router lists only GGUFs at
+most one directory below `--models-dir`.
+
+### November 5–6: inference engine (llama.cpp vs vLLM)
+
+Question: is llama.cpp still the right engine, and is it tuned? Measured
+with `nous-eval` ([docs/nous-eval.md](nous-eval.md)), tier t2, ABBA blocks,
+production's sampling and contract (160K context, images, prefix caching,
+tool and reasoning parsing). Candidates: llama.cpp tip 61d447234 (Vulkan, HIP,
+HIP+rocWMMA) and the [vLLM radiance fork](https://github.com/SlyBase/vllm-sly-radiance)
+1.9.1 with two MXFP4 checkpoints, Swift-1.5 heretic (GPTQ) and stock Qwen3.8
+(AMD Quark), both drafting with DFlash2 (k=7). Run
+`20261105T184940Z-t2-incumbent-vs-vllm-quark-stock-vs-vllm-swift-heretic`:
+
+| Metric | Incumbent (llama.cpp f805c57a2 Vulkan) | vLLM swift-heretic | vLLM quark-stock |
+| --- | ---: | ---: | ---: |
+| Decode code / edit / prose t/s | 81 / 137 / 76 | 148 / 188 / 134 | 144 / 180 / 137 |
+| TTFT prose s | 0.42 | 0.08 | 0.09 |
+| Prefill 32K / 131K / 160K t/s | 868 / 640 / 589 | 3,363 / 2,443 / 2,259 | 3,314 / 2,415 / 2,237 |
+| Decode at 32K / 160K t/s | 70 / 66 | 186 / 156 | 167 / 138 |
+| Needle recall, 4 depths | 3/4 (32K fails every time) | 4/4 | 4/4 |
+| Agent replay wall s (3 sessions) | 101.7 | 37.8 | 40.1 |
+| 4 sessions, 4 clients, makespan s | 42.4 | 9.5 | 9.4 |
+| Vision (synthetic) | 14/14 | 14/14 | 14/14 |
+| ScreenSpot click hit (n=100) | 0.38 | 0.38 | 0.45 |
+| Tool calls valid (n=50, workload v4) | 0.98 | 0.98 | not rerun |
+
+vLLM decode on ROCm is bimodal per process, about 22% apart
+([ROCm/ROCm#6347](https://github.com/ROCm/ROCm/issues/6347)). This run mixes
+both states (A/A 0.80 and 1.27), so `compare` calls it inconclusive. In the
+fast state both checkpoints decode at a 165 t/s geomean on the speed set, and
+12 later blocks in a row were fast. Slow-state decode (~128) is still 1.4× the
+incumbent's 89. Tool validity is from rerun `20261106T025740Z` after the
+fixture fix (ledger M45); the first run scored vLLM 0.92 for calling tools
+that only the histories showed. quark-stock leaked reasoning (finish stop,
+empty content) on the same concurrency reply in both blocks and stays a
+reference arm. llama.cpp tip 61d447234 Vulkan at t1 was 1.02× decode and
+1.13× prefill at 32K over production, with one LCB truncation (9/10 vs 10/10).
+
+Decision (2026-11-06, Tucker): promote vLLM swift-heretic. vLLM leads every
+speed and context metric by 1.7-4×, at equal vision and tool validity. How
+the open points were settled:
+
+- bimodal decode: `llama-speedcheck` restarts production after two slow idle
+  probes ([nous-inference.md](nous-inference.md#serving-vllm-via-nous-serve));
+- the router: in 30 days of logs only the Heretic worker was loaded, so the
+  other models went with it;
+- serving without docker: `nous-serve` runs the exported image under
+  bubblewrap in `llama.service`, and `nous-eval` measures the same spec;
+- accuracy (MXFP4 Swift-1.5 heretic is not the Q4_K_M RVN-Heretic, and Cactus
+  draft acceptance, `RADIANCE_CACTUS_DELTA=0.5`, is lossy): t3 LCB 258 against
+  the llama.cpp arm after the cutover, below.
+
 ## Established benchmarks for candidate selection
 
 Research checked September 19, 2026. A repeatable harness and independent tests

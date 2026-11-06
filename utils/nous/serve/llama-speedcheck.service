@@ -1,0 +1,9 @@
+[Unit]
+Description=Restart production inference stuck in ROCm's slow decode state
+After=llama.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/llama-speedcheck
+TimeoutStartSec=5min
+StateDirectory=llama-speedcheck

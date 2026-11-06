@@ -13,27 +13,24 @@ its existing RSA identity, without forwarding the SSH agent.
 | OS / CPU | Ubuntu 26.04.1 LTS / i9-13900K |
 | RAM / GPU | 128 GB DDR5-5600 (2×64 GB, since 2026-10-01; was 32 GB) / Radeon AI PRO R9700, 32 GB VRAM |
 | Model storage | `/srv/models`; verified artifact identities in `utils/nous/model-artifacts.json` |
-| Service | llama.cpp master f805c57a2 Vulkan (pinned at `/opt/llama.cpp-vulkan-f805c57a2`; b11046 kept at `/opt/llama.cpp-vulkan` for rollback) on a private Mesa 26.2.3 RADV (`/opt/mesa-26.2`; system Mesa stays 26.0.8), `llama.service`, enabled and active |
+| Service | `llama.service` (name kept from llama.cpp): vLLM "radiance" 1.9.1, an RDNA4 fork, run by `nous-serve` from an exported image under bubblewrap (§ Serving: vLLM via nous-serve), since 2026-11-06. llama.cpp f805c57a2 Vulkan stays at `/opt/llama.cpp-vulkan-f805c57a2` for rollback and comparison runs |
 | Network | Loopback server forwarded on port 8080 by Tailscale Serve, tailnet only |
 | API | `http://nous:8080/v1` |
-| Models | Promoted Qwen3.8-27B-RVN-Heretic-Q4_K_M (Heretic abliteration, since 2026-10-09) with DFlash2 drafter plus n-gram drafting and image input (163,840 context / 8,192 output); the previous stock UD-Q4_K_XL, GSQ-RCO IQ3_S+MTP and UD-Q5_K_M remain selectable; smaller Nemotron, Qwen 3.5 9B/4B, Ornith 1.5 9B and Gemma 4 12B remain selectable in OpenCode; verified Gemma 4 26B A4B Q6_K and Qwen3-Coder 30B A3B Q5_K_M candidates remain router-only |
-| Capacity | One serialized model slot (parallel slots measured and rejected 2026-10-01); 48 GiB host prompt cache lets alternating conversations resume without re-prefill; Qwen3.8 uses the 163,840-token preset and other models retain 16,384-token presets |
+| Models | One: `Qwen3.8-27B-Swift-Heretic-MXFP4` (Swift-1.5 Qwen3.8 27B heretic abliteration, MXFP4 GPTQ) with the DFlash2 drafter (7 draft tokens), image input (2 per prompt), 163,840 context / 8,192 output. The router's other models are gone with the router |
+| Capacity | Up to 8 sequences batched; one 386,677-token KV pool in VRAM holds every running sequence and the prefix cache (no host prompt cache). Four concurrent clients finish 4.5x sooner than on llama.cpp's single slot |
 
 No failed systemd units were reported. SSH directory/key file permissions
 were 700/600. GPU temperature was 44 C at the initial inspection.
 
-The scalable deployment source is `utils/nous/llama.service` plus
-`utils/nous/models.ini`. The active host preset is installed at
-`/home/tux/.config/llama/models.ini`, with the Qwen artifact under
-`/srv/models`; per-model presets keep the large Qwen/MTP settings from
-leaking into smaller 16K models. Installation of the root-owned unit is a
-one-time administrative step; ordinary client catalog edits do not perform
-service switching or upgrades.
+The deployment source is `utils/nous/serve/` (launcher, production spec,
+speed check) plus `utils/nous/llama.service`; installing them is a one-time
+administrative step (§ Serving: vLLM via nous-serve). Client catalog edits do
+not switch or upgrade the service.
 `decent-angl-doctor --fleet` checks SSH, the active llama service, GPU query, HTTP health
 and model inventory without installing anything on nous. It does not run
 inference or load models, and is not a correctness/throughput benchmark.
 
-From 2026-09-25 to 2026-10-09 the promoted worker was unsloth's UD-Q4_K_XL quant of Qwen3.8
+Before vLLM (until 2026-11-06) production was llama.cpp. From 2026-09-25 to 2026-10-09 the promoted worker was unsloth's UD-Q4_K_XL quant of Qwen3.8
 27B (17.6 GB) with z-lab's DFlash2 Q4_K_M drafter (`spec-draft-n-max 5`).
 Since 2026-10-02 it also drafts from n-gram repeats (`spec-type
 draft-dflash,ngram-mod`; +30-40% on copy-heavy code rewrites), reads images
@@ -338,6 +335,96 @@ unrelated systemctl operation were denied without authentication. Normal
 Since 2026-09-25 `utils/nous/91-tux-nopasswd.sudoers` grants tux full
 passwordless sudo, which supersedes this allowlist for agents.
 
+## Serving: vLLM via nous-serve
+
+Production is vLLM "radiance", an RDNA4 fork
+([SlyBase/vllm-sly-radiance](https://github.com/SlyBase/vllm-sly-radiance)),
+chosen over llama.cpp on 2026-11-06 for decode 1.7x, prefill 3.8x and 4.5x
+with four clients at equal tool-call validity and vision
+([evaluation](nous-model-evaluation-2026-09-19.md#november-56-inference-engine-llamacpp-vs-vllm)).
+No container daemon runs it: `nous-serve export IMAGE` unpacks the image once
+into `/srv/models/engines/<repo>-<tag>` (with a sidecar holding the image id,
+environment and entrypoint), and `nous-serve run SPEC --port N` execs
+bubblewrap on that tree: read-only root, the caller mapped to root inside as
+under docker, `/dev` and `/sys` from the host, a writable home for compile
+caches. The server is then an ordinary process of its unit: it stays in
+`llama.slice`, a lease's `systemctl stop` kills it, and `--die-with-parent`
+takes it down with the launcher.
+
+The spec (`utils/nous/serve/production.toml`, installed as
+`/etc/nous-inference/serve.toml`) names the rootfs, model, mounts, every
+`vllm serve` flag and every environment knob, with the reason for each.
+`nous-eval` reads it from the unit as its incumbent, and its candidates are the
+same spec with overrides, so an evaluation measures what production serves
+([docs/nous-eval.md](nous-eval.md)).
+
+| Path | Contents |
+| --- | --- |
+| `/srv/models/engines/vllm-sly-radiance-1.9.1-rocm10.1` | exported image (6.3 GB) |
+| `/srv/models/vllm` | weights, mounted read-only at `/models` |
+| `/srv/workspaces/vllm-cache/home` | `/root` inside: `.cache/vllm` (compiled graphs), `.triton`, `.aiter/jit` |
+
+A start with warm caches is ready in about 60 s; a new engine or changed
+compile-relevant flag recompiles for about 10 minutes. The unit stays
+`activating` until `/health` answers (`ExecStartPost`), and a start not ready
+within 30 minutes fails and is retried by `Restart=on-failure`. aiter JIT-builds its ops
+into `~/.aiter/jit` and, with a read-only package directory, imports them only
+when `AITER_JIT_DIR` points there (nous-serve sets it for every spec).
+
+ROCm on the R9700 decodes at one of two speeds ~22% apart, drawn per process
+and occasionally switched mid-process
+([ROCm/ROCm#6347](https://github.com/ROCm/ROCm/issues/6347)).
+`GPU_MAX_HW_QUEUES=1` is upstream's mitigation and costs nothing. With it, all
+6 production vLLM processes sampled on 2026-11-06 drew the same speed (the
+speedcheck probe at 142-143 t/s), which suggests but does not prove it prevents
+the slow draw. `llama-speedcheck.timer` (threshold 127 t/s, the midpoint) probes decode every 15 minutes
+while production is idle (a probe counts only if production was idle before
+and after it and it was the one request finished) and restarts `llama.service`
+after two slow probes in a row, or when a ready server fails `/health`. It
+restarts only under the GPU lease lock, only the invocation it probed, with
+llama enabled and no lease or Bonsai, at most twice an hour; an unreadable
+`/var/lib/llama-speedcheck/restarts.json` refuses restarts until fixed.
+`journalctl -u llama-speedcheck` logs every probe and decision.
+
+| Source | Installed |
+| --- | --- |
+| `utils/nous/serve/nous-serve`, `llama-speedcheck` | `/usr/local/bin/` (0755) |
+| `utils/nous/serve/production.toml` | `/etc/nous-inference/serve.toml` (0644) |
+| `utils/nous/llama.service`, `utils/nous/serve/llama-speedcheck.{service,timer}` | `/etc/systemd/system/` (0644) |
+
+```sh
+ssh nous 'cd ~/src/boilerplate/utils/nous && sudo install -m 0755 serve/nous-serve serve/llama-speedcheck /usr/local/bin/ \
+  && sudo install -D -m 0644 serve/production.toml /etc/nous-inference/serve.toml \
+  && sudo install -m 0644 llama.service serve/llama-speedcheck.service serve/llama-speedcheck.timer /etc/systemd/system/ \
+  && sudo rm -f /etc/systemd/system/llama.service.d/mesa.conf \
+  && sudo systemctl daemon-reload && sudo systemctl restart llama && sudo systemctl enable --now llama-speedcheck.timer'
+```
+
+A knob change is an edit to the spec, then install and restart.
+
+Rollback to llama.cpp restores the unit and Mesa drop-in from `c7a0dbb`, the
+last llama.cpp commit (both files verified byte-identical to what ran in
+production), and uses `~/.config/llama/models.ini` (unmanaged, left in place).
+Both files are fetched and checked before either live file is touched:
+
+```sh
+ssh nous 'set -eu; cd ~/src/boilerplate; pre=c7a0dbbee72573e93167120f53f556ba4549f789; t=$(mktemp -d)
+  git show "$pre:utils/nous/llama.service" >"$t/llama.service"
+  git show "$pre:utils/nous/mesa/llama.service.d/mesa.conf" >"$t/mesa.conf"
+  grep -q "^ExecStart=/opt/llama.cpp-vulkan-" "$t/llama.service"
+  grep -q "^Environment=VK_DRIVER_FILES=" "$t/mesa.conf"
+  sudo systemctl disable --now llama-speedcheck.timer
+  sudo install -m 0644 "$t/llama.service" /etc/systemd/system/llama.service
+  sudo install -m 0644 "$t/mesa.conf" /etc/systemd/system/llama.service.d/mesa.conf
+  sudo systemctl daemon-reload; sudo systemctl restart llama
+  until curl -sf -o /dev/null localhost:8080/health; do sleep 5; done; curl -s localhost:8080/v1/models'
+```
+
+Then revert the clients (the cutover commit's changes under `home/`,
+`utils/scripts` and `utils/omp-context-eval`: `git revert` it, or
+`git checkout c7a0dbb -- <paths>`), `chezmoi apply`, `omp-baseline validate`,
+and propagate as for any shared-config change.
+
 ## GPU lease
 
 Benchmarks borrow the GPU with `llama-yield` instead of stopping
@@ -345,6 +432,15 @@ Benchmarks borrow the GPU with `llama-yield` instead of stopping
 request on loopback 8080 with HTTP 503, `Retry-After` and a `resume_at`
 deadline; `llama-watchdog.timer` restarts production if nothing else does.
 Behavior and agent rules: `platform-ops` skill, `references/nous.md`.
+
+`--slice llama.slice` runs the lease in production's CPU reservation (CPUs
+8-11, § CPU reservation). Benchmarks need it: without it a lease runs in
+`system.slice` on the other CPUs and measures a different machine. `nous-eval`
+always passes it ([docs/nous-eval.md](nous-eval.md)).
+
+Killing the `llama-yield` client does not end its lease (`systemd-run --wait`
+leaves the unit running until `--runtime`); `sudo systemctl stop
+llama-yield-gpu.service` does, and restores production.
 
 Sources live in `utils/nous/gpu-lease/` and mirror these root-owned paths:
 
@@ -374,28 +470,22 @@ for f in llama-yield llama-placeholder; do ssh nous cat /usr/local/bin/$f | diff
 for f in *.service *.timer *.d/*.conf; do ssh nous cat /etc/systemd/system/$f | diff -q - $f >/dev/null || echo "drift: $f"; done
 ```
 
-## Private Mesa for llama
+## Private Mesa for llama.cpp
 
-`llama.service` alone runs Mesa 26.2.3 RADV from the kisak-mesa PPA; the rest
-of nous keeps Ubuntu's 26.0.8. The `.deb`s are extracted, not installed, to
-`/opt/mesa-26.2` (copies kept in `/opt/mesa-26.2/debs`, since the PPA drops
-superseded builds). A drop-in points the Vulkan loader at that RADV and its
-newer libdrm (system libdrm 2.4.131 fails RADV initialization). Only the R9700
-is then visible, as `Vulkan0`.
+llama.cpp's Vulkan backend ran on Mesa 26.2.3 RADV from the kisak-mesa PPA
+(prefill +7%, deep decode +6-11% over Ubuntu's 26.0.8). Production no longer
+uses Vulkan; the llama.cpp candidates of `nous-eval` (the rollback arm and tip
+builds) set its environment themselves. The `.deb`s are extracted, not
+installed, to `/opt/mesa-26.2` (copies kept in `/opt/mesa-26.2/debs`, since the
+PPA drops superseded builds); `utils/nous/mesa/install-mesa` recreates it. That
+RADV needs its newer libdrm (system libdrm 2.4.131 fails RADV initialization)
+and sees only the R9700, as `Vulkan0`:
 
-| Source (`utils/nous/mesa/`) | Installed |
-| --- | --- |
-| `install-mesa` | run once; extracts and verifies the three pinned `.deb`s |
-| `llama.service.d/mesa.conf` | `/etc/systemd/system/llama.service.d/` (0644) |
-
-```sh
-ssh nous 'cd ~/src/boilerplate/utils/nous/mesa && ./install-mesa \
-  && sudo install -D -m 0644 llama.service.d/mesa.conf /etc/systemd/system/llama.service.d/mesa.conf \
-  && sudo systemctl daemon-reload && sudo systemctl restart llama'
 ```
-
-Rollback: remove the drop-in, set `Vulkan1` again in `models.ini`, reload and
-restart llama.
+VK_DRIVER_FILES=/opt/mesa-26.2/usr/share/vulkan/icd.d/radeon_icd.json
+LD_LIBRARY_PATH=/opt/mesa-26.2/usr/lib/x86_64-linux-gnu
+RADV_DEBUG=nocompute
+```
 
 ## CPU reservation
 
@@ -574,6 +664,11 @@ itself); the unit it writes is fine. Inspect: `docker info` (`name=rootless`
 under Security Options), `systemctl --user status docker`,
 `journalctl --user -u docker`. Space: `docker system df`; `docker image prune -a`
 drops unused task images.
+
+Docker only pulls and unpacks inference images (`nous-serve export`); nothing
+runs the GPU in a container. `nous-serve` runs as `tux`, whose `render` group
+opens `/dev/kfd` directly, so no device ACL is needed (rootless docker would drop
+that group inside a container).
 
 ## Expanded model and benchmark evaluation
 

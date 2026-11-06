@@ -19,18 +19,13 @@ providers:
     modelOverrides:
       claude-opus-5-5: {contextWindow: 272000, maxContextWindow: 1000000}
       claude-fable-5-1: {contextWindow: 272000, maxContextWindow: 1000000}
-  llama.cpp:
+  vllm:
     baseUrl: http://100.83.125.83:8080/v1
     api: openai-completions
     auth: none
-    discovery:
-      type: llama.cpp
-      timeoutMs: 1000
-    # The Heretic Qwen is the promoted worker (2026-10-09); stock UD-Q4_K_XL is
-    # the rollback. Discovery keeps smaller installed models selectable.
     models:
-      - id: Qwen3.8-27B-UD-Q4_K_XL
-        name: Nous Qwen 3.8 27B UD-Q4_K_XL
+      - id: Qwen3.8-27B-Swift-Heretic-MXFP4
+        name: Nous Qwen 3.8 27B Swift Heretic MXFP4
         reasoning: true
         input: [text, image]
         contextWindow: 163840
@@ -43,45 +38,6 @@ providers:
         compat:
           supportsStore: false
           supportsDeveloperRole: false
-          supportsReasoningEffort: true
-          omitReasoningEffort: false
-          maxTokensField: max_tokens
-      # Heretic-abliterated Qwen3.8 27B (0bserverx RVN), promoted 2026-10-09.
-      - id: Qwen3.8-27B-RVN-Heretic-Q4_K_M
-        name: Nous Qwen 3.8 27B Heretic RVN Q4_K_M
-        reasoning: true
-        input: [text, image]
-        contextWindow: 163840
-        maxTokens: 8192
-        cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0}
-        thinking:
-          mode: effort
-          defaultLevel: medium
-          efforts: [low, medium, xhigh]
-        compat:
-          supportsStore: false
-          supportsDeveloperRole: false
-          supportsReasoningEffort: true
-          omitReasoningEffort: false
           maxTokensField: max_tokens
           extraBody:
             min_p: 0
-    modelOverrides:
-      Qwen3.8-27B-UD-Q4_K_XL:
-        contextWindow: 163840
-        maxTokens: 8192
-        compat:
-          maxTokensField: max_tokens
-          # Match Qwen's thinking sampler; other clients keep server defaults.
-          extraBody:
-            min_p: 0
-      Ornith-1.5-9B-Q5_K_M:
-        contextWindow: 16384
-        maxTokens: 2048
-        compat:
-          maxTokensField: max_tokens
-      gemma-4-12B-it-Q4_0:
-        contextWindow: 16384
-        maxTokens: 2048
-        compat:
-          maxTokensField: max_tokens

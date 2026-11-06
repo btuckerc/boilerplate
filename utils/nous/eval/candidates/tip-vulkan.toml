@@ -1,0 +1,8 @@
+# llama.cpp 61d447234 (2026-11-05 tip), Vulkan, production preset and Mesa.
+label = "tip-vulkan"
+engine = "/home/tux/.local/opt/llama-61d447234-vulkan/bin/llama-server"
+preset = "/home/tux/.config/llama/models.ini"
+ [env]
+RADV_DEBUG = "nocompute"
+VK_DRIVER_FILES = "/opt/mesa-26.2/usr/share/vulkan/icd.d/radeon_icd.json"
+LD_LIBRARY_PATH = "/opt/mesa-26.2/usr/lib/x86_64-linux-gnu"

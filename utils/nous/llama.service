@@ -1,5 +1,5 @@
 [Unit]
-Description=llama.cpp GGUF API Server
+Description=Production inference (vLLM via nous-serve, OpenAI API on 127.0.0.1:8080)
 After=network.target
 
 [Service]
@@ -7,20 +7,19 @@ Type=simple
 User=tux
 Group=tux
 WorkingDirectory=/srv/models
-Environment=HOME=/home/tux
-# RADV_DEBUG=nocompute: +3% decode on the R9700 (2026-09-25 bench, round 4).
-Environment=RADV_DEBUG=nocompute
-# Pinned llama.cpp master f805c57a2 Vulkan build; /opt/llama.cpp-vulkan
-# (b11046) is kept for rollback.
-ExecStart=/opt/llama.cpp-vulkan-f805c57a2/bin/llama-server \
-  --models-dir /srv/models \
-  --models-preset /home/tux/.config/llama/models.ini \
-  --models-max 1 \
-  --models-autoload \
-  --host 127.0.0.1 \
-  --port 8080
+# The spec (utils/nous/serve/production.toml) names the engine, model and every
+# knob; nous-eval reads it from here as the incumbent. The unit name predates
+# vLLM and is kept: leases, the watchdog and clients address llama.service.
+ExecStart=/usr/local/bin/nous-serve run /etc/nous-inference/serve.toml --port 8080
+# vLLM binds the port only once weights, kernels and graphs are ready (warm
+# cache ~1 min, cold compile ~10 min); until then the unit stays activating, which
+# the watchdog and llama-speedcheck leave alone. A start that never gets ready is a
+# failed start, which Restart=on-failure retries. Start limits are left at the
+# default because lease hand-backs restart this unit many times an hour.
+ExecStartPost=/bin/sh -c 'until curl -sf -o /dev/null http://127.0.0.1:8080/health; do sleep 2; done'
+TimeoutStartSec=30min
 Restart=on-failure
-RestartSec=2
+RestartSec=5
 TimeoutStopSec=30
 LimitNOFILE=1048576
 

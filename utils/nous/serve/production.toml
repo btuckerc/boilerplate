@@ -1,0 +1,65 @@
+# Production inference on nous: installed to /etc/nous-inference/serve.toml, served by
+# llama.service as `nous-serve run /etc/nous-inference/serve.toml --port 8080`.
+# nous-eval derives its incumbent from this file, so every knob here is measured as served.
+#
+# Engine: vLLM "radiance", an RDNA4 fork (https://github.com/SlyBase/vllm-sly-radiance).
+# Model: Swift-1.5 Qwen3.8-27B heretic (abliterated), MXFP4 GPTQ, drafted by DFlash2.
+# Chosen over llama.cpp Vulkan on 2026-11-06: decode 1.7x, prefill 3.8x, 4 clients 4.5x at
+# equal tool-call validity and vision (docs/nous-model-evaluation-2026-09-19.md).
+rootfs = "/srv/models/engines/vllm-sly-radiance-1.9.1-rocm10.1"
+served_model_name = "Qwen3.8-27B-Swift-Heretic-MXFP4"
+home = "/srv/workspaces/vllm-cache/home"  # .cache/vllm, .triton, .aiter: compiled graphs and kernels
+args = [
+  "--model", "/models/Swift-1.5-Qwen3.8-27B-heretic-MXFP4-GPTQ",
+  "--max-model-len", "163840", "--gpu-memory-utilization", "0.98",
+  "--kv-cache-dtype", "fp8", "--mamba-ssm-cache-dtype", "bfloat16",
+  "--speculative-config.method", "dflash",
+  "--speculative-config.model", "/models/Qwen3.8-27B-DFlash2-W4A16",
+  "--speculative-config.num_speculative_tokens", "7",
+  "--speculative-config.draft_sample_method", "probabilistic",
+  "--speculative-config.attention_backend", "TRITON_ATTN",
+  "--attention-backend", "R4D_HYBRID",
+  "--max-num-seqs", "8", "--max-num-batched-tokens", "2048",
+  "--compilation-config.cudagraph_mode", "FULL_DECODE_ONLY",
+  "--compilation-config.cudagraph_capture_sizes", "[8,16,24,32,40,48,56,64]",
+  "--enable-prefix-caching",
+  "--enable-prompt-tokens-details",  # usage.cached_tokens: nous-eval's replay counts re-prefill with it
+  # Images on, so no --skip-mm-profiling (ledger M43). Capped at 4096 tokens per image (32x32 px
+  # each), which bounds the encoder peak that startup reserves.
+  "--limit-mm-per-prompt.image", "2", "--limit-mm-per-prompt.video", "0",
+  "--mm-processor-kwargs", '{"size": {"longest_edge": 4194304, "shortest_edge": 65536}}',
+  "--enable-auto-tool-choice", "--tool-call-parser", "qwen3_xml", "--reasoning-parser", "qwen3",
+  "--chat-template", "/opt/qwen-fixed.jinja",
+  "--default-chat-template-kwargs", '{"reasoning_effort": "medium"}',
+]
+
+[mounts]
+"/models" = "/srv/models/vllm"
+
+[env]
+HIP_VISIBLE_DEVICES = "0"
+# ROCm on the R9700 decodes at one of two speeds, ~22% apart, per process (ROCm/ROCm#6347;
+# ledger M44). One HW queue is upstream's mitigation; it costs nothing here but is not shown to
+# prevent the slow state, which llama-speedcheck catches.
+GPU_MAX_HW_QUEUES = "1"
+RADIANCE_RUN_BWTEST = "0"  # the startup bandwidth sweep measures nothing we use
+RADIANCE_MXFP4 = "1"
+RADIANCE_MXFP4_W4A8 = "1"
+RADIANCE_MXFP4_W4A8_MIN_M = "0"
+RADIANCE_MXFP4_DECODE_MAX_M = "128"
+RADIANCE_MXFP4_A_TILED_MIN_M = "513"
+RADIANCE_MXFP4_WPERM = "1"
+RADIANCE_MXFP4_WIDE_MAX_M = "192"
+RADIANCE_LMHEAD_INT4 = "1"
+RADIANCE_FUSED_NORM_QUANT = "1"
+RADIANCE_KV_GROUP_SIZE = "8"
+RADIANCE_EMBED_INT8 = "1"
+RADIANCE_EMBED_BITS = "4"
+RADIANCE_ADAPTIVE_WIDTH = "perseq"
+# Cactus (image default 0.5) accepts drafts the target would reject: faster, but output leaves
+# the target model's distribution. 0 = stock rejection sampling. 1.9.0+ fades it out between
+# 4096 and 16384 output tokens and caps it (repetition loops, upstream #164).
+RADIANCE_CACTUS_DELTA = "0.5"
+HF_HUB_OFFLINE = "1"  # weights are local; never reach the Hub at startup
+VLLM_NO_USAGE_STATS = "1"
+DO_NOT_TRACK = "1"

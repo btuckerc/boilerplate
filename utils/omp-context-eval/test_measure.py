@@ -9,6 +9,20 @@ class NativeCaptureTests(unittest.TestCase):
         system, tools, wire = measure._components(req)
         self.assertEqual(system, "policy"); self.assertIn('"name":"read"', tools); self.assertEqual(json.loads(wire)["model"], "capture")
 
+    def test_remote_tokenizer_uses_vllm_tokenize_schema(self):
+        completed = type("Completed", (), {"stdout": b'{"model":"Qwen3.8-27B-Swift-Heretic-MXFP4","port":"8080","counts":[7]}'})()
+        with patch.object(measure.subprocess, "run", return_value=completed) as run:
+            counts, source = measure._remote_counts(["hello"], "nous")
+        self.assertEqual(counts, [7])
+        self.assertEqual(source, "remote-exact:Qwen3.8-27B-Swift-Heretic-MXFP4:8080")
+        command = run.call_args.args[0][-1]
+        import re
+        import base64
+        encoded = re.search(r"b64decode\('([^']+)'\)", command).group(1)
+        script = base64.b64decode(encoded).decode()
+        self.assertIn("'model':'Qwen3.8-27B-Swift-Heretic-MXFP4','prompt':t", script)
+        self.assertIn("['count']", script)
+
     def test_remote_mode_fails_closed(self):
         with patch.object(measure, "_capture", return_value=([{"model": "capture", "messages": [], "tools": []}], {})), patch.object(measure, "_remote_counts", return_value=(None, "remote-unavailable:test")):
             with self.assertRaises(RuntimeError): measure.measure("remote")

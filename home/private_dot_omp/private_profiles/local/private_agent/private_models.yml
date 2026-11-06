@@ -1,16 +1,13 @@
-# Managed by chezmoi. The local profile knows only the nous llama.cpp router;
+# Managed by chezmoi. The local profile knows only the nous vLLM endpoint;
 # keep this block in step with the default profile's models.yml.
 providers:
-  llama.cpp:
+  vllm:
     baseUrl: http://100.83.125.83:8080/v1
     api: openai-completions
     auth: none
-    discovery:
-      type: llama.cpp
-      timeoutMs: 1000
     models:
-      - id: Qwen3.8-27B-RVN-Heretic-Q4_K_M
-        name: Nous Qwen 3.8 27B Heretic RVN Q4_K_M
+      - id: Qwen3.8-27B-Swift-Heretic-MXFP4
+        name: Nous Qwen 3.8 27B Swift Heretic MXFP4
         reasoning: true
         input: [text, image]
         contextWindow: 163840
@@ -23,8 +20,6 @@ providers:
         compat:
           supportsStore: false
           supportsDeveloperRole: false
-          supportsReasoningEffort: true
-          omitReasoningEffort: false
           maxTokensField: max_tokens
           extraBody:
             min_p: 0

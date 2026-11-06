@@ -30,9 +30,9 @@ esac
 OMP = """#!/usr/bin/env bash
 [ "$1" = --version ] && { echo "${VERSION_OUT:-omp/18.12.1}"; exit "${VERSION_EXIT:-0}"; }
 [ -n "$OMP_LOG" ] && echo "$HOME $*" >>"$OMP_LOG"
-if [ "$1 $2" = "models llama.cpp" ]; then
-  [ -n "$LLAMA_EXIT" ] && exit "$LLAMA_EXIT"
-  printf '%s' "$LLAMA_OUT"
+if [ "$1 $2" = "models vllm" ]; then
+  [ -n "$VLLM_EXIT" ] && exit "$VLLM_EXIT"
+  printf '%s' "$VLLM_OUT"
   exit 0
 fi
 if [ "$1 $2 $3" = "config get defaultThinkingLevel" ]; then
@@ -276,23 +276,23 @@ fi
         self.assertEqual(stat.S_IMODE((agent / "agent.db").stat().st_mode), 0o600)
         self.assertEqual(stat.S_IMODE((agent / "auth-openai.token").stat().st_mode), 0o600)
 
-    def test_llama_probe_failure_or_empty_output_is_an_error(self):
-        for env in ({"LLAMA_EXIT": "3"}, {"LLAMA_OUT": ""}, {"LLAMA_OUT": "not json"}):
+    def test_vllm_probe_failure_or_empty_output_is_an_error(self):
+        for env in ({"VLLM_EXIT": "3"}, {"VLLM_OUT": ""}, {"VLLM_OUT": "not json"}):
             with self.subTest(**env):
                 result = self.run_baseline("validate", **env)
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn("MODEL   probe failed (omp models llama.cpp --json)", result.stderr)
-                self.assertNotIn("READY   llama.cpp", result.stdout)
-        result = self.run_baseline("validate", LLAMA_OUT='{"models":[{"id":"Qwen3.8-27B-RVN-Heretic-Q4_K_M"}]}')
-        self.assertIn("MODEL   Qwen3.8 local catalog entry", result.stdout)
+                self.assertIn("MODEL   probe failed (omp models vllm --json)", result.stderr)
+                self.assertNotIn("READY   vLLM", result.stdout)
+        result = self.run_baseline("validate", VLLM_OUT='{"models":[{"id":"Qwen3.8-27B-Swift-Heretic-MXFP4"}]}')
+        self.assertIn("MODEL   Swift Heretic Qwen local catalog entry", result.stdout)
 
     def test_failed_catalog_query_is_not_a_readiness_gap(self):
         # A working catalog without the entry is the nonfatal READY gap; a failed
         # jq query over the same catalog is a failed probe.
         models = self.repo / "home/private_dot_omp/private_agent/private_models.yml"
-        models.write_text("providers:\n  llama.cpp:\n    models:\n      - id: Qwen3.8-27B-RVN-Heretic-Q4_K_M\n")
-        result = self.run_baseline("validate", LLAMA_OUT='{"models":[]}')
-        self.assertIn("READY   llama.cpp discovery unavailable", result.stdout)
+        models.write_text("providers:\n  vllm:\n    models:\n      - id: Qwen3.8-27B-Swift-Heretic-MXFP4\n")
+        result = self.run_baseline("validate", VLLM_OUT='{"models":[]}')
+        self.assertIn("READY   vLLM discovery unavailable", result.stdout)
         # The jq the fixture PATH would find (a mise shim needs the real HOME).
         real_jq = shutil.which("jq", path=f"/usr/bin{os.pathsep}/bin")
         if real_jq is None:
@@ -300,10 +300,10 @@ fi
         (self.bin / "jq").write_text(
             f'#!/bin/sh\nfor a in "$@"; do case "$a" in *index*) exit 5 ;; esac; done\nexec {real_jq} "$@"\n')
         (self.bin / "jq").chmod(0o755)
-        result = self.run_baseline("validate", LLAMA_OUT='{"models":[]}')
+        result = self.run_baseline("validate", VLLM_OUT='{"models":[]}')
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("MODEL   probe failed (omp models llama.cpp --json)", result.stderr)
-        self.assertNotIn("READY   llama.cpp", result.stdout)
+        self.assertIn("MODEL   probe failed (omp models vllm --json)", result.stderr)
+        self.assertNotIn("READY   vLLM", result.stdout)
 
     def test_failed_scalar_probe_is_an_error_despite_expected_stdout(self):
         config = self.repo / "home/private_dot_omp/private_agent/private_config.yml"
@@ -408,7 +408,7 @@ fi
         # Native omp runs a "!"-prefixed config value as `/bin/sh -c`
         # (config/resolve-config-value.ts:104-145): stored api_key credentials,
         # which `omp models` resolves for built-in discovery, and the headers of
-        # a keyless llama.cpp discovery provider, which it always fetches.
+        # a keyless vLLM provider, which it always fetches.
         (self.bin / "omp").unlink()
         (self.bin / "omp").symlink_to(REAL_OMP)
         agent = self.home / ".omp/agent"

@@ -66,10 +66,10 @@ def test_compact_result_preserves_full_trace_and_scoped_invocation(fixture):
     invocation = json.loads((root / "invocation.json").read_text())
     config = invocation["config"]
     assert config["enabled_providers"] == ["nous"]
-    assert config["small_model"] == config["model"] == config["agent"]["compaction"]["model"] == "nous/Ornith-1.5-9B-Q5_K_M"
+    assert config["small_model"] == config["model"] == config["agent"]["compaction"]["model"] == "nous/Qwen3.8-27B-Swift-Heretic-MXFP4"
     assert invocation["args"][-3:] == ["old-session", "--", "Read input"]
     worker = invocation["config"]["agent"]["nous-worker"]
-    assert worker["steps"] == 5 and worker["model"] == "nous/Ornith-1.5-9B-Q5_K_M"
+    assert worker["steps"] == 5 and worker["model"] == "nous/Qwen3.8-27B-Swift-Heretic-MXFP4"
     assert worker["permission"].get("edit", "deny") == "deny"
     assert worker["permission"]["*"] == "deny"
 

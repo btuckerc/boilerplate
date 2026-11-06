@@ -77,12 +77,39 @@ escalation, because it spreads load.
 
 ## Nous GPU experiments
 
-Never manually stop `llama.service` for an experiment. On nous, run every
-exclusive-GPU benchmark under the root-owned, host-local `llama-yield` helper:
+Never manually stop `llama.service` for an experiment. Local models, quants,
+engines and serving settings are measured with `nous-eval`
+(`~/src/boilerplate/utils/nous/eval`, docs `docs/nous-eval.md` there), which
+takes the GPU through the lease itself:
 
 ```sh
-cd ~/.local/state/gsq-eval
-llama-yield --runtime 3600 -- python3 bench.py LABEL [options]
+cd ~/src/boilerplate/utils/nous/eval
+./nous-eval preflight
+./nous-eval run t2 --incumbent -c candidates/CANDIDATE.toml   # in a systemd-run --user unit
+```
+
+A candidate is a TOML file: the production incumbent is derived from its live
+nous-serve spec; serving candidates name a nous-serve spec and optional
+overrides; llama.cpp candidates use a preset section. The Quark arm reuses the
+production vLLM spec; `llamacpp-rvn-heretic` preserves the previous Vulkan
+production model as a comparison/rollback arm. T1 checks it works, T2 (ABBA)
+is promotion evidence for speed, depth, cache, concurrency, vision and tool
+calls, and T3 is LCB 258 for coding accuracy. A mistake that costs a run gets
+an entry in its `ledger.toml` and a guard or regression test.
+
+For radiance release work, `./nous-eval canary` fetches latest release metadata,
+derives the documented image tag, exports it, and runs the canary tier. Reuse
+the candidate path it prints for `./nous-eval run t3 --incumbent -c PATH`,
+then run `./nous-eval promote LABEL --run CANARY_RUN --run T3_RUN`. Promotion
+only prints instructions: review and update both the repo and installed
+`/etc/nous-inference/serve.toml`, then restart `llama.service`. `rollback`
+prints the previous-spec restore/restart steps. The old Vulkan
+`llamacpp-rvn-heretic` remains a comparison arm, not production.
+Other exclusive-GPU work runs under the root-owned, host-local `llama-yield`
+helper:
+
+```sh
+llama-yield --runtime 3600 --slice llama.slice -- COMMAND [ARG...]
 ```
 
 The command runs as `tux` in the current directory in the single
@@ -90,9 +117,10 @@ The command runs as `tux` in the current directory in the single
 production first, kills the entire experiment process group at its deadline,
 and restores enabled production even if the caller dies or the command fails.
 The default deadline is 3600 seconds; `--runtime` accepts 1–86400 seconds.
+`--slice llama.slice` runs it on production's CPUs; benchmarks need it.
 Use `--env NAME=VALUE` before `--` for extra environment variables; only
 HOME/USER/LOGNAME/PATH are otherwise passed. Do not launch detached GPU work
-outside the lease. `bench.py` refuses execution outside a lease cgroup.
+outside the lease.
 
 During a lease, `llama-placeholder.service` answers every path and method on
 loopback port 8080 (also through Tailscale Serve) with HTTP 503, JSON
@@ -117,10 +145,8 @@ is active. Intentional long stops require
 
 Local quant/engine candidates: rank quants by KLD against a Q8_0 reference
 (`llama-perplexity --kl-divergence-base`, 40×512 wikitext chunks); HumanEval+
-no longer discriminates (IQ3_S through Q5 all 155–156/164). Quality gate is
-LCB60 (`lcb_gen.py MODEL OUT URL` + `lcb_grade.py OUT`, 2025+ medium/hard) run
-through `bench.py LABEL --short 0 --run "..."` on :18737, plus
-`bench.py --ctx 131072 --long … --replay 8` for depth and cache behavior.
+no longer discriminates (IQ3_S through Q5 all 155–156/164). Accuracy, speed,
+depth and vision gates are the `nous-eval` tiers above.
 
 ## Rules of thumb
 

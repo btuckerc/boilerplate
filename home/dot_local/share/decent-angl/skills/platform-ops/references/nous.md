@@ -59,41 +59,43 @@ independent auth and sessions. Read `~/src/omp-serve/README.md` and
   existing `~/.ssh/id_rsa`, with agent forwarding disabled. Other clients
   install their own public key; do not copy private keys between machines.
 - API: `http://nous:8080/v1`; health: `http://nous:8080/health`.
-- OMP has a native, no-auth OpenAI Chat Completions `llama.cpp` provider in
-  the managed shared files `~/.omp/agent/models.yml` and
-  `~/.omp/agent/config.yml` (chezmoi sources `private_models.yml` and
-  `private_config.yml` under `home/private_dot_omp/private_agent/`). The
-  promoted Qwen3.8 profile (`Qwen3.8-27B-RVN-Heretic-Q4_K_M`, the
-  Heretic-abliterated Qwen3.8 27B since 2026-10-09; stock
-  `Qwen3.8-27B-UD-Q4_K_XL` is the rollback) is 163,840 context / 8,192 output
-  with text and image input and medium reasoning; smaller models
-  retain 16K presets. The provider is
-  `http://nous:8080/v1`; this path does not require OpenCode.
-
-- Service: `llama.service`; source preset/unit:
-  `utils/nous/models.ini` and `utils/nous/llama.service`; models:
-  `/srv/models`. Service configuration is machine-local under
-  `/etc/systemd/system`, not workstation chezmoi state. The unit runs the
-  pinned `/opt/llama.cpp-vulkan-f805c57a2` build (b11046 at
-  `/opt/llama.cpp-vulkan` is the rollback) with `RADV_DEBUG=nocompute` on a
-  private Mesa 26.2.3 RADV (`/opt/mesa-26.2`, drop-in
-  `llama.service.d/mesa.conf`; source `utils/nous/mesa/`). Under that Mesa the
-  R9700 is `Vulkan0`; benchmarks without the drop-in's environment still see
-  it as `Vulkan1` behind the iGPU.
+- OMP uses the built-in, no-auth `vllm` provider at
+  `http://100.83.125.83:8080/v1`, configured in
+  `~/.omp/agent/models.yml` and `~/.omp/agent/config.yml` (chezmoi sources
+  `private_models.yml` and `private_config.yml` under
+  `home/private_dot_omp/private_agent/`). It serves only
+  `Qwen3.8-27B-Swift-Heretic-MXFP4`: 163,840 context / 8,192 output, text and
+  image input, medium reasoning. The profile's OpenAI Chat Completions API
+  comes from vLLM's OpenAI-compatible endpoint.
+- Service: `llama.service`; unit source `utils/nous/llama.service`; serve CLI
+  source `utils/nous/serve/`, installed as `/usr/local/bin/nous-serve` and
+  configured by `/etc/nous-inference/serve.toml`. It launches the vLLM image
+  rootfs `/srv/models/engines/vllm-sly-radiance-1.9.1-rocm10.1`; model weights
+  are under `/srv/models/vllm`; compile caches under
+  `/srv/workspaces/vllm-cache/home`. Service configuration is machine-local
+  under `/etc/systemd/system`, not workstation chezmoi state. No Mesa drop-in
+  is used: vLLM runs ROCm/HIP.
+- vLLM batches up to 8 sequences with a shared 386,677-token VRAM KV pool;
+  there is no host prompt cache. `llama-speedcheck.timer` restarts production
+  when ROCm decode is stuck in its slow state (ROCm/ROCm#6347).
 - CPUs 8-11 belong to `llama.slice` (production llama only); `system.slice`
-  and `user.slice`, including GPU leases and agents, run on 0-7,12-31
-  (`utils/nous/cpu-reserve/`). Do not widen them without measuring decode under load.
+  and `user.slice`, including agents and GPU leases without `--slice`, run on
+  0-7,12-31 (`utils/nous/cpu-reserve/`). Do not widen them without measuring decode under load.
 - Exclusive GPU experiments MUST use the root-owned helper (source and install
   steps: `utils/nous/gpu-lease/`, `docs/nous-inference.md` § GPU lease):
-  `llama-yield --runtime 3600 -- COMMAND [ARG...]` (from the desired working
-  directory). It runs as `tux` in the singleton `llama-yield-gpu.service`,
-  refuses concurrent leases or active Bonsai, orders production shutdown
-  before the command, and uses systemd `ExecStopPost` to restore production
-  after success, failure, caller death or timeout. Default runtime is one hour;
-  `--runtime` accepts 1–86400 seconds. `--env NAME=VALUE` passes additional
-  environment; HOME/USER/LOGNAME/PATH are preserved/set automatically.
-  Never manually stop production for benchmarks or detach GPU work from the
-  lease. `~/.local/state/gsq-eval/bench.py` enforces lease-cgroup membership.
+  `llama-yield --runtime 3600 [--slice llama.slice] -- COMMAND [ARG...]` (from
+  the desired working directory). It runs as `tux` in the singleton
+  `llama-yield-gpu.service`, refuses concurrent leases or active Bonsai, orders
+  production shutdown before the command, and uses systemd `ExecStopPost` to
+  restore production after success, failure, caller death or timeout. Default
+  runtime is one hour; `--runtime` accepts 1–86400 seconds. `--slice
+  llama.slice` puts the lease on production's CPUs 8-11 (benchmarks need it).
+  `--env NAME=VALUE` passes additional environment; HOME/USER/LOGNAME/PATH are
+  preserved/set automatically. Never manually stop production for benchmarks
+  or detach GPU work from the lease.
+- Inference candidates (engines, builds, quants, settings) are measured with
+  `utils/nous/eval/nous-eval` (`docs/nous-eval.md`), which leases the GPU
+  itself and checks production health afterwards.
 - During leases, `llama-placeholder.service` owns loopback 8080.
   Every path/method returns HTTP 503 with `Content-Type: application/json`,
   integer `Retry-After` seconds remaining and
@@ -146,15 +148,12 @@ independent auth and sessions. Read `~/src/omp-serve/README.md` and
   and that no process references. `earlyoom` (`-m 5,3 -s 10,5`) kills single
   processes before the kernel OOM path thrashes the host, preferring
   chrome/pytest/compilers and avoiding llama-server, sshd, tailscaled, herdr
-  and omp. llama has `OOMScoreAdjust=-500` and a 48 GiB prompt cache
-  (`cache-ram 49152`: alternating conversations resume without re-prefill);
-  swap is a 32 GiB swapfile at `/srv/models/.swap/swapfile` (keep that
-  directory 0755: the llama router walks `/srv/models` and fails to start on
-  an unreadable subdirectory); zswap (lzo, 10%) is on via GRUB; `tmp.mount` is
-  masked, so `/tmp` is ext4 on `/`. Never cap the whole
-  herdr/agent tree, shrink llama's `cache-ram` or set llama `MemorySwapMax=0`
-  (rejected: performance/capability cost). A long build loop may get its own
-  scope at ~2x measured peak `MemoryMax`, no CPU quota (Emerald hill-climb:
+  and omp. llama has `OOMScoreAdjust=-500`; swap is a 32 GiB swapfile at
+  `/srv/models/.swap/swapfile` (keep that directory 0755); zswap (lzo, 10%) is
+  on via GRUB; `tmp.mount` is masked, so `/tmp` is ext4 on `/`. Never cap the
+  whole herdr/agent tree or set llama `MemorySwapMax=0` (rejected:
+  performance/capability cost). A long build loop may get its own scope at ~2x
+  measured peak `MemoryMax`, no CPU quota (Emerald hill-climb:
   `emerald-hill-dev.scope`, 16G). `omp-chrome-reaper.timer` stops an OMP
   headless Chrome after 30 min of zero tree CPU (`browser.idleCloseSec` closes
   tabs only; OMP relaunches Chrome on next use). Sources and install:
@@ -168,11 +167,6 @@ independent auth and sessions. Read `~/src/omp-serve/README.md` and
 Current host hardware is an AMD Radeon R9700; preserve the existing loopback
 API and Tailscale Serve exposure boundary.
 
-`Nemotron-9B-OpenCode.Q6_K` and `Qwen3.5-9B-Q5_K_M` are available through
-the router. Re-query `/v1/models` for current names. Both were configured for
-16,384 context tokens and one slot; the router loads at most one model.
-Serialize initial experiments and group by model to avoid repeated swaps.
-Do not infer usable context from the model's larger training context.
 
 The host manager is `/home/tux/ai-stack.sh`; `/usr/local/sbin/ai-stack` is a
 symlink to it (verified 2026-09-19). Use `ssh nous 'ai-stack status'` or
@@ -182,18 +176,17 @@ do not install a second copy. The old installed script was backed up at
 
 Bonsai is retired from the active catalog and launcher. Historical weights and
 evaluation records remain on the host/repository, but ordinary clients must
-not start or select `bonsai.service`; the active endpoint is llama.cpp on
-8080. Do not authorize new service-switching paths.
+not start or select `bonsai.service`; the active endpoint is the single vLLM
+model on port 8080. Do not authorize new service-switching paths.
 
 The root-owned service-control policy remains historical host state; broad sudo
 requires the user. Preserve the existing manager rather than reinstalling it.
 
 The MacBook T3 Nous instance uses `~/.local/bin/opencode-baseline` (mise-pinned
-OpenCode) and managed `~/.config/opencode/opencode.json`. The Heretic Qwen3.8
-(RVN Q4_K_M) is the promoted local model (160K context / 8K output / medium reasoning); Ornith,
-Nemotron, Gemma and smaller Qwen models remain explicit 16K choices. These are
-small screening tests, not a sustained agent benchmark. Selecting a T3 model
-does not switch the host service.
+OpenCode) and managed `~/.config/opencode/opencode.json`. It targets the single
+Swift Heretic Qwen3.8 model (160K context / 8K output / medium reasoning), with
+text and image input. These are small screening tests, not a sustained agent
+benchmark. Selecting a T3 model does not switch the host service.
 
 For tested harness compatibility, measured tool calls, and the Pokémon
 experiment integration plan, read
@@ -206,17 +199,18 @@ is too large for practical local inference on this host. Keep the distinction
 between model screening and verified project performance.
 
 `omp-local` is the fully local OMP lane (profile `local`): every role on the
-promoted Heretic Qwen, cloud providers disabled. Gate results (parity with the
-stock UD-Q4_K_XL) are in `docs/nous-inference.md` § Promoted Heretic worker.
+promoted Swift Heretic Qwen, cloud providers disabled. It shares the built-in
+vLLM endpoint.
 
 Local models are opt-in: the managed OpenCode config does not force a model,
 restrict other providers or tune global build/plan agents. `nous-worker`
-explicitly launches Qwen3.8/Ornith/Nemotron/Gemma with per-process settings,
-JSON events and resumable session IDs. This works from a T3 terminal-capable
-main thread as a subprocess; it is not native Codex `spawn_agent` support.
-Read `docs/nous-inference.md` for invocation and tested limits. The `local-workers` skill carries the concise cross-thread recommendation:
-use a bounded worker when useful, with Qwen3.8 as the launcher default. Do not
-change main-thread model defaults merely because local models are available.
+launches the single Qwen3.8 model with per-process settings, JSON events and
+resumable session IDs. This works from a T3 terminal-capable main thread as a
+subprocess; it is not native Codex `spawn_agent` support. Read
+`docs/nous-inference.md` for invocation and tested limits. The `local-workers`
+skill carries the concise cross-thread recommendation: use a bounded worker
+when useful. Do not change main-thread model defaults merely because local
+models are available.
 
 Worker readiness check: these results belong to the supervised OpenCode
 `nous-worker` harness and must not be conflated with native OMP task children.

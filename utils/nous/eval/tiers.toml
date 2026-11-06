@@ -1,0 +1,62 @@
+# What each tier measures. budget_s is the expected wall time of one block (one
+# candidate pass) and sizes the GPU lease. Workload options: reps, workers
+# (concurrent items; pair with --set parallel=N for router candidates),
+# items_tier (which item set the workload's items() selects), plus
+# workload-specific keys passed to items().
+
+[tiers.t1]  # smoke: does the candidate boot, answer, call tools, see images
+budget_s = 1800
+design = "ab"
+[tiers.t1.workloads]
+speed = {}
+longctx = {}
+vision = {}
+toolcall = {}
+lcb = {}
+
+[tiers.t2]  # engine/setting bake-off: speed, long context, agents, images
+budget_s = 5400
+design = "abba"
+[tiers.t2.workloads]
+speed = {reps = 3}
+longctx = {}
+replay = {}
+concurrency = {}
+vision = {}
+grounding = {}
+toolcall = {}
+
+[tiers.canary]  # weekly upstream check: tip build vs production, unattended
+budget_s = 2400
+design = "abba"
+[tiers.canary.workloads]
+speed = {items_tier = "t2", reps = 2}
+longctx = {items_tier = "t2", depths = [32768, 131072]}
+replay = {items_tier = "t2"}
+vision = {items_tier = "t1"}
+toolcall = {items_tier = "t2"}
+
+[tiers.t3]  # accuracy: LiveCodeBench medium+hard, 16K cap
+budget_s = 43200
+design = "ab"
+[tiers.t3.workloads]
+lcb = {}
+
+[tiers.selftest]  # the harness itself, on a CPU candidate (candidates/cpu-selftest.toml, --no-lease)
+budget_s = 600
+design = "abba"
+[tiers.selftest.workloads]
+speed = {items_tier = "t1", max_tokens = 256}
+lcb = {items_tier = "t1", max_tokens = 512}
+
+[compare]
+margin = -0.04     # rate metrics: non-inferior if the CI lower bound of B-A is above this
+tolerance = 0.03   # ratio metrics: pass if the CI lower bound of B/A (better > 1) is above 1 - this
+
+[guards]
+min_eval_free_gib = 100
+min_root_free_gib = 15
+min_mem_available_gib = 24
+max_loadavg = 4.0
+max_idle_vram_mib = 2048
+vram_settle_s = 60   # the driver frees a stopped server's VRAM over seconds

@@ -1,0 +1,6 @@
+# Harness self-test on the CPU:
+#   nous-eval run selftest --no-lease --port 18850 -c candidates/cpu-selftest.toml
+label = "cpu-selftest"
+engine = "/home/tux/.local/opt/llama-61d447234-vulkan/bin/llama-server"
+preset = "/home/tux/src/boilerplate/utils/nous/eval/candidates/cpu-selftest.ini"
+ready_timeout_s = 300

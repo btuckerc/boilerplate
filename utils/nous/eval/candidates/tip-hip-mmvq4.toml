@@ -1,0 +1,9 @@
+# llama.cpp 61d447234, HIP, MMVQ/MMVF max batch 8 -> 4 (llama.cpp#29820: 5-8 column
+# matrix-vector kernels are slow on RDNA4; speculative verify batches are 6 wide).
+label = "tip-hip-mmvq4"
+engine = "/home/tux/.local/opt/llama-61d447234-hip-mmvq4/bin/llama-server"
+preset = "/home/tux/.config/llama/models.ini"
+# HIP sees only the R9700 as ROCm0; the preset's Vulkan device names do not apply.
+[overrides]
+device = "ROCm0"
+device-draft = "ROCm0"

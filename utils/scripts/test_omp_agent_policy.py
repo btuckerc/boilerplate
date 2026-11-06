@@ -19,7 +19,7 @@ FULL = ["low", "medium", "high", "xhigh", "max"]
 # What `omp models --json` writes to stderr (still exiting 0) when native loading rejects models.yml.
 REJECTED = (
     "Warning: models.yml validation failed \u2014 custom providers disabled\n"
-    "Schema error: providers.llama.cpp.models.0.thinking.supportsDisplay: must be boolean (was a string)\n"
+    "Schema error: providers.vllm.models.0.thinking.supportsDisplay: must be boolean (was a string)\n"
 )
 # `omp config list --json` values at the 18.16.0 schema defaults, for the settings the checker compares.
 NATIVE_DEFAULTS = {
@@ -75,7 +75,7 @@ class PolicyTests(unittest.TestCase):
             "modelRoles:\n"
             "  default: anthropic/claude-opus-5-5:high\n"
             "  plan: openai-codex/gpt-6.1-sol:high\n"
-            "  smol: llama.cpp/test:low\n"
+            "  smol: vllm/test:low\n"
             "  tiny: '@smol'\n"
             "  task: openai-codex/gpt-6-luna:medium\n"
             "  fable: anthropic/claude-fable-test:medium\n"
@@ -91,7 +91,7 @@ class PolicyTests(unittest.TestCase):
             "task.enableEffort": True,
             "modelRoles": {
                 "default": "anthropic/claude-opus-5-5:high", "plan": "openai-codex/gpt-6.1-sol:high",
-                "smol": "llama.cpp/test:low", "tiny": "@smol", "task": "openai-codex/gpt-6-luna:medium",
+                "smol": "vllm/test:low", "tiny": "@smol", "task": "openai-codex/gpt-6-luna:medium",
                 "fable": "anthropic/claude-fable-test:medium", "slow": "anthropic/claude-opus-5-5:high",
                 "astra": "openai-codex/gpt-6-astra:high",
             },
@@ -100,10 +100,10 @@ class PolicyTests(unittest.TestCase):
         self.add("architect", "@plan:xhigh", "xhigh", ["read", "grep", "glob", "web_search", "yield"])
         shutil.copy(AUDITOR, self.agent / "private_agents/auditor.md")
         self.add("browser", "@default:medium", "medium", ["eval", "yield"])
-        self.add("nous", "llama.cpp/test", "medium", ["read", "grep", "glob", "edit", "write", "yield"])
-        self.add("scout", "llama.cpp/test", "low", ["read", "grep", "glob", "web_search", "yield"])
+        self.add("nous", "vllm/test", "medium", ["read", "grep", "glob", "edit", "write", "yield"])
+        self.add("scout", "vllm/test", "low", ["read", "grep", "glob", "web_search", "yield"])
         self.add("sol", "@plan", "high")
-        self.add("sonic", "llama.cpp/test", "low", ["read", "grep", "glob", "edit", "write", "yield"])
+        self.add("sonic", "vllm/test", "low", ["read", "grep", "glob", "edit", "write", "yield"])
         consult = ["read", "grep", "glob", "web_search", "yield"]
         self.add("fable", "@fable", "medium", consult)
         self.add("astra", "@astra", "high", consult)
@@ -123,7 +123,7 @@ class PolicyTests(unittest.TestCase):
         ("openai-codex", "gpt-6-astra", FULL),
         ("anthropic", "claude-opus-5-5", FULL),
         ("anthropic", "claude-fable-test", FULL),
-        ("llama.cpp", "test", ["low", "medium", "high"]),
+        ("vllm", "test", ["low", "medium", "high"]),
     ]
     serial = itertools.count()
 
@@ -248,7 +248,7 @@ class PolicyTests(unittest.TestCase):
             ("openai-codex", "gpt-6.1-sol", ["low", "medium", "high"]),
             ("openai-codex", "gpt-6-luna", ["low", "medium", "high"]),
             ("anthropic", "claude-opus-5-5", ["low", "medium", "high"]),
-            ("llama.cpp", "test", ["low", "medium"]),
+            ("vllm", "test", ["low", "medium"]),
             ("anthropic", "claude-fable-test", ["low", "medium"]),
         ])
         result = self.run_checker("--catalog", catalog, "--effort", "med")
@@ -278,10 +278,10 @@ class PolicyTests(unittest.TestCase):
 
     def test_15_nested_role_expansion(self):
         overlay = self.root / "overlay.yml"
-        overlay.write_text("modelRoles:\n  tiny: '@smol'\n  smol: llama.cpp/test:low\ntask:\n  agentModelOverrides:\n    architect: '@tiny'\n")
+        overlay.write_text("modelRoles:\n  tiny: '@smol'\n  smol: vllm/test:low\ntask:\n  agentModelOverrides:\n    architect: '@tiny'\n")
         result = self.run_checker("--config", str(overlay))
         self.assertIn("MODEL architect", result.stderr)
-        self.assertIn("llama.cpp/test", result.stdout)
+        self.assertIn("vllm/test", result.stdout)
 
     def test_16_disabled_provider_filtering(self):
         catalog = self.evidence(models=[("openai-codex", "gpt-6.1-sol", ["low", "medium", "high"])])
@@ -641,7 +641,7 @@ class PolicyTests(unittest.TestCase):
         return next(agent for agent in json.loads(result.stdout)["agents"] if agent["name"] == name)
 
     def test_21_native_tool_gates(self):
-        self.add("extra", "llama.cpp/test", "low", ["read", "grep", "lsp", "find", "bash", "todo", "ask", "frobnicate"])
+        self.add("extra", "vllm/test", "low", ["read", "grep", "lsp", "find", "bash", "todo", "ask", "frobnicate"])
         result = self.run_checker("--json")
         extra = self.agent_report(result, "extra")
         # lsp needs task.enableLsp; children never get ask; find (auto) and todo depend on runtime state.
@@ -659,7 +659,7 @@ class PolicyTests(unittest.TestCase):
         self.assertIn("lsp", extra["callable"])
 
     def test_22_spawns_and_recursion_depth(self):
-        (self.agent / "private_agents/lead.md").write_text("---\nname: lead\ndescription: x\nmodel: llama.cpp/test\nthinkingLevel: low\ntools: [read]\nspawns: scout\n---\n")
+        (self.agent / "private_agents/lead.md").write_text("---\nname: lead\ndescription: x\nmodel: vllm/test\nthinkingLevel: low\ntools: [read]\nspawns: scout\n---\n")
         result = self.run_checker("--json")
         self.assertTrue({"task", "wait"} <= set(self.agent_report(result, "lead")["callable"]))
         sol = self.agent_report(result, "sol")
@@ -672,13 +672,13 @@ class PolicyTests(unittest.TestCase):
         self.assertNotIn("task", self.agent_report(result, "sol")["callable"])
 
     def test_23_model_default_thinking(self):
-        (self.agent / "private_agents/extra.md").write_text('---\nname: extra\ndescription: x\nmodel: "llama.cpp/test"\n---\n')
-        gap = "UNVERIFIED extra thinking falls to the model default of llama.cpp/test"
+        (self.agent / "private_agents/extra.md").write_text('---\nname: extra\ndescription: x\nmodel: "vllm/test"\n---\n')
+        gap = "UNVERIFIED extra thinking falls to the model default of vllm/test"
         result = self.run_checker("--catalog", self.evidence())
         self.assertEqual(result.returncode, 1)
         self.assertIn(gap, result.stderr)
         models = self.agent / "private_models.yml"
-        provider = "providers:\n  llama.cpp:\n    baseUrl: http://localhost:8080/v1\n    api: openai-completions\n    auth: none\n"
+        provider = "providers:\n  vllm:\n    baseUrl: http://localhost:8080/v1\n    api: openai-completions\n    auth: none\n"
         custom = "    models:\n      - id: test\n        thinking: {mode: effort, efforts: [low, medium, high], defaultLevel: medium}\n"
         models.write_text(provider + custom)
         result = self.run_checker("--json", "--catalog", self.evidence())
@@ -700,21 +700,21 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn(
             f"MODELS {models} rejected by native loading, custom models and overrides discarded: "
-            "Schema error: providers.llama.cpp.models.0.thinking.supportsDisplay: must be boolean (was a string)",
+            "Schema error: providers.vllm.models.0.thinking.supportsDisplay: must be boolean (was a string)",
             result.stderr,
         )
         self.assertIn(gap, result.stderr)
 
     def test_24_catalog_clamp(self):
         catalog = self.evidence(models=self.MODELS + [
-            ("llama.cpp", "steps", ["low", "medium", "xhigh"]),
-            ("llama.cpp", "flat", []),
-            ("llama.cpp", "unsorted", ["high", "low"]),
+            ("vllm", "steps", ["low", "medium", "xhigh"]),
+            ("vllm", "flat", []),
+            ("vllm", "unsorted", ["high", "low"]),
         ])
-        self.add("up", "llama.cpp/steps", "high")
-        self.add("floor", "llama.cpp/steps", "minimal")
-        self.add("flat", "llama.cpp/flat", "high")
-        self.add("odd", "llama.cpp/unsorted", "medium")  # the native loop stops at the first higher effort
+        self.add("up", "vllm/steps", "high")
+        self.add("floor", "vllm/steps", "minimal")
+        self.add("flat", "vllm/flat", "high")
+        self.add("odd", "vllm/unsorted", "medium")  # the native loop stops at the first higher effort
         result = self.run_checker("--catalog", catalog, "--json")
         levels = {name: self.agent_report(result, name)["thinking"] for name in ("up", "floor", "flat", "odd")}
         self.assertEqual(levels, {"up": "medium", "floor": "low", "flat": "off", "odd": "high"})
@@ -722,8 +722,8 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         errors = "\n".join(json.loads(result.stdout)["errors"])
         for level, model in (("high", "steps"), ("minimal", "steps"), ("medium", "unsorted")):
-            self.assertIn(f"UNSUPPORTED thinking {level} is not served by llama.cpp/{model}", errors)
-        self.assertNotIn("served by llama.cpp/flat", errors)
+            self.assertIn(f"UNSUPPORTED thinking {level} is not served by vllm/{model}", errors)
+        self.assertNotIn("served by vllm/flat", errors)
 
     def test_25_catalog_evidence_must_match(self):
         models = self.agent / "private_models.yml"
@@ -867,7 +867,7 @@ class PolicyTests(unittest.TestCase):
         dotenv = cwd / ".env.local"
         dotenv.write_text("FOO=1\n")
         self.assertEqual(run().returncode, 0)
-        dotenv.write_text("PI_SMOL_MODEL=llama.cpp/test\n")
+        dotenv.write_text("PI_SMOL_MODEL=vllm/test\n")
         self.assertIn(f"UNSUPPORTED dotenv {dotenv} sets PI_SMOL_MODEL (launch-dir dotenv not mirrored)", run().stderr)
 
     def test_31_role_env_overrides_after_settings_check(self):
@@ -953,8 +953,8 @@ class PolicyTests(unittest.TestCase):
         # A project role that is not a string or string list is cleared, so the global plan role stays.
         (cwd / ".omp/config.yml").write_text("modelRoles:\n  plan: null\n")
         self.assertEqual(run().returncode, 0, run().stderr)
-        (cwd / ".omp/config.yml").write_text("modelRoles:\n  plan: llama.cpp/test\n")
-        self.native["modelRoles"] = {**self.native["modelRoles"], "plan": "llama.cpp/test"}
+        (cwd / ".omp/config.yml").write_text("modelRoles:\n  plan: vllm/test\n")
+        self.native["modelRoles"] = {**self.native["modelRoles"], "plan": "vllm/test"}
         self.assertIn("MODEL architect", run().stderr)
         (cwd / ".omp/config.yml").unlink()
         self.native["modelRoles"]["plan"] = "openai-codex/gpt-6.1-sol:high"
@@ -992,13 +992,13 @@ class PolicyTests(unittest.TestCase):
         for line, declared in cases.items():
             with self.subTest(line=line):
                 (self.agent / "private_agents/extra.md").write_text(
-                    f"---\nname: extra\ndescription: x\nmodel: llama.cpp/test\nthinkingLevel: low\n{line}\n---\n")
+                    f"---\nname: extra\ndescription: x\nmodel: vllm/test\nthinkingLevel: low\n{line}\n---\n")
                 result = self.run_checker("--json")
                 self.assertEqual(self.agent_report(result, "extra")["declared"], declared)
 
     def test_malformed_tools_declaration_grants_no_builtin_tools(self):
         (self.agent / "private_agents/extra.md").write_text(
-            "---\nname: extra\ndescription: x\nmodel: llama.cpp/test\nthinkingLevel: low\ntools: [42]\n---\n")
+            "---\nname: extra\ndescription: x\nmodel: vllm/test\nthinkingLevel: low\ntools: [42]\n---\n")
         result = self.agent_report(self.run_checker("--json"), "extra")
         self.assertEqual(result["declared"], [])
         self.assertNotIn("read", result["callable"])
@@ -1009,7 +1009,7 @@ class PolicyTests(unittest.TestCase):
         self.config.write_text(self.config.read_text().replace("  structured: true\n", "  structured: false\n"))
         self.native["task.structured"] = False
         schema = {"type": "object", "required": ["answer"], "properties": {"answer": {"type": "string"}}}
-        (self.agent / "private_agents/extra.md").write_text("---\nname: extra\ndescription: x\nmodel: llama.cpp/test\nthinkingLevel: low\nstructured: true\noutput:\n  type: object\n  required: [answer]\n  properties:\n    answer: {type: string}\ntools: [read]\n---\n")
+        (self.agent / "private_agents/extra.md").write_text("---\nname: extra\ndescription: x\nmodel: vllm/test\nthinkingLevel: low\nstructured: true\noutput:\n  type: object\n  required: [answer]\n  properties:\n    answer: {type: string}\ntools: [read]\n---\n")
         architect = self.agent / "private_agents/architect.md"
         architect.write_text(architect.read_text().replace("thinkingLevel:", "structured: true\nthinkingLevel:", 1))
         result = self.run_checker("--json", "--catalog", self.evidence())
@@ -1046,14 +1046,14 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(report["callable"], ["read", "grep", "glob"])
 
     def test_user_seance_shadow_has_ordinary_policy(self):
-        self.add("seance", "llama.cpp/test", "low", ["read", "grep", "glob"])
+        self.add("seance", "vllm/test", "low", ["read", "grep", "glob"])
         cwd, run = self.live_fixture()
         (cwd / ".omp/mcp.json").write_text(json.dumps({"mcpServers": {"proj": {"command": "x"}}}))
         result = run(args=["--json"])
         self.assertEqual(result.returncode, 0, result.stderr)
         report = self.agent_report(result, "seance")
         self.assertEqual(report["source"], "user")
-        self.assertEqual(report["model"], "llama.cpp/test")
+        self.assertEqual(report["model"], "vllm/test")
         self.assertEqual(report["thinking"], "low")
         self.assertEqual(report["thinkingLayer"], "frontmatter")
         self.assertTrue(report["structured"])

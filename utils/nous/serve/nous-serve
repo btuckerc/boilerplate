@@ -1,0 +1,172 @@
+#!/usr/bin/python3
+"""Serve an exported vLLM image under bwrap, described by a spec TOML.
+
+Production (`llama.service`) and nous-eval candidates run this same command, so
+an evaluation measures exactly what production serves:
+
+    nous-serve run SPEC --port 8080      exec the server (foreground)
+    nous-serve argv SPEC --port N        print the sandbox argv
+    nous-serve identity SPEC             JSON fingerprint: image id and resolved argv
+    nous-serve export IMAGE              pull IMAGE (rootless docker), unpack it to ENGINES/<name>
+
+The image's root filesystem runs read-only, as the caller mapped to root inside
+(as under docker). No container daemon: the server stays in the caller's
+cgroup, so llama.slice's CPU reservation applies to production and to GPU
+leases alike, and stopping the caller stops the server (--die-with-parent).
+The GPU is reached through the caller's render group.
+
+Spec keys (all required except env and mounts):
+    rootfs             an `export`ed directory under ENGINES
+    served_model_name  the one model id clients send
+    home               writable directory mounted at /root (compile caches)
+    args               `vllm serve` arguments; --host, --port, --served-model-name are added here
+    [mounts]           "/path/inside" = "/path/on/host", read-only
+    [env]              added to the image's environment (spec wins over image and ROOT_RO_ENV)
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import tomllib
+from datetime import datetime, timezone
+from pathlib import Path
+
+ENGINES = Path("/srv/models/engines")
+SIDECAR = ".nous-serve-image.json"
+REQUIRED = {"rootfs", "served_model_name", "home", "args"}
+OPTIONAL = {"mounts", "env"}
+OWNED_FLAGS = ("--host", "--port", "--served-model-name")
+# Engines that JIT-build into their package directory, redirected to the writable
+# home because the root is read-only. aiter builds into AITER_JIT_DIR when set but
+# otherwise imports from its package directory, so unset it fails at the first
+# R4D_HYBRID import (ledger M46).
+ROOT_RO_ENV = {"AITER_JIT_DIR": "/root/.aiter/jit"}
+
+
+class SpecError(ValueError):
+    pass
+
+
+def load(path: str | Path) -> dict:
+    """A spec file: TOML, or JSON with the same keys (nous-eval writes resolved specs as JSON)."""
+    path = Path(path)
+    spec = json.loads(path.read_text()) if path.suffix == ".json" else tomllib.loads(path.read_text())
+    missing, unknown = REQUIRED - spec.keys(), spec.keys() - REQUIRED - OPTIONAL
+    if missing or unknown:
+        raise SpecError(f"{path}: missing {sorted(missing)}, unknown {sorted(unknown)}")
+    args = [str(a) for a in spec["args"]]
+    owned = [a for a in args if a.split("=", 1)[0] in OWNED_FLAGS]
+    if owned:
+        raise SpecError(f"{path}: {owned} are set by nous-serve, not the spec")
+    rootfs = Path(spec["rootfs"])
+    if not (rootfs / SIDECAR).is_file():
+        raise SpecError(f"{path}: {rootfs} is not a nous-serve export (no {SIDECAR})")
+    for inside, host in spec.get("mounts", {}).items():
+        if not inside.startswith("/") or not Path(host).exists():
+            raise SpecError(f"{path}: mount {inside} = {host}: inside path must be absolute, host path must exist")
+    return {"rootfs": rootfs, "served_model_name": str(spec["served_model_name"]), "home": Path(spec["home"]),
+            "args": args, "mounts": {str(k): str(v) for k, v in spec.get("mounts", {}).items()},
+            "env": {str(k): str(v) for k, v in spec.get("env", {}).items()}}
+
+
+def image(spec: dict) -> dict:
+    return json.loads((spec["rootfs"] / SIDECAR).read_text())
+
+
+def argv(spec: dict, port: int, host: str = "127.0.0.1") -> list[str]:
+    meta = image(spec)
+    env = dict(item.split("=", 1) for item in meta["env"])
+    env.update(ROOT_RO_ENV)
+    env.update(spec["env"])
+    env["HOME"] = "/root"
+    # The root is bound writable only so bwrap can create mount points in it; the last
+    # operation remounts it read-only (non-recursive: /root and /tmp stay writable).
+    cmd = ["/usr/bin/bwrap", "--unshare-user", "--uid", "0", "--gid", "0", "--unshare-pid", "--die-with-parent",
+           "--bind", str(spec["rootfs"]), "/", "--proc", "/proc", "--dev-bind", "/dev", "/dev",
+           "--ro-bind", "/sys", "/sys", "--tmpfs", "/tmp", "--bind", str(spec["home"]), "/root", "--clearenv"]
+    for inside, outside in sorted(spec["mounts"].items()):
+        cmd += ["--ro-bind", outside, inside]
+    for key, value in sorted(env.items()):
+        cmd += ["--setenv", key, value]
+    cmd += ["--remount-ro", "/"]
+    return [*cmd, "--", *meta["entrypoint"], *spec["args"], "--served-model-name", spec["served_model_name"],
+            "--host", host, "--port", str(port)]
+
+
+def identity(spec: dict) -> dict:
+    """Everything that can change a measurement except model weights (fingerprinted by the caller)."""
+    resolved = argv(spec, port=0)
+    return {"image": image(spec)["id"], "image_ref": image(spec)["image"],
+            "argv_sha256": hashlib.sha256(json.dumps(resolved).encode()).hexdigest(), "argv": resolved}
+
+
+def export(ref: str, engines: Path = ENGINES) -> Path:
+    """Unpack an image into engines/<repo>-<tag>; an existing export of the same image id is reused."""
+    def docker(*args, **kw):
+        return subprocess.run(["docker", *args], check=True, text=True, capture_output=True, **kw).stdout.strip()
+
+    docker("pull", ref)
+    info = json.loads(docker("image", "inspect", ref))[0]
+    repo, _, tag = ref.rpartition("/")[2].partition(":")
+    dest = engines / f"{repo}-{tag or 'latest'}"
+    if dest.exists():
+        if image({"rootfs": dest})["id"] != info["Id"]:
+            raise SystemExit(f"{dest} holds another image than {ref} ({info['Id']}); remove it or retag")
+        return dest
+    tmp = Path(tempfile.mkdtemp(prefix=f".{dest.name}.", dir=engines))
+    cid = docker("create", ref)
+    try:
+        with subprocess.Popen(["docker", "export", cid], stdout=subprocess.PIPE) as src:
+            subprocess.run(["tar", "-x", "--no-same-owner", "-C", str(tmp)], stdin=src.stdout, check=True)
+        if src.returncode:
+            raise SystemExit(f"docker export {cid} failed with {src.returncode}")
+    finally:
+        docker("rm", cid)
+    config = info["Config"]
+    (tmp / SIDECAR).write_text(json.dumps({
+        "image": ref, "id": info["Id"], "env": config.get("Env") or [],
+        "entrypoint": (config.get("Entrypoint") or []) + (config.get("Cmd") or []),
+        "exported_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}, indent=2) + "\n")
+    tmp.chmod(0o755)
+    tmp.rename(dest)
+    return dest
+
+
+def main(argv_: list[str] | None = None) -> int:
+    p = argparse.ArgumentParser(prog="nous-serve", description=__doc__.split("\n\n")[0])
+    sub = p.add_subparsers(dest="cmd", required=True)
+    for name in ("run", "argv"):
+        s = sub.add_parser(name)
+        s.add_argument("spec")
+        s.add_argument("--port", type=int, required=True)
+        s.add_argument("--host", default="127.0.0.1")
+    sub.add_parser("identity").add_argument("spec")
+    e = sub.add_parser("export")
+    e.add_argument("image")
+    e.add_argument("--engines", type=Path, default=ENGINES)
+    a = p.parse_args(argv_)
+    try:
+        if a.cmd == "export":
+            print(export(a.image, a.engines))
+            return 0
+        spec = load(a.spec)
+        if a.cmd == "identity":
+            print(json.dumps(identity(spec), indent=2))
+        elif a.cmd == "argv":
+            print(json.dumps(argv(spec, a.port, a.host)))
+        else:
+            cmd = argv(spec, a.port, a.host)
+            os.execv(cmd[0], cmd)
+    except (SpecError, OSError) as exc:
+        print(f"nous-serve: {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

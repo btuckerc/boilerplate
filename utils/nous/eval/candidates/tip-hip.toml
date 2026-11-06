@@ -1,0 +1,8 @@
+# llama.cpp 61d447234, HIP (ROCm 10.0), production preset.
+label = "tip-hip"
+engine = "/home/tux/.local/opt/llama-61d447234-hip/bin/llama-server"
+preset = "/home/tux/.config/llama/models.ini"
+# HIP sees only the R9700 as ROCm0; the preset's Vulkan device names do not apply.
+[overrides]
+device = "ROCm0"
+device-draft = "ROCm0"

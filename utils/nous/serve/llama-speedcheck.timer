@@ -1,0 +1,11 @@
+[Unit]
+Description=Probe production decode speed every 15 minutes
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=15min
+AccuracySec=1min
+Unit=llama-speedcheck.service
+
+[Install]
+WantedBy=timers.target

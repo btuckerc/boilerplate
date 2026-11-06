@@ -1,0 +1,283 @@
+# Mistakes that cost a run or put production at risk, and what now stops each
+# from recurring. tests/test_ledger.py checks both directions: every guard named
+# here declares the mistake (guards.py `mistakes=`), every guard that declares a
+# mistake is named here, and every test exists (bare file names are in
+# eval/tests, paths with a slash are relative to utils/nous). A new mistake gets
+# an entry, a guard or a regression test (or both), in the same change that fixes it.
+
+[[mistake]]
+id = "M1"
+what = "VRAM was read from a hard-coded card number; a reboot renumbered the cards"
+guards = ["G-vram-sysfs"]
+tests = ["test_guards.py::test_vram_sysfs_needs_exactly_one_card"]
+
+[[mistake]]
+id = "M2"
+what = "A systemd user unit's PATH lacked ~/.local/bin tools and the mise Python"
+guards = ["G-unit-path"]
+tests = ["test_guards.py::test_unit_path_reports_missing_tools", "test_build.py::test_build_unit_uses_the_unit_path"]
+
+[[mistake]]
+id = "M3"
+what = "A long job died with its terminal and could not resume"
+guards = []
+tests = ["test_runner.py::test_errors_fail_the_run_and_resume_retries_only_them", "test_build.py::test_build_unit_uses_the_unit_path"]
+
+[[mistake]]
+id = "M4"
+what = "Completion was inferred from a stale log line of an earlier run"
+guards = []
+tests = ["test_store.py::test_done_belongs_to_its_run"]
+
+[[mistake]]
+id = "M5"
+what = "A lease runtime was underestimated and results buffered in memory were lost"
+guards = []
+tests = ["test_runner.py::test_lease_runtime_covers_every_block", "test_store.py::test_torn_line_is_skipped_and_isolated"]
+
+[[mistake]]
+id = "M6"
+what = "The reasoning parser swallowed the answer: finish=stop, empty content, scored as a wrong answer"
+guards = []
+tests = ["test_ctx.py::test_reasoning_leak_flagged_and_counted", "test_runner.py::test_reasoning_leak_fails_the_run"]
+
+[[mistake]]
+id = "M7"
+what = "An LCB pass rate hid that most failures were truncations at the token cap"
+guards = []
+tests = ["test_compare.py::test_lcb_summary_reports_truncation_and_missing_code"]
+
+
+[[mistake]]
+id = "M9"
+what = "A candidate download filled the root filesystem"
+guards = ["G-disk"]
+tests = ["test_guards.py::test_disk_rejects_the_root_filesystem"]
+
+[[mistake]]
+id = "M10"
+what = "A preset or driver changed between the blocks of one comparison"
+guards = []
+tests = ["test_runner.py::test_plan_snapshot_survives_candidate_edits"]
+
+[[mistake]]
+id = "M11"
+what = "A model was promoted on a dozen problems, inside the noise"
+guards = []
+tests = ["test_stats.py::test_small_samples_are_inconclusive", "test_build.py::test_promote_refuses_failing_evidence"]
+
+[[mistake]]
+id = "M12"
+what = "Production ran an outdated radiance release while upstream fixed RDNA4 kernels"
+guards = ["G-engine-age"]
+tests = ["test_guards.py::test_engine_age_warns_when_production_lags", "test_guards.py::test_engine_age_reports_latest_image"]
+
+[[mistake]]
+id = "M13"
+what = "A candidate was compared with a baseline measured on another day"
+guards = []
+tests = ["test_compare.py::test_cross_run_label_refused"]
+
+[[mistake]]
+id = "M14"
+what = "A multi-line shell string passed to the lease broke its argument parsing"
+guards = []
+tests = ["test_runner.py::test_lease_argv_is_an_argv_in_llama_slice"]
+
+[[mistake]]
+id = "M15"
+what = "GPU runtime power management suspended the card and evicted the model"
+guards = ["G-runtime-pm"]
+tests = ["test_guards.py::test_runtime_pm_requires_on"]
+
+[[mistake]]
+id = "M16"
+what = "Benchmarks ran beside CPU-heavy jobs and on the wrong CPUs"
+guards = ["G-lease-cpuset", "G-load"]
+tests = ["test_guards.py::test_lease_cpuset_checks_the_process_affinity", "test_guards.py::test_load_warns_when_busy"]
+
+[[mistake]]
+id = "M17"
+what = "Scratch data on tmpfs plus a loaded host ran out of memory"
+guards = ["G-memory"]
+tests = ["test_guards.py::test_memory_rejects_tmpfs"]
+
+[[mistake]]
+id = "M18"
+what = "An unreadable production model mount broke nous-serve at start"
+guards = ["G-models-readable"]
+tests = ["test_guards.py::test_models_readable_checks_serve_spec_mounts"]
+
+[[mistake]]
+id = "M19"
+what = "Vendor performance claims were taken as evidence"
+guards = []
+tests = ["test_build.py::test_promote_requires_a_same_session_compare"]
+
+[[mistake]]
+id = "M20"
+what = "Benchmark flags drifted from the production preset (bench.py hard-coded draft-mtp n3, ctx 65536, Vulkan1)"
+guards = []
+tests = ["test_candidate.py::test_incumbent_is_derived_from_the_live_unit", "test_candidate.py::test_derive_preset_keeps_global_and_production_section_only"]
+
+[[mistake]]
+id = "M21"
+what = "The LCB grader ran model-written code unsandboxed, with network and home access"
+guards = ["G-sandbox"]
+tests = ["test_workloads_acc_vision.py::test_sandbox_python_and_limits"]
+
+[[mistake]]
+id = "M23"
+what = "GPU leases ran in system.slice, on other CPUs than production's llama.slice"
+guards = ["G-lease-cpuset"]
+tests = ["test_guards.py::test_lease_cpuset_checks_the_process_affinity", "test_runner.py::test_lease_argv_is_an_argv_in_llama_slice"]
+
+[[mistake]]
+id = "M24"
+what = "The sandbox set RLIMIT_NPROC before entering its namespace: EAGAIN for a busy user"
+guards = ["G-sandbox"]
+tests = ["test_workloads_acc_vision.py::test_sandbox_python_and_limits"]
+
+[[mistake]]
+id = "M25"
+what = "A worker-written ledger mapped mistakes to unrelated guards and file-level tests"
+guards = []
+tests = ["test_ledger.py::test_ledger_matches_guards_and_tests"]
+
+[[mistake]]
+id = "M26"
+what = "Workload data was missing (LCB pool not fetched) and the run only found out after building its plan; under a lease that is after production stopped"
+guards = []
+tests = ["test_runner.py::test_missing_data_fails_before_taking_the_gpu"]
+
+[[mistake]]
+id = "M27"
+what = "A lease teardown must kill a foreground candidate server before production restarts"
+guards = []
+tests = ["test_runner.py::test_sigterm_kills_a_command_candidate_before_exiting"]
+
+[[mistake]]
+id = "M28"
+what = "The lease CPU guard read cpuset files from the lease's own cgroup; llama.slice does not delegate cpuset, so the files do not exist and the first real lease failed. Its test passed on a fixture tree built from the same wrong belief"
+guards = ["G-reserved-cpus"]
+tests = ["test_guards.py::test_reserved_cpus_probe_reads_this_hosts_real_layout", "test_guards.py::test_lease_cpuset_checks_the_process_affinity"]
+
+[[mistake]]
+id = "M29"
+what = "The lease checked free VRAM once, the moment production stopped; the driver was still releasing 6 GiB, so the lease failed"
+guards = ["G-vram-free"]
+tests = ["test_guards.py::test_vram_free_waits_for_the_driver_to_release_production"]
+
+[[mistake]]
+id = "M30"
+what = "longctx sized its filler with /tokenize bodies written from memory; the llama.cpp router wants `model` and answers an unknown body with an empty token list, so every depth failed on the first real run"
+guards = []
+tests = ["test_workloads_text.py::test_token_counts_work_on_llama_and_vllm"]
+
+[[mistake]]
+id = "M31"
+what = "rows kept scores but not the replies behind them, so a longctx recall of 0 on production could not be explained without another GPU lease"
+guards = []
+tests = ["test_runner.py::test_a_score_can_be_explained_from_the_run_directory"]
+
+[[mistake]]
+id = "M32"
+what = "compare called any run with a done.json complete, even status failed, and ignored the incumbent's errors: a failed second ABBA block left surviving rows that could pass (council S-01)"
+guards = []
+tests = ["test_compare.py::test_a_run_that_did_not_finish_ok_never_passes", "test_compare.py::test_errors_in_a_prevent_a_pass"]
+
+[[mistake]]
+id = "M33"
+what = "the percentile bootstrap collapses to [0, 0] when every item agrees, so three matching vision items certified non-inferiority within 4 points (council S-03, O-02)"
+guards = []
+tests = ["test_stats.py::test_agreeing_items_need_enough_of_them_to_pass"]
+
+[[mistake]]
+id = "M34"
+what = "speed came from llama.cpp's server timings but from client arrival times on vLLM: two engines measured at different boundaries (council A-02, O-07)"
+guards = []
+tests = ["test_ctx.py::test_timings_are_measured_at_the_client_on_every_engine"]
+
+[[mistake]]
+id = "M35"
+what = "resume rebuilt items from mutable data and never re-checked candidate identity, so a re-fetch or a rebuilt engine could join an old run's rows (council A-05, S-06)"
+guards = []
+tests = ["test_runner.py::test_resume_refuses_items_that_changed_since_the_run_started", "test_runner.py::test_resume_refuses_a_data_file_that_changed_under_the_same_items", "test_runner.py::test_resume_refuses_a_candidate_that_changed_since_the_run_started"]
+
+[[mistake]]
+id = "M36"
+what = "promote accepted a speed-only t2 (even a --workloads subset) with no accuracy run, against an incumbent that may no longer be production (council S-02, O-05)"
+guards = []
+tests = ["test_build.py::test_promote_needs_speed_and_accuracy_evidence", "test_build.py::test_promote_refuses_a_workload_subset", "test_build.py::test_promote_refuses_evidence_against_an_older_production"]
+
+[[mistake]]
+id = "M37"
+what = "padding the rate interval by 3/n on both sides stopped small item sets from ever failing: three of seven images misread was 'inconclusive' (council O-15)"
+guards = []
+tests = ["test_stats.py::test_a_clear_loss_on_a_small_item_set_still_fails"]
+
+[[mistake]]
+id = "M38"
+what = "concurrency caught failed requests and scored them as a lower ok_fraction with a shorter makespan, so an engine that dropped requests under load could pass (council A-08)"
+guards = []
+tests = ["test_workloads_text.py::test_a_request_failing_under_load_fails_the_item"]
+
+[[mistake]]
+id = "M39"
+what = "promote compared plan dictionaries, not manifests: a binary rebuilt at the same path between or after the evidence runs was promoted unmeasured (council S-08)"
+guards = []
+tests = ["test_build.py::test_promote_refuses_a_candidate_rebuilt_after_it_was_measured"]
+
+[[mistake]]
+id = "M40"
+what = "the vLLM radiance image turns on lossy Cactus draft acceptance by default (RADIANCE_CACTUS_DELTA=0.5, not in the image ENV), so its first speed numbers compared lossy against llama.cpp's lossless drafting; and --set of an env knob missing from start would have been appended as a flag. Env defaults that change outputs now sit in start, and an env key absent from start is refused"
+guards = []
+tests = ["test_candidate.py::test_command_candidates_take_overrides_in_their_argv"]
+
+[[mistake]]
+id = "M41"
+what = "the candidate identity included llama-server --version's timestamped log line, so the resume/manifest check (M35) failed the last ABBA block of the first real t2 run as 'candidate changed'; the check had only been tested with a fake manifest"
+guards = []
+tests = ["test_candidate.py::test_an_unchanged_engine_has_the_same_manifest_every_time"]
+
+[[mistake]]
+id = "M42"
+what = "both vLLM engines died mid-block in the first real t2 run (encoder out of VRAM on a 2880x1800 screenshot); the block carried on, 264 later items failed in milliseconds, and the run named no cause until the server log was searched"
+guards = []
+tests = ["test_runner.py::test_an_engine_that_dies_mid_block_fails_the_block_and_names_its_log"]
+
+[[mistake]]
+id = "M43"
+what = "the vLLM candidates copied the fork quickstart's --skip-mm-profiling, which goes with images off, and turned images on: no VRAM was reserved for the vision encoder at 0.98 utilisation, so a large screenshot killed the engine. Changing one flag of an upstream recipe needs a check of the flags that assumed it"
+guards = []
+tests = ["test_candidate.py::test_serve_candidates_check_encoder_reservation"]
+
+[[mistake]]
+id = "M44"
+what = "vLLM decode on the R9700 runs at one of two speeds per process, ~22% apart (6 of 18 blocks slow, once switching mid-process; ROCm/ROCm#6347), and the first full t2 averaged both states into one A/A of 0.80. One stable rerun after pinning vLLM off the E-cores was taken as the cause and written into docs and candidates; three more pinned runs showed the same split with no CPU contention, memory spill or power-profile change. A fix needs repeated A/As, not one. Now A/A beyond 2x tolerance blocks a pass, and ROCm candidates set GPU_MAX_HW_QUEUES=1 (upstream's mitigation; no cost here, not shown to prevent it)"
+guards = []
+tests = ["test_compare.py::test_a_candidate_running_in_two_states_cannot_pass"]
+
+[[mistake]]
+id = "M45"
+what = "toolcall offered 8 tools while its session histories showed 73 calls to wait, task and web_search; both vLLM arms copied that history 6 times in 100 and were scored invalid, while llama.cpp (whose tool grammar I expect limits names to the offered set; not checked) never did. An eval fixture must not show the model actions it cannot take"
+guards = []
+tests = ["test_workloads_text.py::test_a_checkpoint_whose_history_calls_an_unoffered_tool_is_dropped"]
+
+[[mistake]]
+id = "M46"
+what = "the first production-shaped vLLM start under nous-serve's read-only root died at the R4D_HYBRID import ('No module named aiter.ops.triton.unified_attention'): aiter JIT-builds into its package directory or AITER_JIT_DIR but only imports from the latter when set. nous-serve now points AITER_JIT_DIR into the writable home for every spec, instead of one spec carrying it"
+guards = []
+tests = ["serve/test_serve.py::test_jit_caches_go_to_the_writable_home_unless_the_spec_says_otherwise"]
+
+[[mistake]]
+id = "M47"
+what = "llama-speedcheck's first threshold (150 t/s) came from an 800-token thinking-on smoke at 168 t/s; its own 512-token greedy probe decodes 142-143 t/s on every healthy process, so as installed it would have restarted healthy production twice an hour. Calibrated on production before the timer could act (127, the midpoint). A monitor's threshold comes from the monitor's own probe on the target, never from another benchmark"
+guards = []
+tests = ["serve/test_serve.py::test_the_hourly_budget_survives_across_runs"]
+
+[[mistake]]
+id = "M48"
+what = "the first speedcheck draft restarted llama.service from a timer without the lease lock or a fresh state check, so a restart could land mid-lease or undo an intentional stop (audit BLOCK). Any automatic restarter takes /run/llama-yield.lock non-blocking and re-reads llama's invocation, enablement, leases and Bonsai under it"
+guards = []
+tests = ["serve/test_serve.py::test_no_restart_while_a_lease_caller_holds_the_lock", "serve/test_serve.py::test_no_restart_when_production_changed_or_the_gpu_is_claimed"]

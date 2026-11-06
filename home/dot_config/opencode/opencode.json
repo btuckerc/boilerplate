@@ -5,13 +5,13 @@
   "provider": {
     "nous": {
       "npm": "@ai-sdk/openai-compatible",
-      "name": "Nous llama.cpp",
+      "name": "Nous vLLM",
       "options": {
         "baseURL": "http://100.83.125.83:8080/v1"
       },
       "models": {
-        "Qwen3.8-27B-RVN-Heretic-Q4_K_M": {
-          "name": "Nous Qwen 3.8 27B Heretic RVN Q4_K_M",
+        "Qwen3.8-27B-Swift-Heretic-MXFP4": {
+          "name": "Nous Qwen 3.8 27B Swift Heretic MXFP4",
           "limit": {
             "context": 163840,
             "output": 8192
@@ -20,65 +20,6 @@
           "modalities": {
             "input": ["text", "image"],
             "output": ["text"]
-          },
-          "reasoning": true,
-          "tool_call": true
-        },
-        "Qwen3.8-27B-UD-Q4_K_XL": {
-          "name": "Nous Qwen 3.8 27B UD-Q4_K_XL",
-          "limit": {
-            "context": 163840,
-            "output": 8192
-          },
-          "attachment": true,
-          "modalities": {
-            "input": ["text", "image"],
-            "output": ["text"]
-          },
-          "reasoning": true,
-          "tool_call": true
-        },
-        "Nemotron-9B-OpenCode.Q6_K": {
-          "name": "Nous Nemotron 9B (experimental tools)",
-          "limit": {
-            "context": 16384,
-            "output": 4096
-          },
-          "reasoning": true,
-          "tool_call": true
-        },
-        "Qwen3.5-9B-Q5_K_M": {
-          "name": "Nous Qwen 3.5 9B",
-          "limit": {
-            "context": 16384,
-            "output": 4096
-          },
-          "reasoning": true,
-          "tool_call": true
-        },
-        "Ornith-1.5-9B-Q5_K_M": {
-          "name": "Nous Ornith 1.5 9B",
-          "limit": {
-            "context": 16384,
-            "output": 4096
-          },
-          "reasoning": true,
-          "tool_call": true
-        },
-        "gemma-4-12B-it-Q4_0": {
-          "name": "Nous Gemma 4 12B",
-          "limit": {
-            "context": 16384,
-            "output": 4096
-          },
-          "reasoning": true,
-          "tool_call": true
-        },
-        "Qwen3.5-4B-Q5_K_M": {
-          "name": "Nous Qwen 3.5 4B (experimental)",
-          "limit": {
-            "context": 16384,
-            "output": 4096
           },
           "reasoning": true,
           "tool_call": true

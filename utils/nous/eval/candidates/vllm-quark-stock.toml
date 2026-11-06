@@ -1,0 +1,11 @@
+# Stock Qwen3.8-27B, AMD Quark AWQ MXFP4. Shares production's vLLM serving contract.
+# ROCm can decode in two states (~22% apart; ROCm/ROCm#6347). One HW queue is upstream's
+# mitigation; it costs nothing here but has not been shown to prevent the slow state (ledger M44).
+kind = "serve"
+label = "vllm-quark-stock"
+spec = "/etc/nous-inference/serve.toml"
+ready_timeout_s = 1800
+
+[overrides]
+model = "/models/Qwen3.8-27B-Quark-AWQ-MXFP4"
+quantization = "quark"

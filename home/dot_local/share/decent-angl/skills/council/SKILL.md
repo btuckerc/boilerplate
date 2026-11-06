@@ -57,7 +57,7 @@ point that round's seats there.
 - `packet.md`, frozen after round 1: the ask, acceptance criteria, what is out
   of scope, the tree id, the checks with raw output, and what stays untested.
   Pointers are labelled as pointers. Never include your reasoning, earlier
-  reviews or scores, or secrets.
+  reviews or scores, the target, or secrets.
 - Size: about 400 changed lines of one concern is the human-review limit
   (unverified for seats). For larger or mixed work, tell the user and suggest
   splitting the work itself; never clip a diff silently.
@@ -85,13 +85,14 @@ intent, on any supported path. nit = anything else, including extra scope.
 Score with one decimal, e.g. 8.6. The integer is the band: 10 nothing to fix
 or cut; 9 ship, nits only; 7-8 shoulds open; 5-6 a blocker; below 5 wrong
 approach. The tenth ranks the work within its band. APPROVE means no blocker
-or should.
+or should. In raise, name the change that would most raise your score, or
+none.
 ```
 
 Pass this `outputSchema`:
 
 ```json
-{"type":"object","required":["score","verdict","top_risk","findings"],"properties":{"score":{"type":"number","minimum":0,"maximum":10},"verdict":{"enum":["APPROVE","CHANGES"]},"top_risk":{"type":"string"},"findings":{"type":"array","items":{"type":"object","required":["id","severity","location","claim","fix"],"properties":{"id":{"type":"string"},"status":{"enum":["new","resolved","open"]},"severity":{"enum":["blocker","should","nit"]},"location":{"type":"string"},"claim":{"type":"string"},"fix":{"type":"string"}}}}}}
+{"type":"object","required":["score","verdict","top_risk","raise","findings"],"properties":{"score":{"type":"number","minimum":0,"maximum":10},"verdict":{"enum":["APPROVE","CHANGES"]},"top_risk":{"type":"string"},"raise":{"type":"string"},"findings":{"type":"array","items":{"type":"object","required":["id","severity","location","claim","fix"],"properties":{"id":{"type":"string"},"status":{"enum":["new","resolved","open"]},"severity":{"enum":["blocker","should","nit"]},"location":{"type":"string"},"claim":{"type":"string"},"fix":{"type":"string"}}}}}}
 ```
 
 Check every finding yourself; you set the final severity. Agreement between
@@ -107,19 +108,26 @@ disposition, evidence.
 
 **Next round.** Hold one while a seat has an open blocker or should or a fix
 to confirm, while behavior changed after it approved, or while it is below a
-target and has named what would raise it. Nit fixes, and wording fixes that
-keep the meaning, need no round. Message only those seats' existing agents
-(`write agent://<id>`) with the new tree id, `delta-rN.patch`, fresh check
-output and only their own ledger rows. Each marks its ids `resolved` or
-`open`, raises new findings on changed code or any blocker or should it
-missed in scope, and re-scores, naming the ids behind any change.
+target and its raise names a change you accept. Nit fixes, and wording fixes
+that keep the meaning, need no round. Message only those seats' existing
+agents (all seats when there is a target) via `write agent://<id>` with the
+new tree id, `delta-rN.patch`, fresh check output and only their own ledger
+rows. Each marks its ids `resolved` or `open`, raises new findings on changed
+code or any blocker or should it missed in scope, and re-scores, naming the
+ids behind any change.
+
+A score outside the band its own open findings set, or APPROVE with a blocker
+or should open, goes back to the seat once with the mismatch; if it stands,
+that seat is not satisfied.
 
 **Target.** "push a 9.5" or "to N" needs every seat at N or above; "+0.2"
 needs every seat 0.2 above its own round-1 score (10 counts as met). A seat
 re-scores in the context where it judged the earlier work, so the step is a
 comparison, not a fresh guess. A fix, evidence the seat accepts, or a ruling
-can move a score; persuasion cannot. Ask a seat below target with nothing
-open, once, what would raise it; its answer is a finding like any other.
+can move a score; persuasion cannot. A raise is a finding like any other.
+Seats never learn that a target exists: no packet, brief or message names it,
+the stop rule, the budget, a seat's distance from it, or another seat's
+score, and every round asks every seat the same thing.
 
 **Tiebreak.** A blocker or should the seat still holds after answering your
 counter-evidence once, or one the seats disagree on, goes to one fresh

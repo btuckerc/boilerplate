@@ -42,6 +42,16 @@ design = "ab"
 [tiers.t3.workloads]
 lcb = {}
 
+[tiers.tune]  # one-factor tuning of production: one candidate file per setting, ABBA, many arms per run
+budget_s = 1800
+design = "abba"
+[tiers.tune.workloads]
+speed = {items_tier = "t2"}
+longctx = {items_tier = "t2", depths = [32768, 131072]}
+concurrency = {items_tier = "t2"}
+vision = {items_tier = "t1"}
+toolcall = {items_tier = "t1"}
+
 [tiers.selftest]  # the harness itself, on a CPU candidate (candidates/cpu-selftest.toml, --no-lease)
 budget_s = 600
 design = "abba"

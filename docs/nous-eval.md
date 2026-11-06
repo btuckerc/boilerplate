@@ -65,7 +65,8 @@ engine, retagged image), so one run never mixes two versions of either.
 |---|---|---|---|
 | t1 | ab | speed, longctx 32K, vision, toolcall, lcb 10 | does it boot and work at all |
 | t2 | abba | speed ×3, longctx 32K-160K, replay ×3, concurrency, vision, grounding, toolcall | promotion evidence |
-| canary | abba | trimmed t2 | weekly origin/master check |
+| canary | abba | trimmed t2 | weekly radiance release check |
+| tune | abba | speed, longctx 32K/128K, concurrency, vision, toolcall 10 | one-factor tuning: one candidate file per setting, many arms in one run |
 | t3 | ab | lcb 258 medium+hard, 16K cap | coding accuracy, non-inferiority |
 | selftest | abba | speed, lcb (short) | harness check on CPU |
 
@@ -182,16 +183,21 @@ own LCB discordance (an A/A on a subset) to size reps.
 reads the image tag documented in its release notes, exports it with
 `/usr/local/bin/nous-serve export`, writes a reusable candidate under
 `$NOUS_EVAL_ROOT/canary/candidates/`, and runs the `canary` tier against the
-live incumbent. No llama.cpp build is part of the production canary.
+live incumbent. If that passes it runs `t3` against the incumbent too, so a
+release reaches Tucker with the full promotion evidence. A release it has
+already measured, or the one production runs, is skipped in seconds. No
+llama.cpp build is part of the production canary.
 
-Exact flow:
+`nous-eval-canary.timer` (user unit, Sundays 03:00) runs it. Install once:
 
 ```sh
-./nous-eval canary
-# Read Candidate spec and run ID from the output.
-./nous-eval run t3 --incumbent -c /srv/models/.eval/canary/candidates/radiance-VERSION.toml
-./nous-eval promote radiance-VERSION --run CANARY_RUN --run T3_RUN
+install -m 0644 utils/nous/eval/systemd/nous-eval-canary.{service,timer} ~/.config/systemd/user/
+systemctl --user daemon-reload && systemctl --user enable --now nous-eval-canary.timer
 ```
+
+The result is in `/srv/models/.eval/canary/radiance-VERSION.json` and
+`latest-{canary,t3}.md`; the printed next step is
+`./nous-eval promote radiance-VERSION --run CANARY_RUN --run T3_RUN`.
 
 `promote` checks both same-incumbent runs and prints reviewed steps to update
 `utils/nous/serve/production.toml` and `/etc/nous-inference/serve.toml`, then

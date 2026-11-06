@@ -212,6 +212,22 @@ def test_missing_data_fails_before_taking_the_gpu(make_run, fake_workload, monke
     assert leases == []
 
 
+def test_a_candidate_model_production_does_not_use_is_checked_before_the_lease(make_run, monkeypatch, tmp_path, capsys):
+    """The host guards see the run's plan, not only production (ledger M18, M49)."""
+    from nevl import guards
+    run = make_run()
+    missing = {"kind": "serve", "label": "other", "spec": {"mounts": {"/models": str(tmp_path)},
+                                                          "args": ["--model", "/models/absent"]}}
+    run.write_json("plan.json", {**run.plan, "lease": True,
+                                 "candidates": {**run.plan["candidates"], "other": missing}})
+    leases = []
+    monkeypatch.setattr(guards, "REGISTRY", {"G-models-readable": guards.REGISTRY["G-models-readable"]})
+    monkeypatch.setattr(runner, "in_lease", lambda: False)
+    monkeypatch.setattr(runner.subprocess, "run", lambda *a, **k: leases.append(a))
+    assert runner.start(run) == 1
+    assert leases == [] and "absent" in capsys.readouterr().out
+
+
 CHILD = """
 import subprocess, sys, time, types
 from pathlib import Path

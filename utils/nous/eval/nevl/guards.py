@@ -43,6 +43,7 @@ class Host:
     system_root: Path = Path("/")
     unit_path: str = UNIT_PATH
     config: dict = field(default_factory=lambda: tomllib.loads(CONFIG.read_text())["guards"])
+    plan: dict | None = None  # the run about to take the GPU; None: production only
 
 
 @dataclass
@@ -154,16 +155,24 @@ def _fstype(mounts: Path, path: Path) -> str:
 
 
 
-@guard("G-models-readable", mistakes=("M18",))
+@guard("G-models-readable", mistakes=("M18", "M49"))
 def models_readable(host: Host):
-    spec = incumbent()["spec"]
-    paths = [Path(value) for value in spec["mounts"].values()]
-    for value in spec["args"]:
-        for inside, outside in spec["mounts"].items():
-            if value == inside or value.startswith(inside.rstrip("/") + "/"):
-                paths.append(Path(outside) / value[len(inside):].lstrip("/"))
-    bad = [str(path) for path in paths if not os.access(path, os.R_OK)]
-    return ("fail", f"unreadable spec model paths: {bad}") if bad else ("ok", "production spec mounts and model paths readable")
+    """Every model path the run's serve candidates mount (production's without a plan) is readable."""
+    candidates = (host.plan or {}).get("candidates", {}).values()
+    specs = [c["spec"] for c in candidates if c.get("kind") == "serve"]
+    if host.plan is None:
+        specs = [incumbent()["spec"]]
+    bad = set()
+    for spec in specs:
+        paths = [Path(value) for value in spec["mounts"].values()]
+        for value in spec["args"]:
+            for inside, outside in spec["mounts"].items():
+                if value == inside or value.startswith(inside.rstrip("/") + "/"):
+                    paths.append(Path(outside) / value[len(inside):].lstrip("/"))
+        bad |= {str(path) for path in paths if not os.access(path, os.R_OK)}
+    if bad:
+        return "fail", f"unreadable spec model paths: {sorted(bad)}"
+    return "ok", f"model paths of {len(specs)} serve spec(s) readable"
 
 
 @guard("G-engine-age", mistakes=("M12",))

@@ -97,3 +97,31 @@ def test_latest_radiance_release_derives_documented_image_tag():
     assert build.latest_radiance_release(payload) == {
         "version": "1.9.1", "image_tag": "1.9.1-rocm10.1",
         "image_ref": "ghcr.io/slybase/vllm-sly-radiance:1.9.1-rocm10.1"}
+
+
+@pytest.mark.parametrize("cand_ok, tiers_run", [(1.0, ["canary", "t3"]), (0.2, ["canary"])])
+def test_a_new_release_gets_t3_only_after_its_canary_passes(make_run, fake_workload, fake_server, monkeypatch,
+                                                            tmp_path, cand_ok, tiers_run):
+    from conftest import TIERS, command_candidate
+    from nevl.runner import plan_run
+    label = "radiance-9.9"
+    fake_workload.oks = {"incumbent": 1.0, label: cand_ok}
+    monkeypatch.setattr(build, "latest_radiance_release", lambda: {
+        "version": "9.9", "image_tag": "9.9-rocm", "image_ref": "ghcr.io/x/radiance:9.9-rocm"})
+    monkeypatch.setattr(build, "incumbent", lambda: {**command_candidate("incumbent"), "spec_source": "/spec.toml",
+                                                     "spec": {"rootfs": "/engines/vllm-sly-radiance-1.0"}})
+    monkeypatch.setattr(build.subprocess, "run", lambda *a, **k: type("R", (), {"stdout": "/engines/new\n"}))
+    monkeypatch.setattr(build, "load", lambda path: command_candidate(label))
+    tiers = []
+
+    def plan(tier, candidates):
+        tiers.append(tier)
+        planned = plan_run("tx", candidates, lease=False, port=18850, tiers=TIERS)
+        planned["run_id"] += f"-{len(tiers)}"
+        return planned
+    monkeypatch.setattr(build, "plan_run", plan)
+    monkeypatch.setattr(build, "start", lambda run: execute(run))
+    build.canary()
+    assert tiers == tiers_run
+    record = (tmp_path / "canary" / f"{label}.json").read_text()
+    assert ('"t3_run_id": null' in record) == (tiers_run == ["canary"])

@@ -1,5 +1,5 @@
 [Unit]
-Description=nous-eval canary: build llama.cpp origin/master, measure it against production
+Description=nous-eval canary: export the latest vLLM radiance release, measure it against production
 Documentation=file:///home/tux/src/boilerplate/docs/nous-eval.md
 
 [Service]

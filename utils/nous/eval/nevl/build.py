@@ -154,7 +154,8 @@ def latest_radiance_release(payload: dict | None = None) -> dict:
 
 
 def canary() -> int:
-    """Check latest radiance release, export its image, then measure it against production."""
+    """Check latest radiance release, export its image, measure it against production, and
+    when it passes, run t3 too, so a new release arrives with complete promotion evidence."""
     release = latest_radiance_release()
     production = incumbent()
     label = f"radiance-{release['version']}"
@@ -172,21 +173,26 @@ def canary() -> int:
     candidate_path.write_text(f'kind = "serve"\nlabel = "{label}"\nspec = "{production["spec_source"]}"\n'
                               f'ready_timeout_s = 1800\n\n[overrides]\nrootfs = "{rootfs}"\n')
     candidate = load(candidate_path)
-    run = store.Run.create(plan_run("canary", [production, candidate]))
-    status = start(run)
-    if not run.done():
-        return status or 1
-    report = compare(run, "incumbent", label)
-    text = write(run, report)
-    record.parent.mkdir(parents=True, exist_ok=True)
-    record.write_text(json.dumps({"image_ref": release["image_ref"], "run_id": run.run_id,
-                                  "verdict": report["verdict"], "candidate": str(candidate_path)},
-                                 indent=2) + "\n")
-    (record.parent / "latest.md").write_text(text)
-    print(text)
+    runs = {}
+    for tier in ("canary", "t3"):
+        run = store.Run.create(plan_run(tier, [production, candidate]))
+        runs[tier] = run.run_id
+        status = start(run)
+        if not run.done():
+            return status or 1
+        report = compare(run, "incumbent", label)
+        text = write(run, report)
+        record.parent.mkdir(parents=True, exist_ok=True)
+        record.write_text(json.dumps({"image_ref": release["image_ref"], "run_id": runs["canary"],
+                                      "t3_run_id": runs.get("t3"), "verdict": report["verdict"],
+                                      "candidate": str(candidate_path)}, indent=2) + "\n")
+        (record.parent / f"latest-{tier}.md").write_text(text)
+        print(text)
+        if tier == "canary" and report["verdict"] != "pass":
+            print(f"Candidate spec: {candidate_path}; canary did not pass, so t3 was not run.")
+            return status
     print(f"Candidate spec: {candidate_path}")
-    print(f"Next: `./nous-eval run t3 --incumbent -c {candidate_path}` then "
-          f"`./nous-eval promote {label} --run {run.run_id} --run T3_RUN`.")
+    print(f"Next: `./nous-eval promote {label} --run {runs['canary']} --run {runs['t3']}`.")
     return status
 
 

@@ -1,0 +1,6 @@
+# Standalone radiance engine with its own Qwen3.8-27B MXFP4 + DFlash2 container: an engine
+# comparison against production's vLLM radiance fork (spec: specs/radiance-quark.toml).
+kind = "serve"
+label = "radiance-quark"
+spec = "candidates/specs/radiance-quark.toml"
+ready_timeout_s = 1800

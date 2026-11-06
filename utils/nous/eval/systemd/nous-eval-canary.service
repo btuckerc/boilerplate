@@ -1,5 +1,5 @@
 [Unit]
-Description=nous-eval canary: export the latest vLLM radiance release, measure it against production
+Description=nous-eval canary and upstream watch: measure the latest vLLM radiance release, then check upstream models and engines
 Documentation=file:///home/tux/src/boilerplate/docs/nous-eval.md
 
 [Service]
@@ -7,6 +7,7 @@ Type=oneshot
 # The unit PATH from nevl/guards.py (UNIT_PATH): mise Python first, for Pillow.
 Environment=PATH=/home/tux/.local/share/mise/shims:/home/tux/.local/bin:/usr/local/bin:/usr/bin:/bin
 WorkingDirectory=%h/src/boilerplate/utils/nous/eval
-ExecStart=%h/src/boilerplate/utils/nous/eval/nous-eval canary
+ExecStart=-%h/src/boilerplate/utils/nous/eval/nous-eval canary
+ExecStart=%h/src/boilerplate/utils/nous/eval/nous-eval watch
 TimeoutStartSec=30h
 Nice=5

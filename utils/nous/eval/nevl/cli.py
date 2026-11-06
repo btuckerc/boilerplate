@@ -63,6 +63,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--here", action="store_true", help="build in this process")
 
     sub.add_parser("canary", help="export and measure latest radiance release")
+    sub.add_parser("watch", help="check upstream model and engine changes")
     p = sub.add_parser("promote", help="check evidence, print promotion steps")
     p.add_argument("label")
     p.add_argument("--run", action="append", required=True, dest="runs")
@@ -181,9 +182,14 @@ def cmd_build(args) -> int:
     return 0
 
 
+def cmd_watch(args) -> int:
+    from . import watch
+    return watch.run()
+
+
 COMMANDS = {"preflight": cmd_preflight, "run": cmd_run, "plan": cmd_plan, "resume": cmd_resume,
             "grade": cmd_grade, "show": cmd_show, "compare": cmd_compare, "ls": cmd_ls,
             "incumbent": cmd_incumbent, "fetch": cmd_fetch, "build": cmd_build,
-            "canary": lambda args: build.canary(),
+            "canary": lambda args: build.canary(), "watch": cmd_watch,
             "promote": lambda args: build.promote(args.label, args.runs),
             "rollback": lambda args: build.rollback()}

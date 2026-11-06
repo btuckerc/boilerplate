@@ -1,5 +1,5 @@
 [Unit]
-Description=Weekly nous-eval canary (a new radiance release takes the GPU for up to ~12 hours: canary, then t3)
+Description=Weekly nous-eval canary and upstream watch (a new radiance release takes the GPU for up to ~12 hours: canary, then t3)
 
 [Timer]
 # No Persistent=: a missed Sunday night must not take the GPU at boot, mid-day.

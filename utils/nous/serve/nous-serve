@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Serve an exported vLLM image under bwrap, described by a spec TOML.
+"""Serve an exported inference-engine image (vLLM radiance, standalone radiance) under bwrap.
 
 Production (`llama.service`) and nous-eval candidates run this same command, so
 an evaluation measures exactly what production serves:
@@ -19,7 +19,7 @@ Spec keys (all required except env and mounts):
     rootfs             an `export`ed directory under ENGINES
     served_model_name  the one model id clients send
     home               writable directory mounted at /root (compile caches)
-    args               `vllm serve` arguments; --host, --port, --served-model-name are added here
+    args               engine arguments after the image's command; --host, --port, --served-model-name are added here
     [mounts]           "/path/inside" = "/path/on/host", read-only
     [env]              added to the image's environment (spec wins over image and ROOT_RO_ENV)
 """
@@ -105,6 +105,12 @@ def identity(spec: dict) -> dict:
             "argv_sha256": hashlib.sha256(json.dumps(resolved).encode()).hexdigest(), "argv": resolved}
 
 
+def command(config: dict) -> list[str]:
+    """The image's command for spec args: as `docker run IMAGE ARGS`, args replace Cmd, so Cmd
+    is the command only when there is no Entrypoint (radiance's Cmd is `--help`)."""
+    return config.get("Entrypoint") or config.get("Cmd") or []
+
+
 def export(ref: str, engines: Path = ENGINES) -> Path:
     """Unpack an image into engines/<repo>-<tag>; an existing export of the same image id is reused."""
     def docker(*args, **kw):
@@ -130,7 +136,7 @@ def export(ref: str, engines: Path = ENGINES) -> Path:
     config = info["Config"]
     (tmp / SIDECAR).write_text(json.dumps({
         "image": ref, "id": info["Id"], "env": config.get("Env") or [],
-        "entrypoint": (config.get("Entrypoint") or []) + (config.get("Cmd") or []),
+        "entrypoint": command(config),
         "exported_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}, indent=2) + "\n")
     tmp.chmod(0o755)
     tmp.rename(dest)

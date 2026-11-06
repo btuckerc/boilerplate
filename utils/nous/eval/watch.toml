@@ -1,0 +1,30 @@
+# Sources checked by `nous-eval watch`.
+inbox = "/home/tux/hearth/inbox"
+
+[[hf_author]]
+author = "Qwen"
+why = "base model releases"
+
+[[hf_author]]
+author = "z-lab"
+why = "DFlash drafters"
+
+[[hf_author]]
+author = "slybase"
+why = "radiance-tuned quants of production's model"
+
+[[hf_author]]
+author = "StillDeadcode"
+why = "standalone radiance containers"
+
+[[github_release]]
+repo = "ggml-org/llama.cpp"
+why = "comparison and rollback engine"
+
+[[github_release]]
+repo = "SlyBase/vllm-sly-radiance"
+why = "production engine; the canary measures it"
+
+[[docker_tag]]
+repo = "stilldeadcode/radiance"
+why = "standalone radiance engine"

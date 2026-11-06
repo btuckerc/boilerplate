@@ -1,0 +1,22 @@
+# nous-serve spec: standalone radiance (C++/HIP, https://codeberg.org/StillDeadcode/radiance),
+# a comparison engine for production's vLLM radiance fork. Its own Qwen3.8-27B container:
+# AMD Quark AWQ-MXFP4 trunk, DFlash2 drafter merged in, vision tower bf16
+# (https://huggingface.co/StillDeadcode/qwen3.8-27b-mxfp4). Production's contract otherwise:
+# one card, 160K context, fp8 KV, 8 sequences, 2048-token steps, reasoning medium; prefix
+# caching and images (4096 tokens each, 16384 patches) are the engine's defaults.
+rootfs = "/srv/models/engines/radiance-1.17.0"
+served_model_name = "Qwen3.8-27B-Quark-MXFP4-radiance"
+home = "/srv/workspaces/radiance-cache/home"
+args = [
+  "--model", "/models/qwen3.8-27b-mxfp4/qwen3.8-27b-mxfp4.rad",
+  "--tp", "1", "--max-model-len", "163840", "--kv-cache-dtype", "fp8",
+  "--max-num-seqs", "8", "--max-num-batched-tokens", "2048",
+  "--reasoning-effort", "medium",
+]
+
+[mounts]
+"/models" = "/srv/models/rad"
+
+[env]
+HIP_VISIBLE_DEVICES = "0"
+GPU_MAX_HW_QUEUES = "1"  # every ROCm candidate (ledger M44)

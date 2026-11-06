@@ -287,3 +287,15 @@ id = "M49"
 what = "the serve cutover passed guards.Host(plan=…) from runner.start, but Host had no plan field and G-models-readable still checked production only; every runner test ran without a lease, so 92 passing tests hid a TypeError that killed the first real run before its lease. A lease-path test now runs start() into the real Host and guard, and the guard checks every serve candidate in the plan"
 guards = ["G-models-readable"]
 tests = ["test_runner.py::test_a_candidate_model_production_does_not_use_is_checked_before_the_lease"]
+
+[[mistake]]
+id = "M50"
+what = "nous-serve export stored an image command as Entrypoint + Cmd; harmless for vLLM radiance (no Cmd), but the standalone radiance image (Entrypoint radiance, Cmd --help) would have run `radiance --help <spec args>` and failed every block. Spec args replace Cmd as `docker run IMAGE ARGS` does; caught reading the first non-vLLM export before a lease"
+guards = []
+tests = ["serve/test_serve.py::test_spec_args_replace_the_image_cmd_as_docker_run_does"]
+
+[[mistake]]
+id = "M51"
+what = "a power loss at 05:16 UTC on 2026-11-06 killed a 15-hour tune sweep (3 of 12 blocks done) and its transient user unit; nothing would have resumed or reported it, so the sweep would have sat unnoticed until someone looked. rows.jsonl survived intact and resume continued it. The weekly watch now reports any started run with no done.json and no row for 6 hours as an open item with its resume command"
+guards = []
+tests = ["test_watch.py::test_a_started_run_that_went_quiet_without_finishing_is_open"]

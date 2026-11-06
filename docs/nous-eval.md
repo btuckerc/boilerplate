@@ -179,6 +179,31 @@ cannot pass until a stable rerun (ledger M44). Anything else is inconclusive:
 run more reps or a bigger tier. Before a t3 decision, measure the incumbent's
 own LCB discordance (an A/A on a subset) to size reps.
 
+## Staying current
+
+`./nous-eval watch` checks, without the GPU:
+
+- production's model repositories (from its spec and
+  `utils/nous/model-artifacts.json`): an upstream revision other than the
+  recorded one stays open every week until the artifacts file is updated;
+- new models from the Hugging Face authors in `watch.toml` (base models,
+  drafters, radiance quants), and new releases or image tags of the engines
+  listed there (llama.cpp, vLLM radiance, standalone radiance);
+- the canary's verdict for the latest vLLM radiance release;
+- runs that started but stopped without `done.json` (no row for 6 hours: a
+  power loss or a killed unit), with their `resume` command (ledger M51).
+
+Results go to `$NOUS_EVAL_ROOT/watch/latest.md`; a note in
+`/home/tux/hearth/inbox/` (`NOUS_EVAL_INBOX` overrides) is written only when
+something is new, open or could not be checked. The first run seeds the
+baseline and writes no note. The weekly canary unit runs the watch after the
+canary, also when the canary fails. Install or reinstall the unit:
+
+```sh
+install -m 0644 utils/nous/eval/systemd/nous-eval-canary.{service,timer} ~/.config/systemd/user/
+systemctl --user daemon-reload && systemctl --user enable --now nous-eval-canary.timer
+```
+
 `./nous-eval canary` checks the latest SlyBase/vllm-sly-radiance GitHub release,
 reads the image tag documented in its release notes, exports it with
 `/usr/local/bin/nous-serve export`, writes a reusable candidate under
@@ -222,7 +247,7 @@ Everything lives under `/srv/models/.eval` (`NOUS_EVAL_ROOT` overrides it):
 | `runs/<run_id>/compare.<a>.<b>.{json,md}` | verdicts |
 | `runs/<run_id>/presets/`, `specs/`, `logs/` | derived llama.cpp presets, resolved nous-serve specs, server logs |
 | `runs/<run_id>/inputs.json`, `replies.jsonl` | item hashes per workload; every reply |
-| `builds/`, `canary/`, `index.sqlite` | builds, canary records, run index |
+| `builds/`, `canary/`, `watch/`, `index.sqlite` | builds, canary records, upstream watch state and report, run index |
 
 ## Mistakes become guards
 

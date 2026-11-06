@@ -77,6 +77,11 @@ def test_a_rootfs_that_is_not_an_export_is_rejected(tmp_path, rootfs):
         serve.load(write_spec(tmp_path, rootfs))
 
 
+def test_spec_args_replace_the_image_cmd_as_docker_run_does():
+    assert serve.command({"Entrypoint": ["radiance"], "Cmd": ["--help"]}) == ["radiance"]
+    assert serve.command({"Entrypoint": None, "Cmd": ["vllm", "serve"]}) == ["vllm", "serve"]
+
+
 def test_identity_changes_with_any_knob_but_not_with_the_port(tmp_path, rootfs):
     spec = serve.load(write_spec(tmp_path, rootfs))
     tuned = {**spec, "env": {**spec["env"], "KNOB": "other"}}

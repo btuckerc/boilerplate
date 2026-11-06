@@ -1,5 +1,5 @@
 {
-  "date": "2026-10-09",
+  "date": "2026-11-06",
   "host": "nous",
   "models": [
     {
@@ -81,6 +81,83 @@
       "file": "Qwen3.5-4B-Q5_K_M.gguf",
       "bytes": 3143656608,
       "sha256": "8814232b85594dcd46c50e5b8b29324a7efe9e746edbe8a3d1df3d3fce7aad39"
+    },
+    {
+      "repository": "slybase/Swift-1.5-Qwen3.8-27B-heretic-MXFP4-GPTQ",
+      "revision": "3bb379dcbb1b5522ae28588df6292168f519df19",
+      "file": "/srv/models/vllm/Swift-1.5-Qwen3.8-27B-heretic-MXFP4-GPTQ/model-00001-of-00009.safetensors",
+      "bytes": 2542796952,
+      "sha256": "cec21a53517089f1b9708a77936465420f266482a45da26fd4c0dd596d609d08"
+    },
+    {
+      "repository": "slybase/Swift-1.5-Qwen3.8-27B-heretic-MXFP4-GPTQ",
+      "revision": "3bb379dcbb1b5522ae28588df6292168f519df19",
+      "file": "/srv/models/vllm/Swift-1.5-Qwen3.8-27B-heretic-MXFP4-GPTQ/model-00002-of-00009.safetensors",
+      "bytes": 1995666776,
+      "sha256": "7de6ea726d02843bf51100ca38c0f01c8728966d6a06da425c346a74d4ebe642"
+    },
+    {
+      "repository": "slybase/Swift-1.5-Qwen3.8-27B-heretic-MXFP4-GPTQ",
+      "revision": "3bb379dcbb1b5522ae28588df6292168f519df19",
+      "file": "/srv/models/vllm/Swift-1.5-Qwen3.8-27B-heretic-MXFP4-GPTQ/model-00003-of-00009.safetensors",
+      "bytes": 1999683720,
+      "sha256": "ccb5320def60ee3724194c1a00d7d445fcbcd9edb8b976cbecbc42bcbf180c00"
+    },
+    {
+      "repository": "slybase/Swift-1.5-Qwen3.8-27B-heretic-MXFP4-GPTQ",
+      "revision": "3bb379dcbb1b5522ae28588df6292168f519df19",
+      "file": "/srv/models/vllm/Swift-1.5-Qwen3.8-27B-heretic-MXFP4-GPTQ/model-00004-of-00009.safetensors",
+      "bytes": 1999768216,
+      "sha256": "a2423923c8dc4bf68ff1628854ed68a519bd2c296edffe0391e66488861d1cb7"
+    },
+    {
+      "repository": "slybase/Swift-1.5-Qwen3.8-27B-heretic-MXFP4-GPTQ",
+      "revision": "3bb379dcbb1b5522ae28588df6292168f519df19",
+      "file": "/srv/models/vllm/Swift-1.5-Qwen3.8-27B-heretic-MXFP4-GPTQ/model-00005-of-00009.safetensors",
+      "bytes": 1960930592,
+      "sha256": "a8c7741b16ea6d51487ee95ff629ceb35a14da3e4b3bf516345f657609aab87a"
+    },
+    {
+      "repository": "slybase/Swift-1.5-Qwen3.8-27B-heretic-MXFP4-GPTQ",
+      "revision": "3bb379dcbb1b5522ae28588df6292168f519df19",
+      "file": "/srv/models/vllm/Swift-1.5-Qwen3.8-27B-heretic-MXFP4-GPTQ/model-00006-of-00009.safetensors",
+      "bytes": 1971832584,
+      "sha256": "efeca663000286ffb7d3bc6879d3e818080684fb05d36c4915acdf7356070be9"
+    },
+    {
+      "repository": "slybase/Swift-1.5-Qwen3.8-27B-heretic-MXFP4-GPTQ",
+      "revision": "3bb379dcbb1b5522ae28588df6292168f519df19",
+      "file": "/srv/models/vllm/Swift-1.5-Qwen3.8-27B-heretic-MXFP4-GPTQ/model-00007-of-00009.safetensors",
+      "bytes": 1977746144,
+      "sha256": "d68fef187677308009b9aadc2e9bb0fec58bb28c388581c94f33263471da378d"
+    },
+    {
+      "repository": "slybase/Swift-1.5-Qwen3.8-27B-heretic-MXFP4-GPTQ",
+      "revision": "3bb379dcbb1b5522ae28588df6292168f519df19",
+      "file": "/srv/models/vllm/Swift-1.5-Qwen3.8-27B-heretic-MXFP4-GPTQ/model-00008-of-00009.safetensors",
+      "bytes": 2542796928,
+      "sha256": "a24be664519c328534485c015ed440a8b0070c221d50eb467b201bd1b13d6d22"
+    },
+    {
+      "repository": "slybase/Swift-1.5-Qwen3.8-27B-heretic-MXFP4-GPTQ",
+      "revision": "3bb379dcbb1b5522ae28588df6292168f519df19",
+      "file": "/srv/models/vllm/Swift-1.5-Qwen3.8-27B-heretic-MXFP4-GPTQ/model-00009-of-00009.safetensors",
+      "bytes": 1957571416,
+      "sha256": "5c9fca7d4e332dfae0a9689aa5fc406b364cbfdba0618ac884c22883d0ec4f0a"
+    },
+    {
+      "repository": "slybase/Swift-1.5-Qwen3.8-27B-heretic-MXFP4-GPTQ",
+      "revision": "3bb379dcbb1b5522ae28588df6292168f519df19",
+      "file": "/srv/models/vllm/Swift-1.5-Qwen3.8-27B-heretic-MXFP4-GPTQ/model_mtp.safetensors",
+      "bytes": 849400392,
+      "sha256": "1d8268aa85ace093a561e3e7b63b9d390dac1cd55a90cd55b5ec509c3c9da9fe"
+    },
+    {
+      "repository": "syvai/Qwen3.8-27B-DFlash2-W4A16",
+      "revision": "4d30ec736ffc6b8688dc2ae2b502d9b48bdec279",
+      "file": "/srv/models/vllm/Qwen3.8-27B-DFlash2-W4A16/model.safetensors",
+      "bytes": 1280633960,
+      "sha256": "ec26996e6a0745ab5edb857117220ce1e219ad524f71e6e149b703804947d8e7"
     }
   ],
   "sha256_verified_on_host": true

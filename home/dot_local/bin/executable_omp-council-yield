@@ -1,0 +1,254 @@
+#!/usr/bin/env python3
+"""Council seat accounting from the seats' own transcripts.
+
+add RUN LINES ID=ALONE/SHARED/DECLINED ... [ID ...]
+    RUN is the run directory name, <YYYY-MM-DD>-<slug>. Appends one yield.tsv
+    row per counted seat (model, rounds, cost and active time read from
+    <session dir>/<ID>.jsonl) and prints the report table. A bare ID (a
+    round-0 or tiebreak agent) is reported but not appended. A round starts at
+    the brief (round 1) and at each director message beginning "Council seat,
+    round N."; any other message (a bounce, a ruling) belongs to the current
+    round.
+summary [--last N]
+    Per seat on its current model: scored runs, verified findings alone in the
+    last N runs, cost per verified finding and declined share.
+"""
+from __future__ import annotations
+
+import argparse
+import csv
+import datetime as dt
+import json
+import os
+import re
+import sys
+from collections import defaultdict
+from pathlib import Path
+
+YIELD = Path.home() / ".local/state/council/yield.tsv"
+HEADER = ["date", "slug", "seat", "model", "lines", "rounds", "alone", "shared", "declined", "cost_usd", "active_s"]
+SEATS = {"architect": "sol", "fable": "fable", "astra": "astra", "opus": "opus"}
+COUNTS = re.compile(r"^(?P<id>[^=]+)=(?P<alone>\d+)/(?P<shared>\d+)/(?P<declined>\d+)$")
+RUN = re.compile(r"^(?P<date>\d{4}-\d{2}-\d{2})-(?P<slug>.+)$")
+ROUND = re.compile(r"Council seat, round (\d+)\.")
+
+
+class TranscriptError(Exception):
+    pass
+
+
+def _time(stamp: str) -> dt.datetime:
+    return dt.datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+
+
+def _cost(record: dict | None, path: Path, what: str) -> float:
+    total = ((record or {}).get("cost") or {}).get("total")
+    if isinstance(total, bool) or not isinstance(total, (int, float)):
+        raise TranscriptError(f"{path}: {what} has no recorded cost total; cost unknown")
+    return float(total)
+
+
+def read_seat(path: Path) -> dict:
+    """Model, per-round score/active time/cost and totals from one seat transcript.
+
+    Active time sums each stretch from a brief or director message to the
+    seat's last assistant turn before the next one."""
+    if not path.is_file():
+        raise TranscriptError(f"{path}: no such transcript")
+    agent = model = effort = None
+    rounds: dict[int, dict] = {}
+    current = folded = 0
+    stretch_start = stretch_end = None
+
+    def close_stretch() -> None:
+        if stretch_end is not None:
+            rounds[current]["seconds"] += (stretch_end - stretch_start).total_seconds()
+
+    for line in path.read_text().splitlines():
+        entry = json.loads(line)
+        kind = entry.get("type")
+        if kind == "session_init":
+            agent = entry.get("agent")
+        elif kind == "model_change":
+            model = entry.get("model")
+        elif kind == "thinking_level_change":
+            effort = entry.get("thinkingLevel")
+        elif kind == "message" and entry["message"].get("role") == "user" and not current:
+            current, stretch_start, stretch_end = 1, _time(entry["timestamp"]), None
+        elif kind == "custom_message" and entry.get("customType") == "irc:incoming" and current:
+            close_stretch()
+            text = (entry.get("details") or {}).get("message")
+            if not isinstance(text, str):
+                content = entry.get("content")
+                text = content.split("\n\n", 1)[-1] if isinstance(content, str) else ""
+            marker = ROUND.match(text.lstrip())
+            if marker:
+                current = int(marker[1])
+            else:
+                folded += 1
+            stretch_start, stretch_end = _time(entry["timestamp"]), None
+        elif kind == "message" and entry["message"].get("role") == "assistant":
+            message = entry["message"]
+            this = rounds.setdefault(current or 1, {"cost": 0.0, "score": None, "seconds": 0.0})
+            if current:
+                stretch_end = _time(entry["timestamp"])
+            this["cost"] += _cost(message.get("usage"), path, "an assistant turn")
+            for part in message.get("content") or []:
+                if part.get("type") == "toolCall" and part.get("name") == "yield":
+                    data = (part.get("arguments") or {}).get("data")
+                    score = data.get("score") if isinstance(data, dict) else None
+                    if isinstance(score, (int, float)) and not isinstance(score, bool):
+                        this["score"] = score
+        elif kind == "model_usage":
+            this = rounds.setdefault(current or 1, {"cost": 0.0, "score": None, "seconds": 0.0})
+            this["cost"] += _cost(entry.get("usage"), path, "a model_usage entry")
+    if current:
+        rounds.setdefault(current, {"cost": 0.0, "score": None, "seconds": 0.0})
+        close_stretch()
+    if agent not in SEATS:
+        raise TranscriptError(f"{path}: agent {agent!r} is not a council seat")
+    if not model or not current:
+        raise TranscriptError(f"{path}: no model or no brief recorded")
+    rounds = {n: r for n, r in rounds.items() if r["cost"] or r["seconds"] or r["score"] is not None}
+    return {
+        "seat": SEATS[agent],
+        "model": f"{model}:{effort}" if effort else model,
+        "rounds": rounds,
+        "cost": sum(r["cost"] for r in rounds.values()),
+        "seconds": sum(r["seconds"] for r in rounds.values()),
+        "folded": folded,
+    }
+
+
+def _duration(seconds: float) -> str:
+    minutes, rest = divmod(round(seconds), 60)
+    return f"{minutes}m{rest:02d}s"
+
+
+def _cell(r: dict) -> str:
+    return f"{'no score' if r['score'] is None else r['score']} · {_duration(r['seconds'])} · ${r['cost']:.2f}"
+
+
+def report(named: dict[str, dict], counted: set[str]) -> str:
+    out = []
+    seats = {i: s for i, s in named.items() if i in counted}
+    if seats:
+        numbers = sorted({n for s in seats.values() for n in s["rounds"]})
+        head = ["seat", "agent"] + [f"round {n}" for n in numbers] + ["total"]
+        out += ["| " + " | ".join(head) + " |", "|" + "---|" * len(head)]
+        for ident, s in seats.items():
+            cells = [_cell(s["rounds"][n]) if n in s["rounds"] else "" for n in numbers]
+            out.append(f"| {s['seat']} | {ident} | " + " | ".join(cells) + f" | {_duration(s['seconds'])} · ${s['cost']:.2f} |")
+        out.append("")
+    for ident, s in named.items():
+        if s["folded"]:
+            out.append(f"{ident}: {s['folded']} director message(s) without a round line folded into the current round")
+        if ident not in counted:
+            out.append(f"Unscored agent {ident} ({s['seat']}): {_duration(s['seconds'])} · ${s['cost']:.2f}")
+    total = sum(s["cost"] for s in named.values())
+    return "\n".join(out + [f"Total seat cost: ${total:.2f}"])
+
+
+def _rows() -> list[dict]:
+    if not YIELD.exists():
+        return []
+    with YIELD.open(newline="") as fh:
+        return list(csv.DictReader(fh, delimiter="\t"))
+
+
+def add(args: argparse.Namespace) -> int:
+    run = RUN.match(Path(args.run).name)
+    try:
+        if not run:
+            raise ValueError
+        dt.date.fromisoformat(run["date"])
+    except ValueError:
+        print(f"omp-council-yield: {args.run}: expected the run directory name <YYYY-MM-DD>-<slug>", file=sys.stderr)
+        return 2
+    date, slug = run["date"], run["slug"]
+    session = Path(args.session_dir) if args.session_dir else None
+    if session is None:
+        current = os.environ.get("PI_SESSION_FILE", "")
+        if not current.endswith(".jsonl"):
+            print("omp-council-yield: no --session-dir and PI_SESSION_FILE is unset", file=sys.stderr)
+            return 2
+        session = Path(current[: -len(".jsonl")])
+    counted, named = [], {}
+    try:
+        for spec in args.seats:
+            match = COUNTS.match(spec)
+            ident = match["id"] if match else spec
+            if "=" in spec and not match:
+                raise TranscriptError(f"{spec}: expected ID=ALONE/SHARED/DECLINED")
+            named[ident] = read_seat(session / f"{ident}.jsonl")
+            if match:
+                counted.append((ident, match))
+    except TranscriptError as exc:
+        print(f"omp-council-yield: {exc}", file=sys.stderr)
+        return 1
+    existing = {(r["date"], r["slug"], r["seat"].lower()) for r in _rows()}
+    new = []
+    for ident, match in counted:
+        s = named[ident]
+        if (date, slug, s["seat"]) in existing or any(n["seat"] == s["seat"] for n in new):
+            print(f"omp-council-yield: {date} {slug} {s['seat']} already has a row", file=sys.stderr)
+            return 1
+        new.append({
+            "date": date, "slug": slug, "seat": s["seat"], "model": s["model"], "lines": str(args.lines),
+            "rounds": str(len(s["rounds"])), "alone": match["alone"], "shared": match["shared"],
+            "declined": match["declined"], "cost_usd": f"{s['cost']:.2f}", "active_s": str(round(s["seconds"])),
+        })
+    if new and not args.dry_run:
+        YIELD.parent.mkdir(parents=True, exist_ok=True)
+        fresh = not YIELD.exists()
+        with YIELD.open("a", newline="") as fh:
+            writer = csv.DictWriter(fh, fieldnames=HEADER, delimiter="\t", lineterminator="\n")
+            if fresh:
+                writer.writeheader()
+            writer.writerows(new)
+    print(report(named, {ident for ident, _ in counted}))
+    return 0
+
+
+def _base_model(model: str) -> str:
+    return model.split("/")[-1].split(":")[0]
+
+
+def summary(args: argparse.Namespace) -> int:
+    by_seat: dict[str, list[dict]] = defaultdict(list)
+    for row in sorted(_rows(), key=lambda r: r["date"]):
+        by_seat[row["seat"].lower()].append(row)
+    print(f"| seat | model | scored runs | alone, last {args.last} | verified | declined % | cost $ | $ per verified |")
+    print("|---|---|---|---|---|---|---|---|")
+    for seat, rows in sorted(by_seat.items()):
+        model = _base_model(rows[-1]["model"])
+        rows = [r for r in rows if _base_model(r["model"]) == model]
+        verified = sum(int(r["alone"]) + int(r["shared"]) for r in rows)
+        declined = sum(int(r["declined"]) for r in rows)
+        cost = sum(float(r["cost_usd"]) for r in rows)
+        recent = sum(int(r["alone"]) for r in rows[-args.last:])
+        share = f"{100 * declined / (verified + declined):.0f}" if verified + declined else "-"
+        per = f"{cost / verified:.2f}" if verified else "-"
+        print(f"| {seat} | {model} | {len(rows)} | {recent} | {verified} | {share} | {cost:.2f} | {per} |")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="omp-council-yield", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = parser.add_subparsers(dest="command", required=True)
+    p_add = sub.add_parser("add", help="append seat rows and print the report table")
+    p_add.add_argument("run", help="run directory name, <YYYY-MM-DD>-<slug>")
+    p_add.add_argument("lines", type=int, help="insertions plus deletions of the round-1 diff")
+    p_add.add_argument("seats", nargs="+", metavar="ID[=ALONE/SHARED/DECLINED]")
+    p_add.add_argument("--session-dir", help="directory holding <ID>.jsonl (default: from PI_SESSION_FILE)")
+    p_add.add_argument("--dry-run", action="store_true", help="print the report without appending")
+    p_add.set_defaults(func=add)
+    p_sum = sub.add_parser("summary", help="per-seat yield on each seat's current model")
+    p_sum.add_argument("--last", type=int, default=5)
+    p_sum.set_defaults(func=summary)
+    args = parser.parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

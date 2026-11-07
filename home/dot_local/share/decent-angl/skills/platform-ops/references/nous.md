@@ -29,9 +29,9 @@ installs only the agent toolchain there; the host-local
 - Auth: the CLI is a broker client via host-local `~/.omp/agent/.env`
   (`OMP_AUTH_BROKER_URL`) and `~/.omp/auth-broker.token`. The broker
   (`omp-auth-broker.service`) stores credentials under
-  `~/.local/share/omp-serve-pilot/agent`. Add an OAuth account from the MacBook
-  with `ssh -t -L 54545:127.0.0.1:54545 nous omp-broker-login anthropic`
-  (Codex callback port 1455).
+  `~/.local/share/omp-serve-pilot/agent`. OMP cloud inference uses only Codex.
+  Add a Codex OAuth account from the MacBook with
+  `ssh -t -L 1455:127.0.0.1:1455 nous omp-broker-login openai-codex`.
 - `~/.omp/agent/host.yml` (via `PI_CONFIG_FILES`) disables the `computer`
   prelude: nous has no desktop. Mac computer use goes through the `mac` MCP
   server (Peekaboo over SSH, background-only) in `~/.omp/agent/mcp.json`. The

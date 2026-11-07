@@ -1,24 +1,6 @@
-# Managed by chezmoi. Cloud models inherit the native catalog; roles/effort
-# live in config.yml. OpenRouter is an explicit alternative, never a fallback.
+# Managed by chezmoi. Codex models inherit the native catalog; roles/effort
+# live in config.yml. Only the local provider needs a custom definition.
 providers:
-  openrouter:
-    modelOverrides:
-      z-ai/glm-5.3-flash:
-        reasoning: true
-        thinking:
-          mode: effort
-          defaultLevel: low
-          efforts: [low, high, max]
-        compat:
-          supportsReasoningEffort: true
-          omitReasoningEffort: false
-  anthropic:
-    # A 1M budget defers compaction to ~850K, and every request re-reads that
-    # context from cache against the weekly pool. Match the Codex 272K budget;
-    # `/extended-context on` restores 1M for a session that needs it.
-    modelOverrides:
-      claude-opus-5-5: {contextWindow: 272000, maxContextWindow: 1000000}
-      claude-fable-5-1: {contextWindow: 272000, maxContextWindow: 1000000}
   vllm:
     baseUrl: http://100.83.125.83:8080/v1
     api: openai-completions

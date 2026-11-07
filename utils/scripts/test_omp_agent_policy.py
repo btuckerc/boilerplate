@@ -73,13 +73,12 @@ class PolicyTests(unittest.TestCase):
         self.config = self.agent / "private_config.yml"
         self.config.write_text(
             "modelRoles:\n"
-            "  default: anthropic/claude-opus-5-5:high\n"
+            "  default: openai-codex/gpt-6.1-sol:high\n"
             "  plan: openai-codex/gpt-6.1-sol:high\n"
             "  smol: vllm/test:low\n"
             "  tiny: '@smol'\n"
             "  task: openai-codex/gpt-6-luna:medium\n"
-            "  fable: anthropic/claude-fable-test:medium\n"
-            "  slow: anthropic/claude-opus-5-5:high\n"
+            "  slow: openai-codex/gpt-6.1-sol:high\n"
             "  astra: openai-codex/gpt-6-astra:high\n"
             "task:\n  agentModelOverrides: {}\n  structured: true\n  enableEffort: true\n"
             "astGrep:\n  enabled: true\n"
@@ -90,24 +89,22 @@ class PolicyTests(unittest.TestCase):
         self.native = {
             "task.enableEffort": True,
             "modelRoles": {
-                "default": "anthropic/claude-opus-5-5:high", "plan": "openai-codex/gpt-6.1-sol:high",
+                "default": "openai-codex/gpt-6.1-sol:high", "plan": "openai-codex/gpt-6.1-sol:high",
                 "smol": "vllm/test:low", "tiny": "@smol", "task": "openai-codex/gpt-6-luna:medium",
-                "fable": "anthropic/claude-fable-test:medium", "slow": "anthropic/claude-opus-5-5:high",
+                "slow": "openai-codex/gpt-6.1-sol:high",
                 "astra": "openai-codex/gpt-6-astra:high",
             },
             "astGrep.enabled": True, "retry.modelFallback": False, "task.structured": True,
         }
         self.add("architect", "@plan:xhigh", "xhigh", ["read", "grep", "glob", "web_search", "yield"])
         shutil.copy(AUDITOR, self.agent / "private_agents/auditor.md")
-        self.add("browser", "@default:medium", "medium", ["eval", "yield"])
+        self.add("browser", "@plan:high", "high", ["eval", "yield"])
         self.add("nous", "vllm/test", "medium", ["read", "grep", "glob", "edit", "write", "yield"])
         self.add("scout", "vllm/test", "low", ["read", "grep", "glob", "web_search", "yield"])
         self.add("sol", "@plan", "high")
         self.add("sonic", "vllm/test", "low", ["read", "grep", "glob", "edit", "write", "yield"])
         consult = ["read", "grep", "glob", "web_search", "yield"]
-        self.add("fable", "@fable", "medium", consult)
         self.add("astra", "@astra", "high", consult)
-        self.add("opus", "@slow", "high", consult)
         (self.agent / "private_commands/private_review").mkdir(parents=True)
         shutil.copy(REVIEW, self.agent / "private_commands/private_review/index.ts")
 
@@ -121,8 +118,6 @@ class PolicyTests(unittest.TestCase):
         ("openai-codex", "gpt-6.1-sol", FULL),
         ("openai-codex", "gpt-6-luna", FULL),
         ("openai-codex", "gpt-6-astra", FULL),
-        ("anthropic", "claude-opus-5-5", FULL),
-        ("anthropic", "claude-fable-test", FULL),
         ("vllm", "test", ["low", "medium", "high"]),
     ]
     serial = itertools.count()
@@ -159,12 +154,12 @@ class PolicyTests(unittest.TestCase):
         result = self.run_checker()
         self.assertIn("EFFORT architect expected xhigh resolved high via selector-suffix", result.stderr)
 
-    def test_03_inherited_browser_effort(self):
-        self.add("browser", "@default", "medium", ["eval"])
+    def test_03_browser_cannot_lower_pinned_effort(self):
+        self.add("browser", "@plan:medium", "medium", ["eval", "yield"])
         result = self.run_checker()
-        self.assertIn("EFFORT browser expected medium resolved high", result.stderr)
+        self.assertIn("EFFORT browser expected high resolved medium", result.stderr)
 
-    def test_04_browser_explicit_medium_passes(self):
+    def test_04_browser_explicit_high_passes(self):
         result = self.run_checker("--catalog", self.evidence())
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -203,12 +198,12 @@ class PolicyTests(unittest.TestCase):
         profile = self.root / "home/private_dot_omp/private_profiles/local/private_agent"
         (profile / "private_agents").mkdir(parents=True)
         (profile / "private_config.yml").write_text(
-            "modelRoles:\n  default: anthropic/claude-opus-x:high\n  task: anthropic/claude-opus-x:medium\n"
+            "modelRoles:\n  default: vllm/test:high\n  task: vllm/test:medium\n"
         )
-        (profile / "private_agents/cloud.md").write_text('---\nname: cloud\ndescription: cloud\nmodel: "anthropic/claude-opus-x"\nthinkingLevel: medium\n---\n')
+        (profile / "private_agents/local.md").write_text('---\nname: local\ndescription: local\nmodel: "vllm/test"\nthinkingLevel: medium\n---\n')
         catalog = self.evidence(
-            models=self.MODELS + [("anthropic", "claude-opus-x", FULL)], models_file=profile / "private_models.yml", profile="local",
-            native={"modelRoles": {"default": "anthropic/claude-opus-x:high", "task": "anthropic/claude-opus-x:medium"}},
+            models_file=profile / "private_models.yml", profile="local",
+            native={"modelRoles": {"default": "vllm/test:high", "task": "vllm/test:medium"}},
         )
         result = self.run_checker("--profile", "local", "--catalog", catalog)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -247,9 +242,8 @@ class PolicyTests(unittest.TestCase):
         catalog = self.evidence(models=[
             ("openai-codex", "gpt-6.1-sol", ["low", "medium", "high"]),
             ("openai-codex", "gpt-6-luna", ["low", "medium", "high"]),
-            ("anthropic", "claude-opus-5-5", ["low", "medium", "high"]),
+            ("openai-codex", "gpt-6-astra", ["low", "medium", "high"]),
             ("vllm", "test", ["low", "medium"]),
-            ("anthropic", "claude-fable-test", ["low", "medium"]),
         ])
         result = self.run_checker("--catalog", catalog, "--effort", "med")
         self.assertIn("via caller-effort", result.stderr)
@@ -384,7 +378,7 @@ class PolicyTests(unittest.TestCase):
         (project / ".git").mkdir(parents=True)
         (home / ".omp/agents").mkdir(parents=True)
         (home / ".omp/agents/architect.md").write_text(
-            "---\nname: architect\ndescription: project walk loads this user-layout directory\nmodel: anthropic/claude-opus-5-5\nthinkingLevel: low\n---\n")
+            "---\nname: architect\ndescription: project walk loads this user-layout directory\nmodel: openai-codex/gpt-6-luna\nthinkingLevel: low\n---\n")
         project_result = run(at=project)
         self.assertEqual(project_result.returncode, 1)
         self.assertIn("MISSING architect expected user definition; effective project", project_result.stderr)
@@ -876,7 +870,7 @@ class PolicyTests(unittest.TestCase):
         cwd, run = self.live_fixture()
         self.assertEqual(run().returncode, 0, run().stderr)
         # main.ts applies PI_PLAN_MODEL to the plan role at runtime; `config list` never shows it.
-        result = run(PI_PLAN_MODEL="anthropic/claude-opus-5-5")
+        result = run(PI_PLAN_MODEL="openai-codex/gpt-6-luna")
         self.assertEqual(result.returncode, 1)
         self.assertIn("MODEL architect", result.stderr)
         self.assertNotIn("SETTINGS", result.stderr)

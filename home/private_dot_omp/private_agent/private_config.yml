@@ -1,11 +1,10 @@
 # Managed by chezmoi. Credentials, sessions and account usage stay local.
-# Claude Opus directs; the `task` worker runs on Codex Luna (parallel, no GPU
-# queue); nous (local Heretic Qwen) keeps the `nous` agent and the smol/commit/tiny roles.
-# Sol is evidence-triggered escalation (`architect` xhigh, `sol` high); Opus high directs and is also
-# @slow; Astra is a manual reserve; Fable is the different-family second opinion.
+# Legacy OMP uses Codex Sol high for direction and sustained work, Luna for
+# parallel task/vision work, and local Qwen for smol/commit/tiny roles.
+# Sol also serves the architect/sol agents; Astra is a manual reserve.
 modelRoles:
-  default: anthropic/claude-opus-5-5:high
-  slow: anthropic/claude-opus-5-5:high
+  default: openai-codex/gpt-6.1-sol:high
+  slow: openai-codex/gpt-6.1-sol:high
   plan: openai-codex/gpt-6.1-sol:high
   # Cloud vision: the local model takes image input, but no visual acceptance
   # has been demonstrated on it.
@@ -14,8 +13,6 @@ modelRoles:
   smol: vllm/Qwen3.8-27B-Swift-Heretic-MXFP4:low
   tiny: vllm/Qwen3.8-27B-Swift-Heretic-MXFP4:low
   task: openai-codex/gpt-6-luna:medium
-  # Scarce Anthropic weekly pool (capped at half of it); see RULES.md.
-  fable: anthropic/claude-fable-5-1:medium
   # `astra` agent: council seat or explicit request; ~5x Sol per token (Codex).
   astra: openai-codex/gpt-6-astra:high
   # Web search: APIs only; scrapers blocked as of 2026-10-14. Exa (keyless)
@@ -25,27 +22,18 @@ modelRoles:
   web: web/exa
 
 modelProviderOrder:
-  - anthropic
   - openai-codex
   - vllm
-  - openrouter
 
 cycleOrder:
   - default
-  - fable
   - task
 
 enabledModels:
-  - anthropic/claude-opus-5-5
-  - anthropic/claude-fable-5-1
   - openai-codex/gpt-6.1-sol
   - openai-codex/gpt-6-astra
   - openai-codex/gpt-6-luna
   - vllm/*
-  - openrouter/z-ai/glm-5.3-flash
-  - openrouter/z-ai/glm-5.3
-  - openrouter/moonshotai/kimi-k3
-  - openrouter/openai/gpt-6-luna
 
 # These are foreign configuration discovery adapters, not model providers.
 disabledProviders:
@@ -217,9 +205,6 @@ features:
   # OMP already detects repeated streams. Do not let a local classifier
   # independently resume a stopped turn and recreate the same work.
   unexpectedStopDetection: none
-
-providers:
-  openrouterVariant: default
 
 # enablePi* is the native ~/.omp/agent/skills and .omp/skills gate (legacy name).
 # Leave Codex/Claude/Agents off so foreign harness skills stay out.

@@ -484,7 +484,7 @@ os._exit(0)
         sentinel = self.root / "extension-ran"
         extension = self.root / "sentinel.ts"
         extension.write_text(f'import * as fs from "node:fs";\nexport default function () {{ fs.writeFileSync({str(sentinel)!r}, "ran"); }}\n')
-        (agent / "config.yml").write_text(f"cycleOrder: [default, fable, task]\nextensions: [{extension}]\n")
+        (agent / "config.yml").write_text(f"cycleOrder: [default, task]\nextensions: [{extension}]\n")
         sqlite3.connect(agent / "agent.db").close()
         (agent / "agent.db").chmod(0o644)
         agent.chmod(0o755)
@@ -500,7 +500,7 @@ os._exit(0)
 
         result = self.run_baseline("validate", cwd=project, TMPDIR=str(scratch))
         self.assertNotIn("PROBE ", result.stderr)
-        self.assertIn('CONFIG  effective cycleOrder ["default","fable","task"]', result.stdout)
+        self.assertIn('CONFIG  effective cycleOrder ["default","task"]', result.stdout)
         self.assertEqual(before, self.snapshot())
         project_after = sorted((p.name, p.read_bytes()) for p in [*project.iterdir(), *(project / ".omp").iterdir()] if p.is_file())
         self.assertEqual(project_before, project_after)
@@ -521,7 +521,7 @@ os._exit(0)
         (self.bin / "omp").unlink()
         (self.bin / "omp").symlink_to(REAL_OMP)
         agent = self.home / ".omp/agent"
-        (agent / "config.yml").write_text("cycleOrder: [default, fable, task]\n")
+        (agent / "config.yml").write_text("cycleOrder: [default, task]\n")
         cwd = self.root / "cwd"
         cwd.mkdir()
         subprocess.run([REAL_OMP, "config", "list", "--json"], env={"HOME": str(self.home), "PATH": "/usr/bin:/bin"},
@@ -540,7 +540,7 @@ os._exit(0)
 
         result = self.run_baseline("validate", TMPDIR=str(scratch))
         self.assertNotIn("PROBE ", result.stderr)
-        self.assertIn('CONFIG  effective cycleOrder ["default","fable","task"]', result.stdout)
+        self.assertIn('CONFIG  effective cycleOrder ["default","task"]', result.stdout)
         self.assertEqual([], ran(), "validate ran a stored credential command")
         self.assertEqual(before, self.snapshot())
 

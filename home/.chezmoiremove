@@ -18,3 +18,6 @@
 .local/share/decent-angl/skills/boat
 # Retired 2026-10-29: omp-openrouter-env became omp-env (all OMP API keys).
 .local/bin/omp-openrouter-env
+# Retired 2026-11-07: legacy OMP cloud inference is Codex-only.
+.omp/agent/agents/fable.md
+.omp/agent/agents/opus.md

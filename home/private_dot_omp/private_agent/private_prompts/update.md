@@ -12,7 +12,7 @@ Do not run `omp update`. That command installs an unreviewed binary and fights t
 5. Run `omp-baseline upgrade --dry-run`, then `omp-baseline upgrade VERSION`.
 6. Re-read live `omp models`. Treat discovered Codex and vLLM IDs as
    authoritative; rewrite dead catalog IDs in `config.yml`, `models.yml`, and
-   `omp-baseline` checks. Keep OpenRouter models manual-only. Bonsai is
+   `omp-baseline` checks. Cloud inference stays Codex-only. Bonsai is
    historical-only and must not be restored to the active catalog or launcher.
 7. Run `decent-angl-skills sync`. `validate` audits source and live dest; a dest `references/` file without a dest SKILL.md link fails even when source is linked.
 8. Run `omp-baseline validate --strict`. That is the commit gate. It does not roll back the pin. Unrelated dest skill drift fails it.

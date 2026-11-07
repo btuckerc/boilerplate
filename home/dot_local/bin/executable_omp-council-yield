@@ -27,7 +27,7 @@ from pathlib import Path
 
 YIELD = Path.home() / ".local/state/council/yield.tsv"
 HEADER = ["date", "slug", "seat", "model", "lines", "rounds", "alone", "shared", "declined", "cost_usd", "active_s"]
-SEATS = {"architect": "sol", "fable": "fable", "astra": "astra", "opus": "opus"}
+SEATS = {"architect": "sol", "astra": "astra"}
 COUNTS = re.compile(r"^(?P<id>[^=]+)=(?P<alone>\d+)/(?P<shared>\d+)/(?P<declined>\d+)$")
 RUN = re.compile(r"^(?P<date>\d{4}-\d{2}-\d{2})-(?P<slug>.+)$")
 ROUND = re.compile(r"Council seat, round (\d+)\.")

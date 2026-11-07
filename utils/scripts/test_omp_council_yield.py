@@ -73,18 +73,18 @@ class CouncilYieldTests(unittest.TestCase):
             turn("2026-11-07T11:01:00Z", 0.2, data={"score": 9.0}),
             {"type": "model_usage", "usage": {"cost": {"total": 0.05}}},
         ])
-        self.write("F1", header("fable", "anthropic/claude-fable-5-1", "medium") + [
+        self.write("A1", header("astra", "openai-codex/gpt-6-astra", "high") + [
             turn("2026-11-07T10:03:00Z", 1.0, data={"score": 7.0}),
             director("2026-11-07T10:40:00Z", "Council seat, round 2. Tree def in run/tree-r2."),
             turn("2026-11-07T10:41:00Z", 0.4, data={"score": 8.0}),
         ])
-        code, out, _ = self.run_cli("add", "120", "S1=2/3/1", "F1=1/0/0")
+        code, out, _ = self.run_cli("add", "120", "S1=2/3/1", "A1=1/0/0")
         self.assertEqual(code, 0)
         self.assertIn("| seat | agent | round 1 | round 2 | round 3 | total |", out)
         self.assertIn("| sol | S1 | 8.4 · 2m30s · $0.60 |  | 9.0 · 1m00s · $0.25 | 3m30s · $0.85 |", out)
-        self.assertIn("| fable | F1 | 7.0 · 3m00s · $1.00 | 8.0 · 1m00s · $0.40 |  | 4m00s · $1.40 |", out)
+        self.assertIn("| astra | A1 | 7.0 · 3m00s · $1.00 | 8.0 · 1m00s · $0.40 |  | 4m00s · $1.40 |", out)
         self.assertIn("S1: 1 director message(s) without a round line folded into the current round", out)
-        self.assertNotIn("F1:", out)
+        self.assertNotIn("A1:", out)
         sol = self.rows()[0]
         self.assertEqual(
             (sol["date"], sol["slug"], sol["seat"], sol["model"], sol["lines"], sol["rounds"], sol["alone"], sol["shared"], sol["declined"], sol["cost_usd"], sol["active_s"]),
@@ -107,10 +107,10 @@ class CouncilYieldTests(unittest.TestCase):
 
     def test_bare_ids_are_reported_not_counted_and_a_repeat_run_is_refused(self):
         self.write("S1", header() + [turn("2026-11-07T10:01:00Z", 0.1, data={"score": 9.0})])
-        self.write("T1", header("opus", "anthropic/claude-opus-5-5", "high") + [turn("2026-11-07T10:01:00Z", 0.2, data="prose ruling")])
+        self.write("T1", header("astra", "openai-codex/gpt-6-astra", "high") + [turn("2026-11-07T10:01:00Z", 0.2, data="prose ruling")])
         code, out, _ = self.run_cli("add", "10", "S1=1/0/0", "T1")
         self.assertEqual(code, 0)
-        self.assertIn("Unscored agent T1 (opus): 1m00s · $0.20", out)
+        self.assertIn("Unscored agent T1 (astra): 1m00s · $0.20", out)
         self.assertIn("Total seat cost: $0.30", out)
         self.assertEqual([r["seat"] for r in self.rows()], ["sol"])
         code, _, err = self.run_cli("add", "10", "S1=1/0/0")

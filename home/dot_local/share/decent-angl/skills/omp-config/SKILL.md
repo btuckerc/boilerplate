@@ -19,8 +19,8 @@ description: Change the shared OMP baseline in chezmoi - upgrades, omp-baseline,
   the shared pin with `omp update`. Use `omp-baseline upgrade` to move the two
   pin sites together.
 - Prefer native OMP config and features. Keep native skill discovery enabled.
-- Every host's OAuth logins (Codex, Anthropic, others) live on the one auth
-  broker on nous (`omp-auth-broker.service`, tailnet port 8747). Other hosts
+- OMP's Codex OAuth logins live on the one auth broker on nous
+  (`omp-auth-broker.service`, tailnet port 8747). Other hosts
   are clients through host-local `OMP_AUTH_BROKER_URL` in
   `~/.omp/agent/.env` and `~/.omp/auth-broker.token`, both copied from nous and
   never committed. Never log in locally: two holders of one refresh token
@@ -30,25 +30,16 @@ description: Change the shared OMP baseline in chezmoi - upgrades, omp-baseline,
   auth-broker migrate --from-local --include-oauth`, then delete the local
   `oauth` rows. The Codex pool is session-sticky and quota-aware; use
   `/session pin` when needed.
-- Default routing is Claude Opus high as director (raised from medium on
-  2026-10-08: weekly Anthropic use was ~19% on medium; high costs ~1.7–2.8x
-  per prompt through more tool calls, not longer thinking). Drop back to
-  medium for the week if `omp-quota` shows <40% Anthropic 7d left before
-  day 5 of the window. The director owns
-  requirements, integration and acceptance; trivial work stays direct. The
-  `task` role (so the `task` agent) runs on Codex Luna medium, like `vision`,
-  because local queuing stalled parallel children. The `commit`, `smol` and
-  `tiny` roles (so `scout`, `sonic`) and the explicitly pinned `nous` agent run
-  on nous Qwen to save Codex quota.
+- Legacy OMP defaults and `@slow` use Codex Sol high. The `task` role
+  (so the `task` agent) runs on Codex Luna medium, like `vision`.
+  The `commit`, `smol` and `tiny` roles (so `scout`, `sonic`) and the
+  explicitly pinned `nous` agent run on nous Qwen. The browser agent is
+  pinned to Sol high through `@plan:high`.
   Use fresh compact briefs, not the full parent transcript or pre-solved implementations.
 - Escalation lanes: GPT-6.1 Sol (`architect` read-only at xhigh, `sol`
   implementation at high; both `@plan`, with no reserve model) is the default.
-  It trails GPT-6 Astra by 1–5 points on coding/agentic benchmarks at about 1/8
-  the blended token price (model-eval benchmarks, 2026-09-29) and draws from the
-  Codex pool, not the director's. Astra (role and agent `astra`), Fable medium
-  (agent `fable`, `@fable`) and the `opus` agent (Opus high via `@slow`) are
-  read-only consults; Astra stays in `enabledModels` for its role. Seat
-  lifecycle: the `council` skill.
+  Astra (role and read-only agent `astra`) remains a manual reserve in
+  `enabledModels`. Seat lifecycle: the `council` skill.
   Escalation is scoped child delegation, not a parent-model switch. When to
   escalate, consult or audit is the RULES.md policy; this section covers only
   the mechanics.
@@ -74,14 +65,13 @@ description: Change the shared OMP baseline in chezmoi - upgrades, omp-baseline,
   `--agent-file`/`--model` runs are model-admission controls
   (`release: false`; see `model-eval`), never release verdicts.
   Results stay under `~/.local/state/omp-audit/runs/`. Codex quota per xhigh
-  decision is unmeasured; the price ratios above are per token.
-- Fable shares the Anthropic weekly pool with the Opus director. It can use at
-  most half of that pool and costs about 2x Opus on the real token mix, so it is
-  not extra capacity. `cycleOrder` (default → fable → task) is kept for manual
-  cycling. Leave `providers.anthropic.serverSideFallback` off because it would
-  silently move Fable to Opus 4.8.
+  decision is unmeasured.
+- Cloud inference is Codex-only; `cycleOrder` is default → task.
+  Do not restore retired cloud providers or their removed agents. The optional
+  `omp-triage` decision helper is separate from OMP model routing and retains
+  its existing API-key plumbing.
 - Keep `task.enableEffort: true` for per-task choices without an extra classifier.
-  Omit effort to retain the agent default (medium; high for `sol`, xhigh for
+  Omit effort to retain the agent default (medium; high for `sol` and `browser`, xhigh for
   `architect` and `auditor`). Always omit it for those two: a task
   `effort: med` was observed to drop `architect` to high. `lo` is for routine cloud work.
   Coarse `med` selects high on every cloud model. Keep local implementation
@@ -98,7 +88,7 @@ description: Change the shared OMP baseline in chezmoi - upgrades, omp-baseline,
   protocol. vLLM batches up to 8 sequences; the shared 399,968-token VRAM KV
   pool replaces the old serialized slot/host prompt cache, so bound task
   concurrency at 4. The `task` agent is the cloud worker; uncertain design
-  stays with Opus or Sol. Keep the OpenCode `nous-worker` path available with
+  stays with Sol. Keep the OpenCode `nous-worker` path available with
   fresh briefs and its privacy bounds. All inference stays on nous or cloud;
   do not add Mac background inference or model downloads.
 - `omp-local` (`omp --profile local`, source
@@ -118,33 +108,15 @@ description: Change the shared OMP baseline in chezmoi - upgrades, omp-baseline,
 - Treat OMP model discovery as authoritative before changing shared model IDs.
   Weigh any new model with `/skill:model-eval` (price, token mix, benchmarks,
   quota) before it takes a lane.
-- Keep cloud model IDs centralized: `config.yml` roles/enabledModels, plus the
-  Anthropic 272K `contextWindow` overrides in `models.yml` (1M only through a
-  per-session `/extended-context on`). Keep 1M off by default: replaying 19,774
-  Opus 5.5 turns (2026-09-29) showed cache reads were 52% of API-equivalent
-  spend, and compacting near 860K instead of 232K would multiply cache-read
-  tokens 3.3x (about 2.2x total usage) while saving only about $0.35 per
-  avoided compaction. Use 1M only for a session that needs one huge working
-  set. Agents, RULES and skills name model families, not
-  generations. For a generation upgrade: run `omp models`, change those IDs,
-  then run `omp-baseline validate`. It checks role families and efforts, that
-  every role model is discovered, and the Anthropic budget. Then confirm the
-  exact `provider`/`model` in a fresh `omp -p --mode json` response; a fuzzy
-  match or successful exit alone does not prove the new model. A Sol
-  generation also moves its deliberate exact pins together: the `architect`,
-  `auditor` and `sol` contracts in `omp-agent-policy`, `RELEASE_MODEL` in
-  `omp-audit`, and the audit lane text above, after model-eval's admission
-  controls pass.
-- Prompt cache and compaction (2026-10-30 replay of 74K Opus requests plus
-  Terminal-Bench 2.0 A/B): OAuth sessions default to 1h cache entries. nous
-  pilots `providers.cacheRetention: short` with `cacheWarming: idle` in its
-  host-local `host.yml` (replay: −11% Opus cache cost at list prices; the
-  subscription-quota effect is unverified). Keep it only if
-  `~/src/omp-lab/droid-1.0/cache_pilot.py` shows a lower cache $/M context;
-  otherwise delete the block. Keep the reserve-based compaction trigger: a
-  160K trigger saves cache reads but compacts 1.5x as often. A RULES batching
-  or PTC nudge changed neither multi-call share nor eval use across 142 trials,
-  so it stays out.
+- Keep cloud model IDs centralized in `config.yml` roles/enabledModels.
+  For a generation upgrade: run `omp models`, change those IDs, then run
+  `omp-baseline validate`. It checks role families, efforts, and discovery.
+  Confirm the exact `provider`/`model` in a fresh `omp -p --mode json`
+  response; a fuzzy match or successful exit does not prove the model.
+  A Sol generation also moves its deliberate exact pins together: the
+  `architect`, `auditor`, `sol` and `browser` contracts in `omp-agent-policy`,
+  `RELEASE_MODEL` in `omp-audit`, and the audit lane text above, after
+  model-eval's admission controls pass.
 - Keep `private_models.yml` focused on catalog overrides plus necessary tested
   custom providers; do not remove those providers under an override-only rule.
   Retain the custom `ghostty` theme.

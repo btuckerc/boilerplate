@@ -1,0 +1,1936 @@
+#!/usr/bin/env python3
+"""Isolated, receipted workers for a director. Python 3.13; standard library only."""
+import argparse
+import contextlib
+import contextvars
+import datetime as dt
+import fcntl
+import functools
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import secrets
+import selectors
+import shlex
+import shutil
+import signal
+import socket
+import stat
+import subprocess
+import sys
+import tarfile
+import time
+import urllib.parse
+import urllib.request
+
+WORKER_CONTRACT = """You are a worker for a director. Stay inside the stated scope. Do not commit,
+stage or reset (git is read-only in your worktree). Do not spawn subagents.
+{acceptance} Stop within the time limit.
+Never guess around a blocker: report it.
+Your final message must be the JSON required by the output schema.
+"""
+RESULT_SCHEMA = {
+    "type": "object", "additionalProperties": False,
+    "required": ["paths", "checks_run", "summary", "blockers"],
+    "properties": {
+        "paths": {"type": "array", "items": {"type": "string"}},
+        "checks_run": {"type": "array", "items": {"type": "string"}},
+        "summary": {"type": "string"},
+        "blockers": {"type": "array", "items": {"type": "string"}},
+    },
+}
+# Identical to the output schema in .omp/agent/agents/auditor.md.
+AUDIT_SCHEMA = {
+    "type": "object", "additionalProperties": False,
+    "required": ["verdict", "candidate", "findings", "missing_evidence", "summary"],
+    "properties": {
+        "verdict": {"type": "string", "enum": ["PASS", "BLOCK", "UNVERIFIED"]},
+        "candidate": {"type": "string", "pattern": "^([0-9a-f]{40}|[0-9a-f]{64})$",
+                      "description": "The exact candidate id the packet states (Git tree or commit, or a sha256)."},
+        "findings": {"type": "array", "items": {
+            "type": "object", "additionalProperties": False,
+            "required": ["severity", "location", "claim", "counterexample"],
+            "properties": {
+                "severity": {"type": "string", "enum": ["blocker", "major", "minor"]},
+                "location": {"type": "string", "pattern": r"^\S+:[0-9]+(-[0-9]+)?$",
+                             "description": "file:line or file:start-end"},
+                "claim": {"type": "string"},
+                "counterexample": {"type": "string", "description": "A concrete input or state that breaks the contract."},
+            }}},
+        "missing_evidence": {"type": "array", "items": {"type": "string"},
+                             "description": "Mandatory evidence the packet lacks and read-only inspection cannot supply."},
+        "summary": {"type": "string"},
+    },
+}
+AUDIT_CONTRACT = """You are the release auditor. Accept or reject one fixed candidate against the
+supplied contract. Do not design, implement, rank alternatives or give general advice.
+Read the whole packet first. Audit only the exact candidate stated below.
+Evidence is the packet's diffs, hashes and raw command output, and the files it
+names. Author plans, summaries and pointers are claims to check, never evidence.
+Try to break every acceptance item: changed paths, callers, consumers, rollback,
+and what the recorded checks did not exercise. PASS only when every acceptance
+item is evidenced. BLOCK when you can state a counterexample at file:line.
+UNVERIFIED when mandatory evidence cannot be obtained read-only; name it in
+missing_evidence. Severity: blocker breaks the contract; major is a likely defect;
+minor changes nothing in the verdict. PASS has no blocker/major findings or
+missing evidence. Make no edits and spawn nothing. Return only the schema JSON.
+"""
+CODEX_MODELS = {"sol": ("gpt-6.1-sol", "xhigh"), "astra": ("gpt-6-astra", "high"),
+                "luna": ("gpt-6-luna", "low")}
+DISABLE_FLAGS = ["--disable", "hooks", "--disable", "multi_agent", "--disable", "plugins",
+                 "--disable", "apps", "--disable", "goals", "-c", "skills.include_instructions=false"]
+CLAUDE_TOOLS = {"Read", "Grep", "Glob", "WebSearch", "WebFetch", "StructuredOutput"}
+LOCAL_TOOLS = {"read", "edit", "write", "grep", "glob"}
+MAX_WORKER_BYTES = 512 * 1024 * 1024
+MAX_JSONL_LINE = 16 * 1024 * 1024
+WORKER_READ_BYTES = contextvars.ContextVar("worker_read_bytes", default=None)
+
+
+class StrictSchemaError(ValueError):
+    pass
+
+
+class UnsafeTempRepoError(ValueError):
+    pass
+
+
+def temporary_roots():
+    roots = os.environ.get("AGENT_RUN_TMP_ROOTS")
+    roots = roots.split(os.pathsep) if roots is not None else ["/tmp", os.environ.get("TMPDIR", "/tmp")]
+    return [Path(p).expanduser().resolve() for p in roots if p]
+
+
+def overlaps(a, b):
+    return a.is_relative_to(b) or b.is_relative_to(a)
+
+
+def refuse_writable_state(state, worktree_root, run_id):
+    # RUN/child is the sole intentional nested writable mount. All control
+    # directories and their lock inodes must be outside every other writable
+    # root, including Codex's implicit temp allowances, in every launch lane.
+    writable_roots = [("temporary root", root) for root in temporary_roots()]
+    writable_roots.append(("worktree root", worktree_root))
+    for path in (state, (state / ".slots").resolve(), (state / run_id).resolve()):
+        for label, writable in writable_roots:
+            if overlaps(path, writable):
+                raise UnsafeTempRepoError(
+                    f"run/state path {path} overlaps worker-writable {label} {writable}")
+
+
+def refuse_temporary_repo(repo):
+    """Implicit worker temp writes must never overlap the caller's checkout/Git.
+
+    AGENT_RUN_TMP_ROOTS replaces the default roots (/tmp and $TMPDIR). It is a
+    deliberate escape hatch for tests; whoever sets it already runs as the director.
+    """
+    roots = temporary_roots()
+    for label, args in (("toplevel", ("--show-toplevel",)),
+                        ("git common dir", ("--path-format=absolute", "--git-common-dir"))):
+        path = Path(git(repo, "rev-parse", *args).decode().strip()).resolve()
+        overlap = [root for root in roots if overlaps(path, root)]
+        if overlap:
+            raise UnsafeTempRepoError(
+                f"caller {label} {path} overlaps a temporary root: {overlap[0]}; "
+                "worker /tmp and $TMPDIR write allowances would expose caller state")
+
+
+def refuse_overlapping_layout(repo, state, worktree_root, run_id):
+    protected = [Path(git(repo, "rev-parse", *args).decode().strip()).resolve() for args in (
+        ("--show-toplevel",), ("--path-format=absolute", "--git-common-dir"), ("--absolute-git-dir",))]
+    worker = (worktree_root / f"{repo.name}-{run_id}").resolve()
+    run = (state / run_id).resolve()
+    for path in (worktree_root, worker):
+        for caller in protected:
+            if overlaps(path, caller):
+                raise UnsafeTempRepoError(f"worker path {path} overlaps caller path {caller}")
+    for path in (state, run):
+        for other in (*protected, worktree_root, worker):
+            if overlaps(path, other):
+                raise UnsafeTempRepoError(f"run/state path {path} overlaps protected path {other}")
+    return worker
+
+
+def strict_schema(schema, path="$"):
+    """Reject schemas Codex's strict structured-output API cannot accept."""
+    if not isinstance(schema, dict):
+        raise StrictSchemaError(f"strict schema {path}: expected a schema object")
+    types = schema.get("type", [])
+    if types == "object" or "object" in types or "properties" in schema:
+        properties = schema.get("properties", {})
+        if schema.get("additionalProperties") is not False:
+            raise StrictSchemaError(f"strict schema {path}: additionalProperties must be false")
+        if set(schema.get("required", [])) != set(properties):
+            raise StrictSchemaError(f"strict schema {path}: required must list every property")
+    for key in ("properties", "$defs", "definitions"):
+        for name, sub in schema.get(key, {}).items():
+            strict_schema(sub, f"{path}.{key}.{name}")
+    if "items" in schema:
+        strict_schema(schema["items"], path + ".items")
+    for key in ("anyOf", "oneOf", "allOf"):
+        for i, sub in enumerate(schema.get(key, [])):
+            strict_schema(sub, f"{path}.{key}[{i}]")
+
+
+def ignored_files(worktree):
+    return set(git(worktree, "ls-files", "-o", "-i", "--exclude-standard", "-z").decode().split("\0")) - {""}
+
+
+def profile_snapshot():
+    snapshot = {}
+    # Private overlays pin host inputs; retain this as a host-integrity backstop.
+    profile = Path.home() / ".omp" / "profiles" / "local" / "agent"
+    snapshot["local_profile_inputs"] = {
+        name: ("link:" + os.readlink(path) if path.is_symlink()
+               else hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file()
+               else "dir" if path.is_dir() else None)
+        for name in LOCAL_PROFILE_INPUTS for path in [profile / name]}
+    return snapshot
+
+
+# chezmoi-managed entries of the local profile: OMP launch inputs a worker must not rewrite.
+LOCAL_PROFILE_INPUTS = ("RULES.md", "config.yml", "models.yml", "extensions", "skills", "themes")
+
+
+def local_sandbox(worktree, run, repo):
+    """Writable worker output and private profile overlays, never caller state.
+
+    OMP print mode writes SQLite/WAL files, custom-session-files, logs and
+    daemon metadata under its profile, and extracts native modules on first
+    use. Private overlays accommodate those writes without mutable host inputs.
+    """
+    bwrap = shutil.which("bwrap")
+    if not bwrap:
+        raise RuntimeError("local lane requires bwrap; refusing unsandboxed execution")
+    command = [bwrap, "--die-with-parent", "--new-session", "--unshare-pid", "--unshare-ipc",
+               "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
+               "--tmpfs", "/tmp", "--tmpfs", "/run"]
+    resolver = Path(os.path.realpath("/etc/resolv.conf"))
+    if resolver.is_relative_to(Path("/run")) and resolver.is_file():
+        # Restore DNS configuration only, never host runtime sockets/directories.
+        command += ["--ro-bind", str(resolver), str(resolver)]
+    profile = Path.home() / ".omp" / "profiles" / "local"
+    cache = (Path.home() / ".cache").resolve()
+    cache.mkdir(parents=True, exist_ok=True)
+    for path in (cache, profile, Path.home() / ".omp" / "natives"):
+        path.mkdir(parents=True, exist_ok=True)
+        path = path.resolve()
+        command += ["--overlay-src", str(path), "--tmp-overlay", str(path)]
+    # All paths are resolved: ~/src may be a symlink to /srv.
+    repo, worktree, run = (Path(str(p)).resolve() for p in (repo, worktree, run))
+    child = run / "child"
+    child.mkdir(exist_ok=True)
+    caller = Path(git(repo, "rev-parse", "--show-toplevel").decode().strip()).resolve()
+    command += ["--ro-bind", str(caller), str(caller),
+                "--bind", str(worktree), str(worktree),
+                "--ro-bind", str(run), str(run), "--bind", str(child), str(child)]
+    # Protect both linked-worktree metadata and the common repository after
+    # writable mounts, including a --repo subdirectory under ~/.cache.
+    for tree in (repo, worktree):
+        for option in ("--git-common-dir", "--absolute-git-dir"):
+            path = Path(git(tree, "rev-parse", "--path-format=absolute", option).decode().strip()).resolve()
+            command += ["--ro-bind", str(path), str(path)]
+    command += ["--ro-bind", str(worktree / ".git"), str(worktree / ".git")]
+    # /var/run is normally a symlink to /run; mask it independently otherwise.
+    if Path("/var/run").resolve() != Path("/run"):
+        command += ["--tmpfs", "/var/run"]
+    command += ["--chdir", str(worktree)]
+    for name in LOCAL_PROFILE_INPUTS:
+        path = profile / "agent" / name
+        # Symlink targets can live under the writable cache. Pin them too;
+        # replacing the symlink itself only changes the private overlay.
+        if path.exists():
+            path = path.resolve()
+            command += ["--ro-bind", str(path), str(path)]
+    probe = subprocess.run(command + ["true"], env=child_env(), capture_output=True, text=True)
+    if probe.returncode:
+        raise RuntimeError("local bwrap probe failed; refusing unsandboxed execution: " + probe.stderr.strip())
+    return command
+
+
+def now():
+    return dt.datetime.now(dt.timezone.utc).isoformat()
+
+
+def state_home():
+    return Path(os.environ.get("AGENT_RUN_HOME", "~/.local/state/agent-runs")).expanduser().resolve()
+
+
+def chmod_entry(directory_fd, name, mode):
+    try:
+        os.chmod(name, mode, dir_fd=directory_fd, follow_symlinks=False)
+    except NotImplementedError:
+        # Older glibc cannot implement no-follow chmod. Symlinks have no
+        # meaningful mode; only ordinary entries need the compatibility call.
+        if not stat.S_ISLNK(os.stat(name, dir_fd=directory_fd, follow_symlinks=False).st_mode):
+            os.chmod(name, mode, dir_fd=directory_fd)
+
+
+class DirPath(os.PathLike):
+    """A name beneath an owned directory fd; display paths are never used for I/O."""
+
+    def __init__(self, directory, parts=()):
+        self.directory = directory
+        self.parts = tuple(parts)
+        if any(p in {"", ".", ".."} or "/" in p for p in self.parts):
+            raise ValueError("unsafe directory-relative path")
+
+    @property
+    def path(self):
+        return self.directory.display.joinpath(*self.parts)
+
+    @property
+    def name(self):
+        return self.path.name
+
+    @property
+    def parent(self):
+        return DirPath(self.directory, self.parts[:-1]) if self.parts else self.directory.owner_parent
+
+    def __str__(self):
+        return str(self.path)
+
+    def __lt__(self, other):
+        return str(self) < str(other)
+
+    def __fspath__(self):
+        raise TypeError("pinned paths require dir_fd I/O; str(path) is display-only")
+
+    def __truediv__(self, name):
+        return DirPath(self.directory, self.parts + Path(name).parts)
+
+    @contextlib.contextmanager
+    def parent_fd(self):
+        with contextlib.ExitStack() as stack:
+            fd = self.directory.fd
+            for part in self.parts[:-1]:
+                fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+                stack.callback(os.close, fd)
+            yield fd, self.parts[-1] if self.parts else "."
+
+    def open_fd(self, flags, mode=0o600):
+        with self.parent_fd() as (fd, name):
+            return os.open(name, flags | os.O_NOFOLLOW, mode, dir_fd=fd)
+
+    def stat(self):
+        with self.parent_fd() as (fd, name):
+            return os.stat(name, dir_fd=fd, follow_symlinks=False)
+
+    def exists(self):
+        try:
+            self.stat()
+            return True
+        except (FileNotFoundError, NotADirectoryError):
+            return False
+
+    def is_file(self):
+        return self.exists() and stat.S_ISREG(self.stat().st_mode)
+
+    def is_dir(self):
+        return self.exists() and stat.S_ISDIR(self.stat().st_mode)
+
+    def is_symlink(self):
+        return self.exists() and stat.S_ISLNK(self.stat().st_mode)
+
+    def mkdir(self, mode=0o777, *, exist_ok=False):
+        with self.parent_fd() as (fd, name):
+            try:
+                os.mkdir(name, mode, dir_fd=fd)
+            except FileExistsError:
+                if not exist_ok or not self.is_dir():
+                    raise
+
+    def unlink(self):
+        with self.parent_fd() as (fd, name):
+            os.unlink(name, dir_fd=fd)
+
+    def chmod(self, mode):
+        # Unlike opening read-only then fchmod, this also handles mode-000
+        # directories. Never follow a worker's replacement symlink.
+        with self.parent_fd() as (fd, name):
+            chmod_entry(fd, name, mode)
+
+    def rglob(self, pattern):
+        if pattern != "*":
+            raise ValueError("only recursive directory enumeration is supported")
+        fd = self.open_fd(os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            names = os.listdir(fd)
+        finally:
+            os.close(fd)
+        for name in names:
+            child = self / name
+            yield child
+            if child.is_dir():
+                yield from child.rglob("*")
+
+
+class Directory(DirPath):
+    def __init__(self, display, fd, parent):
+        self.display, self.fd, self.owner_parent = Path(display), fd, parent
+        super().__init__(self)
+
+    def open_dir(self, name):
+        path = self / name
+        return Directory(path.path, path.open_fd(os.O_RDONLY | os.O_DIRECTORY), self)
+
+    def close(self):
+        if self.fd is not None:
+            os.close(self.fd)
+            self.fd = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
+
+
+@contextlib.contextmanager
+def pin_directory(path):
+    if isinstance(path, Directory):
+        yield path
+        return
+    path = Path(path).absolute()
+    with Directory(path.parent, os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW), None) as parent:
+        with parent.open_dir(path.name) as directory:
+            yield directory
+
+
+@contextlib.contextmanager
+def file_parent(path):
+    if isinstance(path, DirPath):
+        with path.parent_fd() as item:
+            yield item
+    else:
+        path = Path(path)
+        with pin_directory(path.parent) as parent:
+            yield parent.fd, path.name
+
+
+def open_fd(path, flags, mode=0o600):
+    with file_parent(path) as (fd, name):
+        return os.open(name, flags | os.O_NOFOLLOW, mode, dir_fd=fd)
+
+
+@contextlib.contextmanager
+def open_read(path, *, root=None):
+    """Pin a regular file without blocking on FIFOs or following symlinks."""
+    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+    with contextlib.ExitStack() as stack:
+        if isinstance(path, DirPath):
+            fd = path.open_fd(flags)
+        elif root is None:
+            fd = os.open(path, flags)
+        else:
+            root = Path(root).absolute()
+            parts = Path(path).absolute().relative_to(root).parts
+            if not parts or any(part == ".." for part in parts):
+                raise ValueError("unsafe child output path")
+            parent = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            stack.callback(os.close, parent)
+            for part in parts[:-1]:
+                parent = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+                stack.callback(os.close, parent)
+            fd = os.open(parts[-1], flags, dir_fd=parent)
+        # Validate the opened inode, not a racy path-based preflight.
+        stack.callback(os.close, fd)
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise ValueError(f"not a regular file: {path}")
+        os.set_blocking(fd, True)
+        src = stack.enter_context(os.fdopen(fd, "rb", closefd=False))
+        yield src
+
+
+def read_bytes(path, *, root=None):
+    size = 0
+    chunks = []
+    with open_read(path, root=root) as src:
+        if os.fstat(src.fileno()).st_size > MAX_WORKER_BYTES:
+            raise ValueError(f"worker file size limit exceeded: {path}")
+        while chunk := src.read(min(65536, MAX_WORKER_BYTES + 1 - size)):
+            size += len(chunk)
+            consume_worker_bytes(len(chunk))
+            if size > MAX_WORKER_BYTES:
+                raise ValueError(f"worker file size limit exceeded: {path}")
+            chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def consume_worker_bytes(count):
+    used = WORKER_READ_BYTES.get()
+    if used is not None:
+        WORKER_READ_BYTES.set(used + count)
+        if used + count > MAX_WORKER_BYTES:
+            raise ValueError("worker verification read limit exceeded")
+
+
+def atomic_bytes(path, value):
+    with file_parent(path) as (directory_fd, name):
+        tmp = "." + name + "." + secrets.token_hex(8)
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=directory_fd)
+        try:
+            with os.fdopen(fd, "wb") as out:
+                out.write(value)
+            os.replace(tmp, name, src_dir_fd=directory_fd, dst_dir_fd=directory_fd)
+        finally:
+            with contextlib.suppress(FileNotFoundError):
+                os.unlink(tmp, dir_fd=directory_fd)
+
+
+def atomic_json(path, value):
+    if not isinstance(path, DirPath):
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+    atomic_bytes(path, (json.dumps(value, indent=2, allow_nan=False) + "\n").encode())
+
+
+@contextlib.contextmanager
+def atomic_stream(path):
+    """Install a fresh inode atomically; streaming writes use its already-open fd."""
+    with file_parent(path) as (directory_fd, name):
+        tmp = "." + name + "." + secrets.token_hex(8)
+        fd = os.open(tmp, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=directory_fd)
+        try:
+            with os.fdopen(fd, "w+b") as out:
+                try:
+                    out.write(read_bytes(path))
+                except FileNotFoundError:
+                    pass
+                out.flush()
+                os.replace(tmp, name, src_dir_fd=directory_fd, dst_dir_fd=directory_fd)
+                yield out
+        finally:
+            with contextlib.suppress(FileNotFoundError):
+                os.unlink(tmp, dir_fd=directory_fd)
+
+
+def open_lock(path, *, create=True):
+    flags = (os.O_RDWR | os.O_CREAT if create else os.O_RDONLY) | os.O_NONBLOCK
+    fd = open_fd(path, flags, 0o600)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise ValueError(f"not a regular lock file: {path}")
+        os.set_blocking(fd, True)
+        return os.fdopen(fd, "a+" if create else "r")
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def parent_identity(environ):
+    if environ.get("CLAUDE_CODE_SESSION_ID"):
+        return {"harness": "claude", "session_id": environ["CLAUDE_CODE_SESSION_ID"]}
+    if environ.get("PI_SESSION_FILE"):
+        return {"harness": "omp", "session_id": environ["PI_SESSION_FILE"]}
+    return {"harness": "none", "session_id": None}
+
+
+def child_env(environ=None, *, tmpdir=None, setup=False):
+    env = dict(os.environ if environ is None else environ)
+    for key in list(env):
+        if (key.startswith(("HERDR_", "CLAUDE_CODE_", "ANTHROPIC_", "PI_"))
+                or key in {"CLAUDECODE", "OMPCODE", "CODEX_THREAD_ID", "OPENAI_API_KEY",
+                           "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"}
+                or (not setup and (key.startswith("DBUS_") or key in {
+                    "XDG_RUNTIME_DIR", "SSH_AUTH_SOCK", "SSH_AGENT_PID", "GPG_AGENT_INFO",
+                    "WAYLAND_DISPLAY", "DISPLAY"}))):
+            del env[key]
+    env["GIT_OPTIONAL_LOCKS"] = "0"
+    env["DISABLE_AUTOUPDATER"] = "1"
+    if setup:
+        env.pop("AGENT_RUN_CHILD", None)
+    else:
+        env["AGENT_RUN_CHILD"] = "1"
+    if tmpdir is not None:
+        env.update(TMPDIR=str(tmpdir), TMP=str(tmpdir), TEMP=str(tmpdir))
+    return env
+
+
+@functools.cache
+def trusted_excludes_file():
+    # Capture the director's excludes before neutralising global Git settings.
+    result = subprocess.run(["git", "config", "--global", "--path", "--get", "core.excludesFile"],
+                            cwd="/", capture_output=True, text=True)
+    if result.returncode == 0 and result.stdout.strip():
+        return str(Path(result.stdout.strip()).expanduser().absolute())
+    if result.returncode not in {0, 1}:
+        raise RuntimeError(result.stderr.strip() or "cannot read trusted global excludes")
+    default = Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))) / "git/ignore"
+    return str(default.absolute()) if default.is_file() else "/dev/null"
+
+
+def git(repo, *args, env=None, pass_fds=()):
+    # The caller owns Git metadata, but workers own the worktree and may
+    # replace any tracked attribute/filter script. Never run that code here.
+    excludes = trusted_excludes_file()
+    env = dict(child_env() if env is None else env)
+    env.update(GIT_ATTR_SOURCE="4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+               GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL="/dev/null")
+    command = ["git", "-C", str(repo), "-c", "core.attributesFile=/dev/null",
+               "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null"]
+    command += ["-c", f"core.excludesFile={excludes}"]
+    # info/attributes in trusted Git metadata can still select a configured
+    # filter even with an empty attribute tree. Neutralize those drivers too.
+    config = subprocess.run(command + ["config", "--null", "--name-only", "--get-regexp",
+                                      r"^filter\..*\.(clean|smudge|process|required)$"],
+                            env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, pass_fds=pass_fds)
+    if config.returncode not in {0, 1}:
+        raise RuntimeError(config.stderr.decode(errors="replace").strip() or "git config failed")
+    drivers = {key.rsplit(".", 1)[0] for key in config.stdout.decode().split("\0") if key}
+    for driver in sorted(drivers):
+        for setting, value in (("clean", ""), ("smudge", ""), ("process", ""), ("required", "false")):
+            command += ["-c", f"{driver}.{setting}={value}"]
+    if args and args[0] == "diff":
+        args = (args[0], "--no-ext-diff", "--no-textconv", *args[1:])
+    p = subprocess.run([*command, *args], env=env,
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False, pass_fds=pass_fds)
+    if p.returncode:
+        raise RuntimeError(p.stderr.decode(errors="replace").strip() or "git failed")
+    return p.stdout
+
+
+@functools.cache
+def fd_directory_paths_supported():
+    """fdesc on Darwin exposes files, but cannot traverse directory aliases."""
+    fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        return os.path.samestat(os.stat(f"/dev/fd/{fd}/."), os.fstat(fd))
+    except OSError:
+        return False
+    finally:
+        os.close(fd)
+
+
+def capture_patch(worktree, base, run):
+    """Snapshot filesystem vs base without touching either real Git index."""
+    with pin_directory(run) as directory:
+        name = ".index-" + secrets.token_hex(16)
+        env = child_env()
+        fd_paths = fd_directory_paths_supported()
+        # Only trusted Git children inherit a directory fd. If fdesc cannot
+        # traverse it, the protected absolute path must still name this inode.
+        index_root = f"/dev/fd/{directory.fd}" if fd_paths else str(directory.display.absolute())
+        env["GIT_INDEX_FILE"] = f"{index_root}/{name}"
+        def check_identity():
+            if not fd_paths:
+                try:
+                    same = os.path.samestat(os.stat(index_root), os.fstat(directory.fd))
+                except OSError as exc:
+                    raise RuntimeError("patch index directory identity unavailable") from exc
+                if not same:
+                    raise RuntimeError("patch index directory identity mismatch")
+        try:
+            def index_git(*args):
+                check_identity()
+                try:
+                    return git(worktree, *args, env=env, pass_fds=(directory.fd,) if fd_paths else ())
+                finally:
+                    check_identity()
+            index_git("read-tree", base)
+            index_git("add", "-A", "--", ".")
+            patch = index_git("diff", "--cached", "--binary", "--full-index", base, "--")
+            paths = index_git("diff", "--cached", "--name-only", "-z", base, "--")
+            diffstat = index_git("diff", "--cached", "--stat", base, "--").decode(errors="replace").strip()
+            atomic_bytes(directory / "result.patch", patch)
+        finally:
+            for suffix in ("", ".lock"):
+                with contextlib.suppress(FileNotFoundError):
+                    (directory / (name + suffix)).unlink()
+    return [p.decode(errors="replace") for p in paths.split(b"\0") if p], diffstat
+
+
+def acquire_slot(root, local=False):
+    slots = Path(root) / ".slots"
+    slots.mkdir(parents=True, exist_ok=True)
+    for i in range(4 if local else 3):
+        f = open_lock(slots / f"{'local' if local else 'cloud'}-{i}.lock")
+        try:
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return f
+        except BlockingIOError:
+            f.close()
+    return None
+
+
+
+def extract_candidate(tar, destination):
+    """Git archives contain directories, regular files and relative symlinks."""
+    for member in tar:
+        path = destination / member.name
+        if member.isdir():
+            path.mkdir(exist_ok=True)
+        elif member.isfile():
+            with tar.extractfile(member) as src:
+                atomic_bytes(path, src.read())
+            path.chmod(member.mode & 0o755)
+        elif member.issym():
+            target = os.path.normpath(str(Path(member.name).parent / member.linkname))
+            if os.path.isabs(member.linkname) or target == ".." or target.startswith("../"):
+                raise ValueError("archive symlink escapes candidate")
+            with path.parent_fd() as (fd, name):
+                os.symlink(member.linkname, name, dir_fd=fd)
+        else:
+            raise ValueError("unsupported candidate archive entry")
+
+
+def validate(value, schema, root=None, path="$", depth=0):
+    """Validate the JSON Schema subset used by worker schemas; fail closed otherwise."""
+    root = schema if root is None else root
+    if depth > 100:
+        raise ValueError(f"{path}: schema recursion limit")
+    if schema is True:
+        return
+    if schema is False:
+        raise ValueError(f"{path}: forbidden by schema")
+    if not isinstance(schema, dict):
+        raise ValueError("schema must be an object or boolean")
+    annotations = {"$schema", "$id", "$defs", "definitions", "title", "description", "default", "examples", "$comment"}
+    supported = {"$ref", "type", "enum", "const", "properties", "required", "additionalProperties", "items",
+                 "minItems", "maxItems", "uniqueItems", "minLength", "maxLength", "pattern", "minimum", "maximum",
+                 "exclusiveMinimum", "exclusiveMaximum", "multipleOf", "anyOf", "oneOf", "allOf", "not",
+                 "minProperties", "maxProperties"}
+    unknown = set(schema) - annotations - supported
+    if unknown:
+        raise ValueError(f"{path}: unsupported schema keywords: {', '.join(sorted(unknown))}")
+    if "$ref" in schema:
+        ref = schema["$ref"]
+        if not ref.startswith("#/"):
+            raise ValueError("only local schema references are supported")
+        target = root
+        for part in ref[2:].split("/"):
+            target = target[part.replace("~1", "/").replace("~0", "~")]
+        validate(value, target, root, path, depth + 1)
+    for keyword in ("allOf", "anyOf", "oneOf", "not"):
+        if keyword not in schema:
+            continue
+        variants = [schema[keyword]] if keyword == "not" else schema[keyword]
+        matches = 0
+        for sub in variants:
+            try:
+                validate(value, sub, root, path, depth + 1)
+                matches += 1
+            except ValueError:
+                pass
+        if not {"allOf": matches == len(variants), "anyOf": matches > 0,
+                "oneOf": matches == 1, "not": matches == 0}[keyword]:
+            raise ValueError(f"{path}: {keyword} failed")
+    types = {"object": isinstance(value, dict), "array": isinstance(value, list),
+             "string": isinstance(value, str), "boolean": isinstance(value, bool), "null": value is None,
+             "integer": isinstance(value, int) and not isinstance(value, bool),
+             "number": isinstance(value, (int, float)) and not isinstance(value, bool)}
+    wanted = schema.get("type")
+    if wanted is not None and not any(types.get(t, False) for t in (wanted if isinstance(wanted, list) else [wanted])):
+        raise ValueError(f"{path}: expected {wanted}")
+    if "enum" in schema and value not in schema["enum"]:
+        raise ValueError(f"{path}: not in enum")
+    if "const" in schema and value != schema["const"]:
+        raise ValueError(f"{path}: const mismatch")
+    if isinstance(value, dict):
+        missing = set(schema.get("required", [])) - set(value)
+        if missing:
+            raise ValueError(f"{path}: missing {', '.join(sorted(missing))}")
+        for key, item in value.items():
+            subschema = schema.get("properties", {}).get(key, schema.get("additionalProperties", True))
+            validate(item, subschema, root, f"{path}.{key}", depth + 1)
+        for k, compare in (("minProperties", len(value) >= schema.get("minProperties", 0)),
+                           ("maxProperties", len(value) <= schema.get("maxProperties", len(value)))):
+            if not compare:
+                raise ValueError(f"{path}: {k} failed")
+    if isinstance(value, list):
+        for i, item in enumerate(value):
+            validate(item, schema.get("items", True), root, f"{path}[{i}]", depth + 1)
+        if len(value) < schema.get("minItems", 0) or len(value) > schema.get("maxItems", len(value)):
+            raise ValueError(f"{path}: array length")
+        if schema.get("uniqueItems") and len({json.dumps(x, sort_keys=True) for x in value}) != len(value):
+            raise ValueError(f"{path}: nonunique items")
+    if isinstance(value, str):
+        if len(value) < schema.get("minLength", 0) or len(value) > schema.get("maxLength", len(value)):
+            raise ValueError(f"{path}: string length")
+        if "pattern" in schema and not re.search(schema["pattern"], value):
+            raise ValueError(f"{path}: pattern mismatch")
+    if types["number"]:
+        for k, bad in (("minimum", value < schema.get("minimum", value)),
+                       ("maximum", value > schema.get("maximum", value)),
+                       ("exclusiveMinimum", "exclusiveMinimum" in schema and value <= schema["exclusiveMinimum"]),
+                       ("exclusiveMaximum", "exclusiveMaximum" in schema and value >= schema["exclusiveMaximum"])):
+            if bad:
+                raise ValueError(f"{path}: {k} failed")
+        if "multipleOf" in schema and abs(value / schema["multipleOf"] - round(value / schema["multipleOf"])) > 1e-9:
+            raise ValueError(f"{path}: multipleOf failed")
+
+
+def jsonl(path, issues, *, root=None):
+    try:
+        with open_read(path, root=root) as src:
+            if os.fstat(src.fileno()).st_size > MAX_WORKER_BYTES:
+                raise ValueError("worker file size limit exceeded")
+            total = 0
+            n = 0
+            while line := src.readline(MAX_JSONL_LINE + 1):
+                n += 1
+                total += len(line)
+                consume_worker_bytes(len(line))
+                if len(line) > MAX_JSONL_LINE:
+                    raise ValueError("worker JSONL line limit exceeded")
+                if total > MAX_WORKER_BYTES:
+                    raise ValueError("worker file size limit exceeded")
+                if not line.strip():
+                    continue
+                try:
+                    item = json.loads(line)
+                    if not isinstance(item, dict):
+                        raise ValueError("not an object")
+                    yield item
+                except (ValueError, UnicodeError):
+                    issues.append(f"invalid JSONL: {path}:{n}")
+    except (OSError, ValueError) as exc:
+        issues.append(f"unreadable JSONL: {path}: {exc}")
+
+
+def blank_verification():
+    return {"model_ok": False, "effort_ok": False, "sandbox_ok": False,
+            "spawned_subagents": 0, "mcp_calls": 0, "issues": []}
+
+
+def verify_rollout(path, model, effort, sandbox, network, writable_roots=()):
+    verification = blank_verification()
+    issues = verification["issues"]
+    verification.update(sandbox_evidence="transcript", attestation_evidence="rollout")
+    verification["sandbox_policies"] = []
+    turns = 0
+    model_ok = effort_ok = sandbox_ok = True
+    tokens = rate_limits = None
+    spawn_events = set()
+    mcp_events = set()
+    # Code-mode references, dotted, optional-chained or bracketed; no call parens needed.
+    spawn_ref = re.compile(r"""\btools\s*(?:\??\.\s*|\[\s*["'`]\s*)spawn_agent\b""")
+    mcp_ref = re.compile(r"""\btools\s*(?:\??\.\s*|\[\s*["'`]\s*)mcp__\w""")
+    for record in jsonl(path, issues):
+        payload = record.get("payload", {})
+        if record.get("type") == "turn_context":
+            turns += 1
+            policy = payload.get("sandbox_policy", {})
+            verification["sandbox_policies"].append({
+                key: policy.get(key, False) for key in ("exclude_slash_tmp", "exclude_tmpdir_env_var")})
+            model_ok &= payload.get("model") == model
+            effort_ok &= payload.get("effort") == effort
+            # Codex omits network_access for read-only: its default is false.
+            sandbox_ok &= (policy.get("type") == sandbox and policy.get("network_access", False) == network)
+            if sandbox == "workspace-write":
+                sandbox_ok &= (policy.get("exclude_slash_tmp") is True
+                               and policy.get("exclude_tmpdir_env_var") is True)
+            for root in policy.get("writable_roots", []):
+                candidate = Path(root)
+                if not candidate.is_absolute() or not any(
+                        candidate.resolve() == Path(allowed).resolve() for allowed in writable_roots):
+                    sandbox_ok = False
+                    issues.append(f"unexpected writable root: {root}")
+        if record.get("type") == "event_msg" and payload.get("type", "").startswith("collab_agent_spawn"):
+            # Codex protocol spawn events are dispatch evidence independent of source text.
+            spawn_events.add(payload.get("call_id") or json.dumps(payload, sort_keys=True))
+        if record.get("type") == "event_msg" and payload.get("type") == "token_count":
+            tokens = (payload.get("info") or {}).get("total_token_usage")
+            if payload.get("rate_limits"):
+                rate_limits = payload["rate_limits"]
+        if record.get("type") == "response_item":
+            kind = payload.get("type", "")
+            if kind in {"function_call", "custom_tool_call", "tool_call"}:
+                name = payload.get("name", "")
+                args = str(payload.get("arguments", payload.get("input", "")))
+                leaf = name.split(".")[-1]
+                code_dispatch = leaf == "exec"  # code-mode, NOT exec_command's shell text
+                verification["spawned_subagents"] += int(leaf == "spawn_agent" or (
+                    code_dispatch and bool(spawn_ref.search(args))))
+                verification["mcp_calls"] += int(leaf.startswith("mcp__") or (
+                    code_dispatch and bool(mcp_ref.search(args))))
+            if kind.startswith("mcp_"):
+                verification["mcp_calls"] += 1
+            # v2 subagents are dispatched via exec, not necessarily a spawn_agent call.
+            if kind in {"message", "agent_message"}:
+                content = payload.get("content", [])
+                verification["spawned_subagents"] += sum(
+                    1 for part in content if isinstance(part, dict) and "Message Type: NEW_TASK" in part.get("text", ""))
+        if record.get("type") == "event_msg" and payload.get("type", "").startswith("mcp_tool_call"):
+            mcp_events.add(payload.get("call_id") or json.dumps(payload, sort_keys=True))
+    verification["spawned_subagents"] += len(spawn_events)
+    verification["mcp_calls"] += len(mcp_events)
+    verification.update(model_ok=bool(turns and model_ok), effort_ok=bool(turns and effort_ok),
+                        sandbox_ok=bool(turns and sandbox_ok))
+    if not turns:
+        issues.append("no turn_context records")
+    for field in ("model_ok", "effort_ok", "sandbox_ok"):
+        if not verification[field]:
+            issues.append(field + " mismatch")
+    if verification["spawned_subagents"]:
+        issues.append("worker spawned subagents")
+    if verification["mcp_calls"]:
+        issues.append("worker called MCP tools")
+    return verification, tokens, rate_limits
+
+
+def verify_codex(run, meta):
+    issues = []
+    events = list(jsonl(run / "events.jsonl", issues))
+    errors = [r.get("error", r.get("message")) for r in events if r.get("type") in {"turn.failed", "error"}]
+    if errors:
+        meta["error"] = "; ".join(e.get("message", str(e)) if isinstance(e, dict) else str(e) for e in errors)
+        issues.append("Codex reported failure: " + meta["error"])
+    threads = {r["thread_id"] for r in events
+               if r.get("type") == "thread.started" and isinstance(r.get("thread_id"), str)}
+    verification = blank_verification()
+    verification["attestation_evidence"] = "rollout"
+    if len(threads) != 1:
+        verification["issues"] = issues + ["expected exactly one thread.started id"]
+        return verification
+    thread = threads.pop()
+    meta["child"]["session_id"] = thread
+    if not re.fullmatch(r"[A-Za-z0-9-]+", thread):
+        verification["issues"] = ["invalid thread id"]
+        return verification
+    sessions = Path(os.environ.get("CODEX_HOME", "~/.codex")).expanduser() / "sessions"
+    matches = list(sessions.glob(f"*/*/*/rollout-*-{thread}.jsonl"))
+    if len(matches) != 1:
+        verification["issues"] = issues + [f"expected one rollout for thread {thread}, found {len(matches)}"]
+        return verification
+    meta["child"]["transcript_path"] = str(matches[0].resolve())
+    verification, meta["tokens"], meta["rate_limits"] = verify_rollout(
+        matches[0], meta["model"], meta["effort"], meta["sandbox"], meta["network"],
+        [p for p in (meta.get("worktree"), str(run / "child/tmp")) if p])
+    meta["sandbox_policies"] = verification.pop("sandbox_policies", [])
+    verification["issues"].extend(issues)
+    return verification
+
+
+def verify_messages(path, model, tools, issues, *, local=False, root=None):
+    messages = []
+    tools_ok = True
+    if path and (path.is_file() if isinstance(path, DirPath) else Path(path).is_file()):
+        for record in jsonl(path, issues, root=root):
+            message = record.get("message", {})
+            if ((local and record.get("type") == "message" and message.get("role") == "assistant")
+                    or (not local and record.get("type") == "assistant")):
+                if message.get("model") == "<synthetic>":
+                    continue
+                messages.append(message)
+                for part in message.get("content", []):
+                    if isinstance(part, dict) and part.get("type") in {"tool_use", "toolCall"}:
+                        if part.get("name") not in tools:
+                            tools_ok = False
+                            issues.append("prohibited tool: " + str(part.get("name")))
+    if not messages:
+        issues.append("missing, empty or zero-assistant transcript")
+    model_ok = bool(messages) and all(m.get("model") == model and (
+        not local or m.get("provider") == "vllm") for m in messages)
+    if not model_ok:
+        issues.append("assistant transcript model mismatch or no assistant output")
+    return model_ok, bool(messages) and tools_ok
+
+
+def verify_claude(run, meta, cwd):
+    verification = blank_verification()
+    verification.update(tools_ok=False, sandbox_evidence="transcript-tools", attestation_evidence="transcript")
+    data = json.loads(read_bytes(run / "events.jsonl"))
+    transcript = None
+    if data.get("is_error") is not False:
+        verification["issues"].append("Claude is_error is not false")
+    if "structured_output" not in data:
+        verification["issues"].append("Claude structured_output absent")
+    else:
+        atomic_json(run / "result.json", data["structured_output"])
+    session = data.get("session_id")
+    meta["child"]["session_id"] = session
+    meta["tokens"] = data.get("usage", data.get("modelUsage"))
+    if not isinstance(session, str) or not re.fullmatch(r"[A-Za-z0-9-]+", session):
+        verification["issues"].append("Claude session id absent/invalid")
+    else:
+        projects = Path(os.environ.get("CLAUDE_CONFIG_DIR", "~/.claude")).expanduser() / "projects"
+        # Claude keys projects by the real cwd (~/src resolves to /srv on nous).
+        key = re.sub(r"[^A-Za-z0-9]", "-", str(Path(cwd).resolve()))
+        transcript = projects / key / (session + ".jsonl")
+        if not transcript.is_file():
+            matches = list(projects.glob(f"*/{session}.jsonl"))
+            transcript = matches[0] if len(matches) == 1 else transcript
+        if transcript.is_file():
+            meta["child"]["transcript_path"] = str(transcript.resolve())
+            if meta["model"] == "fable":
+                models = set()
+                for record in jsonl(transcript, verification["issues"]):
+                    if record.get("type") == "assistant":
+                        model = record.get("message", {}).get("model")
+                        if model != "<synthetic>":
+                            models.add(model)
+                    elif record.get("type") == "api-request":
+                        models.add(record.get("params", {}).get("model"))
+                if len(models) == 1 and isinstance(next(iter(models)), str) and next(iter(models)).startswith("claude-fable-"):
+                    meta["model"] = models.pop()
+        else:
+            verification["issues"].append("Claude transcript not found by session id")
+    verification["model_ok"], verification["tools_ok"] = verify_messages(
+        transcript, meta["model"], CLAUDE_TOOLS, verification["issues"])
+    records = list(jsonl(transcript, verification["issues"])) if transcript and transcript.is_file() else []
+    requests = [r.get("params", {}) for r in records if r.get("type") == "api-request"]
+    snapshots = [r["attachment"] for r in records if r.get("type") == "attachment"
+                 and isinstance(r.get("attachment"), dict) and r["attachment"].get("type") == "prompt_snapshot"
+                 and "tools" in r["attachment"]]
+    verification["model_ok"] &= bool(requests) and all(p.get("model") == meta["model"] for p in requests)
+    verification["effort_ok"] = bool(requests) and all(
+        p.get("output_config", {}).get("effort") == meta.get("effort") for p in requests)
+    verification["sandbox_ok"] = bool(snapshots) and verification["tools_ok"] and all(
+        isinstance(s.get("tools"), list) and all(isinstance(tool, dict) and tool.get("name") in CLAUDE_TOOLS
+                                               for tool in s["tools"]) for s in snapshots)
+    for field in ("model_ok", "effort_ok", "sandbox_ok"):
+        if verification[field] is not True:
+            verification["issues"].append(f"Claude {field}: missing or mismatched transcript attestation")
+    return verification
+
+
+def verify_local(run, meta):
+    verification = blank_verification()
+    argv = meta.get("sandbox_argv", [])
+    verification.update(sandbox_ok=meta.get("sandbox") == "bwrap" and
+                        meta.get("sandbox_probe_ok") is True and bool(argv) and
+                        Path(argv[0]).name == "bwrap" and "--ro-bind" in argv,
+                        tools_ok=False, sandbox_evidence="runner-bwrap",
+                        attestation_evidence="omp-session-worker-writable")
+    if not verification["sandbox_ok"]:
+        verification["issues"].append("local bwrap sandbox not attested")
+    issues = verification["issues"]
+    messages = []
+    sessions = set()
+    transcript = None
+    for record in jsonl(run / "events.jsonl", issues):
+        if record.get("type") == "session" and isinstance(record.get("id"), str):
+            sessions.add(record["id"])
+        message = record.get("message", {})
+        if record.get("type") == "message_end" and message.get("role") == "assistant":
+            messages.append(message)
+    if not messages:
+        issues.append("local events have no assistant output")
+    if len(sessions) == 1:
+        session = sessions.pop()
+        if re.fullmatch(r"[A-Za-z0-9-]+", session):
+            meta["child"]["session_id"] = session
+            try:
+                with contextlib.ExitStack() as stack:
+                    child_fd = open_fd(run / "child", os.O_RDONLY | os.O_DIRECTORY)
+                    stack.callback(os.close, child_fd)
+                    sessions_fd = os.open("sessions", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=child_fd)
+                    stack.callback(os.close, sessions_fd)
+                    matches = [run / "child/sessions" / name for name in os.listdir(sessions_fd)
+                               if name.endswith("_" + session + ".jsonl")]
+                if len(matches) == 1:
+                    meta["child"]["transcript_path"] = str(matches[0])
+                    transcript = matches[0]
+            except OSError as exc:
+                issues.append("local sessions unreadable: " + str(exc))
+    if not meta["child"]["transcript_path"]:
+        issues.append("local transcript not found by session id")
+    verification["model_ok"], verification["tools_ok"] = verify_messages(
+        transcript, meta["model"], LOCAL_TOOLS, issues, local=True, root=run / "child")
+    records = list(jsonl(transcript, issues, root=run / "child")) if transcript else []
+    changes = [r for r in records if r.get("type") == "model_change"]
+    thinking = [r for r in records if r.get("type") == "thinking_level_change"]
+    verification["model_ok"] &= bool(changes) and all(
+        r.get("model") == "vllm/" + meta["model"] and r.get("resolvedModelIsFallback") is False for r in changes)
+    verification["effort_ok"] = bool(thinking) and all(
+        r.get("thinkingLevel") == meta.get("effort") for r in thinking)
+    for field in ("model_ok", "effort_ok"):
+        if verification[field] is not True:
+            issues.append(f"local {field}: missing or mismatched transcript attestation")
+    meta["tokens"] = sum((m.get("usage") or {}).get("totalTokens", 0) for m in messages)
+    if not messages or messages[-1].get("stopReason") != "stop":
+        issues.append("local worker did not finish normally")
+    final = messages[-1] if messages else {}
+    text = "\n".join(p.get("text", "") for p in final.get("content", []) if p.get("type") == "text").strip()
+    if text.startswith("```json\n") and text.endswith("```"):
+        text = text[8:-3].strip()
+    atomic_json(run / "result.json", json.loads(text))
+    return verification
+
+
+def audit_receipt(result, candidate, digest, run, verification, packet, child_ok):
+    issues = verification["issues"]
+    try:
+        validate(result, AUDIT_SCHEMA)
+    except (ValueError, TypeError, KeyError) as exc:
+        issues.append(f"audit schema: {exc}")
+    result = result if isinstance(result, dict) else {}
+    if result.get("candidate") != candidate:
+        issues.append("auditor candidate mismatch")
+    if hashlib.sha256(read_bytes(packet)).hexdigest() != digest:
+        issues.append("audit packet digest changed")
+    verdict = result.get("verdict", "UNVERIFIED")
+    findings = result.get("findings", [])
+    if verdict == "PASS" and (any(f.get("severity") in {"major", "blocker"} for f in findings if isinstance(f, dict)) or result.get("missing_evidence")):
+        issues.append("PASS inconsistent with findings or missing evidence")
+    if verdict == "BLOCK" and not findings:
+        issues.append("BLOCK without a finding")
+    attested = (all(verification.get(k) is True for k in ("model_ok", "effort_ok", "sandbox_ok"))
+                and not verification.get("spawned_subagents") and not verification.get("mcp_calls"))
+    accepted = bool(child_ok and attested and not issues and verdict in {"PASS", "BLOCK"})
+    receipt = dict(result)
+    receipt.update(accepted=accepted, verdict=verdict, release=True, candidate=candidate,
+                   packet_sha256=digest, run=run)
+    return receipt
+
+
+def append_index(root, meta):
+    record = {"run": meta["run"], "lane": meta["lane"], "state": meta["state"],
+              "parent_session_id": meta["parent"]["session_id"], "parent_harness": meta["parent"]["harness"],
+              "child_harness": meta["child"]["harness"], "child_session_id": meta["child"]["session_id"],
+              "transcript_path": meta["child"]["transcript_path"], "host": meta["host"], "ts": now()}
+    fd = open_fd(root / "index.jsonl", os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+    with os.fdopen(fd, "a") as out:
+        fcntl.flock(out, fcntl.LOCK_EX)
+        out.write(json.dumps(record, separators=(",", ":")) + "\n")
+
+
+def process_start(pid):
+    """Stable process identity; absent/unreadable evidence never authorizes a signal."""
+    if not isinstance(pid, int) or pid <= 0:
+        return None
+    try:
+        if sys.platform.startswith("linux"):
+            text = Path(f"/proc/{pid}/stat").read_text()
+            start_ticks = text[text.rfind(")") + 2:].split()[19]
+            boot = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+            return boot + ":" + start_ticks
+        if sys.platform == "darwin":
+            result = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True)
+            return result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else None
+    except (OSError, IndexError, ValueError):
+        pass
+    return None
+
+
+def signal_checked(pid, expected, sig, *, group=False):
+    if expected is None or process_start(pid) != expected:
+        return False
+    try:
+        if group:
+            if os.getpgid(pid) != pid or process_start(pid) != expected:
+                return False
+            os.killpg(pid, sig)
+        else:
+            os.kill(pid, sig)
+        return True
+    except OSError:
+        return False
+
+
+def kill_group(pgid, sig, expected):
+    return signal_checked(pgid, expected, sig, group=True)
+
+
+def stop_group(proc, expected, grace_seconds=10):
+    if not kill_group(proc.pid, signal.SIGTERM, expected):
+        return False
+    grace = time.monotonic() + grace_seconds
+    while time.monotonic() < grace:
+        if proc.poll() is not None or not kill_group(proc.pid, 0, expected):
+            break
+        time.sleep(min(0.1, max(0, grace - time.monotonic())))
+    if proc.poll() is None:
+        if not kill_group(proc.pid, signal.SIGKILL, expected):
+            return False
+    proc.wait()
+    return True
+
+
+def local_guard(command):
+    """Own lifetime locks outside the PID namespace, never pass them to bwrap."""
+    stopping = [False]
+    def stop(signum, frame):
+        stopping[0] = True
+    handlers = {sig: signal.signal(sig, stop) for sig in (signal.SIGTERM, signal.SIGINT)}
+    try:
+        # --die-with-parent is mandatory: killing this guardian kills the sandbox.
+        if "--die-with-parent" not in command:
+            raise ValueError("local sandbox must die with its guardian")
+        proc = subprocess.Popen(command, close_fds=True, start_new_session=True)
+        expected = process_start(proc.pid)
+        while proc.poll() is None:
+            if stopping[0]:
+                stop_group(proc, expected, grace_seconds=5)
+                stopping[0] = False
+            try:
+                proc.wait(timeout=0.2)
+            except subprocess.TimeoutExpired:
+                pass
+        return proc.returncode
+    finally:
+        for sig, handler in handlers.items():
+            signal.signal(sig, handler)
+
+
+def execute(command, cwd, run, meta, deadline, interrupted, *, setup=False, runner_lock=None, slot_lock=None):
+    output = run / ("setup.log" if setup else "events.jsonl")
+    with contextlib.ExitStack() as descriptors, open_read(run / "prompt.md") as inp, \
+            atomic_stream(output) as out, atomic_stream(run / "stderr.log") as err:
+        pass_fds = tuple(lock.fileno() for lock in (runner_lock, slot_lock) if lock is not None)
+        if not setup and meta["lane"] != "local" and command[0] == "codex":
+            command = list(command)
+            # Pass individual files, never a host directory fd, to the child.
+            # /dev/fd file aliases also work on macOS; directory traversal needn't.
+            for flag, path, flags in (("--output-schema", run / "schema.json", os.O_RDONLY),
+                                      ("-o", run / "child/result.json", os.O_WRONLY | os.O_CREAT | os.O_TRUNC)):
+                fd = open_fd(path, flags)
+                descriptors.callback(os.close, fd)
+                pass_fds += (fd,)
+                command[command.index(flag) + 1] = f"/dev/fd/{fd}"
+        if not setup and meta["lane"] == "local":
+            meta["sandbox_argv"] = command
+            guard = "import runpy,sys; sys.exit(runpy.run_path(sys.argv[1])['local_guard'](sys.argv[2:]))"
+            command = [sys.executable, "-I", "-c", guard, str(Path(__file__).resolve()), *command]
+            # Import the guardian only from a neutral cwd. bwrap owns --chdir.
+            cwd = "/"
+        elif not setup and command[0] == "codex":
+            # Codex receives its worktree explicitly with -C.
+            cwd = "/"
+        child_setup = None
+        if isinstance(cwd, DirPath):
+            cwd_fd = cwd.open_fd(os.O_RDONLY | os.O_DIRECTORY)
+            descriptors.callback(os.close, cwd_fd)
+            # The CLI is single-threaded. fchdir runs before close_fds/exec:
+            # no directory descriptor is exposed to the worker after exec.
+            child_setup = lambda: os.fchdir(cwd_fd)
+            cwd = None
+        input_data = memoryview(inp.read())
+        tmpdir = run / "child/tmp" if not setup and meta["lane"] == "sol" else None
+        proc = subprocess.Popen(command, cwd=cwd, env=child_env(tmpdir=tmpdir, setup=setup), stdin=subprocess.PIPE, preexec_fn=child_setup,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True, pass_fds=pass_fds)
+        meta.update(pid=proc.pid, pgid=proc.pid, child_start=process_start(proc.pid))
+        atomic_json(run / "meta.json", meta)
+        reason = None
+        orphan = False
+        position = 0
+        with selectors.DefaultSelector() as io:
+            for stream, sink in ((proc.stdout, out), (proc.stderr, err)):
+                descriptors.enter_context(stream)
+                os.set_blocking(stream.fileno(), False)
+                io.register(stream, selectors.EVENT_READ, sink)
+            descriptors.enter_context(proc.stdin)
+            os.set_blocking(proc.stdin.fileno(), False)
+            if input_data:
+                io.register(proc.stdin, selectors.EVENT_WRITE)
+            else:
+                proc.stdin.close()
+
+            def retire(stream):
+                io.unregister(stream)
+                stream.close()
+
+            def receive(key, drain=False):
+                while True:
+                    try:
+                        data = os.read(key.fd, 65536)
+                    except BlockingIOError:
+                        return
+                    if not data:
+                        retire(key.fileobj)
+                        return
+                    key.data.write(data)
+                    key.data.flush()
+                    if not drain:
+                        return
+
+            while True:
+                if interrupted[0] or (run / "cancel.requested").exists():
+                    reason = "cancelled"
+                elif proc.poll() is None and time.monotonic() >= deadline:
+                    reason = "timeout"
+                if reason and proc.poll() is None:
+                    if not stop_group(proc, meta["child_start"]):
+                        meta["cancel_note"] = f"child pid {proc.pid} unverified; stop it by hand"
+                        orphan = True
+                if proc.poll() is not None or orphan:
+                    for key in list(io.get_map().values()):
+                        if key.fileobj is proc.stdin:
+                            retire(key.fileobj)
+                        else:
+                            receive(key, drain=True)
+                    break
+                for key, _ in io.select(timeout=0.2):
+                    if key.fileobj is proc.stdin:
+                        try:
+                            position += os.write(key.fd, input_data[position:position + 65536])
+                            if position == len(input_data):
+                                retire(proc.stdin)
+                        except BrokenPipeError:
+                            retire(proc.stdin)
+                    else:
+                        receive(key)
+        return proc.returncode, reason
+
+
+def local_configuration():
+    """Read just vLLM's scalar settings without a YAML dependency."""
+    folder = Path.home() / ".omp/profiles/local/agent"
+    endpoint = model = None
+    for name in ("models.yml", "config.yml"):
+        path = folder / name
+        if not path.is_file():
+            continue
+        text = path.read_text()
+        # Only accept a baseUrl scoped to a vllm mapping, never a cloud provider.
+        lines = text.splitlines()
+        in_vllm = False
+        vllm_indent = 0
+        for line in lines:
+            stripped = line.strip()
+            indent = len(line) - len(line.lstrip())
+            if stripped == "vllm:":
+                in_vllm, vllm_indent = True, indent
+                continue
+            if in_vllm and stripped and not stripped.startswith("#") and indent <= vllm_indent:
+                in_vllm = False
+            if in_vllm and re.match(r"baseUrl\s*:", stripped):
+                endpoint = stripped.split(":", 1)[1].strip().strip("\"'")
+            if in_vllm and re.match(r"-\s+id\s*:", stripped):
+                model = stripped.split(":", 1)[1].strip().strip("\"'")
+        match = re.search(r"^\s+default:\s*[\"']?vllm/([^\s:\"']+)", text, re.M)
+        if match:
+            model = match.group(1)
+    if not endpoint or not model:
+        raise RuntimeError("local vLLM endpoint/model absent from local profile")
+    url = urllib.parse.urlparse(endpoint)
+    if url.scheme not in {"http", "https"} or not url.hostname or url.username or url.password:
+        raise RuntimeError("invalid local vLLM endpoint")
+    # No proxy redirect/fallback: a failed local service must never reach cloud.
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *args, **kwargs):
+            return None
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+    try:
+        with opener.open(endpoint.rstrip("/") + "/models", timeout=2) as response:
+            models = json.load(response)
+        if model not in {m.get("id") for m in models.get("data", [])}:
+            raise RuntimeError("configured model not served")
+    except Exception as exc:
+        raise RuntimeError(f"local vLLM endpoint is not answering: {exc}") from exc
+    return model
+
+
+def print_result(run, meta, result, as_json=False):
+    if as_json:
+        print(json.dumps({"meta": meta, "result": result}, separators=(",", ":")))
+        return
+    lines = [f"{meta['run']} {meta['state']} {meta['lane']}/{meta['model']}", f"result: {run / 'result.json'}"]
+    if meta.get("worktree"):
+        lines.append(f"patch: {run / 'result.patch'}")
+    if meta.get("diffstat"):
+        lines.append(meta["diffstat"])
+    if isinstance(result, dict):
+        if result.get("summary"):
+            lines.append(str(result["summary"]))
+        lines.extend("blocker: " + str(x) for x in result.get("blockers", []))
+    lines.extend("verification: " + str(x) for x in meta["verification"]["issues"])
+    if meta.get("error"):
+        lines.append("error: " + meta["error"])
+    text = "\n".join(lines)
+    print(text.encode()[:4000].decode(errors="ignore"))
+
+
+def launch(args):
+    root = state_home()
+    repo = Path(args.repo or os.getcwd()).expanduser().resolve()
+    name = getattr(args, "name", None) or secrets.token_hex(2)
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", name):
+        raise ValueError("name must be 1-128 letters, digits, underscores or hyphens")
+    args.run_id = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S") + f"-{args.lane}-{name}"
+    args.worktree_root = Path(os.environ.get("AGENT_RUN_WORKTREE_ROOT", "~/src/worktrees/agent")).expanduser().resolve()
+    refuse_writable_state(root, args.worktree_root, args.run_id)
+    if args.lane in {"sol", "local"}:
+        refuse_temporary_repo(repo)
+        args.worker_path = refuse_overlapping_layout(repo, root, args.worktree_root, args.run_id)
+    slot = acquire_slot(root, args.lane == "local")
+    if slot is None:
+        print("agent-run: all worker slots busy", file=sys.stderr)
+        return 75
+    with slot, pin_directory(root) as root, contextlib.ExitStack() as runs:
+        return launch_locked(args, root, slot, runs)
+
+
+def launch_locked(args, root, slot, runs):
+    lane = args.lane
+    repo = Path(args.repo or os.getcwd()).expanduser().resolve()
+    if not repo.is_dir():
+        raise ValueError(f"not a directory: {repo}")
+    brief_path = Path(args.packet if lane == "audit" else args.brief).expanduser().resolve()
+    brief = brief_path.read_bytes()
+    schema = AUDIT_SCHEMA if lane == "audit" else RESULT_SCHEMA
+    if lane == "ask" and args.schema:
+        schema = json.loads(Path(args.schema).read_text())
+        if not isinstance(schema, (dict, bool)):
+            raise ValueError("schema must be a JSON object or boolean")
+    model, effort = CODEX_MODELS["sol"] if lane in {"sol", "audit"} else ("vllm", "medium")
+    harness = "omp" if lane == "local" else "codex"
+    sandbox = "workspace-write" if lane == "sol" else "read-only"
+    if lane == "sol":
+        effort = "high"
+    if lane == "ask":
+        if args.model in CODEX_MODELS:
+            model, effort = CODEX_MODELS[args.model]
+        else:
+            model = "claude-opus-5-5" if args.model == "opus" else "fable"
+            effort, harness, sandbox = "high", "claude", "tool-allowlist"
+    if lane == "local":
+        sandbox = "bwrap"
+    if harness == "codex":
+        strict_schema(schema)
+    run_id = args.run_id
+    (root / run_id).mkdir(mode=0o700)
+    run = runs.enter_context(root.open_dir(run_id))
+    runner_lock = open_lock(run / "runner.lock")
+    fcntl.flock(runner_lock, fcntl.LOCK_EX)
+    child = run / "child"
+    child.mkdir()
+    if lane == "sol":
+        (child / "tmp").mkdir()
+    atomic_bytes(run / "brief.md", brief)
+    atomic_bytes(run / "events.jsonl", b"")
+    atomic_bytes(run / "stderr.log", b"")
+    atomic_json(run / "schema.json", schema)
+    network = bool(getattr(args, "net", False))
+    meta = {"schema_version": 1, "run": run_id, "lane": lane, "model": model, "effort": effort,
+            "sandbox": sandbox, "network": network, "repo": str(repo), "base": None, "worktree": None,
+            "brief_sha256": hashlib.sha256(brief).hexdigest(), "host": socket.gethostname(),
+            "parent": parent_identity(os.environ),
+            "child": {"harness": harness, "session_id": None, "transcript_path": None},
+            "pid": None, "pgid": None, "runner_pid": os.getpid(), "runner_start": process_start(os.getpid()),
+            "started_at": now(), "ended_at": None,
+            "state": "running", "exit_code": None, "tokens": None, "verification": blank_verification()}
+    meta["worker_bytes_read"] = 0
+    meta["verification"]["attestation_evidence"] = (
+        "omp-session-worker-writable" if lane == "local" else "transcript" if harness == "claude" else "rollout")
+    atomic_json(run / "meta.json", meta)
+    append_index(root, meta)
+    interrupted = [False]
+    def interrupted_handler(signum, frame):
+        interrupted[0] = True
+    old_handlers = {sig: signal.signal(sig, interrupted_handler) for sig in (signal.SIGTERM, signal.SIGINT)}
+    deadline = time.monotonic() + args.timeout
+    result = None
+    terminal = None
+    child_code = None
+    packet = None
+    read_token = None
+    try:
+        network_note = ("WebSearch and WebFetch granted" if harness == "claude" else
+                        "granted to local vLLM" if lane == "local" else
+                        "granted" if network else "not granted; Codex sandbox policy applies")
+        acceptance = ("The director runs the acceptance check; you cannot execute processes. "
+                      "In checks_run list the checks you could not run."
+                      if lane == "local" else "Run the brief's acceptance check yourself.")
+        prompt = WORKER_CONTRACT.format(acceptance=acceptance) + f"\nTime limit: {args.timeout:g} seconds. Network: {network_note}.\n"
+        cwd = repo
+        if lane in {"sol", "local"}:
+            base = git(repo, "rev-parse", "--verify", (args.base or "HEAD") + "^{commit}").decode().strip()
+            meta["base"] = base
+            worktree_root = args.worktree_root
+            worktree_root.mkdir(parents=True, exist_ok=True)
+            cwd = args.worker_path
+            meta.update(worktree=str(cwd), worktree_root=str(worktree_root))
+            atomic_json(run / "meta.json", meta)
+            git(repo, "worktree", "add", "--detach", str(cwd), base)
+            meta["ignored_base"] = sorted(ignored_files(cwd))
+        if lane == "audit":
+            if not re.fullmatch(r"[0-9a-f]{40}", args.candidate):
+                raise ValueError("audit candidate must be a full 40-hex commit id")
+            candidate = git(repo, "rev-parse", "--verify", args.candidate + "^{commit}").decode().strip()
+            if candidate != args.candidate:
+                raise ValueError("candidate is not the exact commit id")
+            meta["base"] = candidate
+            packet = run / "packet.md"
+            atomic_bytes(packet, brief)
+            packet.chmod(0o444)
+            meta["packet_sha256"] = hashlib.sha256(brief).hexdigest()
+            ranges = [line for line in brief.decode().splitlines() if line.startswith("Audited-Range: ")]
+            if len(ranges) != 1 or not re.fullmatch(r"Audited-Range: [0-9a-f]{40}\.\." + candidate, ranges[0]):
+                raise ValueError("packet must contain exactly one Audited-Range: BASE..CANDIDATE line")
+            cwd = run / "tree"
+            cwd.mkdir()
+            archive = run / "candidate.tar"
+            atomic_bytes(archive, git(repo, "archive", "--format=tar", candidate))
+            with open_read(archive) as archive_file, tarfile.open(fileobj=archive_file) as tar:
+                extract_candidate(tar, cwd)
+            archive.unlink()
+            for path in sorted(cwd.rglob("*"), reverse=True):
+                if not path.is_symlink():
+                    path.chmod(0o555 if path.is_dir() or path.stat().st_mode & stat.S_IXUSR else 0o444)
+            cwd.chmod(0o555)
+            prompt += AUDIT_CONTRACT + f"\nCandidate: {candidate}\nPacket: {packet}\nCandidate files: {cwd}\n"
+        else:
+            prompt += "\nBrief:\n" + brief.decode()
+            if lane == "ask":
+                prompt += "\nThis is a read-only consult/extraction. Make no changes.\n"
+        prompt += "\nOutput schema:\n" + json.dumps(schema) + "\n"
+        atomic_bytes(run / "prompt.md", prompt.encode())
+        if lane == "local":
+            meta["model"] = local_configuration()
+            # Explicitly pin all auxiliary roles, disable external discovery and
+            # expose only basic coding tools. No fallback, hooks or cloud selector.
+            overlay = run / "local.yml"
+            atomic_bytes(overlay, ("retry:\n  modelFallback: false\n  enabled: false\nmodelRoles:\n" +
+                                  "".join(f"  {role}: vllm/{meta['model']}:medium\n" for role in
+                                          ("default", "slow", "plan", "vision", "task", "commit", "smol", "tiny"))).encode())
+            command = ["omp-local", "-p", "--mode", "json", "--model", "vllm/" + meta["model"],
+                       "--thinking", effort,
+                       "--config", str(overlay), "--no-extensions", "--no-skills", "--no-rules",
+                       "--no-context-files", "--no-lsp", "--no-title", "--tools", "read,edit,write,grep,glob",
+                       "--session-dir", str(child / "sessions"), "--max-time", str(args.timeout),
+                       "@" + str(run / "prompt.md")]
+            command = local_sandbox(cwd, run, repo) + command
+            meta["sandbox_probe_ok"] = True
+            meta["profile_snapshot_before"] = profile_snapshot()
+        elif harness == "claude":
+            command = ["claude", "-p", "--safe-mode", "--model", model, "--effort", effort,
+                       "--tools", "Read,Grep,Glob,WebSearch,WebFetch", "--disallowedTools", "mcp__*",
+                       "--allowedTools", "Read,Grep,Glob,WebSearch,WebFetch",
+                       "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
+                       "--permission-mode", "dontAsk", "--output-format", "json", "--json-schema", json.dumps(schema)]
+            for directory in dict.fromkeys([str(brief_path.parent), *getattr(args, "add_dir", [])]):
+                command += ["--add-dir", str(Path(directory).expanduser().resolve())]
+        else:
+            command = ["codex", "exec", "--ignore-user-config", "--ignore-rules"]
+            for directory in getattr(args, "add_dir", []):
+                command += ["--add-dir", str(Path(directory).expanduser().resolve())]
+            command += ["-m", model, "-c", f'model_reasoning_effort="{effort}"', "-s", sandbox] + DISABLE_FLAGS
+            if lane == "sol":
+                command += ["-c", "sandbox_workspace_write.exclude_slash_tmp=true",
+                            "-c", "sandbox_workspace_write.exclude_tmpdir_env_var=true",
+                            "--add-dir", str(child / "tmp")]
+            if network:
+                command += ["-c", "sandbox_workspace_write.network_access=true"]
+            try:
+                git(cwd, "rev-parse", "--show-toplevel")
+            except RuntimeError:
+                command += ["--skip-git-repo-check"]
+            command += ["-C", str(cwd), "--output-schema", str(run / "schema.json"),
+                        "-o", str(child / "result.json"), "--json", "-"]
+        atomic_json(run / "meta.json", meta)
+        if lane == "sol" and args.setup:
+            child_code, terminal = execute(["/bin/sh", "-c", args.setup], cwd, run, meta, deadline, interrupted,
+                                           setup=True, runner_lock=runner_lock, slot_lock=slot)
+            if child_code and not terminal:
+                terminal = "failed"
+                meta["error"] = f"setup failed with exit {child_code}"
+            meta["setup_changed_paths"], _ = capture_patch(cwd, meta["base"], run)
+            meta["ignored_base"] = sorted(ignored_files(cwd))
+            atomic_json(run / "meta.json", meta)
+        if not terminal:
+            child_code, terminal = execute(command, cwd, run, meta, deadline, interrupted,
+                                           runner_lock=runner_lock, slot_lock=slot)
+            # Persist the partial patch before reading any worker-produced
+            # transcript/result, even when verification later fails.
+            capture_worker_patch(meta, run)
+            read_token = WORKER_READ_BYTES.set(0)
+            if harness == "codex":
+                meta["verification"] = verify_codex(run, meta)
+                if (child / "result.json").exists():
+                    try:
+                        atomic_bytes(run / "result.json", read_bytes(child / "result.json", root=child))
+                    except (OSError, ValueError) as exc:
+                        meta["verification"]["issues"].append("unreadable worker result: " + str(exc))
+            elif harness == "claude":
+                meta["verification"] = verify_claude(run, meta, cwd)
+            else:
+                meta["verification"] = verify_local(run, meta)
+            for field in ("model_ok", "effort_ok", "sandbox_ok"):
+                if meta["verification"].get(field) is not True:
+                    issue = field + " not attested"
+                    if issue not in meta["verification"]["issues"]:
+                        meta["verification"]["issues"].append(issue)
+            if (run / "result.json").is_file():
+                result = json.loads(read_bytes(run / "result.json"))
+            if lane == "audit":
+                result = audit_receipt(result, args.candidate, meta["packet_sha256"], run_id,
+                                       meta["verification"], packet, child_code == 0 and terminal is None)
+                atomic_json(run / "result.json", result)
+            else:
+                validate(result, schema)
+            if terminal is None:
+                if meta["verification"]["issues"]:
+                    terminal = "unverified"
+                elif child_code:
+                    terminal = "failed"
+                elif lane == "audit":
+                    terminal = {"PASS": "ok", "BLOCK": "blockers"}.get(result.get("verdict"), "unverified")
+                    if not result.get("accepted"):
+                        terminal = "unverified"
+                else:
+                    terminal = "blockers" if isinstance(result, dict) and result.get("blockers") else "ok"
+    except Exception as exc:
+        if isinstance(exc, ValueError) and "limit exceeded" in str(exc):
+            meta["verification"]["issues"].append(str(exc))
+        meta["error"] = meta.get("error") or str(exc)
+        terminal = terminal or ("cancelled" if interrupted[0] else
+                                "unverified" if meta["verification"]["issues"] else "failed")
+        if lane == "audit":
+            result = {"accepted": False, "verdict": "UNVERIFIED", "release": True,
+                      "candidate": args.candidate, "packet_sha256": meta.get("packet_sha256", meta["brief_sha256"]),
+                      "run": run_id, "findings": [], "missing_evidence": [str(exc)], "summary": "Audit failed"}
+            atomic_json(run / "result.json", result)
+    finally:
+        if read_token is not None:
+            meta["worker_bytes_read"] = WORKER_READ_BYTES.get()
+            WORKER_READ_BYTES.reset(read_token)
+        capture_worker_patch(meta, run)
+        if meta.get("patch_error"):
+            issue = "patch capture failed: " + meta["patch_error"]
+            if issue not in meta["verification"]["issues"]:
+                meta["verification"]["issues"].append(issue)
+            if terminal not in {"timeout", "cancelled"}:
+                terminal = "unverified"
+        if lane == "local" and meta.get("profile_snapshot_before"):
+            try:
+                meta["profile_snapshot_after"] = profile_snapshot()
+                if meta["profile_snapshot_after"] != meta["profile_snapshot_before"]:
+                    raise RuntimeError("local profile inputs changed")
+            except Exception as exc:
+                meta["verification"]["issues"].append("profile integrity: " + str(exc))
+                if terminal in {"ok", "blockers"}:
+                    terminal = "unverified"
+        if interrupted[0] or (run / "cancel.requested").exists():
+            terminal = "cancelled"
+        meta.update(state=terminal or "failed", ended_at=now(), exit_code=child_code)
+        atomic_json(run / "meta.json", meta)
+        append_index(root, meta)
+        for sig, handler in old_handlers.items():
+            signal.signal(sig, handler)
+        runner_lock.close()
+    print_result(run, meta, result, args.json)
+    return 0 if meta["state"] == "ok" else 1
+
+
+def capture_worker_patch(meta, run):
+    if not meta.get("worktree") or not Path(meta["worktree"]).is_dir():
+        return
+    # A successful pre-verification capture is final: no worker runs afterward.
+    if meta.get("patch_captured"):
+        return
+    try:
+        meta["changed_paths"], meta["diffstat"] = capture_patch(meta["worktree"], meta["base"], run)
+        meta["patch_captured"] = True
+        meta["ignored_new_files"] = sorted(ignored_files(meta["worktree"]) - set(meta.get("ignored_base", [])))
+    except Exception as exc:
+        meta["patch_error"] = str(exc)
+        meta["verification"]["issues"].append("patch capture failed: " + str(exc))
+
+
+def settle_abandoned(run, meta, *, persist=True):
+    with pin_directory(run) as directory:
+        return _settle_abandoned(directory, meta, persist=persist)
+
+
+def _settle_abandoned(run, meta, *, persist=True):
+    """A lifetime flock, not a recyclable PID, is the runner's liveness proof."""
+    if meta.get("state") != "running":
+        return meta
+    try:
+        lock = open_lock(run / "runner.lock", create=persist)
+    except FileNotFoundError:
+        return dict(meta, state="abandoned", ended_at=now())
+    with lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return meta
+        meta = json.loads(read_bytes(run / "meta.json"))
+        if meta.get("state") != "running":
+            return meta
+        meta.update(state="abandoned", ended_at=now())
+        if not persist:
+            return meta
+        if meta.get("worktree") and Path(meta["worktree"]).is_dir():
+            try:
+                meta["changed_paths"], meta["diffstat"] = capture_patch(
+                    meta["worktree"], meta["base"], run)
+                meta["ignored_new_files"] = sorted(ignored_files(meta["worktree"]) - set(meta.get("ignored_base", [])))
+            except Exception as exc:
+                meta["patch_error"] = str(exc)
+                meta.setdefault("verification", blank_verification())["issues"].append("patch capture failed: " + str(exc))
+        atomic_json(run / "meta.json", meta)
+        if "parent" in meta:
+            append_index(run.parent, meta)
+    return meta
+
+
+@contextlib.contextmanager
+def get_run(root, run_id, *, persist=True):
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", run_id):
+        raise ValueError("invalid run id")
+    with pin_directory(root) as directory, directory.open_dir(run_id) as run:
+        yield run, settle_abandoned(run, json.loads(read_bytes(run / "meta.json")), persist=persist)
+
+
+def clear_user_flags(directory_fd, name, absolute_root, relative="."):
+    chflags = getattr(os, "chflags", None)
+    if chflags is not None and chflags in os.supports_dir_fd:
+        try:
+            chflags(name, 0, dir_fd=directory_fd, follow_symlinks=False)
+            return
+        except (TypeError, NotImplementedError):
+            pass
+    # Darwin has no chflagsat. Avoid absolute-path I/O for unflagged entries;
+    # flagged entries may use lchflags only while both names identify one inode.
+    lchflags = getattr(os, "lchflags", None)
+    if lchflags is None:
+        return
+    entry = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+    if not getattr(entry, "st_flags", 0):
+        return
+    absolute_path = absolute_root / relative / name
+    try:
+        actual = os.lstat(absolute_path)
+    except OSError:
+        return
+    if os.path.samestat(actual, entry):
+        lchflags(absolute_path, 0)
+
+
+def remove_tree(parent_fd, root_name, absolute_parent):
+    """Remove one entry beneath a pinned parent without traversing symlinks."""
+    if root_name in {"", ".", ".."} or "/" in root_name:
+        raise ValueError("unsafe removal entry name")
+    try:
+        entry = os.stat(root_name, dir_fd=parent_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return
+    clear_user_flags(parent_fd, root_name, absolute_parent)
+    if not stat.S_ISDIR(entry.st_mode):
+        os.unlink(root_name, dir_fd=parent_fd)
+        return
+    chmod_entry(parent_fd, root_name, 0o700)
+
+    def walk_error(exc):
+        raise exc
+
+    # fwalk in Python 3.13 is iterative and opens each child relative to
+    # its parent fd, avoiding recursion and reopen-from-root quadratic I/O.
+    for relative, dirs, files, fd in os.fwalk(root_name, dir_fd=parent_fd, topdown=True,
+                                             follow_symlinks=False, onerror=walk_error):
+        for name in files:
+            clear_user_flags(fd, name, absolute_parent, relative)
+        for name in dirs[:]:
+            clear_user_flags(fd, name, absolute_parent, relative)
+            if stat.S_ISDIR(os.stat(name, dir_fd=fd, follow_symlinks=False).st_mode):
+                chmod_entry(fd, name, 0o700)
+            else:
+                # Prune directory symlinks before fwalk can open them.
+                dirs.remove(name)
+                os.unlink(name, dir_fd=fd)
+    for relative, dirs, files, fd in os.fwalk(root_name, dir_fd=parent_fd, topdown=False,
+                                             follow_symlinks=False, onerror=walk_error):
+        for name in files:
+            clear_user_flags(fd, name, absolute_parent, relative)
+            os.unlink(name, dir_fd=fd)
+        for name in dirs:
+            if stat.S_ISDIR(os.stat(name, dir_fd=fd, follow_symlinks=False).st_mode):
+                os.rmdir(name, dir_fd=fd)
+            else:
+                os.unlink(name, dir_fd=fd)
+    os.rmdir(root_name, dir_fd=parent_fd)
+
+
+def remove_child_tmp(run):
+    if not (run / "child").exists():
+        return
+    with run.open_dir("child") as child:
+        remove_tree(child.fd, "tmp", Path(str(run)).absolute() / "child")
+
+
+def gc_run(run, meta):
+    meta.update(settle_abandoned(run, meta))
+    if meta["state"] == "running":
+        raise ValueError("refusing to gc a running worker")
+    if meta.get("worktree") and not meta.get("gc_at") and not meta.get("worktree_removed"):
+        path = Path(meta["worktree"])
+        root = Path(meta["worktree_root"])
+        expected = f"{Path(meta['repo']).name}-{meta['run']}"
+        if path.is_symlink() or path.parent != root or path.name != expected or path.resolve() == root.resolve():
+            raise ValueError("unsafe worktree target")
+        try:
+            os.lstat(meta["repo"])
+        except FileNotFoundError:
+            # A lost caller repo also loses Git's worktree registry. Keep the
+            # same target checks, then remove only its pinned-parent entry.
+            try:
+                os.lstat(path)
+            except FileNotFoundError:
+                pass
+            else:
+                with pin_directory(root) as parent:
+                    remove_tree(parent.fd, path.name, parent.display.absolute())
+            meta["worktree_removed_without_repo"] = True
+        else:
+            registered = git(meta["repo"], "worktree", "list", "--porcelain").decode()
+            if f"worktree {path}\n" not in registered:
+                if path.exists():
+                    raise ValueError("recorded worktree is not registered in its repository")
+            else:
+                git(meta["repo"], "worktree", "remove", "--force", str(path))
+        meta["worktree_removed"] = now()
+        atomic_json(run / "meta.json", meta)
+    try:
+        remove_child_tmp(run)
+    except Exception as exc:
+        tmp_path = shlex.quote(str(run / "child/tmp"))
+        recovery = ("on macOS a worker may leave ACLs or flags: "
+                    f"chmod -RN {tmp_path}; chflags -R nouchg {tmp_path}; then rerun gc")
+        meta["gc_tmp_error"] = f"{exc}; {recovery}"
+        atomic_json(run / "meta.json", meta)
+        raise RuntimeError(f"temporary cleanup failed: {meta['gc_tmp_error']}; "
+                           f"rerun agent-run gc {meta.get('run', 'ID')} to retry") from exc
+    meta.pop("gc_tmp_error", None)
+    if meta.get("lane") == "audit" and (run / "tree").exists():
+        tree = run / "tree"
+        if tree.is_symlink():
+            raise ValueError("unsafe audit tree target")
+        tree.chmod(0o700)
+        for path in tree.rglob("*"):
+            if path.is_dir() and not path.is_symlink():
+                path.chmod(0o700)
+        shutil.rmtree("tree", dir_fd=run.fd)
+    meta["gc_at"] = now()
+    atomic_json(run / "meta.json", meta)
+
+
+def management(args):
+    path = state_home()
+    if args.lane == "list" and not path.exists():
+        print("[]" if args.json else "", end="\n" if args.json else "")
+        return 0
+    with pin_directory(path) as root:
+        if args.lane == "list":
+            metas = []
+            for name in sorted(os.listdir(root.fd), reverse=True):
+                try:
+                    with get_run(root, name, persist=False) as (_, meta):
+                        metas.append(meta)
+                except (ValueError, OSError):
+                    continue
+                if len(metas) >= args.n:
+                    break
+            if args.json:
+                print(json.dumps(metas))
+            else:
+                for meta in metas:
+                    print(f"{meta['run']} {meta['state']} {meta['lane']}/{meta['model']}")
+            return 0
+        if args.lane == "gc" and args.older_than is not None:
+            if args.run:
+                raise ValueError("choose RUN or --older-than, not both")
+            cutoff = time.time() - args.older_than * 86400
+            failed = False
+            for name in sorted(os.listdir(root.fd)):
+                if not re.fullmatch(r"[A-Za-z0-9_-]+", name):
+                    continue
+                try:
+                    with get_run(root, name) as (run, meta):
+                        stamp = meta["started_at"] if meta["state"] == "abandoned" else meta.get("ended_at")
+                        if meta["state"] != "running" and stamp and dt.datetime.fromisoformat(stamp).timestamp() < cutoff:
+                            gc_run(run, meta)
+                            print(f"gc {meta['run']}")
+                except Exception as exc:
+                    failed = True
+                    print(f"gc {name} failed: {exc}", file=sys.stderr)
+            return 1 if failed else 0
+        if not args.run:
+            raise ValueError("RUN is required")
+        with get_run(root, args.run, persist=args.lane != "show") as (run, meta):
+            if args.lane == "show":
+                result = json.loads(read_bytes(run / "result.json")) if (run / "result.json").exists() else None
+                print_result(run, meta, result, args.json)
+            elif args.lane == "cancel":
+                if meta["state"] != "running":
+                    raise ValueError("run is not running")
+                atomic_bytes(run / "cancel.requested", b"")
+                runner_pid, runner_start = meta.get("runner_pid"), meta.get("runner_start")
+                if runner_start is None or process_start(runner_pid) != runner_start:
+                    print(f"cancel requested: {meta['run']}; orphan child pid {meta.get('pid')} "
+                          "unverified; its lock is held, stop it by hand (no signals sent)")
+                    return 0
+                child_ok = kill_group(meta.get("pgid"), signal.SIGTERM, meta.get("child_start"))
+                runner_ok = signal_checked(runner_pid, runner_start, signal.SIGTERM)
+                print(f"cancel requested: {meta['run']}")
+                if not child_ok or not runner_ok:
+                    print(f"pid {meta.get('pid')} unverified; if its lock remains held, stop it by hand")
+            elif args.lane == "gc":
+                gc_run(run, meta)
+                print(f"gc {meta['run']}")
+    return 0
+
+
+def positive(value):
+    number = float(value)
+    if not 0 < number < float("inf"):
+        raise argparse.ArgumentTypeError("must be a finite positive number")
+    return number
+
+
+def nonnegative(value):
+    number = float(value)
+    if not 0 <= number < float("inf"):
+        raise argparse.ArgumentTypeError("must be a finite non-negative number")
+    return number
+
+
+def main(argv=None):
+    nested = next((key for key in ("AGENT_RUN_CHILD", "CODEX_SANDBOX", "CODEX_SANDBOX_NETWORK_DISABLED")
+                   if key in os.environ), None)
+    if nested:
+        print(f"agent-run: {nested} is set; worker environments cannot launch agent-run "
+              "(run it from Claude Code or a plain shell)", file=sys.stderr)
+        return 3
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--json", action="store_true", help="machine-readable output")
+    subs = parser.add_subparsers(dest="lane", required=True)
+    for lane in ("sol", "ask", "audit", "local"):
+        sub = subs.add_parser(lane)
+        sub.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+        sub.add_argument("--repo", required=lane in {"sol", "audit", "local"})
+        sub.add_argument("--timeout", type=positive, default=3600 if lane == "audit" else 1800)
+        if lane == "audit":
+            sub.add_argument("--packet", required=True)
+            sub.add_argument("--candidate", required=True)
+        else:
+            sub.add_argument("--brief", required=True)
+        if lane in {"sol", "local"}:
+            sub.add_argument("--base")
+        if lane == "sol":
+            sub.add_argument("--net", action="store_true")
+            sub.add_argument("--setup")
+        if lane in {"sol", "local", "ask"}:
+            sub.add_argument("--name")
+        if lane == "ask":
+            sub.add_argument("--model", required=True, choices=[*CODEX_MODELS, "opus", "fable"])
+            sub.add_argument("--schema")
+            sub.add_argument("--add-dir", action="append", default=[], metavar="DIR")
+    for lane in ("list", "show", "cancel", "gc"):
+        sub = subs.add_parser(lane)
+        sub.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+        if lane == "list":
+            sub.add_argument("--n", type=int, default=20)
+        elif lane == "gc":
+            sub.add_argument("run", nargs="?")
+            sub.add_argument("--older-than", type=nonnegative)
+        else:
+            sub.add_argument("run")
+    args = parser.parse_args(argv)
+    if os.environ.get("AGENT_LOCAL_ONLY") == "1" and args.lane not in {"local", "list", "show", "gc", "cancel"}:
+        print("agent-run: AGENT_LOCAL_ONLY=1 refuses cloud workers", file=sys.stderr)
+        return 3
+    try:
+        return management(args) if args.lane in {"list", "show", "gc", "cancel"} else launch(args)
+    except (StrictSchemaError, UnsafeTempRepoError) as exc:
+        print(f"agent-run: {exc}", file=sys.stderr)
+        return 2
+    except (ValueError, OSError, RuntimeError) as exc:
+        print(f"agent-run: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

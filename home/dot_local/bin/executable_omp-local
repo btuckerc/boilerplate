@@ -3,4 +3,7 @@
 # Drop the default profile's broker/overlay settings when started from inside
 # another OMP session; this profile needs no credentials.
 unset OMP_AUTH_BROKER_URL PI_AUTH_BROKER_URL OMP_AUTH_BROKER_TOKEN PI_AUTH_BROKER_TOKEN PI_CONFIG_FILES
+# agent-run refuses its cloud lanes under this marker, so tools launched from
+# this session cannot reach paid inference either.
+export AGENT_LOCAL_ONLY=1
 exec omp --profile local "$@"

@@ -1,27 +1,27 @@
 ---
 name: model-eval
-description: Weigh a new or changed model for the OMP lanes (director, escalation, worker, local) using prices, real token mix, benchmarks, and quota before adopting it.
+description: Weigh a new or changed model for the agent lanes (Claude Code director, agent-run workers, consults and audits, legacy OMP roles, local) using prices, real token mix, benchmarks, and quota before adopting it.
 argument-hint: "[provider/model ...]"
 disable-model-invocation: true
 ---
 
 # Model evaluation
 
-Decide whether a candidate model earns a lane. Adoption itself follows the
-`omp-config` upgrade path; this skill produces the decision and its evidence.
+Decide whether a candidate model earns a lane. Adoption follows step 6; this
+skill produces the decision and its evidence.
 
 ## Lanes
 
-| Lane | Role/agent | Pool | Current |
+| Lane | Entry point | Pool | Current |
 | --- | --- | --- | --- |
-| Director | `default` | Anthropic | Opus high |
-| Escalation | `plan` → `architect`/`sol` | Codex | GPT-6.1 Sol (`architect` xhigh, `sol` high) |
-| Release audit | `plan` → `auditor` | Codex | GPT-6.1 Sol xhigh |
-| Sustained frontier | `slow` | Anthropic | Opus high |
-| Escalation, second opinion | `fable` | Anthropic, capped at half | Fable medium (after Sol fails) |
-| Council seats | `architect`, `fable`, `astra`, `opus` | per seat | Sol xhigh, Fable medium, Astra high, Opus high |
-| Local worker | `nous`, `smol`, `tiny`, `commit` | nous GPU, no quota | Qwen3.8 27B |
-| Cloud worker | `task`, `vision` | Codex | Luna medium |
+| Director | `claude` (settings `model`) | Claude Max | Opus 5.5 high |
+| Implementation | `agent-run sol` | Codex | GPT-6.1 Sol high |
+| Escalation consult | `agent-run ask --model sol` | Codex | GPT-6.1 Sol xhigh |
+| Release audit | `agent-run audit` | Codex | GPT-6.1 Sol xhigh |
+| Extraction | `agent-run ask --model luna` | Codex | Luna low |
+| Council seats | `agent-run ask --model sol/fable/astra/opus` | per seat | Sol xhigh, Fable high, Astra high, Opus high |
+| Local worker | `agent-run local`, `omp-local` | nous GPU, no quota | Qwen3.8 27B |
+| Legacy OMP roles | `config.yml` roles | Codex | Sol high default, Luna `task`/`vision` |
 
 A candidate must beat the incumbent for one lane on quality per unit of that
 lane's pool. Near-equal quality on a different pool can still win for
@@ -42,38 +42,40 @@ escalation, because it spreads load.
    independent or cross-vendor table. Prefer agentic coding benchmarks
    (Terminal-Bench, SWE-bench Pro, DeepSWE, FrontierSWE). Note the effort
    level for every number; vendor tables mix efforts.
-4. **Quota fit.** Run `omp-quota`. A lane that exhausts its pool before the
+4. **Quota fit.** Run `agent-quota`. A lane that exhausts its pool before the
    weekly reset loses to a slightly weaker model on a pool with headroom.
-5. **Smoke.** Run `omp -p --mode json --no-session --model CANDIDATE --thinking medium "Reply OK"`
-   and confirm the exact `provider`/`model` in the response. Then test the
-   named lane itself at its intended effort: point a scratch copy of that
-   lane's agent definition (or its role in a scratch profile) at the
-   candidate, dispatch it with no `effort` override, and confirm from the
-   child session that the candidate, not the incumbent, served at that
-   effort. For a worker or director candidate, run one real bounded task with
-   an independent check. For an escalation or `auditor` candidate, copy
-   `~/.omp/agent/agents/auditor.md` with its `model` set to the candidate at
-   `:xhigh` and run two admission controls,
-   `omp-audit --agent-file COPY --model PROVIDER/MODEL NAME PACKET CANDIDATE`
-   (the copy runs as a project agent of that run only; the result says
-   `release: false` and fails unless the candidate served): a realistic
+5. **Smoke.** Confirm the exact served model first: `codex exec -m CANDIDATE`
+   (rollout `turn_context.model`), `claude -p --model CANDIDATE
+   --output-format json` (`modelUsage`), or for an OMP role
+   `omp -p --mode json --no-session --model CANDIDATE "Reply OK"`. Then test
+   the named lane itself at its intended effort: for an `agent-run` lane, a
+   scratch copy of `agent-run` with only that model-map entry changed (run it
+   with `AGENT_RUN_HOME` set to a scratch directory); for an OMP role, a scratch
+   profile. The receipt must show the candidate served with no verification
+   issue. For a worker or director candidate, run one real bounded task with
+   an independent check. For an escalation or audit candidate, run two
+   admission controls through the scratch `agent-run audit`: a realistic
    seeded defect (for example a dropped validation branch in a real diff)
    must come back BLOCK with its file:line, and the same packet without the
    defect must not come back BLOCK.
-   For a council seat candidate, use that scratch seat agent at the seat's
-   effort, not `omp-audit`. Give it and the incumbent seat the same realistic
-   seeded/clean packet pair with the council's round-1 brief: the seeded
-   defect must come back as a blocker or should with its file:line, the clean
-   packet must draw no blocker or should, and you verify every finding. Compare
-   verified findings, false positives and usage with the incumbent. Weigh
-   incumbents with `omp-council-yield summary` (from
+   For a council seat candidate, give the scratch seat and the incumbent the
+   same realistic seeded/clean packet pair with the council's round-1 brief:
+   the seeded defect must come back as a blocker or should with its file:line,
+   the clean packet must draw no blocker or should, and you verify every
+   finding. Compare verified findings, false positives and usage with the
+   incumbent. Weigh
+   incumbents with `council-yield summary` (from
    `~/.local/state/council/yield.tsv`): a seat with no verified blocker or
    should alone in its last 5 scored runs on its current model is a drop
    candidate; put it to the user with its cost.
 6. **Decide.** Write a one-line verdict per lane (adopt / trial / reject) with
-   the deciding number. Then adopt through `omp-config`: change the IDs in
-   `config.yml` roles/`enabledModels`, and for Anthropic models add a 272K
-   `contextWindow` override in `models.yml`. Run `omp-baseline validate`.
+   the deciding number. Then adopt: an `agent-run` lane is its model map
+   (`CODEX_MODELS` and the Claude ids in `executable_agent-run`) plus the
+   lane text in `~/.claude/CLAUDE.md` and the council seat table; confirm with
+   one `agent-run ask` whose receipt shows no verification issue. The
+   director is `model` and `modelSettings` in the Claude `modify_settings.json`.
+   Legacy OMP roles go through `omp-config`: change the IDs in `config.yml`
+   roles/`enabledModels` and run `omp-baseline validate`.
    Update (references/benchmarks.md) with the new snapshot and date.
 
 ## Nous GPU experiments
@@ -153,7 +155,7 @@ depth and vision gates are the `nous-eval` tiers above.
 
 - Medium effort is the default for workers; raise it only on a measured gain.
   On CursorBench, Opus 5.5 high scored +3.5 points for about +33% cost per
-  task. The director runs Opus high because the Anthropic pool had headroom.
+  task. The director runs Opus high because the Claude pool had headroom.
 - Local first: a nous model that passes the worker's contracts costs no
   subscription quota.
 - One lane per model family per pool is enough. Do not add a lane that no rule

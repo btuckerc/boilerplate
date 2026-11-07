@@ -108,6 +108,12 @@ and replace an old independent chezmoi clone.
   `omp-baseline repair` fixes runtime permissions.
 - Use the shared Codex model policy and `codex-baseline` wrapper. Account state
   remains local. See [the Codex baseline](home/private_dot_codex/README.md).
+- `agent-run` attests workers from undocumented transcript records: Claude Code
+  `api-request`/`prompt_snapshot`, Codex rollouts, and OMP `model_change`/
+  `thinking_level_change`. After bumping the Claude Code, Codex or OMP pin, run
+  one live `agent-run ask --model opus`, `ask --model luna` and `local` and check
+  that `agent-run show` reports `model_ok`, `effort_ok` and `sandbox_ok` true.
+  A changed record shape turns every run `unverified` (fails closed).
 - Native OS packages belong in the Brewfile or platform prerequisites. Removing
   a declaration does not authorize uninstalling unrelated installed software.
 - Shared skills originate in `home/dot_local/share/decent-angl/skills`. Apply

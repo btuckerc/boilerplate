@@ -1,0 +1,115 @@
+#!/usr/bin/env python3
+"""Subscription remaining quota from local receipts only; never calls a provider."""
+import argparse
+import datetime as dt
+import heapq
+import json
+import os
+from pathlib import Path
+import time
+
+
+def timestamp(value):
+    try:
+        if isinstance(value, (int, float)):
+            return float(value)
+        return dt.datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
+def remaining(value):
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value <= 100:
+        return round(100 - value, 1)
+    return None
+
+
+def stale(captured_at, resets_at=None, now=None):
+    now = time.time() if now is None else now
+    captured = timestamp(captured_at)
+    resets = timestamp(resets_at)
+    return captured is None or now - captured > 6 * 3600 or (resets is not None and now >= resets)
+
+
+def claude_snapshot(home, now):
+    out = {"five_hour": None, "seven_day": None, "stale": False, "captured_at": None}
+    try:
+        data = json.loads((Path(home) / "claude.json").read_text())
+        out["captured_at"] = data.get("captured_at")
+        limits = data.get("rate_limits") or {}
+        for period in ("five_hour", "seven_day"):
+            window = limits.get(period) or {}
+            out[period] = remaining(window.get("used_percentage"))
+            if out[period] is not None:
+                out["stale"] |= stale(out["captured_at"], window.get("resets_at"), now)
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
+    return out
+
+
+def codex_snapshot(home, now):
+    out = {"seven_day": None, "stale": False, "captured_at": None}
+    sessions = Path(home) / "sessions"
+    # Retain at most twenty candidates in memory and read at most twenty files.
+    def candidates():
+        for path in sessions.glob("*/*/*/rollout-*.jsonl"):
+            try:
+                yield path.stat().st_mtime, str(path)
+            except OSError:
+                continue
+    newest = heapq.nlargest(20, candidates())
+    best = None
+    for mtime, name in newest:
+        try:
+            with Path(name).open() as src:
+                for line in src:
+                    try:
+                        record = json.loads(line)
+                        payload = record.get("payload", {})
+                        if record.get("type") != "event_msg" or payload.get("type") != "token_count":
+                            continue
+                        limits = payload.get("rate_limits") or {}
+                        windows = [limits.get("primary"), limits.get("secondary")]
+                        weekly = next((w for w in windows if isinstance(w, dict) and w.get("window_minutes") == 10080), None)
+                        if weekly is None or remaining(weekly.get("used_percent")) is None:
+                            continue
+                        captured = timestamp(record.get("timestamp")) or mtime
+                        if best is None or captured > best[0]:
+                            best = captured, weekly
+                    except (ValueError, TypeError, AttributeError):
+                        continue
+        except (OSError, UnicodeError):
+            continue
+    if best:
+        captured, weekly = best
+        out.update(seven_day=remaining(weekly["used_percent"]), captured_at=captured,
+                   stale=stale(captured, weekly.get("resets_at"), now))
+    return out
+
+
+def display(value):
+    return "unknown" if value is None else f"{value:g}%"
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args(argv)
+    now = time.time()
+    quota_home = Path(os.environ.get("AGENT_QUOTA_HOME", "~/.local/state/agent-quota")).expanduser()
+    codex_home = Path(os.environ.get("CODEX_HOME", "~/.codex")).expanduser()
+    data = {"claude": claude_snapshot(quota_home, now), "codex": codex_snapshot(codex_home, now)}
+    if args.json:
+        print(json.dumps(data, separators=(",", ":")))
+    else:
+        c, x = data["claude"], data["codex"]
+        claude = ("claude no-snapshot" if c["five_hour"] is None and c["seven_day"] is None else
+                  f"claude 5h {display(c['five_hour'])} 7d {display(c['seven_day'])}"
+                  f"{' stale' if c['stale'] else ''}")
+        print(f"{claude} | codex 7d {display(x['seven_day'])}"
+              f"{' stale' if x['stale'] else ''} remaining")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

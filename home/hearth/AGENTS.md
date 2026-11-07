@@ -10,7 +10,7 @@ Tucker's starting point on nous for ideas, new projects and stack questions.
   the code (commands, non-standard conventions), in a few lines. No overviews.
 - Repos under `src/` are canonical; the MacBook `~/src` copies are frozen
   backups.
-- Shared config (OMP, skills, dotfiles) lives in `boilerplate/home`. Edit it in
+- Shared config (Claude Code, OMP, skills, dotfiles) lives in `boilerplate/home`. Edit it in
   a worktree (`git -C ~/src/boilerplate worktree add ~/src/boilerplate-wt/<task>`),
   never in `src/boilerplate` itself (only live-state capture and
   `omp-baseline upgrade` write there): uncommitted edits there hold back every
@@ -23,6 +23,9 @@ Tucker's starting point on nous for ideas, new projects and stack questions.
   (Peekaboo).
 - `sudo -n` works for anything on nous (passwordless); don't hand root steps to
   Tucker.
+- Agents: Claude Code (`claude`, Opus high) directs; `agent-run` dispatches
+  Codex Sol workers, consults, release audits and local Qwen runs.
+  Zero-cloud work starts in `omp-local`.
 - Infra questions: the `platform-ops` skill's nous reference. OMP config:
   `omp-config`. Cloudflare: the `cloudflare` skill (`cf` CLI). New models:
-  `/skill:model-eval`.
+  the `model-eval` skill.

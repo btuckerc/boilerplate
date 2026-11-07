@@ -463,9 +463,9 @@ machine_role() {
     jq -r --arg id "$(machine_id)" '.decentangl.machines[$id].role // empty' 2>/dev/null || true
 }
 
-# Headless agent hosts install only the agent toolchain, not the workstation's
-# language runtimes, LSPs and editors.
-AGENT_HOST_TOOLS=(github:can1357/oh-my-pi herdr chezmoi gh bun node python uv jq ripgrep fd)
+# Headless agent hosts install only the agent toolchain (OMP, the Claude Code
+# director and the Codex worker), not the workstation's runtimes, LSPs and editors.
+AGENT_HOST_TOOLS=(github:can1357/oh-my-pi npm:@anthropic-ai/claude-code codex herdr chezmoi gh bun node python uv jq ripgrep fd)
 
 expected_version() {
   manifest_value omp-version

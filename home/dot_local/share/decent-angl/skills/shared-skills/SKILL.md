@@ -1,13 +1,16 @@
 ---
 name: shared-skills
-description: Onboard, update, validate, or distribute shared skills across OMP and Codex, including invocation policy and provenance. Explicit requests only; not for using a skill.
+description: Onboard, update, validate, or distribute shared skills across Claude Code, OMP and Codex, including invocation policy and provenance. Explicit requests only; not for using a skill.
 ---
 
 # Shared skills
 
 OMP-native directories in
 `~/src/boilerplate/home/dot_local/share/decent-angl/skills/` are canonical.
-`decent-angl-skills` discovers them and generates harness-specific views.
+`decent-angl-skills` discovers them, links them natively into OMP
+(`~/.omp/agent/skills`) and Claude Code (`~/.claude/skills`), and generates
+the Codex view. A skill written around OMP-only tools carries a source-only
+`.no-claude` file, which keeps it out of Claude Code.
 
 ## Add a skill
 

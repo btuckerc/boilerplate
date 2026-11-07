@@ -214,6 +214,7 @@ CREDENTIAL_SIGNATURES='(-----BEGIN ([A-Z0-9]+ )*PRIVATE KEY( BLOCK)?-----|gh[pou
 RUNTIME_DECLARATIONS=(
   'home/private_dot_omp/private_agent/.chezmoiignore' '\.omp/(profiles/[^/]+/)?agent/'
   'home/private_dot_codex/.chezmoiignore' '\.codex/'
+  'home/private_dot_claude/.chezmoiignore' '\.claude/'
 )
 
 # glob_regex GLOB: a .chezmoiignore glob as a regex fragment (* and ? stay within a component, ** spans
@@ -736,9 +737,10 @@ receipt_refusal() {
   return 1
 }
 
-# With DECENT_ANGL_PUBLISH_RECEIPT set (even empty), publication requires that
-# omp-audit result.json to be an accepted release PASS whose candidate is the
-# exact outgoing commit (its id binds the whole history; a tree would not), and
+# With DECENT_ANGL_PUBLISH_RECEIPT set (even empty), publication requires the
+# release audit's result.json (`agent-run audit` or `omp-audit`) to be an
+# accepted release PASS whose candidate is the exact outgoing commit (its id
+# binds the whole history; a tree would not), and
 # DECENT_ANGL_PUBLISH_PACKET to be its audited packet (packet_sha256) whose one
 # `Audited-Range: BASE..COMMIT` line starts at or before the remote base, so the
 # audit covered every outgoing commit.

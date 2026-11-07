@@ -17,7 +17,7 @@ def check(root):
     assert int(version.split(".")[0]) >= 4, "Bash 4+ required; on macOS install the Brewfile's bash formula"
     home = root / "home"
     tools = tomllib.loads((home / "dot_config/mise/config.toml").read_text())["tools"]
-    for tool in ("codex", "github:can1357/oh-my-pi"):
+    for tool in ("codex", "github:can1357/oh-my-pi", "npm:@anthropic-ai/claude-code"):
         assert re.fullmatch(r"\d+\.\d+\.\d+", tools[tool]), f"{tool}: exact release required"
     omp = tools["github:can1357/oh-my-pi"]
     manifest = (home / "dot_config/decent-angl/omp-baseline-manifest.tsv").read_text()

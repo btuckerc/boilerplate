@@ -65,8 +65,6 @@ Applications/Codex Third.app/**
 {{- end }}
 
 # Legacy assistant configs are preserved in source but not deployed by default.
-.claude
-.claude/**
 .config/nvim/.claude
 .config/nvim/.claude/**
 
@@ -139,6 +137,8 @@ Applications/Codex Third.app/**
 **/*
 !.omp
 !.omp/**
+!.claude
+!.claude/**
 !.gitconfig
 !.config
 !.config/mise
@@ -154,6 +154,10 @@ Applications/Codex Third.app/**
 !.local
 !.local/bin
 !.local/bin/omp-*
+!.local/bin/agent-run
+!.local/bin/agent-quota
+!.local/bin/council-yield
+!.local/bin/claude-statusline
 !.local/bin/decent-angl-doctor
 !.local/bin/decent-angl-skills
 !.local/bin/decent-angl-sync

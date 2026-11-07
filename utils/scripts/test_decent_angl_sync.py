@@ -9,7 +9,8 @@ import tempfile
 import unittest
 
 SCRIPT = Path(__file__).resolve().parents[2] / "home/dot_local/bin/executable_decent-angl-sync"
-RUNTIME_DECLARATIONS = ("home/private_dot_omp/private_agent/.chezmoiignore", "home/private_dot_codex/.chezmoiignore")
+RUNTIME_DECLARATIONS = ("home/private_dot_omp/private_agent/.chezmoiignore", "home/private_dot_codex/.chezmoiignore",
+                        "home/private_dot_claude/.chezmoiignore")
 
 
 def real_rg():

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Discover OMP-native shared skills and project them safely into each harness.
+# Discover shared skills and project them safely into each harness.
 
 set -euo pipefail
 
@@ -10,6 +10,7 @@ CANONICAL_ROOT="${DECENT_ANGL_SKILL_ROOT:-$HOME/.local/share/decent-angl/skills}
 RENDER_ROOT="${DECENT_ANGL_SKILL_RENDER_ROOT:-$HOME/.local/share/decent-angl/rendered-skills}"
 CODEX_ROOT="${DECENT_ANGL_CODEX_SKILL_ROOT:-$HOME/.codex/skills}"
 OMP_ROOT="${DECENT_ANGL_OMP_SKILL_ROOT:-$HOME/.omp/agent/skills}"
+CLAUDE_ROOT="${DECENT_ANGL_CLAUDE_SKILL_ROOT:-$HOME/.claude/skills}"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/decent-angl"
 STATE_FILE="$STATE_DIR/shared-skills.tsv"
 failures=0
@@ -25,7 +26,9 @@ Usage: decent-angl-skills <audit-source|sync|validate|list|add|update> [argument
   add DIR [UPSTREAM] Import one staged skill; review and commit the resulting diff.
   update DIR UPSTREAM Replace a vendored skill with validation and rollback.
 
-Canonical skills use OMP/Claude frontmatter. Codex projections are generated.
+Canonical skills use OMP/Claude frontmatter and are linked into OMP and Claude
+Code as-is; Codex projections are generated. A source-only `.no-claude` file
+keeps a skill written for OMP tools out of Claude Code.
 Never edit rendered-skills or harness discovery links directly.
 EOF
 }
@@ -164,9 +167,17 @@ validate_provenance() {
   fi
 }
 
+# Newline-separated inventory; a directory name containing a newline cannot be
+# represented, so discovery fails instead of splitting it.
 discover() {
   local root="$1" directory names
   [ -d "$root" ] || return 0
+  for directory in "$root"/*; do
+    if [ -d "$directory" ] && [[ "${directory##*/}" == *$'\n'* ]]; then
+      printf 'SKILL  unsupported directory name in %s\n' "$root" >&2
+      return 1
+    fi
+  done
   names="$(
     for directory in "$root"/*; do
       [ -d "$directory" ] || continue
@@ -174,6 +185,12 @@ discover() {
     done | sort
   )" || return 1
   printf '%s\n' "$names"
+}
+
+# A source-only `.no-claude` file keeps a skill written in OMP tool terms out of
+# Claude Code; it still reaches OMP and Codex.
+claude_enabled() {
+  [ ! -e "$SOURCE_ROOT/$1/.no-claude" ]
 }
 
 # Skills marked with a source-only `.macos-only` file (chezmoi never deploys
@@ -195,7 +212,7 @@ EOF
 
 require_safe_roots() {
   local root
-  for root in "$CANONICAL_ROOT" "$RENDER_ROOT" "$CODEX_ROOT" "$OMP_ROOT" "$STATE_DIR"; do
+  for root in "$CANONICAL_ROOT" "$RENDER_ROOT" "$CODEX_ROOT" "$OMP_ROOT" "$CLAUDE_ROOT" "$STATE_DIR"; do
     case "$root" in
       ''|/|"$HOME"|"$HOME/") printf 'Refusing unsafe managed root: %s\n' "$root" >&2; return 1 ;;
       "$HOME"/*|/tmp/*) ;;
@@ -252,9 +269,10 @@ safe_link() {
   local link="$1" target="$2" legacy="${3:-}" current
   mkdir -p "${link%/*}" || return 1
   if [ -L "$link" ]; then
-    current="$(readlink "$link")" || { printf 'SKILL  probe failed (link target)\n' >&2; return 1; }
+    read_link_exact "$link" || { printf 'SKILL  probe failed (link target)\n' >&2; return 1; }
+    current="$LINK_TARGET"
     if [ "$current" != "$target" ] && [ -n "$legacy" ] && [ "$current" != "$legacy" ]; then
-      case "$current" in "$CANONICAL_ROOT"/*|"$RENDER_ROOT"/*) ;; *) printf 'SKILL  collision %s -> %s\n' "$link" "$current" >&2; return 1 ;; esac
+      is_managed_link_target "$link" || { [ "$?" -eq 2 ] || printf 'SKILL  collision %s -> %s\n' "$link" "$current" >&2; return 1; }
     fi
     [ "$current" = "$target" ] || { rm "$link"; ln -s "$target" "$link"; }
   elif [ -e "$link" ]; then
@@ -270,11 +288,12 @@ preflight_links() {
   names="$(discover_host)" || { printf 'SKILL  probe failed (skill inventory)\n' >&2; return 1; }
   while IFS= read -r name; do
     [ -n "$name" ] || continue
-    for link in "$OMP_ROOT/$name" "$CODEX_ROOT/$name"; do
+    for link in "$OMP_ROOT/$name" "$CODEX_ROOT/$name" "$CLAUDE_ROOT/$name"; do
       [ ! -e "$link" ] && [ ! -L "$link" ] && continue
       [ -L "$link" ] || { printf 'SKILL  collision unmanaged path %s\n' "$link" >&2; return 1; }
-      current="$(readlink "$link")" || { printf 'SKILL  probe failed (link target)\n' >&2; return 1; }
-      case "$current" in "$CANONICAL_ROOT"/*|"$RENDER_ROOT"/*) ;; *) printf 'SKILL  collision %s -> %s\n' "$link" "$current" >&2; return 1 ;; esac
+      read_link_exact "$link" || { printf 'SKILL  probe failed (link target)\n' >&2; return 1; }
+      current="$LINK_TARGET"
+      is_managed_link_target "$link" || { [ "$?" -eq 2 ] || printf 'SKILL  collision %s -> %s\n' "$link" "$current" >&2; return 1; }
     done
   done <<EOF
 $names
@@ -305,20 +324,19 @@ EOF
 }
 
 remove_owned_stale() {
-  local current_names="$1" old_name harness link target grep_status
+  local current_names="$1" old_name harness link grep_status
   [ -f "$STATE_FILE" ] || return 0
   while IFS=$'\t' read -r old_name harness; do
     [ -n "$old_name" ] || continue
-    if grep -Fqx "$old_name" "$current_names"; then
+    if name_in_inventory "$old_name" "$current_names"; then
       continue
     else
       grep_status=$?
       [ "$grep_status" -eq 1 ] || { printf 'SKILL  probe failed (ownership inventory)\n' >&2; return 1; }
     fi
-    case "$harness" in codex) link="$CODEX_ROOT/$old_name" ;; omp) link="$OMP_ROOT/$old_name" ;; *) continue ;; esac
+    case "$harness" in codex) link="$CODEX_ROOT/$old_name" ;; omp) link="$OMP_ROOT/$old_name" ;; claude) link="$CLAUDE_ROOT/$old_name" ;; *) continue ;; esac
     if [ -L "$link" ]; then
-      target="$(readlink "$link")" || { printf 'SKILL  probe failed (link target)\n' >&2; return 1; }
-      case "$target" in "$CANONICAL_ROOT"/*|"$RENDER_ROOT"/*) rm "$link" ;; esac
+      if is_managed_link_target "$link"; then rm "$link"; else [ "$?" -eq 1 ] || return 1; fi
     fi
     if [ "$harness" = codex ] && [ -d "$RENDER_ROOT/codex/$old_name" ]; then
       rm -rf "$RENDER_ROOT/codex/$old_name"
@@ -329,8 +347,141 @@ remove_owned_stale() {
   done <"$STATE_FILE"
 }
 
+# Exact readlink into LINK_TARGET: a plain command substitution would drop
+# trailing newlines, and macOS readlink omits its own newline after a target
+# that already ends in one, so use readlink -n behind a sentinel.
+read_link_exact() {
+  local out
+  out="$(readlink -n "$1" && printf x)" || return 1
+  LINK_TARGET="${out%x}"
+}
+
+# Exact physical path of an existing directory into PHYSICAL_DIR.
+physical_dir() {
+  local out
+  out="$(cd -P "$1" && pwd -P && printf x)" || return 1
+  out="${out%x}"
+  PHYSICAL_DIR="${out%$'\n'}"
+}
+
+# Physical directory $1 is managed root $2 or below it: 0 yes, 1 no, 2 probe
+# failed. An absent root contains nothing.
+under_managed_root() {
+  local target="$1"
+  [ -d "$2" ] || return 1
+  physical_dir "$2" || return 2
+  case "$target" in
+    "$PHYSICAL_DIR"|"$PHYSICAL_DIR"/*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Dangling link $1 with target $2 lands at "$3/NAME", the form sync writes:
+# $2 is exactly "$3/NAME" with $3 an existing directory and NAME a plain name
+# that is no symlink (lstat fails: a dangling alias would land elsewhere), and
+# the kernel's own lookup through the link (cd -P, errno text read in the C
+# locale) fails with ENOENT. Every component but NAME exists, so ENOENT means
+# NAME is missing; ELOOP (counting the link, its directory and the root's
+# symlinks), ENAMETOOLONG, EACCES or success all mean no. Should strerror stay
+# localized anyway, nothing matches and the link is unmanaged (never removed).
+# The landing physical($3)/NAME must lie under managed root $4 (so a
+# "$RENDER_ROOT/codex" symlinked elsewhere does not count). 0 yes, 1 no.
+is_written_dangling_target() {
+  local link="$1" target="$2" parent="$3" root="$4" name out
+  [ -d "$parent" ] || return 1
+  case "$target" in "$parent"/*) ;; *) return 1 ;; esac
+  name="${target#"$parent"/}"
+  case "$name" in ''|.|..|*/*) return 1 ;; esac
+  [ ! -L "$target" ] || return 1
+  out="$(LC_ALL=C; export LC_ALL; cd -P -- "$link" 2>&1 && printf 'resolved')" || true
+  case "$out" in *': No such file or directory') ;; *) return 1 ;; esac
+  physical_dir "$parent" || return 1
+  under_managed_root "$PHYSICAL_DIR/$name" "$root" && return 0
+  return 1
+}
+
+# 0: managed, 1: unmanaged, 2: probe failed (reported here). Callers must not
+# treat 2 as unmanaged. A link the kernel resolves to a directory is managed
+# iff that directory (cd -P: the kernel's own symlink, ELOOP, ENOTDIR and
+# permission rules) is the canonical or render root or below one. A link the
+# kernel cannot resolve is managed only in a form sync writes
+# (is_written_dangling_target); any other link is unmanaged.
+is_managed_link_target() {
+  local link="$1" target status root
+  if ! read_link_exact "$link"; then
+    printf 'SKILL  probe failed (link target)\n' >&2
+    return 2
+  fi
+  if [ -d "$link" ]; then
+    if ! physical_dir "$link"; then
+      printf 'SKILL  probe failed (link target)\n' >&2
+      return 2
+    fi
+    target="$PHYSICAL_DIR"
+    for root in "$CANONICAL_ROOT" "$RENDER_ROOT"; do
+      status=0
+      under_managed_root "$target" "$root" || status=$?
+      [ "$status" -ne 0 ] || return 0
+      if [ "$status" -eq 2 ]; then
+        printf 'SKILL  probe failed (link target)\n' >&2
+        return 2
+      fi
+    done
+    return 1
+  fi
+  [ ! -e "$link" ] || return 1
+  is_written_dangling_target "$link" "$LINK_TARGET" "$CANONICAL_ROOT" "$CANONICAL_ROOT" ||
+    is_written_dangling_target "$link" "$LINK_TARGET" "$RENDER_ROOT/codex" "$RENDER_ROOT"
+}
+
+# 0: NAME is a line of the inventory file, 1: it is not, 2: grep failed. A name
+# containing a newline can never be an inventory line.
+name_in_inventory() {
+  case "$1" in *$'\n'*) return 1 ;; esac
+  grep -Fqx -- "$1" "$2"
+}
+
+remove_untracked_managed_links() {
+  local root="$1" expected_names="$2" link name grep_status
+  for link in "$root"/* "$root"/.[!.]* "$root"/..?*; do
+    [ -L "$link" ] || continue
+    name="${link##*/}"
+    if name_in_inventory "$name" "$expected_names"; then
+      continue
+    else
+      grep_status=$?
+      [ "$grep_status" -eq 1 ] || { printf 'SKILL  probe failed (skill inventory)\n' >&2; return 1; }
+    fi
+    if is_managed_link_target "$link"; then
+      rm "$link"
+    else
+      [ "$?" -eq 1 ] || return 1
+    fi
+  done
+}
+
+validate_no_stale_managed_links() {
+  local root="$1" expected_names="$2" harness="$3" link name grep_status
+  for link in "$root"/* "$root"/.[!.]* "$root"/..?*; do
+    [ -L "$link" ] || continue
+    name="${link##*/}"
+    if name_in_inventory "$name" "$expected_names"; then
+      continue
+    else
+      grep_status=$?
+      [ "$grep_status" -eq 1 ] || { printf 'SKILL  probe failed (skill inventory)\n' >&2; return 1; }
+    fi
+    if is_managed_link_target "$link"; then
+      printf 'SKILL  live %s link stale: %s\n' "$harness" "$name" >&2
+      failures_live=1
+    else
+      [ "$?" -eq 1 ] || failures_live=1
+    fi
+  done
+}
+
 sync_skills() {
-  local name source target tmp backup names next_state file
+  local name source target tmp backup names next_state claude_names file
   require_safe_roots
   audit_source
   migrate_legacy_adapters
@@ -347,9 +498,16 @@ EOF
   mkdir -p "$RENDER_ROOT/codex" "$STATE_DIR"
   names="$(mktemp "${TMPDIR:-/tmp}/decent-angl-skill-names.XXXXXX")"
   next_state="$(mktemp "${TMPDIR:-/tmp}/decent-angl-skill-state.XXXXXX")"
-  trap 'rm -f "$names" "$next_state"' RETURN
+  claude_names="$(mktemp "${TMPDIR:-/tmp}/decent-angl-skill-claude-names.XXXXXX")"
+  trap 'rm -f "$names" "$next_state" "$claude_names"' RETURN
   discover_host >"$names" || { printf 'SKILL  probe failed (skill inventory)\n' >&2; return 1; }
+  while IFS= read -r name; do
+    if [ -n "$name" ] && claude_enabled "$name"; then printf '%s\n' "$name"; fi
+  done <"$names" >"$claude_names"
   remove_owned_stale "$names"
+  remove_untracked_managed_links "$OMP_ROOT" "$names"
+  remove_untracked_managed_links "$CODEX_ROOT" "$names"
+  remove_untracked_managed_links "$CLAUDE_ROOT" "$claude_names"
   while IFS= read -r name; do
     [ -n "$name" ] || continue
     source="$CANONICAL_ROOT/$name"
@@ -368,24 +526,40 @@ EOF
     safe_link "$OMP_ROOT/$name" "$source"
     safe_link "$CODEX_ROOT/$name" "$target" "$source"
     printf '%s\tomp\n%s\tcodex\n' "$name" "$name" >>"$next_state"
+    if claude_enabled "$name"; then
+      safe_link "$CLAUDE_ROOT/$name" "$source"
+      printf '%s\tclaude\n' "$name" >>"$next_state"
+    elif [ -L "$CLAUDE_ROOT/$name" ]; then
+      # preflight_links proved any existing link points into the managed roots.
+      rm "$CLAUDE_ROOT/$name"
+    fi
   done <"$names"
   sort "$next_state" >"$STATE_FILE"
   trap - RETURN
-  rm -f "$names" "$next_state"
+  rm -f "$names" "$next_state" "$claude_names"
   validate_live
 }
 
 validate_live() {
-  local failures_live=0 name source target expected count=0 state_names expected_names canonical_names source_names host_names skipped system omp_target codex_target names canonical_file
+  local failures_live=0 name source target expected count=0 state_names expected_names expected_claude_names canonical_names source_names host_names skipped system omp_target codex_target claude_target names canonical_file
   expected_names="$(mktemp "${TMPDIR:-/tmp}/decent-angl-skill-expected.XXXXXX")"
+  expected_claude_names="$(mktemp "${TMPDIR:-/tmp}/decent-angl-skill-claude-expected.XXXXXX")"
   state_names="$(mktemp "${TMPDIR:-/tmp}/decent-angl-skill-actual.XXXXXX")"
   canonical_file="$(mktemp "${TMPDIR:-/tmp}/decent-angl-skill-canonical.XXXXXX")"
-  trap 'rm -rf "$expected_names" "$state_names" "$canonical_file" "${expected:-}"' RETURN
+  trap 'rm -rf "$expected_names" "$expected_claude_names" "$state_names" "$canonical_file" "${expected:-}"' RETURN
   system="$(uname -s)" || { printf 'SKILL  probe failed (host platform)\n' >&2; return 1; }
   names="$(discover_host "$system")" || { printf 'SKILL  probe failed (skill inventory)\n' >&2; failures_live=1; names=""; }
   canonical_names="$(discover "$CANONICAL_ROOT")" || { printf 'SKILL  probe failed (canonical inventory)\n' >&2; failures_live=1; canonical_names=""; }
   printf '%s\n' "$names" >"$expected_names"
   printf '%s\n' "$canonical_names" >"$canonical_file"
+  while IFS= read -r name; do
+    if [ -n "$name" ] && claude_enabled "$name"; then printf '%s\n' "$name"; fi
+  done >"$expected_claude_names" <<EOF
+$names
+EOF
+  validate_no_stale_managed_links "$OMP_ROOT" "$expected_names" OMP
+  validate_no_stale_managed_links "$CODEX_ROOT" "$expected_names" Codex
+  validate_no_stale_managed_links "$CLAUDE_ROOT" "$expected_claude_names" Claude
   if ! diff -q "$expected_names" "$canonical_file" >/dev/null 2>&1; then
     printf 'SKILL  canonical live inventory drift\n' >&2
     failures_live=1
@@ -396,13 +570,22 @@ validate_live() {
     source="$CANONICAL_ROOT/$name"
     target="$RENDER_ROOT/codex/$name"
     if [ -L "$OMP_ROOT/$name" ]; then
-      omp_target="$(readlink "$OMP_ROOT/$name")" || { printf 'SKILL  live OMP link probe failed: %s\n' "$name" >&2; failures_live=1; omp_target=""; }
+      if read_link_exact "$OMP_ROOT/$name"; then omp_target="$LINK_TARGET"; else printf 'SKILL  live OMP link probe failed: %s\n' "$name" >&2; failures_live=1; omp_target=""; fi
     else omp_target=""; fi
     [ "$omp_target" = "$source" ] || { printf 'SKILL  live OMP link drift: %s\n' "$name" >&2; failures_live=1; }
     if [ -L "$CODEX_ROOT/$name" ]; then
-      codex_target="$(readlink "$CODEX_ROOT/$name")" || { printf 'SKILL  live Codex link probe failed: %s\n' "$name" >&2; failures_live=1; codex_target=""; }
+      if read_link_exact "$CODEX_ROOT/$name"; then codex_target="$LINK_TARGET"; else printf 'SKILL  live Codex link probe failed: %s\n' "$name" >&2; failures_live=1; codex_target=""; fi
     else codex_target=""; fi
     [ "$codex_target" = "$target" ] || { printf 'SKILL  live Codex link drift: %s\n' "$name" >&2; failures_live=1; }
+    if [ -L "$CLAUDE_ROOT/$name" ]; then
+      if read_link_exact "$CLAUDE_ROOT/$name"; then claude_target="$LINK_TARGET"; else printf 'SKILL  live Claude link probe failed: %s\n' "$name" >&2; failures_live=1; claude_target=""; fi
+    elif [ -e "$CLAUDE_ROOT/$name" ]; then claude_target="unmanaged"
+    else claude_target=""; fi
+    if claude_enabled "$name"; then
+      [ "$claude_target" = "$source" ] || { printf 'SKILL  live Claude link drift: %s\n' "$name" >&2; failures_live=1; }
+    else
+      [ -z "$claude_target" ] || { printf 'SKILL  live Claude link for .no-claude skill: %s\n' "$name" >&2; failures_live=1; }
+    fi
     expected="$(mktemp -d "${TMPDIR:-/tmp}/decent-angl-codex-render.XXXXXX")"
     if ! render_codex "$source" "$expected"; then
       printf 'SKILL  Codex projection probe failed: %s\n' "$name" >&2
@@ -425,7 +608,7 @@ EOF
   trap - RETURN
   rm -f "$expected_names" "$state_names" "$canonical_file"
   [ "$failures_live" -eq 0 ] || return 1
-  printf 'SKILL  live ok %s skill(s), OMP native and Codex projected\n' "$count"
+  printf 'SKILL  live ok %s skill(s), OMP and Claude native, Codex projected\n' "$count"
   source_names="$(discover "$SOURCE_ROOT")" || { printf 'SKILL  probe failed (skill inventory)\n' >&2; return 1; }
   host_names="$(discover_host "$system")" || { printf 'SKILL  probe failed (skill inventory)\n' >&2; return 1; }
   skipped="$(comm -23 <(printf '%s\n' "$source_names") <(printf '%s\n' "$host_names") | paste -sd, -)" || { printf 'SKILL  probe failed (skill inventory)\n' >&2; return 1; }

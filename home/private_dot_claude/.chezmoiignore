@@ -1,0 +1,45 @@
+# Claude Code runtime files are managed by Claude Code, herdr and
+# decent-angl-skills, not chezmoi. Only CLAUDE.md and the owned keys of
+# settings.json (modify template) are managed here.
+.credentials.json
+.update.lock
+agents/
+agents/**
+backups/
+backups/**
+cache/
+cache/**
+commands/
+commands/**
+debug/
+debug/**
+downloads/
+downloads/**
+file-history/
+file-history/**
+history.jsonl
+hooks/
+hooks/**
+ide/
+ide/**
+plans/
+plans/**
+plugins/
+plugins/**
+projects/
+projects/**
+session-env/
+session-env/**
+sessions/
+sessions/**
+settings.local.json
+shell-snapshots/
+shell-snapshots/**
+skills/
+skills/**
+statsig/
+statsig/**
+telemetry/
+telemetry/**
+todos/
+todos/**

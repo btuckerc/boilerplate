@@ -1,0 +1,298 @@
+#!/usr/bin/env python3
+"""Council accounting from agent-run receipts.
+
+add RUN LINES SEAT=ALONE/SHARED/DECLINED ... [NAME ...] [--dry-run]
+    RUN is <YYYY-MM-DD>-<slug>. Counted seats are sol, fable, astra or opus;
+    named ask runs <run>-<seat>-rN (and -bounce) supply rounds and scores.
+    Bare NAMEs identify unscored ask runs. Append one yield.tsv row per seat.
+summary [--last N]
+    Per seat on its current model: scored runs, verified findings alone in the
+    last N runs, cost per verified finding and declined share.
+"""
+from __future__ import annotations
+
+import argparse
+import csv
+import datetime as dt
+import importlib.machinery
+import importlib.util
+import json
+import math
+import os
+import re
+import sys
+from collections import defaultdict
+from pathlib import Path
+
+YIELD = Path.home() / ".local/state/council/yield.tsv"
+HEADER = ["date", "slug", "seat", "model", "lines", "rounds", "alone", "shared", "declined", "cost_usd", "active_s"]
+SEATS = {"sol", "fable", "astra", "opus"}
+COUNTS = re.compile(r"^(?P<seat>[^=]+)=(?P<alone>\d+)/(?P<shared>\d+)/(?P<declined>\d+)$")
+RUN = re.compile(r"^(?P<date>\d{4}-\d{2}-\d{2})-(?P<slug>[A-Za-z0-9][A-Za-z0-9_-]*)$")
+NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
+
+
+class ReceiptError(Exception):
+    pass
+
+
+def _settle(path, meta):
+    # Use the dispatcher's single lifecycle implementation in installed and
+    # chezmoi-source layouts alike; do not duplicate orphan/patch handling.
+    script = Path(__file__).with_name("agent-run")
+    if not script.is_file():
+        script = Path(__file__).with_name("executable_agent-run")
+    loader = importlib.machinery.SourceFileLoader("council_agent_run", str(script))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    runner = importlib.util.module_from_spec(spec)
+    loader.exec_module(runner)
+    return runner.settle_abandoned(path, meta)
+
+
+def _time(stamp: str) -> dt.datetime:
+    value = dt.datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+    if value.tzinfo is None:
+        raise ValueError("timestamp needs a timezone")
+    return value
+
+
+def _number(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def _sum_cost(values) -> float | None:
+    values = list(values)
+    return None if any(value is None for value in values) else sum(values)
+
+
+def _claude_cost(path: Path) -> float | None:
+    """Claude JSON output has the whole session's cost; never invent Codex cost."""
+    try:
+        text = path.read_text()
+        try:
+            records = [json.loads(text)]
+        except ValueError:
+            records = [json.loads(line) for line in text.splitlines() if line.strip()]
+        for record in reversed(records):
+            value = record.get("total_cost_usd") if isinstance(record, dict) else None
+            if _number(value) and value >= 0:
+                return float(value)
+    except (OSError, ValueError, UnicodeError):
+        pass
+    return None
+
+
+def _receipt(path: Path) -> dict:
+    try:
+        meta = json.loads((path / "meta.json").read_text())
+        if meta.get("state") == "running":
+            meta = _settle(path, meta)
+        if meta.get("state") == "running":
+            raise ReceiptError(f"{path.name}: run is still running")
+        started, ended = _time(meta["started_at"]), _time(meta["ended_at"])
+        seconds = (ended - started).total_seconds()
+        if seconds < 0:
+            raise ValueError("ended_at precedes started_at")
+        model, effort = meta["model"], meta["effort"]
+        if not isinstance(model, str) or not model or not isinstance(effort, str) or not effort:
+            raise ValueError("missing model or effort")
+        result_path = path / "result.json"
+        result = json.loads(result_path.read_text()) if result_path.exists() else {}
+        score = result.get("score") if isinstance(result, dict) else None
+        if score is not None and (not _number(score) or not 0 <= score <= 10):
+            raise ValueError("score must be a number from 0 to 10")
+        cost = _claude_cost(path / "events.jsonl") if meta["child"]["harness"] == "claude" else None
+        return {"model": f"{model}:{effort}", "score": score, "seconds": seconds,
+                "cost": cost, "ended": ended, "run": path.name}
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+        raise ReceiptError(f"{path.name}: invalid agent-run receipt: {exc}") from exc
+
+
+def read_seat(home: Path, slug: str, seat: str) -> dict:
+    pattern = re.compile(r"-ask-" + re.escape(f"{slug}-{seat}") + r"-r(?P<round>\d+)(?P<bounce>-bounce)?$")
+    grouped = defaultdict(list)
+    for path in sorted(home.iterdir()) if home.is_dir() else []:
+        match = pattern.search(path.name)
+        if match and path.is_dir():
+            grouped[int(match["round"])].append((_receipt(path), bool(match["bounce"])))
+    if not grouped:
+        raise ReceiptError(f"{seat}: no agent-run runs named {slug}-{seat}-r<N> under {home}")
+    models = {r["model"] for runs in grouped.values() for r, _ in runs}
+    if len(models) != 1:
+        raise ReceiptError(f"{seat}: model/effort changed between runs: {', '.join(sorted(models))}")
+    rounds = {}
+    for number, runs in sorted(grouped.items()):
+        # A bounce corrects its original result without creating another round.
+        final, _ = max(runs, key=lambda item: (item[1], item[0]["ended"], item[0]["run"]))
+        rounds[number] = {"score": final["score"], "seconds": sum(r["seconds"] for r, _ in runs),
+                          "cost": _sum_cost(r["cost"] for r, _ in runs)}
+    return {"seat": seat, "model": models.pop(), "rounds": rounds,
+            "seconds": sum(r["seconds"] for r in rounds.values()),
+            "cost": _sum_cost(r["cost"] for r in rounds.values())}
+
+
+def read_unscored(home: Path, name: str) -> dict:
+    if not NAME.fullmatch(name):
+        raise ReceiptError(f"{name}: invalid bare run name")
+    runs = [_receipt(path) for path in sorted(home.iterdir())
+            if path.is_dir() and path.name.endswith("-ask-" + name)] if home.is_dir() else []
+    if not runs:
+        raise ReceiptError(f"{name}: no agent-run runs ending -ask-{name} under {home}")
+    return {"model": ", ".join(sorted({r["model"] for r in runs})),
+            "seconds": sum(r["seconds"] for r in runs), "cost": _sum_cost(r["cost"] for r in runs)}
+
+
+def _duration(seconds: float) -> str:
+    minutes, rest = divmod(round(seconds), 60)
+    return f"{minutes}m{rest:02d}s"
+
+
+def _money(cost: float | None) -> str:
+    return "$?" if cost is None else f"${cost:.2f}"
+
+
+def _cell(round_: dict) -> str:
+    score = "no score" if round_["score"] is None else round_["score"]
+    return f"{score} · {_duration(round_['seconds'])} · {_money(round_['cost'])}"
+
+
+def report(named: dict[str, dict], counted: set[str]) -> str:
+    out = []
+    seats = {name: data for name, data in named.items() if name in counted}
+    if seats:
+        numbers = sorted({number for seat in seats.values() for number in seat["rounds"]})
+        head = ["seat", "model"] + [f"round {number}" for number in numbers] + ["total"]
+        out += ["| " + " | ".join(head) + " |", "|" + "---|" * len(head)]
+        for seat, data in seats.items():
+            cells = [_cell(data["rounds"][number]) if number in data["rounds"] else "" for number in numbers]
+            out.append(f"| {seat} | {data['model']} | " + " | ".join(cells) +
+                       f" | {_duration(data['seconds'])} · {_money(data['cost'])} |")
+        out.append("")
+    for name, data in named.items():
+        if name not in counted:
+            out.append(f"Unscored run {name} ({data['model']}): {_duration(data['seconds'])} · {_money(data['cost'])}")
+    total = _sum_cost(data["cost"] for data in named.values())
+    return "\n".join(out + [f"Total seat cost: {_money(total)}"])
+
+
+def _rows() -> list[dict]:
+    if not YIELD.exists():
+        return []
+    with YIELD.open(newline="") as src:
+        return list(csv.DictReader(src, delimiter="\t"))
+
+
+def add(args: argparse.Namespace) -> int:
+    run = RUN.fullmatch(args.run)
+    try:
+        if not run:
+            raise ValueError
+        dt.date.fromisoformat(run["date"])
+    except ValueError:
+        print(f"council-yield: {args.run}: expected <YYYY-MM-DD>-<slug>", file=sys.stderr)
+        return 2
+    date, slug = run["date"], run["slug"]
+    home = Path(os.environ.get("AGENT_RUN_HOME", "~/.local/state/agent-runs")).expanduser()
+    counted, named = {}, {}
+    try:
+        for spec in args.seats:
+            match = COUNTS.fullmatch(spec)
+            name = match["seat"] if match else spec
+            if "=" in spec and not match:
+                raise ReceiptError(f"{spec}: expected SEAT=ALONE/SHARED/DECLINED")
+            if name in named:
+                raise ReceiptError(f"{name}: duplicate entry")
+            if match:
+                if name not in SEATS:
+                    raise ReceiptError(f"{name}: counted seat must be sol, fable, astra or opus")
+                counted[name] = match
+                named[name] = read_seat(home, args.run, name)
+            else:
+                named[name] = read_unscored(home, name)
+        existing = {(r["date"], r["slug"], r["seat"].lower()) for r in _rows()}
+        new = []
+        for seat, counts in counted.items():
+            data = named[seat]
+            if (date, slug, seat) in existing:
+                raise ReceiptError(f"{date} {slug} {seat} already has a row")
+            new.append({"date": date, "slug": slug, "seat": seat, "model": data["model"],
+                        "lines": str(args.lines), "rounds": str(len(data["rounds"])),
+                        "alone": counts["alone"], "shared": counts["shared"], "declined": counts["declined"],
+                        "cost_usd": "" if data["cost"] is None else f"{data['cost']:.2f}",
+                        "active_s": str(round(data["seconds"]))})
+        if new and not args.dry_run:
+            YIELD.parent.mkdir(parents=True, exist_ok=True)
+            fresh = not YIELD.exists() or YIELD.stat().st_size == 0
+            with YIELD.open("a", newline="") as out:
+                writer = csv.DictWriter(out, fieldnames=HEADER, delimiter="\t", lineterminator="\n")
+                if fresh:
+                    writer.writeheader()
+                writer.writerows(new)
+    except (ReceiptError, OSError, ValueError, KeyError) as exc:
+        print(f"council-yield: {exc}", file=sys.stderr)
+        return 1
+    print(report(named, set(counted)))
+    return 0
+
+
+def _base_model(model: str) -> str:
+    return model.split("/")[-1].split(":")[0]
+
+
+def summary(args: argparse.Namespace) -> int:
+    by_seat = defaultdict(list)
+    for row in sorted(_rows(), key=lambda row: row["date"]):
+        by_seat[row["seat"].lower()].append(row)
+    print(f"| seat | model | scored runs | alone, last {args.last} | verified | declined % | cost $ | unknown costs | $ per verified |")
+    print("|---|---|---|---|---|---|---|---|---|")
+    for seat, rows in sorted(by_seat.items()):
+        model = _base_model(rows[-1]["model"])
+        rows = [row for row in rows if _base_model(row["model"]) == model]
+        verified = sum(int(row["alone"]) + int(row["shared"]) for row in rows)
+        declined = sum(int(row["declined"]) for row in rows)
+        known = [float(row["cost_usd"]) for row in rows if row["cost_usd"].strip()]
+        unknown = len(rows) - len(known)
+        cost = sum(known)
+        recent = sum(int(row["alone"]) for row in rows[-args.last:])
+        share = f"{100 * declined / (verified + declined):.0f}" if verified + declined else "-"
+        per = f"{cost / verified:.2f}" if verified and not unknown else "-"
+        print(f"| {seat} | {model} | {len(rows)} | {recent} | {verified} | {share} | {cost:.2f} | {unknown} | {per} |")
+    return 0
+
+
+def nonnegative(value: str) -> int:
+    value = int(value)
+    if value < 0:
+        raise argparse.ArgumentTypeError("must be nonnegative")
+    return value
+
+
+def positive(value: str) -> int:
+    value = int(value)
+    if value < 1:
+        raise argparse.ArgumentTypeError("must be positive")
+    return value
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="council-yield", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = parser.add_subparsers(dest="command", required=True)
+    p_add = sub.add_parser("add", help="append seat rows and print the report table")
+    p_add.add_argument("run", help="<YYYY-MM-DD>-<slug>")
+    p_add.add_argument("lines", type=nonnegative, help="insertions plus deletions of the round-1 diff")
+    p_add.add_argument("seats", nargs="+", metavar="SEAT=ALONE/SHARED/DECLINED|NAME")
+    p_add.add_argument("--dry-run", action="store_true", help="print without appending")
+    p_add.set_defaults(func=add)
+    p_sum = sub.add_parser("summary", help="per-seat yield on each seat's current model")
+    p_sum.add_argument("--last", type=positive, default=5)
+    p_sum.set_defaults(func=summary)
+    args = parser.parse_args(argv)
+    try:
+        return args.func(args)
+    except (OSError, ValueError, KeyError) as exc:
+        print(f"council-yield: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

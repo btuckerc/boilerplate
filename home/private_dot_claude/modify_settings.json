@@ -1,0 +1,27 @@
+{{- /* chezmoi:modify-template */ -}}
+{{- /* Claude Code (/config, /model, /effort) and herdr (hooks) also write this
+     file, so merge only the owned keys into its current contents. When the owned
+     keys already hold these values, emit the file byte-for-byte so a rewrite in
+     another key order never shows as drift. */ -}}
+{{- $config := dict -}}
+{{- if .chezmoi.stdin -}}
+{{- $config = .chezmoi.stdin | fromJson -}}
+{{- end -}}
+{{- $before := $config | toJson -}}
+{{- $env := get $config "env" | default dict -}}
+{{- $_ := set $env "DISABLE_AUTOUPDATER" "1" -}}
+{{- $config = setValueAtPath "env" $env $config -}}
+{{- $config = setValueAtPath "model" "claude-opus-5-5" $config -}}
+{{- /* Opus 5.5 ignores a top-level effortLevel in user settings. */ -}}
+{{- $config = setValueAtPath "modelSettings.claude-opus-5-5.effortLevel" "high" $config -}}
+{{- $config = setValueAtPath "permissions.defaultMode" "bypassPermissions" $config -}}
+{{- $config = setValueAtPath "skipDangerousModePermissionPrompt" true $config -}}
+{{- $config = setValueAtPath "attribution" false $config -}}
+{{- /* Keep transcripts (Herdwick renders them); the default sweep deletes after 30 days. */ -}}
+{{- $config = setValueAtPath "cleanupPeriodDays" 3650 $config -}}
+{{- $config = setValueAtPath "statusLine" (dict "type" "command" "command" (joinPath .chezmoi.homeDir ".local/bin/claude-statusline")) $config -}}
+{{- if and .chezmoi.stdin (eq $before ($config | toJson)) -}}
+{{ .chezmoi.stdin }}
+{{- else -}}
+{{ $config | toPrettyJson }}
+{{ end -}}

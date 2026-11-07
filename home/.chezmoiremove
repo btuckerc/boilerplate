@@ -21,3 +21,5 @@
 # Retired 2026-11-07: legacy OMP cloud inference is Codex-only.
 .omp/agent/agents/fable.md
 .omp/agent/agents/opus.md
+# Retired 2026-11-08: council seats run through agent-run; council-yield reads its receipts.
+.local/bin/omp-council-yield

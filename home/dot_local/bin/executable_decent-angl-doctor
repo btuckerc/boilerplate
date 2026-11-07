@@ -111,7 +111,7 @@ def local_report():
     state = Path(os.environ.get("XDG_STATE_HOME", user / ".local/state")) / "decent-angl"
     config = read_toml(user / ".config/chezmoi/chezmoi.toml")
     machine = config.get("data", {}).get("decentangl", {}).get("machine_id", platform.node())
-    # agent-host (nous) deploys only the agent toolchain: no codex, restic or backup timers.
+    # agent-host (nous) deploys only the agent toolchain: no restic or backup timers.
     _, role = run(["chezmoi", "execute-template",
                    '{{ get (get .decentangl.machines .decentangl.machine_id | default dict) "role" | default "" }}'])
     agent_host = role.strip() == "agent-host"
@@ -133,9 +133,9 @@ def local_report():
     live_tools = read_toml(user / ".config/mise/config.toml").get("tools", {})
     pins = {}
     mise = shutil.which("mise")
-    for name, key in (("codex", "codex"), ("omp", "github:can1357/oh-my-pi"),
-                      ("chezmoi", "chezmoi"), ("restic", "restic")):
-        if agent_host and name in ("codex", "restic"):
+    for name, key in (("codex", "codex"), ("claude", "npm:@anthropic-ai/claude-code"),
+                      ("omp", "github:can1357/oh-my-pi"), ("chezmoi", "chezmoi"), ("restic", "restic")):
+        if agent_host and name == "restic":
             continue
         source, live = source_tools.get(key), live_tools.get(key)
         version_arg = "version" if name == "restic" else "--version"

@@ -12,6 +12,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sqlite3
@@ -29,6 +30,26 @@ def row_key(row: dict) -> tuple:
     return (row["block"], row["candidate"], row["workload"], row["item"], row["rep"])
 
 
+def write_durable(path: Path, text: str) -> None:
+    """Replace path with text so that after a power loss it holds the old or the new text,
+    and the new text once this returns: file and directory are fsynced (release audit)."""
+    tmp = path.with_name(f".{path.name}.tmp")
+    with tmp.open("w") as f:
+        f.write(text)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+    fsync_dir(path.parent)
+
+
+def fsync_dir(path: Path) -> None:
+    directory = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+
+
 class Run:
     def __init__(self, path: Path):
         self.path = Path(path)
@@ -39,6 +60,10 @@ class Run:
         run = cls((base or root()) / "runs" / plan["run_id"])
         run.path.mkdir(parents=True, exist_ok=False)
         run.write_json("plan.json", plan)
+        # the run's own entry in runs/ (and runs/ in the root when new): a canary record names
+        # this run next and must find it after a power loss (release audit)
+        fsync_dir(run.path.parent)
+        fsync_dir(run.path.parent.parent)
         run.index()
         return run
 
@@ -58,16 +83,12 @@ class Run:
         return json.loads(path.read_text()) if path.exists() else None
 
     def write_json(self, name: str, data: dict) -> None:
-        tmp = self.path / f".{name}.tmp"
-        with tmp.open("w") as f:
-            json.dump(data, f, indent=2, sort_keys=True)
-            f.write("\n")
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, self.path / name)
+        write_durable(self.path / name, json.dumps(data, indent=2, sort_keys=True) + "\n")
 
     def append(self, row: dict, name: str = "rows.jsonl") -> None:
-        with (self.path / name).open("a+b") as f:
+        path = self.path / name
+        created = not path.exists()
+        with path.open("a+b") as f:
             if f.seek(0, os.SEEK_END):
                 f.seek(-1, os.SEEK_END)
                 if f.read(1) != b"\n":  # isolate a torn line left by a killed lease
@@ -75,15 +96,30 @@ class Run:
             f.write(json.dumps(row, sort_keys=True).encode() + b"\n")
             f.flush()
             os.fsync(f.fileno())
+        if created:  # the file's entry too: recovery selects a run by its rows.jsonl (release audit, M61)
+            fsync_dir(self.path)
 
     def rows(self) -> list[dict]:
         """Latest row per key; a later row (a retry after an error) replaces an earlier one."""
         return _latest(_read_jsonl(self.path / "rows.jsonl"))
 
     def graded_rows(self) -> list[dict]:
-        """rows() with graded versions substituted where they exist."""
+        """rows() with graded versions substituted where they grade that very row (same ts): a row
+        measured again after its attempt failed its end check keeps the same key (ledger M61)."""
         graded = {row_key(r): r for r in _read_jsonl(self.path / "graded.jsonl")}
-        return [graded.get(row_key(r), r) for r in self.rows()]
+        return [g if (g := graded.get(row_key(r))) and g.get("ts") == r.get("ts") else r for r in self.rows()]
+
+    def evidence(self) -> str:
+        """sha256 of everything a compare reads that a resume can change: rows, grades and
+        done.json. A saved compare report counts only while this still matches (release audit:
+        a resume that measured rows again left the old report standing)."""
+        digest = hashlib.sha256()
+        for name in ("rows.jsonl", "graded.jsonl", "done.json"):
+            path = self.path / name
+            data = path.read_bytes() if path.exists() else b""
+            digest.update(f"{name}:{len(data)}\n".encode())
+            digest.update(data)
+        return digest.hexdigest()
 
     def write_graded(self, rows: list[dict]) -> None:
         tmp = self.path / ".graded.jsonl.tmp"
@@ -133,10 +169,13 @@ def boot_time(stat: Path = Path("/proc/stat")) -> float:
 def interrupted(boot: float, base: Path | None = None) -> list[str]:
     """Runs a reboot cut short: started (rows.jsonl), never finished (no done.json), last row
     written in the day before boot. No process survives a reboot, so none of them is live, and
-    runs started since boot are left alone (ledger M51). Oldest first: run ids sort by start time."""
+    runs started since boot are left alone (ledger M51). A run that got SIGTERM (stopped by
+    hand, or a clean shutdown) has stopped.json and stays stopped (council F-05). Oldest
+    first: run ids sort by start time."""
     found = []
     for rows in sorted(((base or root()) / "runs").glob("*/rows.jsonl")):
-        if not (rows.parent / "done.json").exists() and boot - INTERRUPT_WINDOW_S < rows.stat().st_mtime < boot:
+        ended = (rows.parent / "done.json").exists() or (rows.parent / "stopped.json").exists()
+        if not ended and boot - INTERRUPT_WINDOW_S < rows.stat().st_mtime < boot:
             found.append(rows.parent.name)
     return found
 

@@ -12,8 +12,13 @@ Each metric has a role, from the workload's MUST_PASS and REPORTED:
                 (small item sets that cannot certify non-inferiority)
     reported    shown, never decides (reference-dependent or exploratory)
 A candidate that ran in two blocks (ABBA) also gets an A/A row: its second block
-against its first, the run's own noise floor. A must-pass ratio whose A/A drifts
-by more than twice the tolerance makes the run unstable: it cannot pass (ledger M44).
+against its first, the run's own noise floor; one that ran in one block with reps
+gets its last rep against its first instead (sampling noise only). A must-pass ratio
+whose A/A drifts by more than twice the tolerance makes the run unstable: it cannot
+pass (ledger M44).
+
+Tiers without LiveCodeBench measure no accuracy; their report says so, so a speed
+win in an arm that changes the output distribution is not read as safe (council O-02).
 """
 from __future__ import annotations
 
@@ -38,11 +43,14 @@ def compare(run: Run, a: str | None = None, b: str | None = None) -> dict:
     for label in (a, b):
         if label not in plan["candidates"]:
             raise CompareError(f"{label!r} was not measured in run {run.run_id}; cross-run comparison is refused")
+    kernels = {x: (run.read_json(f"manifest.{x}.json") or {}).get("kernel") for x in (a, b)}
+    if None not in kernels.values() and len(set(kernels.values())) > 1:
+        raise CompareError(f"{a} and {b} ran on different kernels {kernels}; a reboot split the run (ledger M54)")
+    evidence = run.evidence()  # binds the report to the measurements it read (release audit)
     rows = run.graded_rows()
     rules = plan["compare"]
-    done = run.done() or {}
-    report = {"run_id": run.run_id, "tier": plan["tier"], "a": a, "b": b,
-              "complete": done.get("status") == "ok", "workloads": {}}
+    report = {"run_id": run.run_id, "tier": plan["tier"], "a": a, "b": b, "evidence": evidence,
+              "complete": pair_complete(run.done() or {}, a, b), "workloads": {}}
     for spec in plan["workloads"]:
         name = spec["name"]
         module = REGISTRY[name]
@@ -57,6 +65,17 @@ def compare(run: Run, a: str | None = None, b: str | None = None) -> dict:
     report["unstable"] = _unstable(report, rules["tolerance"])
     report["verdict"] = _overall(report)
     return report
+
+
+def pair_complete(done: dict, a: str, b: str) -> bool:
+    """The run finished ok, or finished with nothing failed for A or B (ledger M32, per pair):
+    one arm's crash in a tune sweep or a three-arm t3 withholds no verdict from the others
+    (compare, promote and watch alike; council A-07). A run that stopped before its blocks,
+    or a done.json that names no failed labels, counts as not finished."""
+    if done.get("status") == "ok":
+        return True
+    labels = done.get("failed_labels")
+    return done.get("status") == "failed" and labels is not None and a not in labels and b not in labels
 
 
 def _unstable(report: dict, tolerance: float) -> list[str]:
@@ -85,14 +104,18 @@ def _workload(module, rows: list[dict], a: str, b: str, blocks: list[str], rules
             result = _metric(good, metric, kind, lambda r, x: r["candidate"] == x, a, b, rules)
             out["metrics"].append({"metric": metric, "kind": kind, "role": _role(module, metric), **result})
     for label in sides:
+        mine = [r for r in good if r["candidate"] == label]
         own = [i for i, x in enumerate(blocks) if x == label]
-        if len(own) < 2:
+        reps = sorted({r.get("rep", 0) for r in mine})
+        if len(own) >= 2:
+            key, first, last = "block", own[0], own[-1]
+        elif len(reps) >= 2:  # one block (t3's ab): sampling noise between two reps (council S-01/A-02)
+            key, first, last = "rep", reps[0], reps[-1]
+        else:
             continue
-        first, last = own[0], own[-1]
         for metric, kind in module.METRICS.items():
-            result = _metric([r for r in good if r["candidate"] == label], metric, kind,
-                             lambda r, blk: r["block"] == blk, first, last, rules)
-            out["aa"].append({"label": label, "metric": metric, "kind": kind, **result})
+            result = _metric(mine, metric, kind, lambda r, v: r.get(key, 0) == v, first, last, rules)
+            out["aa"].append({"label": label, "metric": metric, "kind": kind, "by": key, **result})
     return out
 
 
@@ -152,6 +175,9 @@ def markdown(report: dict) -> str:
     if report["unstable"]:
         lines += ["Unstable (A/A beyond twice the tolerance; no pass until a stable rerun): "
                   + "; ".join(report["unstable"]), ""]
+    if "lcb" not in report["workloads"]:
+        lines += ["Accuracy not measured: this tier has no LiveCodeBench. An arm that changes the output "
+                  "distribution (draft acceptance, KV dtype, quantisation) needs a t3 run before it is adopted.", ""]
     lines += ["Ratio metrics: B/A oriented so >1 is better. Rate metrics: B-A difference.", "",
               f"| workload | metric | role | n | {a} | {b} | effect | 95% CI | verdict |",
               "|---|---|---|---:|---:|---:|---:|---|---|"]
@@ -162,11 +188,11 @@ def markdown(report: dict) -> str:
                          f"{m['verdict']} |")
     noise = [(name, x) for name, w in report["workloads"].items() for x in w["aa"]]
     if noise:
-        lines += ["", "## A/A noise (last block vs first block of the same candidate)", "",
-                  "| workload | candidate | metric | n | effect | 95% CI |", "|---|---|---|---:|---:|---|"]
+        lines += ["", "## A/A noise (last vs first block, or rep in a one-block run, of the same candidate)", "",
+                  "| workload | candidate | metric | by | n | effect | 95% CI |", "|---|---|---|---|---:|---:|---|"]
         for name, x in noise:
-            lines.append(f"| {name} | {x['label']} | {x['metric']} | {x['n']} | {_num(x['effect'])} | "
-                         f"{_num(x['lo'])} .. {_num(x['hi'])} |")
+            lines.append(f"| {name} | {x['label']} | {x['metric']} | {x.get('by', 'block')} | {x['n']} | "
+                         f"{_num(x['effect'])} | {_num(x['lo'])} .. {_num(x['hi'])} |")
     lines += ["", "## Summaries", ""]
     for name, w in report["workloads"].items():
         lines.append(f"- **{name}**: errors {w['errors']}, reasoning leaks {w['leaks']}")

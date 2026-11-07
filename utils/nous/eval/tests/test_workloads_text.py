@@ -120,8 +120,20 @@ def test_a_request_failing_under_load_fails_the_item():
     def chat(body):
         if "agent 1;" in body["messages"][0]["content"] and len(body["messages"]) == 5:
             raise RuntimeError("HTTP 500: slot unavailable")
-        return SimpleNamespace(content="ok", timings={"prompt_n": 10}, wall=0.1, ttft=0.05)
+        return SimpleNamespace(content="ok", timings={"prompt_n": 10}, wall=0.1, ttft=0.05, finish_reason="stop")
 
     ctx = SimpleNamespace(seed=0, chat=chat)
     with pytest.raises(RuntimeError, match="1 of 5 requests failed with 2 clients: HTTP 500"):
         concurrency.run_item(ctx, {"clients": 2, "sessions": 2, "doc_tokens": 100})
+
+
+def test_concurrency_counts_the_replies_its_token_cap_cut_off():
+    """'Four clients finish 4.5x sooner' was read off replies mostly cut at 128 tokens (ledger M53)."""
+    def chat(body):
+        capped = "agent 0;" in body["messages"][0]["content"]
+        return SimpleNamespace(content="ok", timings={"prompt_n": 10}, wall=0.1, ttft=0.05,
+                               finish_reason="length" if capped else "stop")
+
+    row = concurrency.run_item(SimpleNamespace(seed=0, chat=chat), {"clients": 2, "sessions": 2, "doc_tokens": 100})
+    summary = concurrency.summarize([{**row, "item": "clients-2"}])["by_clients"]["clients-2"]
+    assert (summary["capped_replies"], summary["replies"]) == (3, 6)

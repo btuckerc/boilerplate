@@ -18,6 +18,14 @@ def command_candidate(label):
             "ready_timeout_s": 5, "identity": [], "model_files": []}
 
 
+@pytest.fixture(autouse=True)
+def isolated_root(tmp_path, monkeypatch):
+    """No test writes to the live eval root or the shared compile caches (ledger M56)."""
+    from nevl import build
+    monkeypatch.setenv("NOUS_EVAL_ROOT", str(tmp_path))
+    monkeypatch.setattr(build, "CANARY_HOME_ROOT", tmp_path / "cache")
+
+
 @pytest.fixture
 def fake_workload(monkeypatch):
     """A registered workload: tps per candidate from `speeds`, ok from `oks`, failures on demand."""
@@ -46,8 +54,7 @@ def fake_workload(monkeypatch):
 
 
 @pytest.fixture
-def make_run(tmp_path, monkeypatch, fake_workload):
-    monkeypatch.setenv("NOUS_EVAL_ROOT", str(tmp_path))
+def make_run(tmp_path, fake_workload):
 
     made = []
 

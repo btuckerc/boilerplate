@@ -79,7 +79,8 @@ independent auth and sessions. Read `~/src/omp-serve/README.md` and
   is used: vLLM runs ROCm/HIP.
 - vLLM batches up to 8 sequences with a shared 386,677-token VRAM KV pool;
   there is no host prompt cache. `llama-speedcheck.timer` restarts production
-  when ROCm decode is stuck in its slow state (ROCm/ROCm#6347).
+  when ROCm decode is stuck in its slow state (ROCm/ROCm#6347). A stop drains
+  in-flight replies for up to 120 s; new requests meanwhile get HTTP 500.
 - CPUs 8-11 belong to `llama.slice` (production llama only); `system.slice`
   and `user.slice`, including agents and GPU leases without `--slice`, run on
   0-7,12-31 (`utils/nous/cpu-reserve/`). Do not widen them without measuring decode under load.
@@ -89,7 +90,9 @@ independent auth and sessions. Read `~/src/omp-serve/README.md` and
   the desired working directory). It runs as `tux` in the singleton
   `llama-yield-gpu.service`, refuses concurrent leases or active Bonsai, orders
   production shutdown before the command, and uses systemd `ExecStopPost` to
-  restore production after success, failure, caller death or timeout. Default
+  restore production after success, failure, caller death or timeout; a
+  TERM/INT/HUP to the caller stops the lease under its lock once the start job
+  is done, and the caller restores production again after every lease. Default
   runtime is one hour; `--runtime` accepts 1–86400 seconds. `--slice
   llama.slice` puts the lease on production's CPUs 8-11 (benchmarks need it).
   `--env NAME=VALUE` passes additional environment; HOME/USER/LOGNAME/PATH are

@@ -1,19 +1,22 @@
 """Build comparison engines; check and canary the latest radiance release."""
 from __future__ import annotations
 
+import difflib
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import time
-import re
+import tomllib
 import urllib.request
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from . import store
-from .candidate import incumbent, load, manifest
-from .compare import compare, write
+from .candidate import CandidateError, incumbent, load, manifest
+from .compare import compare, pair_complete, write
 from .guards import UNIT_PATH
 from .runner import NOUS_EVAL, plan_run, start
 
@@ -23,6 +26,7 @@ ROCM = "/opt/rocm/core-10.0"
 HIP = ["-DGGML_HIP=ON", "-DGPU_TARGETS=gfx1201", f"-DCMAKE_PREFIX_PATH={ROCM}",
        f"-DCMAKE_HIP_COMPILER={ROCM}/llvm/bin/clang"]
 BACKENDS = {"vulkan": ["-DGGML_VULKAN=ON"], "hip": HIP, "hip-wmma": [*HIP, "-DGGML_HIP_ROCWMMA_FATTN=ON"]}
+CANARY_HOME_ROOT = Path("/srv/workspaces/vllm-cache")
 REPO = Path(__file__).resolve().parents[4]
 
 
@@ -154,57 +158,104 @@ def latest_radiance_release(payload: dict | None = None) -> dict:
 
 
 def canary() -> int:
-    """Check latest radiance release, export its image, measure it against production, and
-    when it passes, run t3 too, so a new release arrives with complete promotion evidence."""
-    release = latest_radiance_release()
-    production = incumbent()
+    """Measure the latest radiance release against production, then run t3 when the canary
+    passes, so a new release arrives with complete promotion evidence.
+
+    The record under canary/ saves each stage before it starts (atomically: a power loss
+    mid-write keeps the previous record), so a timer firing after a reboot resumes the
+    same runs, and grades a run the reboot cut between its lease and grading (council
+    S-02). A canary that does not pass is measured once more in a new run of the same
+    export: ROCm draws one of two speeds per process (ledger M44), which can slow a
+    candidate's blocks or swing its A/A (council O-05). A second non-pass, or a finished
+    t3, makes the record terminal. A stage that ends unfinished (a failed preflight, a
+    stopped lease) is noted as `blocked` for the watch (council O-14)."""
+    try:
+        release = latest_radiance_release()
+        production = incumbent()
+    except CandidateError as error:
+        print(f"canary requires nous-serve production: {error}")
+        return 1
     label = f"radiance-{release['version']}"
     if production["spec"]["rootfs"].endswith(f"vllm-sly-radiance-{release['image_tag']}"):
         print(f"production already runs {release['image_ref']}")
         return 0
     record = store.root() / "canary" / f"{label}.json"
-    if record.exists():
-        print(f"canary for {release['image_ref']} already ran: {record}")
-        return 0
-    rootfs = subprocess.run(["/usr/local/bin/nous-serve", "export", release["image_ref"]],
-                            capture_output=True, text=True, check=True).stdout.strip()
-    candidate_path = store.root() / "canary" / "candidates" / f"{label}.toml"
-    candidate_path.parent.mkdir(parents=True, exist_ok=True)
-    candidate_path.write_text(f'kind = "serve"\nlabel = "{label}"\nspec = "{production["spec_source"]}"\n'
-                              f'ready_timeout_s = 1800\n\n[overrides]\nrootfs = "{rootfs}"\n')
-    candidate = load(candidate_path)
-    runs = {}
-    for tier in ("canary", "t3"):
-        run = store.Run.create(plan_run(tier, [production, candidate]))
-        runs[tier] = run.run_id
-        status = start(run)
-        if not run.done():
+    record.parent.mkdir(parents=True, exist_ok=True)
+    data = json.loads(record.read_text()) if record.exists() else {"image_ref": release["image_ref"], "attempts": 0}
+    # A record from before resumable canaries counts no attempts; its canary run is one (release audit)
+    data.setdefault("attempts", 1 if data.get("run_id") else 0)
+
+    def save(**changes) -> None:
+        data.update(changes)
+        store.write_durable(record, json.dumps(data, indent=2) + "\n")
+
+    if data.get("terminal"):
+        print(f"canary for {release['image_ref']} is terminal: {data['verdict']}")
+        return 0 if data["verdict"] == "pass" else 1
+    if not data.get("candidate"):
+        rootfs = subprocess.run(["/usr/local/bin/nous-serve", "export", release["image_ref"]],
+                                capture_output=True, text=True, check=True).stdout.strip()
+        candidate_path = store.root() / "canary" / "candidates" / f"{label}.toml"
+        candidate_path.parent.mkdir(parents=True, exist_ok=True)
+        home = CANARY_HOME_ROOT / Path(rootfs).name / "home"  # made below on every pass
+        production_spec = candidate_path.with_suffix(".production.toml")  # the record is gone at the next stop
+        # On disk, with every directory entry on the way (candidates/ was just made), before the
+        # record names them: after a power loss the stage resumes (release audit)
+        store.write_durable(production_spec, _toml_spec(production["spec"]))
+        store.write_durable(candidate_path, f'kind = "serve"\nlabel = "{label}"\nspec = "{production_spec}"\n'
+                            f'ready_timeout_s = 1800\n\n[overrides]\nrootfs = "{rootfs}"\nhome = "{home}"\n')
+        os.sync()
+        save(candidate=str(candidate_path), home=str(home))
+    # An empty compile-cache home: made on every pass rather than made durable, so a power loss
+    # that took the directory after the record named it cannot stop the stage resuming (release audit).
+    # Records from before resumable canaries name no home; their candidates used production's.
+    home = data.get("home") or tomllib.loads(Path(data["candidate"]).read_text()).get("overrides", {}).get("home")
+    if home:
+        Path(home).mkdir(parents=True, exist_ok=True)
+    candidate = load(Path(data["candidate"]))
+    for tier, key in (("canary", "run_id"), ("t3", "t3_run_id")):
+        if not data.get(key):
+            attempts = data["attempts"] + (tier == "canary")
+            save(attempts=attempts, **{key: store.Run.create(plan_run(tier, [production, candidate])).run_id})
+        run = store.Run.open(data[key])
+        save(blocked=None)
+        # Under the run's lock: a finished run is graded, a stopped one (finished or not) left alone
+        status = start(run, automatic=True)
+        stopped = (run.path / "stopped.json").exists()
+        if stopped or not run.done():
+            why = ("was stopped; continue with: nous-eval resume " + run.run_id
+                   if stopped else f"did not finish (exit {status})")
+            save(blocked=f"{tier} run {run.run_id} {why} at "
+                         f"{datetime.now(timezone.utc):%Y-%m-%d %H:%M}Z; preflight and lease output: "
+                         "`journalctl --user -u nous-eval-canary`")
             return status or 1
         report = compare(run, "incumbent", label)
         text = write(run, report)
-        record.parent.mkdir(parents=True, exist_ok=True)
-        record.write_text(json.dumps({"image_ref": release["image_ref"], "run_id": runs["canary"],
-                                      "t3_run_id": runs.get("t3"), "verdict": report["verdict"],
-                                      "candidate": str(candidate_path)}, indent=2) + "\n")
         (record.parent / f"latest-{tier}.md").write_text(text)
         print(text)
         if tier == "canary" and report["verdict"] != "pass":
-            print(f"Candidate spec: {candidate_path}; canary did not pass, so t3 was not run.")
-            return status
-    print(f"Candidate spec: {candidate_path}")
-    print(f"Next: `./nous-eval promote {label} --run {runs['canary']} --run {runs['t3']}`.")
-    return status
+            save(unstable=report.get("unstable"), canary_verdict=report["verdict"], verdict=report["verdict"])
+            if data["attempts"] >= 2:
+                save(terminal=True)
+                print(f"canary {report['verdict']} after {data['attempts']} attempts; terminal")
+            else:
+                save(run_id=None)
+                print(f"canary {report['verdict']}; the next timer run measures it once more")
+            return 1
+        save(**{f"{tier}_verdict": report["verdict"], "verdict": report["verdict"]})
+        if report["verdict"] != "pass":
+            save(terminal=True)
+            print(f"Candidate spec: {data['candidate']}; {tier} verdict {report['verdict']}, not promotable.")
+            return 1
+    save(terminal=True)
+    print(f"Candidate spec: {data['candidate']}")
+    print(f"Next: `./nous-eval promote {label} --run {data['run_id']} --run {data['t3_run_id']}`.")
+    return 0
 
 
 def promote(label: str, run_ids: list[str]) -> int:
-    """Check the evidence, then print the steps to make `label` production (ledger M11, M19).
-
-    Evidence is a set of runs, each finished ok against the incumbent and measuring
-    its tier's full workload set. Together they cover speed, context and agents (a
-    t2 or canary run whose compare passes) and accuracy (a t3 run whose compare does
-    not fail: one sample per LCB item flips too often for 258 items to certify a
-    4-point margin, but a clear loss fails; council F-11). The candidate is
-    identical in all of them, and each run's incumbent is still production."""
+    """Check promotion evidence. t3's replicated paired interval makes pass a real
+    non-inferiority claim at the configured margin."""
     snapshots, tiers = [], set()
     for run_id in run_ids:
         run = store.Run.open(run_id)
@@ -213,12 +264,16 @@ def promote(label: str, run_ids: list[str]) -> int:
         if report is None:
             print(f"{run_id}: no compare of {label} against incumbent; run `nous-eval compare {run_id}`")
             return 1
-        if (run.done() or {}).get("status") != "ok":
-            print(f"{run_id}: the run did not finish ok")
+        if report.get("evidence") != run.evidence():
+            print(f"{run_id}: its compare of {label} predates the run's current rows; "
+                  f"run `nous-eval compare {run_id} --a incumbent --b {label}`")
             return 1
-        needed = ("pass", "inconclusive") if plan["tier"] == "t3" else ("pass",)
+        if not pair_complete(run.done() or {}, "incumbent", label):
+            print(f"{run_id}: the run did not finish ok for incumbent and {label}")
+            return 1
+        needed = ("pass",)
         if report["verdict"] not in needed:
-            print(f"{run_id}: verdict {report['verdict']}; a {plan['tier']} run needs {' or '.join(needed)}")
+            print(f"{run_id}: verdict {report['verdict']}; a {plan['tier']} run needs pass")
             return 1
         measured = [w["name"] for w in plan["workloads"]]
         if sorted(measured) != sorted(plan["tier_workloads"]):
@@ -242,53 +297,230 @@ def promote(label: str, run_ids: list[str]) -> int:
         print(f"{label} changed after it was measured ({_changed(measured, now)}); measure again")
         return 1
     if candidate["kind"] == "serve":
-        production_spec = Path(candidate["spec_source"])
+        spec_path = store.root() / "promote" / f"{label}.toml"
+        spec_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            old = SERVE_SPEC.read_text()
+        except OSError:
+            old = ""
+        annotated = _annotated_spec(old, candidate["spec"]) if old else None
+        text = annotated or _toml_spec(candidate["spec"])
+        try:
+            loads_back = tomllib.loads(text) == candidate["spec"]
+        except tomllib.TOMLDecodeError:
+            loads_back = False
+        if not loads_back:  # release audit: never print install steps for a spec nous-serve cannot load
+            print(f"{label}'s spec does not serialize to TOML that loads back as itself; not promoting")
+            return 1
+        spec_path.write_text(text)
+        print("".join(difflib.unified_diff(old.splitlines(True), spec_path.read_text().splitlines(True),
+                                            fromfile=str(SERVE_SPEC), tofile=str(spec_path))))
+        if annotated is None:
+            print(f"{spec_path} is generated without {SERVE_SPEC}'s comments; carry over those still true.")
+        archive = _archive_path()
         print(f"""Evidence: {', '.join(run_ids)} pass for {label}.
-Review the frozen spec in runs/*/plan.json and candidate manifest first.
+Review the frozen spec and candidate manifest first.
 Promotion (operator-reviewed, not applied automatically):
-  edit {production_spec}: rootfs = "{candidate['spec']['rootfs']}" (preserve all measured knobs)
-  update {REPO}/utils/nous/serve/production.toml to the same spec
-  sudo -n install -m 644 {REPO}/utils/nous/serve/production.toml /etc/nous-inference/serve.toml
+  sudo -n install -D -m 644 {SERVE_SPEC} {archive}
+  sudo -n install -D -m 644 {spec_path} {SERVE_SPEC}
+  install -m 644 {spec_path} {REPO}/utils/nous/serve/production.toml
   sudo -n systemctl restart llama.service
-  nous-eval run t1 --incumbent
-Rollback: restore the previous spec rootfs from the incumbent manifest/plan.json,
-install it at /etc/nous-inference/serve.toml, and restart llama.service.""")
+  sudo -n llama-speedcheck --calibrate   # idle, 3 min after it answers (refused while settling)
+  nous-eval run t1 --incumbent""")
         return 0
     if candidate["kind"] != "llama-router":
         print(f"{label} is a {candidate['kind']} candidate and cannot be promoted.")
         return 1
-    current = incumbent()
-    engine_dir = Path(candidate["engine"]).parent.parent
-    _, sha, variant = engine_dir.name.split("-", 2)
-    target = Path("/opt") / f"llama.cpp-{variant}-{sha}"
     print(f"""Evidence: {', '.join(run_ids)} pass for {label}.
 Legacy llama.cpp build promotion is not supported for the production service.""")
     return 1
 
 
-def rollback() -> int:
-    """Print manual rollback instructions using the prior incumbent frozen by the canary run."""
-    records = sorted((store.root() / "canary").glob("*.json"), key=lambda path: path.stat().st_mtime,
-                     reverse=True)
-    previous = None
-    for record in records:
-        data = json.loads(record.read_text())
-        if not data.get("run_id"):
-            continue
+SERVE_SPEC = Path("/etc/nous-inference/serve.toml")
+HISTORY_DIR = Path("/etc/nous-inference/history")
+
+
+def _archive_path() -> Path:
+    """A history name later than every existing one: never the rollback source, and the
+    archived live spec sorts as the newest deployment (release audit)."""
+    stamp = datetime.now(timezone.utc).replace(microsecond=0)
+    for path in HISTORY_DIR.glob("serve-*.toml"):
         try:
-            previous = store.Run.open(data["run_id"]).plan["candidates"]["incumbent"]["spec"]["rootfs"]
-        except (KeyError, OSError, ValueError):
+            seen = datetime.strptime(path.stem, "serve-%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+        except ValueError:
             continue
-        break
-    if previous is None:
-        print("no canary run records a prior production spec; restore the previous spec from its backup")
+        stamp = max(stamp, seen + timedelta(seconds=1))
+    return HISTORY_DIR / f"serve-{stamp:%Y%m%dT%H%M%SZ}.toml"
+
+
+def _toml_value(v) -> str:
+    """TOML basic strings take JSON's escapes except surrogate pairs, so non-ASCII stays literal;
+    JSON leaves DEL raw, which TOML forbids (release audit)."""
+    return json.dumps(v, ensure_ascii=False).replace("\x7f", "\\u007f")
+
+
+def _toml_spec(spec: dict) -> str:
+    value = _toml_value
+    rows = [f"{key} = {value(spec[key])}" for key in ("rootfs", "served_model_name", "home", "args")]
+    for section in ("env", "mounts"):
+        rows.extend(["", f"[{section}]"])
+        rows.extend(f"{value(k)} = {value(v)}" for k, v in sorted(spec[section].items()))
+    return "\n".join(rows) + "\n"
+
+
+def _annotated_spec(text: str, spec: dict) -> str | None:
+    """`spec` written over the annotated spec `text`: only lines whose value changed are
+    rewritten, keeping their comments, the record of why each knob is set (council F-09); a
+    changed list is merged line by line (_merged_list); a removed key goes with the comment
+    above it. None when `text` has a value it cannot read or the result would not load back
+    as `spec`."""
+    value = _toml_value
+    want = {"": {k: spec[k] for k in ("rootfs", "served_model_name", "home", "args")},
+            "env": spec["env"], "mounts": spec["mounts"]}
+    written = {name: set() for name in want}
+    out: list[str] = []
+    sections = []
+
+    def close(name: str) -> None:
+        """Append the section's keys the old file lacked, before its trailing blank lines."""
+        tail = []
+        while out and not out[-1].strip():
+            tail.append(out.pop())
+        for key in [k for k in want.get(name, {}) if k not in written[name]]:
+            out.append(f"{value(key) if name else key} = {value(want[name][key])}")
+            written[name].add(key)
+        out.extend(reversed(tail))
+
+    lines = iter(text.splitlines())
+    section = ""
+    for line in lines:
+        header = re.fullmatch(r"\s*\[\s*([^\]]+?)\s*\]\s*(?:#.*)?", line)
+        if header:
+            close(section)
+            section = header.group(1).strip('"')
+            sections.append(section)
+            out.append(line)
+            continue
+        match = re.fullmatch(r'(\s*)("(?:[^"\\]|\\.)*"|[A-Za-z0-9_-]+)\s*=\s*(.*)', line)
+        if not match or section not in want:
+            out.append(line)
+            continue
+        indent, raw_key, rest = match.groups()
+        block = [rest]
+        try:
+            key = next(iter(tomllib.loads(f"{raw_key} = 0")))
+            while True:  # a value may span lines however it is wrapped: read until it parses
+                try:
+                    old = tomllib.loads("k = " + "\n".join(block))["k"]
+                    break
+                except tomllib.TOMLDecodeError:
+                    block.append(next(lines))
+        except (StopIteration, tomllib.TOMLDecodeError):
+            return None
+        if key not in want[section]:
+            while out and out[-1].lstrip().startswith("#"):
+                out.pop()
+            continue
+        new = want[section][key]
+        written[section].add(key)
+        if old == new:
+            out.append(line)
+            out.extend(block[1:])
+        elif isinstance(new, list):
+            rows = _merged_list(rest, block[1:], old, new, value)
+            if rows:
+                out.extend([line, *rows])
+            else:
+                out.append(f"{indent}{raw_key} = [")
+                out.extend(f"{indent}  {value(item)}," for item in new)
+                out.append(f"{indent}]")
+        else:
+            comment = re.fullmatch(r'("(?:[^"\\]|\\.)*"|\'[^\']*\'|[^\s#]+)(\s*#.*)?', rest)
+            out.append(f"{indent}{raw_key} = {value(new)}{(comment and comment.group(2)) or ''}")
+    close(section)
+    for name in want:
+        if name and name not in sections and want[name]:
+            out.extend(["", f"[{name}]"])
+            close(name)
+    merged = "\n".join(out) + "\n"
+    try:
+        same = tomllib.loads(merged) == tomllib.loads(_toml_spec(spec))
+    except tomllib.TOMLDecodeError:
+        return None
+    return merged if same else None
+
+
+def _merged_list(rest: str, body: list[str], old: list, new: list, value) -> list[str] | None:
+    """The lines after `key = [` of a list rewritten from `old` to `new` line by line, so the
+    comments in it, the reasons for each flag, survive a change (council F-09): a changed
+    element re-renders only its own line, keeping that line's comment; an added one joins the
+    line of the element before it; a line left with no elements goes, with the comments above
+    it. None for a layout this does not read, such as elements on a bracket's line."""
+    if not old or not body or not re.fullmatch(r"\[\s*(?:#.*)?", rest.strip()) \
+            or not re.fullmatch(r"\]\s*(?:#.*)?", body[-1].strip()):
+        return None
+    lines = []  # (line, its elements, the code before its comment, the comment)
+    owner = []  # the line index of each old element
+    for line in body[:-1]:
+        for cut in [i for i, c in enumerate(line) if c == "#"] + [len(line)]:
+            try:  # the first `#` outside a string is where the comment starts
+                items = tomllib.loads("x = [\n" + line[:cut] + "\n]")["x"]
+                break
+            except tomllib.TOMLDecodeError:
+                continue
+        else:
+            return None
+        owner.extend([len(lines)] * len(items))
+        lines.append((line, items, line[:cut], line[cut:]))
+    if [item for _, items, _, _ in lines for item in items] != old:
+        return None
+    given: list[list] = [[] for _ in lines]
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, old, new, autojunk=False).get_opcodes():
+        if tag == "equal":
+            for i, j in zip(range(i1, i2), range(j1, j2)):
+                given[owner[i]].append(new[j])
+        elif j2 > j1:  # owners only grow, so the lines still hold `new` in order
+            given[owner[i1] if i2 > i1 else owner[max(i1 - 1, 0)]].extend(new[j1:j2])
+    out: list[str] = []
+    for (line, items, code, comment), mine in zip(lines, given):
+        if mine == items:  # unchanged, or a comment or blank line
+            out.append(line)
+        elif not mine:
+            while out and out[-1].lstrip().startswith("#"):
+                out.pop()
+        else:
+            lead = code[:len(code) - len(code.lstrip())]
+            gap = code[len(code.rstrip()):] if comment else ""
+            out.append(f"{lead}{', '.join(value(item) for item in mine)},{gap}{comment}")
+    out.append(body[-1])
+    return out
+
+
+def rollback() -> int:
+    """Print commands to restore the newest archived production spec that differs."""
+    try:
+        current = SERVE_SPEC.read_text()
+    except OSError as exc:
+        print(f"cannot read current production spec {SERVE_SPEC}: {exc}")
         return 1
-    print(f"""Restore the production spec recorded as incumbent before this canary:
-  edit {REPO}/utils/nous/serve/production.toml and /etc/nous-inference/serve.toml to set rootfs = "{previous}"
-  sudo -n install -m 644 {REPO}/utils/nous/serve/production.toml /etc/nous-inference/serve.toml
+    histories = sorted(HISTORY_DIR.glob("serve-*.toml"), reverse=True)
+    for target in histories:
+        text = target.read_text()
+        if text == current:
+            continue
+        print("".join(difflib.unified_diff(current.splitlines(True), text.splitlines(True),
+                                            fromfile=str(SERVE_SPEC), tofile=str(target))))
+        archive = _archive_path()
+        print(f"""Rollback:
+  sudo -n install -D -m 644 {SERVE_SPEC} {archive}
+  sudo -n install -D -m 644 {target} {SERVE_SPEC}
+  install -m 644 {target} {REPO}/utils/nous/serve/production.toml
   sudo -n systemctl restart llama.service
+  sudo -n llama-speedcheck --calibrate   # idle, 3 min after it answers (refused while settling)
   nous-eval run t1 --incumbent""")
-    return 0
+        return 0
+    print(f"No differing archived production spec found in {HISTORY_DIR}; see docs/nous-inference.md rollback section.")
+    return 1
 
 
 def production_identity() -> dict:

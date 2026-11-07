@@ -1,0 +1,15 @@
+# The llama.cpp rollback arm with four slots, for accuracy runs only (t3, four workers):
+# slots change throughput, not the model's answers. Speed is measured on the one-slot arm.
+kind = "llama-router"
+label = "llamacpp-rvn-heretic-p4"
+engine = "/opt/llama.cpp-vulkan-f805c57a2/bin/llama-server"
+preset = "/home/tux/src/boilerplate/utils/nous/models.ini"
+section = "Qwen3.8-27B-RVN-Heretic-Q4_K_M"
+
+[env]
+RADV_DEBUG = "nocompute"
+VK_DRIVER_FILES = "/opt/mesa-26.2/usr/share/vulkan/icd.d/radeon_icd.json"
+LD_LIBRARY_PATH = "/opt/mesa-26.2/usr/lib/x86_64-linux-gnu"
+
+[overrides]
+parallel = 4

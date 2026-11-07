@@ -31,8 +31,30 @@ journalctl --user -u nevl-t2 -o cat -f
 A reboot (a power loss) ends the unit but not the run: rows are durable.
 `nous-eval-recover.service` starts at boot, waits until production answers,
 then resumes every run that had written a row in the day before boot and has
-no `done.json` (ledger M51). A run you stopped on purpose has no `done.json`
-either; after a reboot within a day it resumes too. Install once:
+no `done.json` (ledger M51). The run's client (the `nous-eval run`/`resume`
+process, which holds the run's `lock`; a second one is refused) alone marks a
+run stopped. Stopped with SIGTERM (`systemctl --user stop`), it writes
+`stopped.json` at once and durably, then ends its lease by signalling
+llama-yield, which stops its own lease (systemd-run would leave it running)
+once the lease's start job is done, so the lease's own stop restarts
+production, and restores production again itself after any lease. It also
+marks a run whose lease was stopped directly (`systemctl stop
+llama-yield-gpu`) or whose child crashed. A stopped run is not resumed by
+recovery or the canary timer, even when stopped after they chose it; `resume`
+by hand clears the mark. A lease that never started, or ran out, leaves the run
+as it was: the lease's child never writes or clears the mark, and does not
+start a run, or another block, once it is set. Inside a lease only the command
+the client launched for it runs the run (it presents the token the client wrote
+to `lease.claim`, and holds `exec.lock`). Only a lease that ran out (systemd
+reports `Finished with result: timeout` after a service runtime of at least
+the lease's) is followed by another, up to three leases. Every row names its block
+attempt and counts only if that attempt passed its end check (the engine still
+alive); a resume measures every other row again, so a lease or power cut
+mid-block costs that block's partial work (ledger M61).
+A run records its kernel at the first lease and refuses to continue on
+another (a storm reboot once booted a pending kernel mid-sweep), and `compare`
+refuses arms whose manifests differ in kernel; `G-kernel-pending` refuses to
+start while an installed kernel waits for a reboot (ledger M54). Install once:
 
 ```sh
 install -m 0644 utils/nous/eval/systemd/nous-eval-recover.service ~/.config/systemd/user/
@@ -76,9 +98,9 @@ engine, retagged image), so one run never mixes two versions of either.
 |---|---|---|---|
 | t1 | ab | speed, longctx 32K, vision, toolcall, lcb 10 | does it boot and work at all |
 | t2 | abba | speed ×3, longctx 32K-160K, replay ×3, concurrency, vision, grounding, toolcall | promotion evidence |
-| canary | abba | trimmed t2 | weekly radiance release check |
+| canary | abba | trimmed t2, with concurrency | weekly radiance release check |
 | tune | abba | speed, longctx 32K/128K, concurrency, vision, toolcall 10 | one-factor tuning: one candidate file per setting, many arms in one run |
-| t3 | ab | lcb 258 medium+hard, 16K cap | coding accuracy, non-inferiority |
+| t3 | ab | lcb 258 medium+hard, 16K cap, 3 reps, 4 workers | coding accuracy, non-inferiority; promotion needs a pass |
 | selftest | abba | speed, lcb (short) | harness check on CPU |
 
 ABBA (incumbent, candidate, candidate, incumbent) cancels drift such as
@@ -92,7 +114,7 @@ an A/A row that shows the noise floor.
 | speed | decode t/s and time to first token on prose, code, and copy-heavy edits | decode_tps | ttft_s |
 | longctx | needle recall, answered within budget (8192 tokens, 3584 at 160K) and prefill/decode speed at 32K-160K, cold prefill | prefill_tps, decode_tps | |
 | replay | session wall time and re-prefilled tokens across 8-turn agent sessions with another client cutting in | | reprefill_tokens (the mechanism; wall time is the outcome) |
-| concurrency | makespan of 4 sessions with 1, 2, 4 clients in flight; any failed request fails the item | | |
+| concurrency | makespan of 4 context-heavy sessions with 1, 2, 4 clients in flight; replies stop at 128 tokens, so it measures turn throughput, not finished answers (`capped_replies` counts them, ledger M53); any failed request fails the item | | |
 | vision | synthetic screenshots, charts, tables, rotated text, two-image diff, image at 120K | | |
 | grounding | ScreenSpot-v2 click points (100, stratified) | | hit_pixel, hit_norm1000 |
 | toolcall | tool-call validity on checkpoints cut from real OMP sessions, with OMP's tool set offered; a checkpoint whose history calls a tool not offered is dropped (ledger M45) | | name_match |
@@ -174,21 +196,32 @@ reports acceptance on NVIDIA/SGLang only), both sweep arms.
 `compare` pairs items between two labels of one run. Speed-like metrics use
 the geometric-mean ratio over items (reps averaged first) with a bootstrap 95%
 interval: pass if the lower bound is at least 0.97 (`tolerance` 0.03), fail if
-the upper bound is below it. Rates (recall, pass, tool validity) use a per-item
-non-inferiority test on the difference: pass if the lower bound is at least
-−0.04 (`margin`). The lower bound is never above effect − 3/n (rule of three),
-so a few agreeing items cannot certify a 4-point margin; it takes about 75.
-The upper bound stays the bootstrap's, so three of seven images lost still fails.
-A rate pass is approximate (about 5% rather than 2.5% one-sided error near the
-margin at n=258), which is why no promotion needs one.
+the upper bound is below it. Rates (recall, pass, tool validity) use a paired
+non-inferiority test on the per-item difference (reps of one item averaged
+first), with the union of a Student-t and a bootstrap-t interval: pass if the
+lower bound is at least −0.04 (`margin`). The lower bound is never above
+min(effect, 0) − 3/n (rule of three), so a few agreeing or winning items cannot
+certify a 4-point margin; it takes more than 75. Student-t alone passed 5 of 258 items lost on every
+rep, a draw 5.25% likely at a true 4-point loss (release audit, ledger M55);
+bootstrap-t alone is erratic on a handful of items. Simulated at n=258, 3 reps
+and a true 4-point loss, the union passed 2.1-2.65% of trials across
+deterministic, noisy and mixed losses (nominal 2.5%); the interval is about
+±0.03 and a true tie passes about 60% of the time. So t3 runs 3 reps and
+promotion needs its pass (ledger M52).
 The verdict fails on any failed must-pass or may-fail metric, any error row or
 any reasoning leak (all thinking, no answer) on either side; it passes only when
-the run finished with status ok and every must-pass metric passes. A candidate
+the run finished with nothing failed (block, missing row, error, leak) for
+either side, so a crashed arm of a many-arm sweep holds back only its own
+pairs (ledger M59), and every must-pass metric passes. A candidate
 whose own A/A on a must-pass ratio metric falls outside [1−2·tolerance,
 1/(1−2·tolerance)] ran in two states, and their mean measures neither, so it
-cannot pass until a stable rerun (ledger M44). Anything else is inconclusive:
-run more reps or a bigger tier. Before a t3 decision, measure the incumbent's
-own LCB discordance (an A/A on a subset) to size reps.
+cannot pass until a stable rerun (ledger M44). A one-block run with reps (t3)
+gets its A/A from splitting reps; a run without an accuracy workload says
+"Accuracy not measured". Anything else is inconclusive: run more reps or a
+bigger tier. A one-slot llama.cpp arm needs `parallel = N` to match the tier's
+workers (`candidates/llamacpp-rvn-heretic-p4.toml`). Production is the
+incumbent; to ask whether it is non-inferior to the llama.cpp arm, compare
+with `--a llamacpp-rvn-heretic-p4 --b incumbent`.
 
 ## Staying current
 
@@ -202,7 +235,10 @@ own LCB discordance (an A/A on a subset) to size reps.
   listed there (llama.cpp, vLLM radiance, standalone radiance);
 - the canary's verdict for the latest vLLM radiance release;
 - runs that started but stopped without `done.json` (no row for 6 hours: a
-  power loss or a killed unit), with their `resume` command (ledger M51).
+  power loss or a killed unit), with their `resume` command (ledger M51);
+- whether live production has a passing t2 or canary and a passing t3 with
+  it as the incumbent, each measuring its tier's full workload set (ledger
+  M52); until then it stays open.
 
 Results go to `$NOUS_EVAL_ROOT/watch/latest.md`; a note in
 `/home/tux/hearth/inbox/` (`NOUS_EVAL_INBOX` overrides) is written only when
@@ -218,29 +254,53 @@ systemctl --user daemon-reload && systemctl --user enable --now nous-eval-canary
 `./nous-eval canary` checks the latest SlyBase/vllm-sly-radiance GitHub release,
 reads the image tag documented in its release notes, exports it with
 `/usr/local/bin/nous-serve export`, writes a reusable candidate under
-`$NOUS_EVAL_ROOT/canary/candidates/`, and runs the `canary` tier against the
-live incumbent. If that passes it runs `t3` against the incumbent too, so a
-release reaches Tucker with the full promotion evidence. A release it has
-already measured, or the one production runs, is skipped in seconds. No
-llama.cpp build is part of the production canary.
-
-`nous-eval-canary.timer` (user unit, Sundays 03:00) runs it. Install once:
-
-```sh
-install -m 0644 utils/nous/eval/systemd/nous-eval-canary.{service,timer} ~/.config/systemd/user/
-systemctl --user daemon-reload && systemctl --user enable --now nous-eval-canary.timer
-```
+`$NOUS_EVAL_ROOT/canary/candidates/` (with its own cache home), and runs the
+`canary` tier against the live incumbent. If that passes it runs `t3` against
+the incumbent too, so a release reaches Tucker with the full promotion
+evidence. `canary/radiance-VERSION.json` records each stage before it starts
+(replaced atomically), so the next timer run resumes it after a reboot and
+grades a run cut between its lease and grading. An unstable canary A/A (ROCm
+draws one of two speeds per process) is measured once more in a new run; a
+second unstable result, a canary or t3 that does not pass, or a finished t3
+makes the record terminal. The
+release production runs is skipped in seconds. No llama.cpp build is part of
+the production canary. `nous-eval-canary.timer` (user unit, Sundays 03:00)
+runs it, with the install above.
 
 The result is in `/srv/models/.eval/canary/radiance-VERSION.json` and
 `latest-{canary,t3}.md`; the printed next step is
 `./nous-eval promote radiance-VERSION --run CANARY_RUN --run T3_RUN`.
 
-`promote` checks both same-incumbent runs and prints reviewed steps to update
-`utils/nous/serve/production.toml` and `/etc/nous-inference/serve.toml`, then
-restart `llama.service`; it never applies the change. `rollback` prints steps
-to restore the previous exported rootfs from the prior production spec/record
-and restart the unit. `G-engine-age` compares production's image ref and
-sidecar export time with the latest release.
+`promote` checks both same-incumbent runs (the canary or t2 and the t3 must
+pass, each by a compare report computed from the run's current rows, grades and
+`done.json`: a report a later resume outdated is refused, and the watch ignores
+it) and writes the candidate's spec to `promote/LABEL.toml`: the live
+`/etc/nous-inference/serve.toml` with only the changed values rewritten, so its
+comments, the reason for each knob, survive (a changed `args` list is merged
+line by line, so unchanged lines keep their comments; a spec that cannot be
+merged is written plain, with a note). It prints the
+diff and the steps: archive the live spec to
+`/etc/nous-inference/history/serve-UTC.toml`, install the new one, copy it to
+`utils/nous/serve/production.toml`, restart `llama.service`, and
+`sudo -n llama-speedcheck --calibrate` while idle, three minutes after it answers
+(it refuses a settling service), then a t1. It never applies the change.
+`rollback` prints the same steps for the newest archived spec that differs from
+the live one; a second rollback returns to the spec the first rolled away from.
+`watch` reports production as open until a t2 or canary and a t3 pass in which
+production's serving identity (label aside) was the measured arm B: the
+incumbent of a final-spec t3, or the candidate a canary qualified before its
+promotion. It judges the spec production loaded, which `nous-serve run --record`
+leaves in `/run/nous-inference/serve.toml` for that invocation's life (the
+incumbent of a run is that spec too, or `serve.toml` while production is
+stopped); a `serve.toml` that differs from it is open until a restart, as is a
+running `llama.service` that records nothing. With llama.cpp
+in production (a rollback) it skips these checks and still watches upstream. A
+canary stage that ends unfinished (a failed preflight) is reported as stuck.
+Rows from a block attempt whose end check failed (its engine died) do not
+count: a resume or the next lease measures them again, and a block that still
+holds such rows when the run finishes is failed, so its pairs get no verdict.
+`G-engine-age` compares production's image ref and sidecar export time with the
+latest release.
 
 llama.cpp `build REF --backend vulkan|hip|hip-wmma` remains available to create
 comparison candidates; it no longer promotes or tracks production freshness.

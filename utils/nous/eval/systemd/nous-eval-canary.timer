@@ -1,8 +1,9 @@
 [Unit]
-Description=Weekly nous-eval canary and upstream watch (a new radiance release takes the GPU for up to ~12 hours: canary, then t3)
+Description=Weekly nous-eval canary and upstream watch (a new radiance release takes the GPU for hours: canary, then t3; budgets in tiers.toml)
 
 [Timer]
-# No Persistent=: a missed Sunday night must not take the GPU at boot, mid-day.
+# No Persistent=: a missed Sunday night must not start new GPU work at boot, mid-day.
+# (nous-eval-recover only finishes runs a power loss cut short.)
 OnCalendar=Sun *-*-* 03:00:00
 RandomizedDelaySec=15min
 

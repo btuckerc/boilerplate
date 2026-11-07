@@ -1,6 +1,6 @@
 # What each tier measures. budget_s is the expected wall time of one block (one
 # candidate pass) and sizes the GPU lease. Workload options: reps, workers
-# (concurrent items; pair with --set parallel=N for router candidates),
+# (concurrent items; a one-slot router candidate needs `parallel = N` in its overrides),
 # items_tier (which item set the workload's items() selects), plus
 # workload-specific keys passed to items().
 
@@ -27,20 +27,24 @@ grounding = {}
 toolcall = {}
 
 [tiers.canary]  # weekly upstream check: tip build vs production, unattended
-budget_s = 2400
+budget_s = 3000
 design = "abba"
 [tiers.canary.workloads]
 speed = {items_tier = "t2", reps = 2}
 longctx = {items_tier = "t2", depths = [32768, 131072]}
 replay = {items_tier = "t2"}
+concurrency = {items_tier = "t2"}  # parallel agents were a reason for vLLM; a scheduler regression must show (council O-08)
 vision = {items_tier = "t1"}
 toolcall = {items_tier = "t2"}
 
-[tiers.t3]  # accuracy: LiveCodeBench medium+hard, 16K cap
+# accuracy: LiveCodeBench medium+hard (258), 16K cap. Three reps per item: simulated at n=258,
+# one rep gives a ±0.052 interval, three ±0.030, which a pass at the -0.04 margin needs
+# (council A-02). Four workers: candidates/llamacpp-rvn-heretic-p4.toml is the four-slot llama.cpp arm.
+[tiers.t3]
 budget_s = 43200
 design = "ab"
 [tiers.t3.workloads]
-lcb = {}
+lcb = {reps = 3, workers = 4}
 
 [tiers.tune]  # one-factor tuning of production: one candidate file per setting, ABBA, many arms per run
 budget_s = 1800

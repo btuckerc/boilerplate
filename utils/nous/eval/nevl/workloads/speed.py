@@ -64,7 +64,8 @@ def run_item(ctx, item):
         "ttft_s": reply.ttft,
         "predicted_n": timings.get("predicted_n", 0),
         "prompt_tps": timings.get("prompt_per_second", 0),
-        "draft_acceptance": server.get("draft_n_accepted", 0) / max(1, server.get("draft_n", 0)),
+        # vLLM reports no per-request draft counts; None, not a 0.0 that reads as measured (council F-07)
+        "draft_acceptance": server.get("draft_n_accepted", 0) / server["draft_n"] if server.get("draft_n") else None,
         "wall": reply.wall,
         "finish_reason": reply.finish_reason,
     }

@@ -36,6 +36,16 @@ def test_runtime_pm_requires_on(tmp_path):
     assert guards.runtime_pm(host(tmp_path, drm=gpu(tmp_path / "on")))[0] == "ok"
 
 
+def test_an_installed_but_unbooted_kernel_fails_the_preflight(tmp_path):
+    """A storm reboot booted a pending kernel mid-sweep (ledger M54)."""
+    boot = tmp_path / "boot"
+    boot.mkdir()
+    (boot / "vmlinuz-7.0.0-42-generic").touch()
+    (boot / "vmlinuz").symlink_to("vmlinuz-7.0.0-42-generic")
+    assert guards.kernel_pending(host(tmp_path, boot=boot, kernel="7.0.0-38-generic"))[0] == "fail"
+    assert guards.kernel_pending(host(tmp_path, boot=boot, kernel="7.0.0-42-generic"))[0] == "ok"
+
+
 def test_vram_free_waits_for_the_driver_to_release_production(tmp_path):
     import threading
 

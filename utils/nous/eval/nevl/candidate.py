@@ -7,10 +7,7 @@ later edits to preset files, candidate files or the unit cannot change a run.
 kind = "llama-router" (default): llama.cpp and a preset section.
 kind = "serve": a nous-serve spec, resolved and snapshotted into the plan.
 kind = "command": a foreground OpenAI-compatible process.
-Both kinds accept a label, request and overrides.
-Both kinds:
-    label      [a-z0-9._-]+, unique in a run
-    request    extra JSON body keys for every request (engine quirks)
+All kinds accept a label and request; overrides depend on kind.
 """
 from __future__ import annotations
 
@@ -71,6 +68,8 @@ def resolve(raw: dict, *, source: str, default_label: str) -> dict:
                 spec["rootfs"] = Path(value)
             elif key == "served_model_name":
                 spec[key] = str(value)
+            elif key == "home":
+                spec[key] = Path(value)
             elif key.isupper():
                 if key not in spec["env"] and key not in base_env:
                     raise CandidateError(f"{label}: {key} is absent from spec and image environment")
@@ -80,9 +79,8 @@ def resolve(raw: dict, *, source: str, default_label: str) -> dict:
         _check_start(label, spec["args"])
         # nous-serve.load() validates paths and owned flags; preserve its normalized JSON shape.
         resolved = {k: str(v) if isinstance(v, Path) else v for k, v in spec.items()}
-        resolved["mounts"] = dict(spec["mounts"])
         return {**common, "spec": resolved, "spec_source": str(spec_path),
-                "model": spec["served_model_name"], "base_url": "http://127.0.0.1:18737",
+                "model": spec["served_model_name"],
                 "ready_timeout_s": int(raw.get("ready_timeout_s", 1800))}
     if kind == "command":
         start = _override_argv([str(x) for x in raw["start"]], raw.get("overrides", {}))
@@ -120,7 +118,9 @@ def _image_environment(spec: dict) -> dict:
 
 
 def incumbent(show: str | None = None) -> dict:
-    """Production as it runs now, read from the live nous-serve unit (ledger M20)."""
+    """Production as it runs now, read from the live nous-serve unit (ledger M20): the spec
+    bytes the running invocation loaded, which `nous-serve run --record` leaves for exactly its
+    lifetime (ledger M60); with none (stopped, or a lease) the spec the next start loads."""
     if show is None:
         show = subprocess.run(["systemctl", "show", PRODUCTION_UNIT, "-p", "ExecStart"],
                               capture_output=True, text=True, check=True).stdout
@@ -129,9 +129,11 @@ def incumbent(show: str | None = None) -> dict:
     if not match:
         raise CandidateError(f"cannot parse ExecStart for {PRODUCTION_UNIT}: {exec_line!r}")
     argv = shlex.split(match.group(1))
-    if len(argv) != 5 or argv[:2] != ["/usr/local/bin/nous-serve", "run"] or argv[3] != "--port":
-        raise CandidateError(f"{PRODUCTION_UNIT} ExecStart is not nous-serve run SPEC --port N")
-    return resolve({"kind": "serve", "label": "incumbent", "spec": argv[2]},
+    if (len(argv) not in (5, 7) or argv[:2] != ["/usr/local/bin/nous-serve", "run"] or argv[3] != "--port"
+            or argv[5:6] not in ([], ["--record"])):
+        raise CandidateError(f"{PRODUCTION_UNIT} ExecStart is not nous-serve run SPEC --port N [--record PATH]")
+    spec = argv[6] if len(argv) == 7 and Path(argv[6]).exists() else argv[2]
+    return resolve({"kind": "serve", "label": "incumbent", "spec": spec},
                    source=f"live {PRODUCTION_UNIT}", default_label="incumbent")
 
 

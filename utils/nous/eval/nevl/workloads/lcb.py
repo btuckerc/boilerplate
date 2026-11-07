@@ -176,4 +176,7 @@ def summarize(rows: list[dict]) -> dict:
     return {"n": n, "errors": len(rows) - n, "pass_rate": sum(bool(r.get("pass")) for r in good) / n if n else 0,
             "truncated_rate": sum(bool(r.get("truncated")) for r in good) / n if n else 0,
             "no_code_rate": sum(bool(r.get("no_code")) for r in good) / n if n else 0,
-            "mean_completion_tokens": sum(r.get("completion_tokens") or 0 for r in good) / n if n else 0, "by_difficulty": by}
+            "mean_completion_tokens": sum(r.get("completion_tokens") or 0 for r in good) / n if n else 0,
+            # an arm whose server capped replies below the request shows it here (council O-12)
+            "max_completion_tokens": max((r.get("completion_tokens") or 0 for r in good), default=0),
+            "by_difficulty": by}

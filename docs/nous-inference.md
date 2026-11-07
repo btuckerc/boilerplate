@@ -17,7 +17,7 @@ its existing RSA identity, without forwarding the SSH agent.
 | Network | Loopback server forwarded on port 8080 by Tailscale Serve, tailnet only |
 | API | `http://nous:8080/v1` |
 | Models | One: `Qwen3.8-27B-Swift-Heretic-MXFP4` (Swift-1.5 Qwen3.8 27B heretic abliteration, MXFP4 GPTQ) with the DFlash2 drafter (7 draft tokens), image input (2 per prompt), 163,840 context / 8,192 output. The router's other models are gone with the router |
-| Capacity | Up to 8 sequences batched; one 386,677-token KV pool in VRAM holds every running sequence and the prefix cache (no host prompt cache). Four concurrent clients finish 4.5x sooner than on llama.cpp's single slot |
+| Capacity | Up to 8 sequences batched; one 386,677-token KV pool in VRAM holds every running sequence and the prefix cache (no host prompt cache). Four concurrent clients' context-heavy turns (128-token replies) complete 4.5x sooner than on llama.cpp's single slot |
 
 No failed systemd units were reported. SSH directory/key file permissions
 were 700/600. GPU temperature was 44 C at the initial inspection.
@@ -340,7 +340,9 @@ passwordless sudo, which supersedes this allowlist for agents.
 Production is vLLM "radiance", an RDNA4 fork
 ([SlyBase/vllm-sly-radiance](https://github.com/SlyBase/vllm-sly-radiance)),
 chosen over llama.cpp on 2026-11-06 for decode 1.7x, prefill 3.8x and 4.5x
-with four clients at equal tool-call validity and vision
+for four clients' context-heavy turns (replies capped at 128 tokens; ledger
+M53), with tool calls and images no worse. Accuracy against the llama.cpp arm
+is t3's question
 ([evaluation](nous-model-evaluation-2026-09-19.md#november-56-inference-engine-llamacpp-vs-vllm)).
 No container daemon runs it: `nous-serve export IMAGE` unpacks the image once
 into `/srv/models/engines/<repo>-<tag>` (with a sidecar holding the image id,
@@ -377,14 +379,37 @@ and occasionally switched mid-process
 `GPU_MAX_HW_QUEUES=1` is upstream's mitigation and costs nothing. With it, all
 6 production vLLM processes sampled on 2026-11-06 drew the same speed (the
 speedcheck probe at 142-143 t/s), which suggests but does not prove it prevents
-the slow draw. `llama-speedcheck.timer` (threshold 127 t/s, the midpoint) probes decode every 15 minutes
+the slow draw. `llama-speedcheck.timer` probes decode every 15 minutes
 while production is idle (a probe counts only if production was idle before
 and after it and it was the one request finished) and restarts `llama.service`
-after two slow probes in a row, or when a ready server fails `/health`. It
-restarts only under the GPU lease lock, only the invocation it probed, with
+after two slow probes in a row, or when a ready server fails `/health` four
+times over a minute (a stalled event loop recovers; a dead server does not).
+The slow threshold is per spec: `sudo -n llama-speedcheck --calibrate`, run on
+an idle, settled server after every spec change and restart, takes 6
+uncontaminated probes and stores 0.89 × their median with the sha256 of the
+spec the running invocation loaded in
+`/var/lib/llama-speedcheck/calibration.json`. `nous-serve run --record` writes
+those exact bytes to `/run/nous-inference/serve.toml` (llama.service's
+`RuntimeDirectory`, removed at every stop), so no clock or ctime is consulted.
+With no calibration for that spec, no record, or a `serve.toml` that no longer
+matches it (a restart would start another spec), slow-state restarts are off
+(logged `uncalibrated`) and only `/health` failures restart;
+a calibration across a restart or spec edit is refused. A calibration taken in
+the slow state would set the threshold too low, so check the median against
+the t2 decode before trusting it. It restarts only under the GPU lease lock,
+only the invocation it probed, for a slow state re-checking under the lock that
+production is still idle and still runs the calibrated spec, with
 llama enabled and no lease or Bonsai, at most twice an hour; an unreadable
 `/var/lib/llama-speedcheck/restarts.json` refuses restarts until fixed.
-`journalctl -u llama-speedcheck` logs every probe and decision.
+`journalctl -u llama-speedcheck` logs every probe and decision. A restart
+drains: llama.service stops with `KillMode=mixed`, `nous-serve` hands the
+SIGTERM to vLLM inside the sandbox, and `--shutdown-timeout 120` lets in-flight
+replies finish, so a request admitted after the last idle check still completes
+(ledger M57). While it drains, for up to 120 s, a new request gets HTTP 500
+("cannot schedule new futures after shutdown"), not a refused connection
+(drain smoke, 2026-11-06). Review on 2026-12-15: if a month of `journalctl -u
+llama-speedcheck` shows no slow probe (`tps=` below the calibrated threshold),
+delete the calibration and slow-state path and keep only the `/health` restart.
 
 | Source | Installed |
 | --- | --- |
@@ -400,7 +425,14 @@ ssh nous 'cd ~/src/boilerplate/utils/nous && sudo install -m 0755 serve/nous-ser
   && sudo systemctl daemon-reload && sudo systemctl restart llama && sudo systemctl enable --now llama-speedcheck.timer'
 ```
 
-A knob change is an edit to the spec, then install and restart.
+Until calibrated the timer only restarts on failed `/health`; once the server
+has settled (it refuses earlier), run `sudo -n llama-speedcheck --calibrate`.
+
+A knob change is an edit to the spec, then archive the live spec
+(`sudo -n install -D -m 0644 /etc/nous-inference/serve.toml
+/etc/nous-inference/history/serve-$(date -u +%Y%m%dT%H%M%SZ).toml`), install,
+restart and recalibrate the speedcheck. `nous-eval promote` and `rollback` print
+these steps; `rollback` restores the newest archived spec that differs.
 
 Rollback to llama.cpp restores the unit and Mesa drop-in from `c7a0dbb`, the
 last llama.cpp commit (both files verified byte-identical to what ran in
@@ -420,6 +452,10 @@ ssh nous 'set -eu; cd ~/src/boilerplate; pre=c7a0dbbee72573e93167120f53f556ba454
   until curl -sf -o /dev/null localhost:8080/health; do sleep 5; done; curl -s localhost:8080/v1/models'
 ```
 
+`nous-eval-canary.timer` stays enabled. With llama.cpp in production, the
+canary step refuses to run (that failure is ignored), and the watch reports
+"production checks skipped" but keeps checking upstream releases.
+
 Then revert the clients (the cutover commit's changes under `home/`,
 `utils/scripts` and `utils/omp-context-eval`: `git revert` it, or
 `git checkout c7a0dbb -- <paths>`), `chezmoi apply`, `omp-baseline validate`,
@@ -438,9 +474,14 @@ Behavior and agent rules: `platform-ops` skill, `references/nous.md`.
 `system.slice` on the other CPUs and measures a different machine. `nous-eval`
 always passes it ([docs/nous-eval.md](nous-eval.md)).
 
-Killing the `llama-yield` client does not end its lease (`systemd-run --wait`
-leaves the unit running until `--runtime`); `sudo systemctl stop
-llama-yield-gpu.service` does, and restores production.
+A TERM, INT or HUP to the `llama-yield` client (sudo relays it) stops its
+lease, from llama-yield and under its lock, once the lease's start job is done
+(stopping it earlier cancels the job and its restore of production), and
+llama-yield restores production again itself after every lease. SIGKILL leaves
+the lease running until `--runtime` (`systemd-run --wait` leaves the unit
+running). `sudo systemctl stop llama-yield-gpu.service` also ends a lease and
+restores production; during the start job, only llama-yield's own restore (or
+the watchdog, after five minutes) brings production back.
 
 Sources live in `utils/nous/gpu-lease/` and mirror these root-owned paths:
 

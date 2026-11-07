@@ -54,6 +54,23 @@ def test_a_run_that_did_not_finish_ok_never_passes(make_run, fake_workload, fake
     assert compare(run)["verdict"] == "inconclusive"
 
 
+def test_one_arm_crashing_withholds_only_its_own_verdict(make_run, fake_workload, fake_server, monkeypatch):
+    """A tune sweep's crashed arm (OOM at max-num-batched-tokens 8192) left every other arm
+    'not finished ok'; the pairs that did not touch it are judged (ledger M32 per pair)."""
+    fake_workload.speeds = {"a": 50.0, "b": 60.0, "c": 60.0}
+    start = fake_server.start
+
+    def crash_c(self):
+        if self.candidate["label"] == "c":
+            raise RuntimeError("engine died: out of memory")
+        return start(self)
+    monkeypatch.setattr(fake_server, "start", crash_c)
+    run = make_run(("a", "b", "c"))
+    assert execute(run) == 1 and run.done()["failed_labels"] == ["c"]
+    assert compare(run, "a", "b")["verdict"] == "pass"
+    assert compare(run, "a", "c")["verdict"] == "inconclusive"
+
+
 def test_errors_in_a_prevent_a_pass(make_run, fake_workload, fake_server, monkeypatch):
     """Half-measured baselines are not evidence for B either."""
     fake_workload.speeds = {"a": 50.0, "b": 60.0}
@@ -101,6 +118,17 @@ def test_workload_version_change_refused(make_run, fake_workload, fake_server):
         compare(run)
 
 
+def test_arms_from_two_kernels_are_refused(make_run, fake_workload, fake_server):
+    """A reboot between blocks moved b to another kernel (ledger M54)."""
+    fake_workload.n_items = 2
+    run = make_run()
+    execute(run)
+    run.write_json("manifest.a.json", {**run.read_json("manifest.a.json"), "kernel": "7.0.0-42-generic"})
+    run.write_json("manifest.b.json", {**run.read_json("manifest.b.json"), "kernel": "7.0.0-38-generic"})
+    with pytest.raises(CompareError, match="different kernels"):
+        compare(run)
+
+
 def test_single_candidate_gets_only_aa(make_run, fake_workload, fake_server):
     fake_workload.n_items = 5
     run = make_run(labels=("a",))
@@ -108,6 +136,17 @@ def test_single_candidate_gets_only_aa(make_run, fake_workload, fake_server):
     report = compare(run)
     assert report["workloads"]["fake"]["metrics"] == [] and report["workloads"]["fake"]["aa"]
     assert report["verdict"] == "inconclusive"
+
+
+def test_a_one_block_run_with_reps_reports_rep_aa_and_says_accuracy_is_unmeasured(
+        make_run, fake_workload, fake_server):
+    """t3 runs each arm once (ab) with reps; its A/A is rep against rep (council S-01/A-02), and a
+    tier without LiveCodeBench says it measured no accuracy (council O-02)."""
+    run = make_run(design="ab")
+    execute(run)
+    report = compare(run)
+    assert {(x["label"], x["by"]) for x in report["workloads"]["fake"]["aa"]} == {("a", "rep"), ("b", "rep")}
+    assert "Accuracy not measured" in markdown(report)
 
 
 def test_lcb_summary_reports_truncation_and_missing_code():

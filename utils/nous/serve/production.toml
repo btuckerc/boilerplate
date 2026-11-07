@@ -4,8 +4,9 @@
 #
 # Engine: vLLM "radiance", an RDNA4 fork (https://github.com/SlyBase/vllm-sly-radiance).
 # Model: Swift-1.5 Qwen3.8-27B heretic (abliterated), MXFP4 GPTQ, drafted by DFlash2.
-# Chosen over llama.cpp Vulkan on 2026-11-06: decode 1.7x, prefill 3.8x, 4 clients 4.5x at
-# equal tool-call validity and vision (docs/nous-model-evaluation-2026-09-19.md).
+# Chosen over llama.cpp Vulkan on 2026-11-06 for speed: decode 1.7x, prefill 3.8x, four clients'
+# context-heavy turns 4.5x (replies capped at 128 tokens), with tool calls and images no worse.
+# Accuracy against the llama.cpp arm: t3 (docs/nous-model-evaluation-2026-09-19.md; ledger M52).
 rootfs = "/srv/models/engines/vllm-sly-radiance-1.9.1-rocm10.1"
 served_model_name = "Qwen3.8-27B-Swift-Heretic-MXFP4"
 home = "/srv/workspaces/vllm-cache/home"  # .cache/vllm, .triton, .aiter: compiled graphs and kernels
@@ -15,13 +16,17 @@ args = [
   "--kv-cache-dtype", "fp8", "--mamba-ssm-cache-dtype", "bfloat16",
   "--speculative-config.method", "dflash",
   "--speculative-config.model", "/models/Qwen3.8-27B-DFlash2-W4A16",
-  "--speculative-config.num_speculative_tokens", "7",
+  # 9 drafts (2026-11-06 tune sweeps, replicated): decode +4%, 128K-context decode +21%,
+  # four clients 4% slower (inconclusive); 5 lost 12%; 11 and 13 halved long-context decode.
+  # Drafts are verified, so output stays in the target's distribution: k moves speed and
+  # numerics only, and t3 confirms accuracy. Capture sizes are multiples of k+1.
+  "--speculative-config.num_speculative_tokens", "9",
   "--speculative-config.draft_sample_method", "probabilistic",
   "--speculative-config.attention_backend", "TRITON_ATTN",
   "--attention-backend", "R4D_HYBRID",
   "--max-num-seqs", "8", "--max-num-batched-tokens", "2048",
   "--compilation-config.cudagraph_mode", "FULL_DECODE_ONLY",
-  "--compilation-config.cudagraph_capture_sizes", "[8,16,24,32,40,48,56,64]",
+  "--compilation-config.cudagraph_capture_sizes", "[10,20,30,40,50,60,70,80]",
   "--enable-prefix-caching",
   "--enable-prompt-tokens-details",  # usage.cached_tokens: nous-eval's replay counts re-prefill with it
   # Images on, so no --skip-mm-profiling (ledger M43). Capped at 4096 tokens per image (32x32 px
@@ -31,6 +36,9 @@ args = [
   "--enable-auto-tool-choice", "--tool-call-parser", "qwen3_xml", "--reasoning-parser", "qwen3",
   "--chat-template", "/opt/qwen-fixed.jinja",
   "--default-chat-template-kwargs", '{"reasoning_effort": "medium"}',
+  # A stop (restart, eval lease, deploy) finishes in-flight replies for up to 120 s instead of
+  # aborting them; llama.service allows 180 s (ledger M57). Output is unaffected.
+  "--shutdown-timeout", "120",
 ]
 
 [mounts]
@@ -58,8 +66,9 @@ RADIANCE_EMBED_BITS = "4"
 RADIANCE_ADAPTIVE_WIDTH = "perseq"
 # Cactus (image default 0.5) accepts drafts the target would reject: faster, but output leaves
 # the target model's distribution. 0 = stock rejection sampling. 1.9.0+ fades it out between
-# 4096 and 16384 output tokens and caps it (repetition loops, upstream #164).
-RADIANCE_CACTUS_DELTA = "0.5"
+# 4096 and 16384 output tokens and caps it (repetition loops, upstream #164). Off until a t3
+# shows 0.5 non-inferior (ledger M52); its speed is a tune arm.
+RADIANCE_CACTUS_DELTA = "0"
 HF_HUB_OFFLINE = "1"  # weights are local; never reach the Hub at startup
 VLLM_NO_USAGE_STATS = "1"
 DO_NOT_TRACK = "1"

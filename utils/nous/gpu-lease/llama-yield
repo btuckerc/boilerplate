@@ -5,11 +5,14 @@ import fcntl
 import json
 import math
 import os
+import queue
 import re
 import socket
+import signal
 import subprocess
 import sys
 import syslog
+import threading
 import time
 
 UNIT = "llama-yield-gpu.service"
@@ -18,16 +21,43 @@ SELF = "/usr/local/bin/llama-yield"
 BUSY = {"active", "activating", "deactivating", "reloading", "refreshing"}
 
 
-def announce(message):
-    syslog.syslog(syslog.LOG_INFO, message)
+def write_all(fd, data):
     try:
-        os.write(1, (message + "\n").encode())
+        while data:
+            data = data[os.write(fd, data):]
     except OSError:
         pass  # The caller's pipe may have vanished; recovery must continue.
 
 
+def emit(message):
+    syslog.syslog(syslog.LOG_INFO, message)
+    write_all(1, (message + "\n").encode())
+
+
+def announce(message):
+    """To syslog and the caller's output, waiting for them at most a second: a log or pipe
+    nobody drains must not hold up a lease's stop, production's restore or the lease lock
+    (release audits)."""
+    writer = threading.Thread(target=emit, args=(message,), daemon=True)
+    writer.start()
+    writer.join(timeout=1)
+
+
+def systemctl(*args):
+    """systemctl with its output captured: nothing it writes waits for our caller."""
+    return subprocess.run(["/usr/bin/systemctl", *args], capture_output=True, text=True)
+
+
 def ctl(*args):
-    return subprocess.check_output(["/usr/bin/systemctl", *args], text=True).strip()
+    done = systemctl(*args)
+    if done.returncode:
+        raise subprocess.CalledProcessError(done.returncode, done.args, done.stdout, done.stderr)
+    return done.stdout.strip()
+
+
+def describe(exc):
+    """An error, with what systemctl said (its output is captured, see systemctl())."""
+    return str(exc) + (": " + exc.stderr.strip() if getattr(exc, "stderr", None) else "")
 
 
 def properties(unit):
@@ -110,8 +140,46 @@ def recover(args):
         return 0
     announce("llama-watchdog: " + ("would start" if args.dry_run else "starting") + " llama.service")
     if not args.dry_run:
-        subprocess.run(["/usr/bin/systemctl", "--no-block", "start", "llama.service"], check=True)
+        ctl("--no-block", "start", "llama.service")
     return 0
+
+
+def lease_state():
+    """(job, ActiveState) of our lease unit; None when systemd cannot say."""
+    try:
+        return (ctl("show", UNIT, "-p", "Job", "--value"),
+                ctl("show", UNIT, "-p", "ActiveState", "--value"))
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
+def stop_own_lease():
+    """Ask systemd to stop our lease, unless its start job is still pending: stopping it then
+    cancels the job, and with it the ExecStopPost that restores production (it stayed down until
+    the watchdog). Returns whether systemd took the stop; until then the caller asks again. Called
+    only while this process holds the lease lock, so the unit by that name is ours."""
+    state = lease_state()
+    if state is None or state[0] or state[1] != "active":  # unknown, starting, or not running
+        return False
+    try:
+        asked = systemctl("--no-block", "stop", UNIT).returncode == 0
+    except OSError:
+        return False
+    if asked:  # after the request: announcing may take up to a second
+        announce("llama-yield: stopping " + UNIT + " for its caller")
+    return asked
+
+
+def restore_after_lease():
+    """What the lease's ExecStopPost does, again: a lease whose start job was cancelled (a stop
+    by hand while production was stopping) never ran it."""
+    args = argparse.Namespace(dry_run=False, restore=True, assume_llama_disabled=False,
+                              assume_bonsai_active=False)
+    try:
+        reconcile_placeholder(args)
+        recover(args)
+    except (OSError, subprocess.CalledProcessError) as exc:
+        announce("llama-yield: restore after the lease failed: " + describe(exc))
 
 
 def main():
@@ -175,35 +243,104 @@ def main():
         os.execv("/usr/bin/sudo", ["sudo", "-n", SELF, *options, "--", *args.command])
     # Held for the caller's lifetime, never by ExecStopPost. A fixed unit name
     # is the second, systemd-atomic exclusion barrier after caller death.
+    # A stop of the caller (sudo relays its TERM/INT/HUP) stops the lease, from
+    # here, under this lock: no other lease can have taken the unit's name.
+    stop = []
+    for number in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        signal.signal(number, lambda signum, frame: stop.append(signum))
+    refusal = None
     with open("/run/llama-yield.lock", "w") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            ap.error("another llama-yield caller is running")
-        if leases():
-            ap.error("another llama-yield lease is active")
-        if properties("bonsai.service")["ActiveState"] in BUSY:
-            ap.error("bonsai.service is active; refusing to take its GPU")
-        cmd = ["/usr/bin/systemd-run", "--unit=" + UNIT, "--uid=tux", "--gid=tux",
-               "--description=GPU lease: " + (args.label or os.path.basename(args.command[0])),
-               "--collect", "--wait", "--pipe", "--service-type=exec", "--expand-environment=no",
-               "--working-directory=" + args.directory,
-               "-p", "Conflicts=llama.service", "-p", "After=llama.service",
-               "-p", "PropagatesStopTo=" + PLACEHOLDER,
-               "-p", "ExecStartPost=+/usr/bin/systemctl --no-block start " + PLACEHOLDER,
-               "-p", "ExecStopPost=+" + SELF + " --restore",
-               "-p", "RuntimeMaxSec=" + str(args.runtime), "-p", "TimeoutStopSec=15s",
-               "-p", "KillMode=control-group"]
-        if args.slice is not None:
-            cmd += ["--slice=" + args.slice]
-        for key, value in environment.items():
-            cmd += ["--setenv=" + key + "=" + value]
-        # The service (including its cleanup) belongs to PID 1, not this caller.
-        return subprocess.run([*cmd, "--", *args.command]).returncode
+            refusal = "another llama-yield caller is running"
+        else:
+            if leases():
+                refusal = "another llama-yield lease is active"
+            elif properties("bonsai.service")["ActiveState"] in BUSY:
+                refusal = "bonsai.service is active; refusing to take its GPU"
+            else:
+                return lease_under_lock(args, environment, stop)
+    ap.error(refusal)  # once the lock is released: a stderr nobody drains must not hold it
+
+
+def lease_under_lock(args, environment, stop):
+    """One lease, while this process holds /run/llama-yield.lock: until its unit has ended,
+    then production's restore."""
+    cmd = ["/usr/bin/systemd-run", "--unit=" + UNIT, "--uid=tux", "--gid=tux",
+           "--description=GPU lease: " + (args.label or os.path.basename(args.command[0])),
+           "--collect", "--wait", "--pipe", "--service-type=exec", "--expand-environment=no",
+           "--working-directory=" + args.directory,
+           "-p", "Conflicts=llama.service", "-p", "After=llama.service",
+           "-p", "PropagatesStopTo=" + PLACEHOLDER,
+           "-p", "ExecStartPost=+/usr/bin/systemctl --no-block start " + PLACEHOLDER,
+           "-p", "ExecStopPost=+" + SELF + " --restore",
+           "-p", "RuntimeMaxSec=" + str(args.runtime), "-p", "TimeoutStopSec=15s",
+           "-p", "KillMode=control-group"]
+    if args.slice is not None:
+        cmd += ["--slice=" + args.slice]
+    for key, value in environment.items():
+        cmd += ["--setenv=" + key + "=" + value]
+    if stop:
+        return 128 + stop[0]  # stopped before anything was leased
+    # The service (including its cleanup) belongs to PID 1, not this caller. Its own
+    # session keeps a terminal's signals from systemd-run, which stops waiting on them.
+    lease = subprocess.Popen([*cmd, "--", *args.command], start_new_session=True,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    relays = [Relay(lease.stdout.fileno(), 1), Relay(lease.stderr.fileno(), 2)]
+    try:
+        asked = False
+        # Until the unit has ended too: restoring production while it runs (or while systemd
+        # cannot say) would stop it, and release its lock to a successor.
+        while lease.poll() is None or (state := lease_state()) is None or state[0] or state[1] in BUSY:
+            if stop and not asked:
+                asked = stop_own_lease()
+            time.sleep(0.2)
+    finally:
+        restore_after_lease()
+    for relay in relays:
+        relay.finish()
+    return lease.returncode
+
+
+class Relay:
+    """Passes what systemd-run (and, through --pipe, the lease) writes to `source` on to our
+    `target` without letting a caller that stops reading hold up systemd-run, and with it the
+    lease lock (release audits): reading never waits for writing, and what does not fit the
+    queue is dropped."""
+
+    def __init__(self, source, target):
+        self.source, self.target = source, target
+        self.chunks = queue.Queue(maxsize=256)
+        self.reader = threading.Thread(target=self.read, daemon=True)
+        self.reader.start()
+        threading.Thread(target=self.write, daemon=True).start()
+
+    def read(self):
+        try:
+            while data := os.read(self.source, 65536):
+                try:
+                    self.chunks.put_nowait(data)
+                except queue.Full:
+                    pass  # our caller stopped reading
+        except OSError:
+            pass
+
+    def write(self):
+        while True:
+            write_all(self.target, self.chunks.get())
+            self.chunks.task_done()
+
+    def finish(self):
+        """What systemd-run wrote last (its result) reaches our caller, unless either side
+        stalls: a second each."""
+        self.reader.join(timeout=1)
+        with self.chunks.all_tasks_done:
+            self.chunks.all_tasks_done.wait_for(lambda: not self.chunks.unfinished_tasks, timeout=1)
 
 
 if __name__ == "__main__":
     try:
         sys.exit(main())
     except (OSError, subprocess.CalledProcessError) as exc:
-        sys.exit("llama-yield: " + str(exc))
+        sys.exit("llama-yield: " + describe(exc))

@@ -4,7 +4,9 @@
 Production (`llama.service`) and nous-eval candidates run this same command, so
 an evaluation measures exactly what production serves:
 
-    nous-serve run SPEC --port 8080      exec the server (foreground)
+    nous-serve run SPEC --port 8080 [--record PATH]
+                                         run the server (foreground; SIGTERM drains it);
+                                         PATH gets the exact spec bytes this run loaded
     nous-serve argv SPEC --port N        print the sandbox argv
     nous-serve identity SPEC             JSON fingerprint: image id and resolved argv
     nous-serve export IMAGE              pull IMAGE (rootless docker), unpack it to ENGINES/<name>
@@ -14,6 +16,11 @@ The image's root filesystem runs read-only, as the caller mapped to root inside
 cgroup, so llama.slice's CPU reservation applies to production and to GPU
 leases alike, and stopping the caller stops the server (--die-with-parent).
 The GPU is reached through the caller's render group.
+
+SIGTERM to `run` reaches the engine inside the sandbox, as `docker stop` does, so
+vLLM's --shutdown-timeout drains in-flight requests. A SIGTERM to bwrap itself
+kills the sandbox at once (ledger M57): llama.service signals only this process
+(KillMode=mixed); a process-group signal still stops everything at once.
 
 Spec keys (all required except env and mounts):
     rootfs             an `export`ed directory under ENGINES
@@ -29,6 +36,7 @@ import argparse
 import hashlib
 import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -54,8 +62,12 @@ class SpecError(ValueError):
 
 def load(path: str | Path) -> dict:
     """A spec file: TOML, or JSON with the same keys (nous-eval writes resolved specs as JSON)."""
+    return parse(Path(path).read_text(), path)
+
+
+def parse(text: str, path: str | Path) -> dict:
     path = Path(path)
-    spec = json.loads(path.read_text()) if path.suffix == ".json" else tomllib.loads(path.read_text())
+    spec = json.loads(text) if path.suffix == ".json" else tomllib.loads(text)
     missing, unknown = REQUIRED - spec.keys(), spec.keys() - REQUIRED - OPTIONAL
     if missing or unknown:
         raise SpecError(f"{path}: missing {sorted(missing)}, unknown {sorted(unknown)}")
@@ -139,8 +151,59 @@ def export(ref: str, engines: Path = ENGINES) -> Path:
         "entrypoint": command(config),
         "exported_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}, indent=2) + "\n")
     tmp.chmod(0o755)
+    os.sync()  # the export, then its name, are on disk before a caller records the path (release audit)
     tmp.rename(dest)
+    os.sync()
     return dest
+
+
+def engine_pid(bwrap_pid: int, proc: Path = Path("/proc")) -> int | None:
+    """The sandbox's first process that is not bwrap: bwrap forks a pid-1 reaper, which
+    runs the command."""
+    queue = [bwrap_pid]
+    while queue:
+        pid = queue.pop(0)
+        try:
+            comm = (proc / str(pid) / "comm").read_text().strip()
+            children = (proc / str(pid) / "task" / str(pid) / "children").read_text().split()
+        except OSError:
+            continue
+        if pid != bwrap_pid and comm != "bwrap":
+            return pid
+        queue.extend(int(child) for child in children)
+    return None
+
+
+def run(cmd: list[str]) -> int:
+    """Run the sandbox as a child and hand SIGTERM/SIGINT to the engine inside it; the
+    exit status is the sandbox's (128 + signal when it was killed). The handlers go in
+    before the child exists: a stop that lands while it starts is held, then forwarded
+    (council F-12), instead of killing this process with the default action."""
+    started: list[subprocess.Popen] = []
+    pending: list[int] = []
+
+    def forward(signum, frame):
+        if not started:
+            pending.append(signum)
+            return
+        os.kill(engine_pid(started[0].pid) or started[0].pid, signum)
+
+    signal.signal(signal.SIGTERM, forward)
+    signal.signal(signal.SIGINT, forward)
+    started.append(subprocess.Popen(cmd))
+    while pending:
+        forward(pending.pop(0), None)
+    code = started[0].wait()
+    return 128 - code if code < 0 else code
+
+
+def record(path: Path, text: str) -> None:
+    """Write the spec text `run` loaded, atomically: what production runs is this file, not a
+    guess from when /etc changed and when the unit started (ledger M60)."""
+    tmp = path.with_name(f".{path.name}.tmp")
+    tmp.write_text(text)
+    tmp.chmod(0o644)
+    os.replace(tmp, path)
 
 
 def main(argv_: list[str] | None = None) -> int:
@@ -151,6 +214,7 @@ def main(argv_: list[str] | None = None) -> int:
         s.add_argument("spec")
         s.add_argument("--port", type=int, required=True)
         s.add_argument("--host", default="127.0.0.1")
+    sub.choices["run"].add_argument("--record", type=Path)
     sub.add_parser("identity").add_argument("spec")
     e = sub.add_parser("export")
     e.add_argument("image")
@@ -160,14 +224,22 @@ def main(argv_: list[str] | None = None) -> int:
         if a.cmd == "export":
             print(export(a.image, a.engines))
             return 0
-        spec = load(a.spec)
+        recording = a.cmd == "run" and a.record is not None
+        if recording:
+            if a.record.suffix != Path(a.spec).suffix:
+                raise SpecError(f"--record {a.record} must have {a.spec}'s suffix")
+            a.record.unlink(missing_ok=True)  # no stale record while this run cannot start
+        text = Path(a.spec).read_text()
+        spec = parse(text, a.spec)
         if a.cmd == "identity":
             print(json.dumps(identity(spec), indent=2))
         elif a.cmd == "argv":
             print(json.dumps(argv(spec, a.port, a.host)))
         else:
             cmd = argv(spec, a.port, a.host)
-            os.execv(cmd[0], cmd)
+            if recording:
+                record(a.record, text)
+            return run(cmd)
     except (SpecError, OSError) as exc:
         print(f"nous-serve: {exc}", file=sys.stderr)
         return 2

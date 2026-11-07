@@ -44,7 +44,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--port", type=int, default=LEASE_PORT)
 
     for name, text in (("resume", "continue a run"), ("grade", "grade a run's rows"), ("show", "run status")):
-        sub.add_parser(name, help=text).add_argument("run_id")
+        p = sub.add_parser(name, help=text)
+        p.add_argument("run_id")
+        if name == "resume":
+            p.add_argument("--lease-token", help=argparse.SUPPRESS)  # set by the run's own client only
     sub.add_parser("recover", help="resume the runs the last reboot interrupted (boot unit)")
 
     p = sub.add_parser("compare", help="compare two candidates of one run")
@@ -119,7 +122,7 @@ def cmd_plan(args) -> int:
 
 
 def cmd_resume(args) -> int:
-    return _start_and_compare(store.Run.open(args.run_id))
+    return _start_and_compare(store.Run.open(args.run_id), lease_token=args.lease_token)
 
 
 def cmd_recover(args) -> int:
@@ -136,15 +139,15 @@ def cmd_recover(args) -> int:
     status = 0
     for run_id in runs:
         print(f"resuming {run_id}", flush=True)
-        status = _start_and_compare(store.Run.open(run_id)) or status
+        status = _start_and_compare(store.Run.open(run_id), automatic=True) or status
     return status
 
 
-def _start_and_compare(run: store.Run) -> int:
-    status = start(run)
+def _start_and_compare(run: store.Run, automatic: bool = False, lease_token: str | None = None) -> int:
+    status = start(run, automatic=automatic, lease_token=lease_token)
     done = run.done()
-    if in_lease() or not done:
-        return status
+    if in_lease() or not done or (automatic and (run.path / "stopped.json").exists()):
+        return status  # automatic: a stopped run is left alone, finished or not
     if not run.rows():
         print(f"run {run.run_id} {done['status']} before measuring anything: {done.get('reason', '')}",
               file=sys.stderr)

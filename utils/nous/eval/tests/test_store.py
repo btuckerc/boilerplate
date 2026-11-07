@@ -41,13 +41,17 @@ def test_later_row_replaces_earlier_for_the_same_key(tmp_path):
     assert run.rows() == [row("x", score=1)]
 
 
-def test_graded_rows_substitute_by_key(tmp_path):
+def test_graded_rows_substitute_only_the_row_they_graded(tmp_path):
+    """A row measured again (its attempt failed the end check) keeps its key; the old grade must
+    not stand in for it (ledger M61)."""
     run = Run.create(plan("r1"), tmp_path)
-    run.append(row("x"))
-    run.append(row("y"))
-    run.write_graded([row("y", graded=True, passed=True)])
+    run.append(row("x", ts=1.0))
+    run.append(row("y", ts=1.0))
+    run.write_graded([row("y", ts=1.0, graded=True, passed=True)])
     by_item = {r["item"]: r for r in run.graded_rows()}
     assert "graded" not in by_item["x"] and by_item["y"]["passed"]
+    run.append(row("y", ts=2.0))
+    assert "graded" not in {r["item"]: r for r in run.graded_rows()}["y"]
 
 
 def test_runs_are_created_once(tmp_path):
@@ -57,18 +61,20 @@ def test_runs_are_created_once(tmp_path):
 
 
 def test_a_reboot_resumes_only_the_runs_it_cut_short(tmp_path):
-    """Started, unfinished, last row in the day before boot (ledger M51)."""
+    """Started, unfinished, last row in the day before boot (ledger M51); not one that was
+    stopped with SIGTERM by hand or by a clean shutdown (council F-05)."""
     boot = 1e9
-    for name, rows, done, written in (("a-cut", True, False, boot - 600), ("b-cut", True, False, boot - 7200),
-                                      ("finished", True, True, boot - 600), ("never-started", False, False, 0),
-                                      ("since-boot", True, False, boot + 60), ("last-week", True, False, boot - 7 * 86400)):
+    for name, rows, end, written in (("a-cut", True, None, boot - 600), ("b-cut", True, None, boot - 7200),
+                                     ("finished", True, "done", boot - 600), ("never-started", False, None, 0),
+                                     ("stopped", True, "stopped", boot - 600),
+                                     ("since-boot", True, None, boot + 60), ("last-week", True, None, boot - 7 * 86400)):
         path = tmp_path / "runs" / name
         path.mkdir(parents=True)
         if rows:
             (path / "rows.jsonl").write_text("{}\n")
             os.utime(path / "rows.jsonl", (written, written))
-        if done:
-            (path / "done.json").write_text("{}")
+        if end:
+            (path / f"{end}.json").write_text("{}")
     assert interrupted(boot, tmp_path) == ["a-cut", "b-cut"]
 
 

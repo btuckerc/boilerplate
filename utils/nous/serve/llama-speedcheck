@@ -5,22 +5,41 @@ On the R9700, a ROCm process decodes at one of two speeds ~22% apart, chosen at
 start and occasionally switched mid-process (ROCm/ROCm#6347; ledger M44). A
 restart redraws it. Every timer tick this probes decode speed while production
 is idle; two slow probes in a row restart llama.service. A ready server whose
-/health fails is restarted the same way (startup stalls are bounded by the
-unit's TimeoutStartSec instead).
+/health fails HEALTH_CHECKS times over a minute is restarted the same way: a
+server that cannot answer /health cannot finish requests either, so this does
+not wait for /metrics, but a minute rides out an event loop stalled by a long
+tokenization (startup stalls are bounded by the unit's TimeoutStartSec instead).
 
 A probe counts only if production was idle before and after it and the probe
 was the one request finished meanwhile. A restart happens only under the GPU
 lease lock, for the same running invocation that was probed, with llama
-enabled, no lease and no Bonsai, at most MAX_RESTARTS per hour; an unreadable
-restart record refuses restarts rather than resetting the budget. Each probe is
-logged as `speedcheck tps=…` for calibration: `journalctl -u llama-speedcheck`.
+enabled, no lease, no Bonsai and, for a slow state, no client request running
+or waiting (re-read under the lock; council F-03), at most MAX_RESTARTS per
+hour; an unreadable restart record refuses restarts rather than resetting the
+budget.
+
+The slow threshold belongs to the spec it was measured on (ledger M47): the
+calibration records the sha256 of the spec the running invocation loaded, as
+`nous-serve run --record` left it in RECORD for that invocation's lifetime
+(ledger M60). With no calibration for it, no record, or SPEC no longer holding
+it (a restart would start another spec), slow-state restarts are off (logged
+`uncalibrated`); the hash is checked again under the lock before a restart.
+After any production spec change: restart, then `sudo -n llama-speedcheck
+--calibrate`, six uncontaminated probes on the settled, idle service of one
+invocation; threshold = 89% of their median, the midpoint between healthy and
+the ~22% slower state (127 for the 142-143 t/s of 2026-11-06). Calibrate a
+process whose probes match its t2 decode: one stuck in the slow state would set
+a threshold nothing falls below. Probes are logged as `speedcheck tps=…`:
+`journalctl -u llama-speedcheck`.
 """
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import os
 import re
+import statistics
 import subprocess
 import sys
 import time
@@ -29,18 +48,121 @@ import urllib.request
 from pathlib import Path
 
 SPEC = Path("/etc/nous-inference/serve.toml")
+RECORD = Path("/run/nous-inference/serve.toml")  # llama.service: nous-serve run --record
 BASE = "http://127.0.0.1:8080"
 STATE = Path("/var/lib/llama-speedcheck/restarts.json")
 LEASE_LOCK = "/run/llama-yield.lock"  # llama-yield holds it for a lease's whole life
 BUSY = {"active", "activating", "deactivating", "reloading", "refreshing"}  # as llama-yield
 SETTLE_S = 180          # a fresh server finishes warm-up before it is judged
-# This probe (greedy, so DFlash acceptance is identical every run) measured 142-143 t/s in
-# all of 6 production processes on 2026-11-06; the slow state would be ~22% lower (~111).
-# Threshold at the midpoint. Recalibrate when the engine, model or drafter changes.
-SLOW_BELOW_TPS = 127
+CALIBRATION = Path("/var/lib/llama-speedcheck/calibration.json")
+CALIBRATION_PROBES = 6
+HEALTH_CHECKS = 4       # /health failures, HEALTH_GAP_S apart, before a restart
+HEALTH_GAP_S = 20
+CALIBRATION_RETRIES = 3
+SLOW_FACTOR = 0.89
 MAX_RESTARTS = 2
 PROMPT = "Write a Python function that parses an ISO 8601 duration string into seconds, with tests."
 TOKENS = 512
+
+
+def running_spec_sha256() -> str | None:
+    """sha256 of the spec the running invocation loaded, if SPEC still holds it, so a restart
+    starts the same spec. nous-serve records the bytes it loaded and systemd removes the record
+    at every stop, so no clock or ctime is involved: inferring the binding from them failed on
+    symlinks, `cp -p`, a read race and a clock step (release audits; ledger M60)."""
+    try:
+        running = RECORD.read_bytes()
+        return hashlib.sha256(running).hexdigest() if running == SPEC.read_bytes() else None
+    except OSError:
+        return None
+
+
+def calibration(spec_sha: str | None) -> dict | None:
+    if spec_sha is None:
+        return None
+    try:
+        value = json.loads(CALIBRATION.read_text())
+        return value if value.get("spec_sha256") == spec_sha else None
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def publish(path: Path, value) -> None:
+    """Write JSON so a power loss leaves the old or the new value, and the new one once this returns:
+    the file, the rename and the directory's own entry are fsynced on every call, since an earlier
+    writer that made the directory may have died before it synced it (release audit)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    with open(tmp, "w") as f:
+        json.dump(value, f)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+    for directory in (path.parent, path.parent.parent):
+        fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+
+
+def write_calibration(value: dict) -> None:
+    publish(CALIBRATION, value)
+
+
+def calibrate() -> int:
+    if os.geteuid() != 0:
+        log("calibration requires root")
+        return 1
+    state = unit("llama.service")
+    if state.get("ActiveState") != "active":
+        log("calibration requires active llama.service")
+        return 1
+    active_since = int(state.get("ActiveEnterTimestampMonotonic") or 0) / 1e6
+    if time.clock_gettime(time.CLOCK_MONOTONIC) - active_since < SETTLE_S:
+        log("calibration requires settled llama.service")
+        return 1
+    spec_sha = running_spec_sha256()
+    if spec_sha is None:
+        log(f"calibration requires llama.service restarted since {SPEC} last changed (no matching {RECORD})")
+        return 1
+    try:
+        if busy(get("/metrics")):
+            log("calibration requires idle production")
+            return 1
+    except OSError as exc:
+        log(f"calibration cannot read metrics: {exc}")
+        return 1
+    try:
+        model = tomllib.loads(RECORD.read_text())["served_model_name"]
+    except OSError as exc:
+        log(f"calibration failed: llama.service stopped ({exc})")
+        return 1
+    results = []
+    for _ in range(CALIBRATION_PROBES):
+        for attempt in range(CALIBRATION_RETRIES):
+            try:
+                tps = probe(model)
+            except OSError as exc:
+                log(f"calibration probe failed: {exc}")
+                return 1
+            if tps is not None:
+                results.append(tps)
+                break
+            if attempt + 1 == CALIBRATION_RETRIES:
+                log("calibration failed: contaminated probe retry limit reached")
+                return 1
+        log(f"calibration probe tps={results[-1]:.1f}")
+    after = unit("llama.service")
+    if after.get("InvocationID") != state.get("InvocationID") or running_spec_sha256() != spec_sha:
+        log("calibration failed: llama.service or its spec changed during the probes")
+        return 1
+    median = statistics.median(results)
+    threshold = round(SLOW_FACTOR * median)
+    write_calibration({"spec_sha256": spec_sha, "probes": results,
+                       "slow_below_tps": threshold, "calibrated_at": time.time()})
+    log(f"calibrated slow_below_tps={threshold} from median {median:.1f} t/s")
+    return 0
 
 
 def log(message: str) -> None:
@@ -86,7 +208,8 @@ def probe(model: str) -> float | None:
 
 def unit(name: str) -> dict:
     out = subprocess.run(["systemctl", "show", name, "-p", "ActiveState", "-p", "UnitFileState", "-p",
-                          "InvocationID", "-p", "ActiveEnterTimestampMonotonic"],
+                          "InvocationID", "-p", "ActiveEnterTimestampMonotonic",
+                          "-p", "InactiveExitTimestampMonotonic"],
                          capture_output=True, text=True, check=True).stdout
     return dict(line.split("=", 1) for line in out.splitlines() if "=" in line)
 
@@ -111,52 +234,80 @@ def restarts_within_hour(now: float) -> list[float]:
 
 
 def record(restarts: list[float]) -> None:
-    STATE.parent.mkdir(parents=True, exist_ok=True)
-    tmp = STATE.with_suffix(".tmp")
-    with open(tmp, "w") as f:
-        json.dump(restarts, f)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp, STATE)
+    publish(STATE, restarts)
 
 
-def restart(probed: dict, reason: str) -> int:
-    """Restart the probed invocation, unless anything changed or a lease/Bonsai/stop intervenes."""
+def unchanged(probed: dict, spec_sha: str | None) -> str | None:
+    """Why the probed invocation may not be restarted now, or None. For a slow state, production
+    must also be idle: metrics are read first, so the unit checks come after their wait."""
+    if spec_sha is not None:
+        try:
+            if busy(get("/metrics")):
+                return "production busy"
+        except OSError:
+            return "production metrics unavailable"
+        if running_spec_sha256() != spec_sha:
+            return f"{SPEC} changed since calibration matched"
+    now_state = unit("llama.service")
+    if now_state.get("InvocationID") != probed.get("InvocationID") or now_state.get("ActiveState") != "active":
+        return "llama.service changed since the probe"
+    if now_state.get("UnitFileState") not in {"enabled", "enabled-runtime"}:
+        return "llama.service is not enabled (intentional stop)"
+    if leases():
+        return "a GPU lease is active"
+    if unit("bonsai.service").get("ActiveState") in BUSY:
+        return "bonsai.service is active"
+    return None
+
+
+def restart(probed: dict, reason: str, spec_sha: str | None = None) -> int:
+    """Restart the probed invocation, unless anything changed or a lease/Bonsai/stop intervenes.
+    spec_sha (slow state only): the calibrated spec, which must still be the running one.
+
+    The guards, idleness included, run after every call that can block (the budget's fsyncs;
+    their own metrics request), the last time immediately before try-restart. systemd has no
+    restart-if-invocation, so the unit read and systemctl's job stay two calls apart (release
+    audits). Its outcome is logged once the lease lock is released: a stdout nobody drains must
+    not keep leases and the watchdog's recovery out."""
     with open(LEASE_LOCK, "a") as lock:
-        try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            log(f"skip restart ({reason}): a llama-yield caller holds the lease lock")
-            return 0
-        now_state = unit("llama.service")
-        why_not = None
-        if now_state.get("InvocationID") != probed.get("InvocationID") or now_state.get("ActiveState") != "active":
-            why_not = "llama.service changed since the probe"
-        elif now_state.get("UnitFileState") not in {"enabled", "enabled-runtime"}:
-            why_not = "llama.service is not enabled (intentional stop)"
-        elif leases():
-            why_not = "a GPU lease is active"
-        elif unit("bonsai.service").get("ActiveState") in BUSY:
-            why_not = "bonsai.service is active"
-        if why_not:
-            log(f"skip restart ({reason}): {why_not}")
-            return 0
-        now = time.time()
-        try:
-            restarts = restarts_within_hour(now)
-        except ValueError as exc:
-            log(f"refuse restart ({reason}): {exc}")
-            return 1
-        if len(restarts) >= MAX_RESTARTS:
-            log(f"refuse restart ({reason}): {len(restarts)} restarts in the last hour")
-            return 1
-        record(restarts + [now])
-        log(f"{reason}; restarting llama.service")
-        subprocess.run(["systemctl", "--no-block", "try-restart", "llama.service"], check=True)
-    return 0
+        status, message = _restart_under(lock, probed, reason, spec_sha)
+    log(message)
+    return status
+
+
+def _restart_under(lock, probed: dict, reason: str, spec_sha: str | None) -> tuple[int, str]:
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return 0, f"skip restart ({reason}): a llama-yield caller holds the lease lock"
+    why_not = unchanged(probed, spec_sha)
+    if why_not:
+        return 0, f"skip restart ({reason}): {why_not}"
+    now = time.time()
+    try:
+        restarts = restarts_within_hour(now)
+    except ValueError as exc:
+        return 1, f"refuse restart ({reason}): {exc}"
+    if len(restarts) >= MAX_RESTARTS:
+        return 1, f"refuse restart ({reason}): {len(restarts)} restarts in the last hour"
+    record(restarts + [now])  # before the restart: a crash after it must not refund the slot
+    why_not = unchanged(probed, spec_sha)
+    if why_not:
+        return 0, f"skip restart ({reason}): {why_not} (after the budget was written; the slot stays spent)"
+    # The guards' last word: nothing between them and the job. systemctl's own output is
+    # captured too: an error it wrote to a stdout/stderr nobody drains would hold the lock.
+    done = subprocess.run(["systemctl", "--no-block", "try-restart", "llama.service"], capture_output=True, text=True)
+    if done.returncode:
+        return 1, f"restart of llama.service failed ({reason}): {done.stderr.strip()}"
+    return 0, f"{reason}; restart of llama.service requested"
 
 
 def main() -> int:
+    if sys.argv[1:] == ["--calibrate"]:
+        return calibrate()
+    if sys.argv[1:]:
+        log("usage: llama-speedcheck [--calibrate]")
+        return 2
     probed = unit("llama.service")
     if probed.get("ActiveState") != "active":
         log("skip: llama.service not active (starting, stopped or leased)")
@@ -165,11 +316,27 @@ def main() -> int:
     if time.clock_gettime(time.CLOCK_MONOTONIC) - active_since < SETTLE_S:
         log("skip: llama.service is settling")
         return 0
+    for check in range(HEALTH_CHECKS):
+        try:
+            get("/health")
+            break
+        except OSError as exc:
+            if check + 1 == HEALTH_CHECKS:
+                return restart(probed, f"ready server fails /health {HEALTH_CHECKS} times ({exc})")
+            log(f"/health failed ({exc}); checking again in {HEALTH_GAP_S}s")
+            time.sleep(HEALTH_GAP_S)
+    spec_sha = running_spec_sha256()
+    threshold_data = calibration(spec_sha)
+    if threshold_data is None:
+        log("uncalibrated: no calibration for the running spec (missing, sha256 differs, no "
+            f"{RECORD}, or {SPEC} changed since llama.service started); slow-state restarts off")
+        return 0
     try:
-        get("/health")
-    except OSError as exc:
-        return restart(probed, f"ready server fails /health ({exc})")
-    model = tomllib.loads(SPEC.read_text())["served_model_name"]
+        model = tomllib.loads(RECORD.read_text())["served_model_name"]
+    except OSError:
+        log("skip: llama.service stopped since the probe")
+        return 0
+    threshold = threshold_data["slow_below_tps"]
     results = []
     for _ in range(2):
         tps = probe(model)
@@ -178,9 +345,9 @@ def main() -> int:
             return 0
         results.append(tps)
         log(f"tps={tps:.1f}")
-        if tps >= SLOW_BELOW_TPS:
+        if tps >= threshold:
             return 0
-    return restart(probed, f"slow state ({', '.join(f'{t:.1f}' for t in results)} < {SLOW_BELOW_TPS} t/s)")
+    return restart(probed, f"slow state ({', '.join(f'{t:.1f}' for t in results)} < {threshold} t/s)", spec_sha)
 
 
 if __name__ == "__main__":

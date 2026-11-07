@@ -26,7 +26,7 @@ class Server:
         self.port = port
         self.proc: subprocess.Popen | None = None
         self.log_path = self.run_dir / "logs" / f"{candidate['label']}.server.log"
-        if candidate["kind"] in ("command", "serve"):
+        if candidate["kind"] == "command":
             self.base_url = candidate["base_url"].rstrip("/")
         else:
             self.base_url = f"http://127.0.0.1:{port}"

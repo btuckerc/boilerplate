@@ -39,17 +39,26 @@ def test_derive_preset_named_section_and_unknown_section():
         derive_preset(PRESET.replace("load-on-startup = true", ""), None, {})
 
 
-def test_incumbent_is_derived_from_the_live_unit(tmp_path):
+def test_incumbent_is_the_spec_production_loaded(tmp_path):
+    """The recorded spec while llama.service runs, even after /etc changed; the installed one
+    when nothing runs, since that is what starts next (ledger M60)."""
     rootfs = tmp_path / "rootfs"
     rootfs.mkdir()
     (rootfs / ".nous-serve-image.json").write_text('{"env": [], "id": "sha", "image": "ref"}')
-    spec = tmp_path / "production.toml"
-    spec.write_text(f'rootfs = "{rootfs}"\nserved_model_name = "qwen"\nhome = "{tmp_path}"\nargs = ["--model", "/models/qwen"]\n[mounts]\n"/models" = "{tmp_path}"\n')
+    spec, record = tmp_path / "production.toml", tmp_path / "record.toml"
+
+    def write(path, model):
+        path.write_text(f'rootfs = "{rootfs}"\nserved_model_name = "{model}"\nhome = "{tmp_path}"\n'
+                        f'args = ["--model", "/models/qwen"]\n[mounts]\n"/models" = "{tmp_path}"\n')
+    write(spec, "installed")
     show = (f"ExecStart={{ path=/usr/local/bin/nous-serve ; argv[]=/usr/local/bin/nous-serve run {spec} "
-            "--port 8080 ; ignore_errors=no ; start_time=[n/a] }")
+            f"--port 8080 --record {record} ; ignore_errors=no ; start_time=[n/a] }}")
     c = incumbent(show)
     assert c["kind"] == "serve" and c["label"] == "incumbent"
-    assert c["model"] == "qwen" and c["spec"]["rootfs"] == str(rootfs)
+    assert c["model"] == "installed" and c["spec"]["rootfs"] == str(rootfs)
+    write(record, "running")
+    assert incumbent(show)["model"] == "running"
+    assert incumbent(show.replace(f" --record {record}", ""))["model"] == "installed"
 
 
 
@@ -142,6 +151,17 @@ def serve_fixture(tmp_path):
     path = tmp_path / "candidate.toml"
     path.write_text(f'kind = "serve"\nspec = "{spec}"\n')
     return path, rootfs
+def test_serve_home_override_and_run_port(tmp_path):
+    from nevl.server import Server
+    path, _ = serve_fixture(tmp_path)
+    home = tmp_path / "release-home"
+    path.write_text(path.read_text() + f'\n[overrides]\nhome = "{home}"\n')
+    candidate = load(path)
+    server = Server(candidate, tmp_path / "run", 18738)
+    assert candidate["spec"]["home"] == str(home)
+    assert server.base_url == "http://127.0.0.1:18738"
+    assert server.argv()[-1] == "18738"
+    assert "--port" in server.argv()
 
 
 def test_serve_overrides_args_env_and_rootfs_and_rejects_unknown_env(tmp_path):

@@ -10,7 +10,11 @@ WorkingDirectory=/srv/models
 # The spec (utils/nous/serve/production.toml) names the engine, model and every
 # knob; nous-eval reads it from here as the incumbent. The unit name predates
 # vLLM and is kept: leases, the watchdog and clients address llama.service.
-ExecStart=/usr/local/bin/nous-serve run /etc/nous-inference/serve.toml --port 8080
+# --record leaves the exact spec this invocation loaded in its RuntimeDirectory,
+# which systemd removes at every stop: llama-speedcheck and nous-eval judge that
+# file, not the one in /etc, which may have changed since (ledger M60).
+RuntimeDirectory=nous-inference
+ExecStart=/usr/local/bin/nous-serve run /etc/nous-inference/serve.toml --port 8080 --record /run/nous-inference/serve.toml
 # vLLM binds the port only once weights, kernels and graphs are ready (warm
 # cache ~1 min, cold compile ~10 min); until then the unit stays activating, which
 # the watchdog and llama-speedcheck leave alone. A start that never gets ready is a
@@ -20,7 +24,12 @@ ExecStartPost=/bin/sh -c 'until curl -sf -o /dev/null http://127.0.0.1:8080/heal
 TimeoutStartSec=30min
 Restart=on-failure
 RestartSec=5
-TimeoutStopSec=30
+# Stop = drain: SIGTERM goes to nous-serve alone, which hands it to vLLM inside the
+# sandbox; vLLM finishes in-flight replies for up to --shutdown-timeout (120 s, in the
+# spec), then frees the GPU. Signalling the whole cgroup killed bwrap and with it
+# every in-flight reply (ledger M57).
+KillMode=mixed
+TimeoutStopSec=180
 LimitNOFILE=1048576
 
 [Install]

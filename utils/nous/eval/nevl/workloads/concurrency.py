@@ -4,6 +4,10 @@ Four sessions, each a ~20K-token document followed by three short questions,
 run with 1, 2 or 4 clients in flight. One client is the serial baseline; more
 clients show what the engine gains (parallel slots, batching) or loses (cache
 eviction, re-prefill) under contention.
+
+Replies stop at 128 tokens, reasoning included, so most are cut off: makespan
+measures context-heavy turn throughput (prefill, prefix cache, scheduling), not
+time to complete answers. The summary counts capped replies (council A-03).
 """
 from __future__ import annotations
 
@@ -51,7 +55,8 @@ def run_item(ctx, item: dict) -> dict:
             messages.append({"role": "assistant", "content": reply.content})
             requests.append({"wall": reply.wall, "ttft_s": reply.ttft,
                              "prompt_n": reply.timings.get("prompt_n", 0),
-                             "decode_tps": reply.timings.get("predicted_per_second", 0)})
+                             "decode_tps": reply.timings.get("predicted_per_second", 0),
+                             "capped": reply.finish_reason == "length"})
         return requests
 
     start = time.monotonic()
@@ -81,7 +86,9 @@ def summarize(rows: list[dict]) -> dict:
         "by_clients": {item: {"makespan_s": statistics.mean(r["makespan_s"] for r in group),
                               "p95_ttft_s": _p95([q["ttft_s"] for r in group for q in r["requests"]
                                                   if q.get("ttft_s") is not None]),
-                              "prompt_tokens_processed": statistics.mean(r["prompt_tokens_processed"] for r in group)}
+                              "prompt_tokens_processed": statistics.mean(r["prompt_tokens_processed"] for r in group),
+                              "capped_replies": sum(q.get("capped", False) for r in group for q in r["requests"]),
+                              "replies": sum(len(r["requests"]) for r in group)}
                        for item, group in sorted(by_clients.items())},
     }
 

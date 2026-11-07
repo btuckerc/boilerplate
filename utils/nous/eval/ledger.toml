@@ -118,7 +118,7 @@ tests = ["test_build.py::test_promote_requires_a_same_session_compare"]
 id = "M20"
 what = "Benchmark flags drifted from the production preset (bench.py hard-coded draft-mtp n3, ctx 65536, Vulkan1)"
 guards = []
-tests = ["test_candidate.py::test_incumbent_is_derived_from_the_live_unit", "test_candidate.py::test_derive_preset_keeps_global_and_production_section_only"]
+tests = ["test_candidate.py::test_incumbent_is_the_spec_production_loaded", "test_candidate.py::test_derive_preset_keeps_global_and_production_section_only"]
 
 [[mistake]]
 id = "M21"
@@ -272,9 +272,9 @@ tests = ["serve/test_serve.py::test_jit_caches_go_to_the_writable_home_unless_th
 
 [[mistake]]
 id = "M47"
-what = "llama-speedcheck's first threshold (150 t/s) came from an 800-token thinking-on smoke at 168 t/s; its own 512-token greedy probe decodes 142-143 t/s on every healthy process, so as installed it would have restarted healthy production twice an hour. Calibrated on production before the timer could act (127, the midpoint). A monitor's threshold comes from the monitor's own probe on the target, never from another benchmark"
+what = "llama-speedcheck's first threshold (150 t/s) came from an 800-token thinking-on smoke at 168 t/s; its own 512-token greedy probe decodes 142-143 t/s on every healthy process, so as installed it would have restarted healthy production twice an hour. Calibrated on production before the timer could act (127, the midpoint). A monitor's threshold comes from the monitor's own probe on the target, never from another benchmark; and it belongs to the spec it was measured on: the calibration records the spec's sha256, and another spec turns slow-state restarts off until `llama-speedcheck --calibrate` (council O-03)"
 guards = []
-tests = ["serve/test_serve.py::test_the_hourly_budget_survives_across_runs"]
+tests = ["serve/test_serve.py::test_the_hourly_budget_survives_across_runs", "serve/test_serve.py::test_slow_restart_threshold_invalidated_when_spec_changes", "serve/test_serve.py::test_slow_restarts_follow_the_spec_the_running_invocation_loaded", "serve/test_serve.py::test_calibration_measured_across_a_spec_change_is_not_written"]
 
 [[mistake]]
 id = "M48"
@@ -296,6 +296,66 @@ tests = ["serve/test_serve.py::test_spec_args_replace_the_image_cmd_as_docker_ru
 
 [[mistake]]
 id = "M51"
-what = "a power loss at 05:16 UTC on 2026-11-06 (a storm) killed a 15-hour tune sweep (3 of 12 blocks done) and its transient user unit; nothing would have resumed or reported it. rows.jsonl survived intact and resume continued it. nous-eval-recover.service (user, at boot) now resumes every run the reboot cut short once production answers, and the weekly watch reports any started run with no done.json and no row for 6 hours"
+what = "a power loss at 05:16 UTC on 2026-11-06 (a storm) killed a 15-hour tune sweep (3 of 12 blocks done) and its transient user unit; nothing would have resumed or reported it. rows.jsonl survived intact and resume continued it. nous-eval-recover.service (user, at boot) now resumes every run the reboot cut short once production answers, but not one stopped with SIGTERM (by hand or a clean shutdown; stopped.json), and the weekly watch reports any started run with no done.json and no row for 6 hours"
 guards = []
-tests = ["test_store.py::test_a_reboot_resumes_only_the_runs_it_cut_short", "test_watch.py::test_a_started_run_that_went_quiet_without_finishing_is_open"]
+tests = ["test_store.py::test_a_reboot_resumes_only_the_runs_it_cut_short", "test_watch.py::test_a_started_run_that_went_quiet_without_finishing_is_open", "test_runner.py::test_sigterm_kills_a_command_candidate_before_exiting", "test_runner.py::test_only_a_lease_that_ran_out_is_followed_by_another"]
+
+[[mistake]]
+id = "M52"
+what = "production moved to vLLM swift-heretic MXFP4 by hand on 2026-11-06 on speed evidence (t2 not finished ok, vLLM A/A 0.80) and ten easy LCB items, with lossy draft acceptance (RADIANCE_CACTUS_DELTA=0.5) on and no t3: promote() would have refused it, and M11 (promoted inside the noise) happened again on the largest change. Cactus is off until a t3 says otherwise; production is qualified by t2 and t3 against the llama.cpp arm; promote needs a t3 pass (reps make one reachable); and the weekly watch keeps an open item while the live production spec has no passing t2 and t3 run, so a hand edit cannot go unnoticed"
+guards = []
+tests = ["test_watch.py::test_production_without_passing_t2_and_t3_evidence_is_open", "test_stats.py::test_a_loss_at_the_margin_does_not_pass_with_reps"]
+
+[[mistake]]
+id = "M53"
+what = "docs said four concurrent clients 'finish 4.5x sooner' on vLLM; the concurrency workload caps replies at 128 tokens with reasoning on, and in the t2 bake-off 21 of 24 vLLM four-client replies (and every llama.cpp reply) were cut off. A workload's metric says what it measures (context-heavy turn throughput, not completed answers), and the summary counts capped replies"
+guards = []
+tests = ["test_workloads_text.py::test_concurrency_counts_the_replies_its_token_cap_cut_off"]
+
+[[mistake]]
+id = "M54"
+what = "a storm power loss booted a pending kernel (7.0.0-38 -> -42) in the middle of a 5 h tune sweep; the per-candidate manifest check refused only the arm that spanned the reboot, and the remaining arms were compared across kernels. A long run starts only on the default kernel, records its kernel at the first lease, refuses to resume on another, and compare refuses arms whose manifests differ in kernel"
+guards = ["G-kernel-pending"]
+tests = ["test_guards.py::test_an_installed_but_unbooted_kernel_fails_the_preflight", "test_runner.py::test_resume_refuses_a_run_that_a_reboot_moved_to_another_kernel", "test_compare.py::test_arms_from_two_kernels_are_refused"]
+
+[[mistake]]
+id = "M55"
+what = "the release audit of the round-1 fixes (2026-11-06, two passes) found what the tests had not: a Student-t rate interval that passes 5 of 258 items lost on every rep (5.25% false pass at a true 4-point loss) and three unanimous wins out of three items; a speedcheck calibration bound to the spec file's mtime rather than the process that runs it (`cp -p` keeps an old mtime); health restarts on one failed /health; a SIGTERM handler that covered only the active block; a canary record written in place without fsync and a canary run cut between lease and grading never graded; a rollback archive that could take its own source's name; production qualification from a --workloads subset; a promotion spec that JSON-escaped emoji into invalid TOML. Every claim a docstring makes about an error rate or a recovery path gets a test of its worst case, not its typical case"
+guards = []
+tests = ["test_stats.py::test_a_few_items_lost_on_every_rep_do_not_pass", "test_stats.py::test_a_handful_of_unanimous_wins_is_not_non_inferiority", "serve/test_serve.py::test_a_spec_changed_under_the_lock_skips_the_slow_restart", "serve/test_serve.py::test_health_restarts_only_after_a_minute_of_failures", "test_runner.py::test_sigterm_between_blocks_marks_the_run_stopped", "test_build.py::test_a_canary_cut_after_its_lease_is_graded_not_measured_again", "test_build.py::test_rollback_never_archives_over_its_source", "test_build.py::test_written_promote_toml_round_trips_through_nous_serve", "test_watch.py::test_production_without_passing_t2_and_t3_evidence_is_open"]
+
+[[mistake]]
+id = "M56"
+what = "a test fixture written without make_run (2026-11-06) left NOUS_EVAL_ROOT unset, so canary tests wrote a canary record, two runs and a compile-cache directory into the live /srv/models/.eval and /srv/workspaces/vllm-cache; the next run of the same test found the record terminal and planned nothing. Every test gets a temporary eval root and canary cache from an autouse fixture, not from a fixture each test must remember"
+guards = []
+tests = ["test_build.py::test_a_canary_that_cannot_start_is_reported_as_stuck"]
+
+[[mistake]]
+id = "M57"
+what = "every restart of production (speedcheck, eval lease, deploy) cut in-flight replies: nous-serve exec'd bwrap, systemd signalled the whole cgroup, bwrap died on SIGTERM and --die-with-parent SIGKILLed the sandbox within 8 ms, so vLLM's drain (--shutdown-timeout) could never run, and its default (0) aborts anyway. nous-serve now runs bwrap as a child and hands SIGTERM to the engine inside it; llama.service stops with KillMode=mixed, TimeoutStopSec=180, and production drains for up to 120 s (found answering council S-05: a restart racing a request admitted after the idle check)"
+guards = []
+tests = ["serve/test_serve.py::test_sigterm_lets_the_engine_in_the_sandbox_drain"]
+
+[[mistake]]
+id = "M58"
+what = "the third release audit (2026-11-06) found four fixes that closed one path and left its sibling open: the spec's ctime binding followed a symlink to an older file's ctime; the watch judged the spec on disk while an older one still served; start() read an earlier lease's 'ran out' mark after a later lease was stopped before its child could write one; the comment-keeping merge read only one array layout and raised on another valid one. A binding is checked on every path that reaches it (link, directory, file), a marker is cleared before the step it reports on, and a parser that falls back must fall back on any input it cannot read"
+guards = []
+tests = ["serve/test_serve.py::test_slow_restarts_follow_the_spec_the_running_invocation_loaded", "test_watch.py::test_evidence_is_judged_only_for_the_spec_production_runs", "test_runner.py::test_only_a_lease_that_ran_out_is_followed_by_another", "test_build.py::test_promote_reads_a_spec_however_its_values_are_wrapped"]
+
+[[mistake]]
+id = "M59"
+what = "in the second tune sweep (2026-11-06) max-num-batched-tokens 8192 ran out of VRAM at the first 32K prompt (radiance's mxfp4_linear_pq workspace is outside vLLM's memory profile at 0.98), and the run-level 'failed' marked every other arm 'not finished ok', withholding k9's pass. done.json names the failed candidates and compare caps only pairs that include one; a batching or memory knob is adopted only after a run that reached the longest context"
+guards = []
+tests = ["test_compare.py::test_one_arm_crashing_withholds_only_its_own_verdict", "test_runner.py::test_only_rows_whose_attempt_passed_its_end_check_are_kept"]
+
+[[mistake]]
+id = "M60"
+what = "whether llama.service ran the spec in /etc was inferred from ctimes against the unit's start: four release audits found holes (cp -p, symlinks, the read racing an install, a clock step or suspend between the start and the check), each fixed by more inference. nous-serve run --record now writes the exact spec bytes it loaded to llama.service's RuntimeDirectory, removed at every stop; llama-speedcheck, the watch and the eval incumbent read that, and no clock or ctime is consulted"
+guards = []
+tests = ["serve/test_serve.py::test_run_records_the_spec_it_loaded_and_never_a_stale_one", "serve/test_serve.py::test_slow_restarts_follow_the_spec_the_running_invocation_loaded", "test_watch.py::test_evidence_is_judged_only_for_the_spec_production_runs", "test_candidate.py::test_incumbent_is_the_spec_production_loaded"]
+
+[[mistake]]
+id = "M61"
+what = "the fifth to fifteenth release audits and an architect review (2026-11-06) found state that one process wrote and another inferred: a 'ran out' mark derived from the unit's deadline (a stop within the slack counted as ran out; the deadline was unknown before the unit was active; a stop that timed out also reports 'timeout'), a failure journal a SIGTERM could cut mid-write, a block-level end check vouching for rows another attempt wrote (an earlier pass for a failed retry, a retry's pass for a failed attempt's rows), compare reports and grades that outlived the rows they were computed from, canary files, run directories (and the directory entry of a new rows.jsonl), marker removals and the speedcheck restart budget not durable before they were relied on, restart guards (production idle, unit, leases) judged on a snapshot older than a blocking call, a binding check that read a record from another invocation than the snapshot it judged, older on-disk layouts (manifests, canary records) the new code crashed on or miscounted, a stopped run whose lease kept the GPU (systemd-run --wait leaves its unit running when the client dies), a lease stopped by name from outside llama-yield's lock (a successor lease could hold the name; a stop issued after a timed-out wait for the start job cancelled that job and production's restore), a lease llama-yield took as ended when systemd could not say, a stop path that wrote to a log first (a stalled reader blocked it before the lease was ended), a stopped run left without stopped.json or with a mark that was only in memory until the lease ended (a power cut made it recoverable), a mark that the lease's child wrote or cleared (a child killed at its runtime marked a run stopped that had run out; a starting child cleared a client's mark), and a run that recovery or the canary chose and then resumed although it was stopped meanwhile (the canary also graded a finished run without looking at its mark, and went on to t3), or that two processes ran at once (a second resume, the canary inside a lease, or an in-lease command that was not the one the client launched). Another lease follows only systemd's own result ('Finished with result: timeout' with a service runtime of at least the lease's); llama-yield, under its lock, stops its own lease on its caller's TERM/INT/HUP once the start job is done, holds the lock until systemd reports the unit ended, and restores production after every lease; the run's client alone marks a run stopped, at once and durably on its signal (only while it holds the run's lock; output only after the lease has ended) and after any lease that started and ended without running out on an unfinished run, and only a resume by hand clears it; the lease's child never writes or clears the mark and starts no run or block once it is set; one process runs a run (a flock on its `lock`; inside a lease only the command the client launched, holding the token the client wrote to `lease.claim` and `exec.lock`), and recovery and the canary decide under the lock, finished or not, leaving a stopped run alone; every row names its block attempt and counts only if that attempt passed its end check, any other row is measured again; a compare report carries the digest of the rows, grades and done.json it read, and promote and the watch accept it only while that still matches; the watch re-parses the record it compares and requires it to equal the judged snapshot"
+guards = []
+tests = ["test_runner.py::test_only_a_lease_that_ran_out_is_followed_by_another", "test_runner.py::test_stopping_the_run_marks_it_then_ends_its_lease", "test_runner.py::test_a_stopped_run_stays_stopped_whatever_its_lease_child_wrote", "test_runner.py::test_a_run_marked_stopped_starts_no_further_block", "test_runner.py::test_a_lease_that_ran_out_leaves_its_run_recoverable", "test_runner.py::test_boot_recovery_leaves_a_run_stopped_after_it_was_chosen", "test_runner.py::test_one_process_runs_a_run_at_a_time", "test_runner.py::test_inside_a_lease_only_the_command_its_client_launched_runs_the_run", "test_runner.py::test_only_rows_whose_attempt_passed_its_end_check_are_kept", "test_runner.py::test_a_run_from_before_attempts_resumes_by_measuring_its_rows_again", "test_store.py::test_graded_rows_substitute_only_the_row_they_graded", "test_build.py::test_promote_refuses_a_compare_older_than_the_rows", "test_build.py::test_a_canary_resumes_after_a_power_loss_took_its_cache_home", "test_build.py::test_a_canary_record_from_before_resumable_canaries_continues", "test_build.py::test_a_canary_run_from_before_resumable_canaries_is_its_first_attempt", "test_build.py::test_the_canary_leaves_a_stopped_run_stopped", "test_build.py::test_the_canary_does_not_go_on_from_a_finished_run_that_was_stopped", "test_watch.py::test_evidence_is_judged_only_for_the_spec_production_runs", "test_watch.py::test_production_without_passing_t2_and_t3_evidence_is_open", "serve/test_serve.py::test_no_restart_when_production_changed_or_the_gpu_is_claimed", "serve/test_serve.py::test_a_request_that_starts_while_the_budget_is_written_stops_a_slow_restart"]

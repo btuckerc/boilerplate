@@ -44,6 +44,8 @@ class Host:
     unit_path: str = UNIT_PATH
     config: dict = field(default_factory=lambda: tomllib.loads(CONFIG.read_text())["guards"])
     plan: dict | None = None  # the run about to take the GPU; None: production only
+    boot: Path = Path("/boot")
+    kernel: str = field(default_factory=lambda: os.uname().release)
 
 
 @dataclass
@@ -127,6 +129,19 @@ def disk(host: Host):
     if root_free < limits["min_root_free_gib"]:
         problems.append(f"/ has {root_free} GiB free")
     return ("fail", "; ".join(problems)) if problems else ("ok", f"eval {eval_free} GiB, / {root_free} GiB free")
+
+
+@guard("G-kernel-pending", mistakes=("M54",))
+def kernel_pending(host: Host):
+    """A kernel installed but not booted splits a long run across kernels at the next reboot."""
+    default = host.boot / "vmlinuz"
+    if not default.is_symlink():
+        return "skip", f"{default} is not a symlink to a versioned kernel"
+    installed = default.resolve().name.removeprefix("vmlinuz-")
+    if installed != host.kernel:
+        return "fail", (f"kernel {installed} is installed but {host.kernel} is running: a reboot mid-run "
+                        "would measure arms on different kernels; reboot first")
+    return "ok", f"running the default kernel {host.kernel}"
 
 
 @guard("G-memory", mistakes=("M17",))

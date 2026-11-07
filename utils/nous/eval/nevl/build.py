@@ -497,7 +497,11 @@ def _merged_list(rest: str, body: list[str], old: list, new: list, value) -> lis
 
 
 def rollback() -> int:
-    """Print commands to restore the newest archived production spec that differs."""
+    """Print commands to restore the newest archived production spec that differs. The client
+    catalogs move around the restart so none advertises more than the server holds: before it,
+    no more than the context the running server reports and the restored spec's; after it, what
+    the restarted server reports. The running server, not a file, is the capacity
+    (docs/nous-inference.md; ledger M82)."""
     try:
         current = SERVE_SPEC.read_text()
     except OSError as exc:
@@ -511,13 +515,18 @@ def rollback() -> int:
         print("".join(difflib.unified_diff(current.splitlines(True), text.splitlines(True),
                                             fromfile=str(SERVE_SPEC), tofile=str(target))))
         archive = _archive_path()
-        print(f"""Rollback:
+        print(f"""First set the client catalogs (`contextWindow` in both OMP private_models.yml, OpenCode `context`;
+`git revert` the context commit or edit them, `chezmoi apply`, MacBook pull/publish/reconcile) to no more than
+the smaller of the `max_model_len` the running server reports (`curl -s localhost:8080/v1/models`) and the
+restored spec's `--max-model-len`. Then:
+Rollback:
   sudo -n install -D -m 644 {SERVE_SPEC} {archive}
   sudo -n install -D -m 644 {target} {SERVE_SPEC}
   install -m 644 {target} {REPO}/utils/nous/serve/production.toml
   sudo -n systemctl restart llama.service
   sudo -n llama-speedcheck --calibrate   # idle, 3 min after it answers (refused while settling)
-  nous-eval run t1 --incumbent""")
+  nous-eval run t1 --incumbent
+Last, set the client catalogs to the `max_model_len` the restarted server reports.""")
         return 0
     print(f"No differing archived production spec found in {HISTORY_DIR}; see docs/nous-inference.md rollback section.")
     return 1

@@ -28,7 +28,7 @@ providers:
         name: Nous Qwen 3.8 27B Swift Heretic MXFP4
         reasoning: true
         input: [text, image]
-        contextWindow: 163840
+        contextWindow: 262144
         maxTokens: 8192
         cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0}
         thinking:

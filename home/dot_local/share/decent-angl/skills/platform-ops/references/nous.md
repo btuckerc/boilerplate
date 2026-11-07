@@ -66,7 +66,7 @@ independent auth and sessions. Read `~/src/omp-serve/README.md` and
   `~/.omp/agent/models.yml` and `~/.omp/agent/config.yml` (chezmoi sources
   `private_models.yml` and `private_config.yml` under
   `home/private_dot_omp/private_agent/`). It serves only
-  `Qwen3.8-27B-Swift-Heretic-MXFP4`: 163,840 context / 8,192 output, text and
+  `Qwen3.8-27B-Swift-Heretic-MXFP4`: 262,144 context / 8,192 output, text and
   image input, medium reasoning. The profile's OpenAI Chat Completions API
   comes from vLLM's OpenAI-compatible endpoint.
 - Service: `llama.service`; unit source `utils/nous/llama.service`; serve CLI
@@ -77,7 +77,7 @@ independent auth and sessions. Read `~/src/omp-serve/README.md` and
   `/srv/workspaces/vllm-cache/home`. Service configuration is machine-local
   under `/etc/systemd/system`, not workstation chezmoi state. No Mesa drop-in
   is used: vLLM runs ROCm/HIP.
-- vLLM batches up to 8 sequences with a shared 386,677-token VRAM KV pool;
+- vLLM batches up to 8 sequences with a shared 399,968-token VRAM KV pool;
   there is no host prompt cache. `llama-speedcheck.timer` restarts production
   when ROCm decode is stuck in its slow state (ROCm/ROCm#6347). A stop drains
   in-flight replies for up to 120 s; new requests meanwhile get HTTP 500.
@@ -189,7 +189,7 @@ requires the user. Preserve the existing manager rather than reinstalling it.
 
 The MacBook T3 Nous instance uses `~/.local/bin/opencode-baseline` (mise-pinned
 OpenCode) and managed `~/.config/opencode/opencode.json`. It targets the single
-Swift Heretic Qwen3.8 model (160K context / 8K output / medium reasoning), with
+Swift Heretic Qwen3.8 model (256K context / 8K output / medium reasoning), with
 text and image input. These are small screening tests, not a sustained agent
 benchmark. Selecting a T3 model does not switch the host service.
 

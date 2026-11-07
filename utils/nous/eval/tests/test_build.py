@@ -373,6 +373,28 @@ def test_rollback_uses_deployment_history_not_canary_records(tmp_path, monkeypat
     assert str(tmp_path / "history/serve-20260101T000000Z.toml") in text
 
 
+@pytest.mark.parametrize("archived", ["163840", "262144"])
+def test_rollback_moves_the_clients_around_the_restart_by_what_the_server_reports(tmp_path, monkeypatch, capsys,
+                                                                                   archived):
+    """`rollback` printed a spec-only server downgrade: the client catalogs kept advertising 262,144
+    tokens to a server holding 163,840 (release audit NousCtx256c). Read from spec files, the
+    capacity was wrong whenever the files and the running server disagree (NousCtx256d-g): the
+    clients go no higher than what the running server reports and the restored spec before the
+    restart, and to what the restarted server reports after it, in either direction."""
+    spec = 'rootfs = "/{}"\nargs = ["--model", "/models/m", "--max-model-len", "{}"]\n'
+    (tmp_path / "history").mkdir()
+    (tmp_path / "history/serve-20260101T000000Z.toml").write_text(spec.format("a", archived))
+    (tmp_path / "serve.toml").write_text(spec.format("b", "196608"))
+    monkeypatch.setattr(build, "SERVE_SPEC", tmp_path / "serve.toml")
+    monkeypatch.setattr(build, "HISTORY_DIR", tmp_path / "history")
+    assert build.rollback() == 0
+    out = capsys.readouterr().out
+    first, restart, last = (out.index(s) for s in ("First set the client catalogs", "systemctl restart llama.service",
+                                                   "Last, set the client catalogs"))
+    assert first < out.index("Rollback:") < restart < last
+    assert "the running server reports" in out[first:restart] and "restarted server reports" in out[last:]
+
+
 def test_written_promote_toml_round_trips_through_nous_serve(tmp_path):
     from nevl.candidate import _serve_module
     rootfs = tmp_path / "rootfs"

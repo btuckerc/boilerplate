@@ -12,7 +12,10 @@ served_model_name = "Qwen3.8-27B-Swift-Heretic-MXFP4"
 home = "/srv/workspaces/vllm-cache/home"  # .cache/vllm, .triton, .aiter: compiled graphs and kernels
 args = [
   "--model", "/models/Swift-1.5-Qwen3.8-27B-heretic-MXFP4-GPTQ",
-  "--max-model-len", "163840", "--gpu-memory-utilization", "0.98",
+  # 262,144 context (2026-11-07 tune, run 20261107T034535Z): decode, prefill and recall unchanged
+  # from 163,840; the KV pool grows to 399,968 tokens. Two 150K or four 84K prompts run at once
+  # without preemption, their prefills one after another (lconc sweep).
+  "--max-model-len", "262144", "--gpu-memory-utilization", "0.98",
   "--kv-cache-dtype", "fp8", "--mamba-ssm-cache-dtype", "bfloat16",
   "--speculative-config.method", "dflash",
   "--speculative-config.model", "/models/Qwen3.8-27B-DFlash2-W4A16",

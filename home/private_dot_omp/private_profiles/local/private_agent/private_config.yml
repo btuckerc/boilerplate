@@ -60,7 +60,7 @@ retry:
 
 task:
   # vLLM batches up to 8 sequences; cap child concurrency at 4 to avoid
-  # exhausting the shared 386,677-token VRAM KV pool.
+  # exhausting the shared 399,968-token VRAM KV pool.
   maxConcurrency: 4
   maxRecursionDepth: 1
   eager: default

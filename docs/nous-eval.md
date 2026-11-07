@@ -164,7 +164,7 @@ candidate's A/A still decides whether a run counts (§ Statistics, ledger M44).
 Vulkan llama.cpp has not shown the split (incumbent A/A 0.99-1.00).
 
 The vLLM argv starts from the fork's quickstart, changed where production's
-contract differs: 160K context, images on, prefix caching on. Images on means
+contract differs: 256K context, images on, prefix caching on. Images on means
 no `--skip-mm-profiling` (the quickstart's flag for images off; with images on
 it reserves no VRAM for the vision encoder and a 2880x1800 screenshot killed
 the engine, so `candidate.py` refuses the pair), and images are capped at
@@ -286,6 +286,7 @@ diff and the steps: archive the live spec to
 (it refuses a settling service), then a t1. It never applies the change.
 `rollback` prints the same steps for the newest archived spec that differs from
 the live one; a second rollback returns to the spec the first rolled away from.
+Across a context change the client catalogs go back first (docs/nous-inference.md).
 `watch` reports production as open until a t2 or canary and a t3 pass in which
 production's serving identity (label aside) was the measured arm B: the
 incumbent of a final-spec t3, or the candidate a canary qualified before its

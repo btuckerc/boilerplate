@@ -13,7 +13,7 @@
         "Qwen3.8-27B-Swift-Heretic-MXFP4": {
           "name": "Nous Qwen 3.8 27B Swift Heretic MXFP4",
           "limit": {
-            "context": 163840,
+            "context": 262144,
             "output": 8192
           },
           "attachment": true,

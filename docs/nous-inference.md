@@ -16,8 +16,8 @@ its existing RSA identity, without forwarding the SSH agent.
 | Service | `llama.service` (name kept from llama.cpp): vLLM "radiance" 1.9.1, an RDNA4 fork, run by `nous-serve` from an exported image under bubblewrap (§ Serving: vLLM via nous-serve), since 2026-11-06. llama.cpp f805c57a2 Vulkan stays at `/opt/llama.cpp-vulkan-f805c57a2` for rollback and comparison runs |
 | Network | Loopback server forwarded on port 8080 by Tailscale Serve, tailnet only |
 | API | `http://nous:8080/v1` |
-| Models | One: `Qwen3.8-27B-Swift-Heretic-MXFP4` (Swift-1.5 Qwen3.8 27B heretic abliteration, MXFP4 GPTQ) with the DFlash2 drafter (7 draft tokens), image input (2 per prompt), 163,840 context / 8,192 output. The router's other models are gone with the router |
-| Capacity | Up to 8 sequences batched; one 386,677-token KV pool in VRAM holds every running sequence and the prefix cache (no host prompt cache). Four concurrent clients' context-heavy turns (128-token replies) complete 4.5x sooner than on llama.cpp's single slot |
+| Models | One: `Qwen3.8-27B-Swift-Heretic-MXFP4` (Swift-1.5 Qwen3.8 27B heretic abliteration, MXFP4 GPTQ) with the DFlash2 drafter (9 draft tokens), image input (2 per prompt), 262,144 context / 8,192 output. The router's other models are gone with the router |
+| Capacity | Up to 8 sequences batched; one 399,968-token KV pool in VRAM holds every running sequence and the prefix cache (no host prompt cache): two 150K or four 84K prompts at once without preemption, their prefills in turn. Four concurrent clients' context-heavy turns (128-token replies) complete 4.5x sooner than on llama.cpp's single slot |
 
 No failed systemd units were reported. SSH directory/key file permissions
 were 700/600. GPU temperature was 44 C at the initial inspection.
@@ -215,7 +215,7 @@ OMP’s managed native providers use OpenAI Chat Completions directly:
 
 | Provider | Live path | Managed model file | Context |
 | --- | --- | --- | ---: |
-| `llama.cpp` | `http://nous:8080/v1` | `~/.omp/agent/models.yml` | Qwen3.8: 163,840 (text and image); smaller models: 16,384 |
+| `llama.cpp` | `http://nous:8080/v1` | `~/.omp/agent/models.yml` | Qwen3.8: 262,144 (text and image); smaller models: 16,384 |
 
 The chezmoi sources are `home/private_dot_omp/private_agent/private_models.yml`
 and `private_config.yml`. These providers require no OpenCode installation;
@@ -432,12 +432,26 @@ A knob change is an edit to the spec, then archive the live spec
 (`sudo -n install -D -m 0644 /etc/nous-inference/serve.toml
 /etc/nous-inference/history/serve-$(date -u +%Y%m%dT%H%M%SZ).toml`), install,
 restart and recalibrate the speedcheck. `nous-eval promote` and `rollback` print
-these steps; `rollback` restores the newest archived spec that differs.
+these steps; `rollback` restores the newest archived spec that differs. A spec
+that changes `--max-model-len` moves the client catalogs with it (`contextWindow`
+in both OMP `private_models.yml`, OpenCode `context`), and no client may
+advertise more than the server holds: a larger context installs the server
+first, then the clients (commit, `chezmoi apply`, MacBook reconcile); a smaller
+one, a rollback included, reconciles the clients first (`git revert`, `chezmoi
+apply`, MacBook reconcile) and only then restarts the server on the old spec.
+What the server holds is what the running one reports (`max_model_len` in
+`curl -s localhost:8080/v1/models`), not a spec file; `rollback` prints the
+client steps on both sides of the restart in those terms.
 
-Rollback to llama.cpp restores the unit and Mesa drop-in from `c7a0dbb`, the
-last llama.cpp commit (both files verified byte-identical to what ran in
-production), and uses `~/.config/llama/models.ini` (unmanaged, left in place).
-Both files are fetched and checked before either live file is touched:
+Rollback to llama.cpp reverts the clients first, so none advertises more context
+or concurrency than llama.cpp serves: the cutover commit's changes under `home/`,
+`utils/scripts` and `utils/omp-context-eval` (`git revert` it, or
+`git checkout c7a0dbb -- <paths>`), `chezmoi apply`, `omp-baseline validate`,
+and propagate as for any shared-config change. Then it restores the unit and
+Mesa drop-in from `c7a0dbb`, the last llama.cpp commit (both files verified
+byte-identical to what ran in production), and uses `~/.config/llama/models.ini`
+(unmanaged, left in place). Both files are fetched and checked before either
+live file is touched:
 
 ```sh
 ssh nous 'set -eu; cd ~/src/boilerplate; pre=c7a0dbbee72573e93167120f53f556ba4549f789; t=$(mktemp -d)
@@ -455,11 +469,6 @@ ssh nous 'set -eu; cd ~/src/boilerplate; pre=c7a0dbbee72573e93167120f53f556ba454
 `nous-eval-canary.timer` stays enabled. With llama.cpp in production, the
 canary step refuses to run (that failure is ignored), and the watch reports
 "production checks skipped" but keeps checking upstream releases.
-
-Then revert the clients (the cutover commit's changes under `home/`,
-`utils/scripts` and `utils/omp-context-eval`: `git revert` it, or
-`git checkout c7a0dbb -- <paths>`), `chezmoi apply`, `omp-baseline validate`,
-and propagate as for any shared-config change.
 
 ## GPU lease
 

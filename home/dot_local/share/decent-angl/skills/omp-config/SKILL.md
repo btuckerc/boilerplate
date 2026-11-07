@@ -88,14 +88,14 @@ description: Change the shared OMP baseline in chezmoi - upgrades, omp-baseline,
   medium; lower effort is not automatically faster. Recheck mappings against
   native discovery after catalog changes.
 - The nous production provider is native `vllm`, serving only
-  `Qwen3.8-27B-Swift-Heretic-MXFP4` (163,840 context / 8,192 output, text and
+  `Qwen3.8-27B-Swift-Heretic-MXFP4` (262,144 context / 8,192 output, text and
   image input, medium reasoning). Keep `retry.modelFallback: false` so local
   work never silently moves to cloud inference. Use task defaults (`eager:
   default`, recursion depth 1, 100-request soft budget, 30-minute runtime cap)
   and keep prewalk and background advisors off.
 - Native nous handles bounded implementations with explicit contracts,
   mechanical transforms and extraction under the `local-workers` acceptance
-  protocol. vLLM batches up to 8 sequences; the shared 386,677-token VRAM KV
+  protocol. vLLM batches up to 8 sequences; the shared 399,968-token VRAM KV
   pool replaces the old serialized slot/host prompt cache, so bound task
   concurrency at 4. The `task` agent is the cloud worker; uncertain design
   stays with Opus or Sol. Keep the OpenCode `nous-worker` path available with

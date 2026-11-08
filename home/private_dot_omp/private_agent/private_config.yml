@@ -252,3 +252,7 @@ memory:
 
 dev:
   autoqaConsent: denied
+
+# Never spend saved Codex rate-limit resets automatically (set live 2026-11-06).
+codexResets:
+  autoRedeem: "no"

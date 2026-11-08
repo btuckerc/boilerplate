@@ -17,10 +17,19 @@ OVERLAY_DIR="${OMARCHY_SHELL_OVERLAY_DIR:-$HOME/.local/share/omarchy-shell-overl
 OMARCHY_PATH="${OMARCHY_PATH:-/usr/share/omarchy}"
 SHELL_DIR="${OMARCHY_PATH}/shell"
 HASH_FILE="${OVERLAY_DIR}/upstream.sha256"
+# The tree is assembled here and then published, so a running shell never sees
+# a half-built runtime (packaged QML briefly standing in for an overlay path).
+BUILD_SHELL="${STATE_DIR}/omarchy-shell-build/shell"
+# Records which packaged shell the runtime was built from; its mtime is when
+# that build started. omarchy-shell (the ~/.local/bin wrapper) reads it too.
+SYNCED_MARK="${STATE_DIR}/omarchy-shell-runtime.synced"
+LOCK_FILE="${STATE_DIR}/omarchy-shell-runtime.lock"
+# Every pacman install, upgrade or removal changes this directory's entries.
+PACKAGE_DB="${OMARCHY_SHELL_OVERLAY_PACKAGE_DB:-/var/lib/pacman/local}"
 
 usage() {
   cat <<'EOF'
-Usage: omarchy-shell-overlay <status|enable|disable|reset|sync-runtime>
+Usage: omarchy-shell-overlay <status|enable|disable|reset|sync-runtime|refresh>
 
   status       Per-file match/merge/skip and whether the next launch overlays
   enable       Use overlay popups and restart the shell
@@ -28,6 +37,8 @@ Usage: omarchy-shell-overlay <status|enable|disable|reset|sync-runtime>
   reset        Copy packaged overlay targets into the overlay tree and
                refresh upstream hashes and merge bases. Local edits are discarded.
   sync-runtime Build the runtime tree (called by omarchy-launch-shell)
+  refresh      Rebuild the runtime tree under a running overlay shell when
+               packages changed since it was built (called by omarchy-shell)
 EOF
 }
 
@@ -97,7 +108,7 @@ classify_rel() {
 }
 
 rewrite_first_party_plugins_dir() {
-  python3 - "${RUNTIME_SHELL}/shell.qml" <<'PY'
+  python3 - "${BUILD_SHELL}/shell.qml" <<'PY'
 from pathlib import Path
 import sys
 
@@ -112,20 +123,53 @@ PY
 }
 
 copy_packaged_shell() {
-  mkdir -p "${RUNTIME_DIR}"
+  mkdir -p "${BUILD_SHELL}"
   if command -v rsync >/dev/null 2>&1; then
-    rsync -a --delete --checksum "${SHELL_DIR}/" "${RUNTIME_SHELL}/"
+    rsync -a --delete --checksum "${SHELL_DIR}/" "${BUILD_SHELL}/"
+  else
+    rm -rf "${BUILD_SHELL}"
+    mkdir -p "${BUILD_SHELL}"
+    cp -a "${SHELL_DIR}/." "${BUILD_SHELL}/"
+  fi
+}
+
+# Only files whose content changed are rewritten, each by rename, so a shell
+# already running from the runtime tree reads either the old or the new file.
+publish_runtime() {
+  mkdir -p "${RUNTIME_SHELL}"
+  if command -v rsync >/dev/null 2>&1; then
+    rsync -a --delete --checksum "${BUILD_SHELL}/" "${RUNTIME_SHELL}/"
   else
     rm -rf "${RUNTIME_SHELL}"
     mkdir -p "${RUNTIME_SHELL}"
-    cp -a "${SHELL_DIR}/." "${RUNTIME_SHELL}/"
+    cp -a "${BUILD_SHELL}/." "${RUNTIME_SHELL}/"
   fi
+}
+
+# The runtime shell discovers plugins from this tree (firstPartyPluginsDir is
+# rewritten to it), so a package update that adds or changes shell files is
+# invisible to it until the tree is rebuilt. Stale when never built here, built
+# from another OMARCHY_PATH, or any package changed since the build started.
+runtime_stale() {
+  local built_from=""
+
+  [[ -f ${SYNCED_MARK} ]] || return 0
+  read -r built_from <"${SYNCED_MARK}" || true
+  [[ ${built_from} == "${SHELL_DIR}" ]] || return 0
+  [[ ${PACKAGE_DB} -nt ${SYNCED_MARK} ]] && return 0
+  return 1
+}
+
+take_lock() {
+  mkdir -p "${STATE_DIR}"
+  exec {lock_fd}>"${LOCK_FILE}"
+  flock -w 120 "${lock_fd}"
 }
 
 apply_rel() {
   local kind="$1"
   local rel="$2"
-  local dest="${RUNTIME_SHELL}/${rel}"
+  local dest="${BUILD_SHELL}/${rel}"
   local tmp
 
   mkdir -p "$(dirname "${dest}")"
@@ -220,23 +264,22 @@ cmd_status() {
   printf 'NEXT    %s\n' "${next}"
 }
 
-cmd_sync_runtime() {
-  local expected rel kind rest
+# launch: the shell is about to start. Return 1 when nothing overlays, so the
+#   launcher runs packaged QML and drops the runtime stamp.
+# live: a shell may already be running from the runtime tree, and the qs and
+#   quickshell wrappers find it only through the stamp. Always publish and
+#   keep the stamp; a path that no longer applies falls back to packaged QML.
+sync_tree() {
+  local mode="$1"
+  local expected rel kind rest started
   local applied=0
   local -a drift_lines=()
 
-  if [[ -e ${DISABLE_FLAG} ]]; then
-    return 1
-  fi
-  if [[ ! -f ${HASH_FILE} ]]; then
-    log "overlay hash list missing; using packaged popups"
-    return 1
-  fi
-  if [[ ! -d ${SHELL_DIR} ]]; then
-    log "packaged shell missing: ${SHELL_DIR}"
-    return 1
-  fi
-
+  # When the build starts, less 10ms for coarse filesystem timestamps: a package
+  # change during the build still reads newer than the mark, so the next call
+  # rebuilds again. bash's -nt compares nanoseconds.
+  started=$(($(date +%s%N) - 10000000))
+  started="${started:0:-9}.${started: -9}"
   copy_packaged_shell
 
   while IFS=$'\t' read -r expected rel; do
@@ -259,20 +302,72 @@ cmd_sync_runtime() {
 
   if ((applied == 0)); then
     log "no overlay files applied; using packaged popups"
-    rm -f "${RUNTIME_STAMP}"
-    write_drift_flag
-    return 1
+    if [[ ${mode} == launch ]]; then
+      rm -f "${RUNTIME_STAMP}" "${SYNCED_MARK}"
+      write_drift_flag
+      return 1
+    fi
   fi
 
   if ! rewrite_first_party_plugins_dir; then
     log "firstPartyPluginsDir rewrite failed; overlay widgets would be ignored"
-    rm -f "${RUNTIME_STAMP}"
+    if [[ ${mode} == launch ]]; then
+      rm -f "${RUNTIME_STAMP}" "${SYNCED_MARK}"
+      return 1
+    fi
+  fi
+
+  publish_runtime
+  mkdir -p "${STATE_DIR}"
+  printf '%s\n' "${SHELL_DIR}" >"${SYNCED_MARK}"
+  touch -d "@${started}" "${SYNCED_MARK}"
+  if [[ ${mode} == launch ]]; then
+    printf '%s\n' "${RUNTIME_SHELL}" >"${RUNTIME_STAMP}"
+  fi
+  write_drift_flag
+}
+
+cmd_sync_runtime() {
+  if [[ -e ${DISABLE_FLAG} ]]; then
+    return 1
+  fi
+  if [[ ! -f ${HASH_FILE} ]]; then
+    log "overlay hash list missing; using packaged popups"
+    return 1
+  fi
+  if [[ ! -d ${SHELL_DIR} ]]; then
+    log "packaged shell missing: ${SHELL_DIR}"
+    return 1
+  fi
+  if ! take_lock; then
+    log "runtime lock busy; using packaged popups"
     return 1
   fi
 
-  mkdir -p "${STATE_DIR}"
-  printf '%s\n' "${RUNTIME_SHELL}" >"${RUNTIME_STAMP}"
-  write_drift_flag
+  sync_tree launch
+}
+
+# Keep a running overlay shell's tree current with the packages, as a stock
+# shell reads /usr/share/omarchy/shell after an upgrade. Without this, a
+# migration that adds a plugin and then places it on the bar fails with
+# "not a known widget". A shell running packaged QML (no stamp) needs nothing.
+cmd_refresh() {
+  if [[ -e ${DISABLE_FLAG} || ! -s ${RUNTIME_STAMP} ]]; then
+    return 0
+  fi
+  if [[ ! -f ${HASH_FILE} || ! -d ${SHELL_DIR} ]]; then
+    return 0
+  fi
+  runtime_stale || return 0
+  if ! take_lock; then
+    log "runtime lock busy; refresh skipped"
+    return 1
+  fi
+  # Another caller may have rebuilt it while this one waited.
+  runtime_stale || return 0
+
+  sync_tree live
+  log "runtime tree refreshed from ${SHELL_DIR}"
 }
 
 cmd_enable() {
@@ -285,7 +380,7 @@ cmd_enable() {
 cmd_disable() {
   mkdir -p "${STATE_DIR}"
   : >"${DISABLE_FLAG}"
-  rm -f "${RUNTIME_STAMP}"
+  rm -f "${RUNTIME_STAMP}" "${SYNCED_MARK}"
   cmd_status
   restart_shell
 }
@@ -322,6 +417,7 @@ case "${1:-status}" in
   disable) cmd_disable ;;
   reset) cmd_reset ;;
   sync-runtime) cmd_sync_runtime ;;
+  refresh) cmd_refresh ;;
   -h | --help) usage ;;
   *)
     usage >&2

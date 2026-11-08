@@ -7,6 +7,7 @@ import hashlib
 import os
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 
@@ -182,11 +183,146 @@ def test_conflict_uses_packaged_for_that_path() -> None:
         subprocess.run(["rm", "-rf", str(root)], check=False)
 
 
+SHIM = Path(__file__).parents[2] / "home" / "dot_local" / "bin" / "executable_omarchy-shell"
+NEW_PLUGIN = "plugins/panels/elsewhen/manifest.json"
+
+
+def state(env: dict[str, str], name: str) -> Path:
+    return Path(env["XDG_STATE_HOME"]) / "decent-angl" / name
+
+
+def with_package_db(root: Path, env: dict[str, str]) -> Path:
+    db = root / "pacman-local"
+    db.mkdir()
+    earlier = time.time() - 60
+    os.utime(db, (earlier, earlier))
+    env["OMARCHY_SHELL_OVERLAY_PACKAGE_DB"] = str(db)
+    return db
+
+
+def packages_changed(db: Path) -> None:
+    """Simulate a pacman transaction landing after the last build."""
+    later = time.time() + 30
+    os.utime(db, (later, later))
+
+
+def test_refresh_without_runtime_stamp_does_nothing() -> None:
+    root, env = tree()
+    try:
+        with_package_db(root, env)
+        seed_match(env)
+        proc = run(env, "refresh")
+        assert proc.returncode == 0, proc.stderr
+        assert not runtime(env, "shell.qml").exists()
+    finally:
+        subprocess.run(["rm", "-rf", str(root)], check=False)
+
+
+def test_refresh_picks_up_a_new_packaged_plugin() -> None:
+    root, env = tree()
+    try:
+        db = with_package_db(root, env)
+        seed_match(env)
+        assert run(env, "sync-runtime").returncode == 0
+        write(packaged(env, NEW_PLUGIN), '{"id": "omarchy.elsewhen"}\n')
+
+        # Fresh: no package change since the build, so nothing is rebuilt.
+        assert run(env, "refresh").returncode == 0
+        assert not runtime(env, NEW_PLUGIN).exists()
+
+        packages_changed(db)
+        proc = run(env, "refresh")
+        assert proc.returncode == 0, proc.stderr
+        assert runtime(env, NEW_PLUGIN).exists()
+        assert runtime(env, WS).read_text(encoding="utf-8") == 'text: "\\u25CF"\n'
+        assert "Quickshell.shellDir" in runtime(env, "shell.qml").read_text(encoding="utf-8")
+        assert state(env, "omarchy-shell-runtime.path").read_text(encoding="utf-8").strip() == str(runtime(env, "shell.qml").parent)
+        mark = state(env, "omarchy-shell-runtime.synced")
+        assert mark.read_text(encoding="utf-8").strip() == str(Path(env["OMARCHY_PATH"]) / "shell")
+        assert mark.stat().st_mtime < time.time()
+    finally:
+        subprocess.run(["rm", "-rf", str(root)], check=False)
+
+
+def test_refresh_keeps_stamp_when_no_overlay_applies() -> None:
+    root, env = tree()
+    try:
+        db = with_package_db(root, env)
+        write(packaged(env, WS), "foo\n")
+        write(overlay(env, WS), "bar\n")
+        write(Path(env["OMARCHY_SHELL_OVERLAY_DIR"]) / "upstream.sha256", hashed(Path(env["OMARCHY_PATH"]) / "shell", WS))
+        assert run(env, "sync-runtime").returncode == 0
+        write(packaged(env, WS), "baz\n")
+        packages_changed(db)
+
+        # A launch would fall back to packaged QML; a running shell must keep
+        # its stamp or restart and IPC can no longer find it.
+        proc = run(env, "refresh")
+        assert proc.returncode == 0, proc.stderr
+        assert runtime(env, WS).read_text(encoding="utf-8") == "baz\n"
+        assert state(env, "omarchy-shell-runtime.path").exists()
+        assert run(env, "sync-runtime", check=False).returncode == 1
+        assert not state(env, "omarchy-shell-runtime.path").exists()
+    finally:
+        subprocess.run(["rm", "-rf", str(root)], check=False)
+
+
+def test_omarchy_shell_wrapper_refreshes_before_ipc() -> None:
+    root, env = tree()
+    try:
+        db = with_package_db(root, env)
+        seed_match(env)
+        assert run(env, "sync-runtime").returncode == 0
+        write(packaged(env, NEW_PLUGIN), '{"id": "omarchy.elsewhen"}\n')
+        packages_changed(db)
+
+        # Stand-in for the packaged omarchy-shell: records what the runtime
+        # tree held when the IPC call arrived.
+        real = Path(env["OMARCHY_PATH"]) / "bin" / "omarchy-shell"
+        write(real, f'#!/usr/bin/env bash\n[[ -e "{runtime(env, NEW_PLUGIN)}" ]] && echo seen; echo "args:$*"\n')
+        real.chmod(0o755)
+        bin_dir = root / "bin"
+        bin_dir.mkdir()
+        overlay_bin = bin_dir / "omarchy-shell-overlay"
+        overlay_bin.write_text(f'#!/usr/bin/env bash\nexec bash "{SCRIPT}" "$@"\n', encoding="utf-8")
+        overlay_bin.chmod(0o755)
+        env["OMARCHY_SHELL_OVERLAY_BIN"] = str(overlay_bin)
+
+        proc = subprocess.run(
+            ["bash", str(SHIM), "-q", "shell", "rescanPlugins"],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout.splitlines() == ["seen", "args:-q shell rescanPlugins"], proc.stdout
+
+        # Lock calls skip the refresh even when the tree is stale.
+        packages_changed(db)
+        write(packaged(env, "plugins/panels/late/manifest.json"), "{}\n")
+        later = time.time() + 60
+        os.utime(db, (later, later))
+        proc = subprocess.run(["bash", str(SHIM), "-q", "lock", "lock"], env=env, capture_output=True, text=True)
+        assert proc.stdout.splitlines() == ["seen", "args:-q lock lock"], proc.stdout
+        assert not runtime(env, "plugins/panels/late/manifest.json").exists()
+
+        # Without a runtime stamp the call goes straight through.
+        state(env, "omarchy-shell-runtime.path").unlink()
+        proc = subprocess.run(["bash", str(SHIM), "shell", "ping"], env=env, capture_output=True, text=True)
+        assert proc.stdout.splitlines()[-1] == "args:shell ping", proc.stdout
+    finally:
+        subprocess.run(["rm", "-rf", str(root)], check=False)
+
+
 def main() -> int:
     test_match_copies_overlay_and_snapshots_base()
     test_one_drifted_file_does_not_drop_the_rest()
     test_merge_keeps_overlay_edits_and_new_packaged_api()
     test_conflict_uses_packaged_for_that_path()
+    test_refresh_without_runtime_stamp_does_nothing()
+    test_refresh_picks_up_a_new_packaged_plugin()
+    test_refresh_keeps_stamp_when_no_overlay_applies()
+    test_omarchy_shell_wrapper_refreshes_before_ipc()
     return 0
 
 

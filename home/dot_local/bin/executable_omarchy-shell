@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+
+# Bring the overlay runtime tree up to date before an IPC call, then hand off
+# to Omarchy's own omarchy-shell unchanged.
+#
+# omarchy-launch-shell runs the shell from a copy of the packaged tree
+# (omarchy-shell-overlay sync-runtime), and plugin discovery reads that copy.
+# A package update that adds a plugin stays invisible to the running shell
+# until the copy is rebuilt, so a migration that rescans plugins and then puts
+# the new widget on the bar fails with "not a known widget". Everything that
+# talks to the shell comes through here first, migrations included.
+#
+# The fresh check is a couple of stats, so routine calls stay fast. A failed
+# refresh never blocks the call; it goes through to the packaged command.
+
+OMARCHY_PATH="${OMARCHY_PATH:-/usr/share/omarchy}"
+REAL="${OMARCHY_PATH}/bin/omarchy-shell"
+[[ -x ${REAL} ]] || REAL=/usr/bin/omarchy-shell
+
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/decent-angl"
+RUNTIME_STAMP="${STATE_DIR}/omarchy-shell-runtime.path"
+SYNCED_MARK="${STATE_DIR}/omarchy-shell-runtime.synced"
+PACKAGE_DB="${OMARCHY_SHELL_OVERLAY_PACKAGE_DB:-/var/lib/pacman/local}"
+OVERLAY_BIN="${OMARCHY_SHELL_OVERLAY_BIN:-$HOME/.local/bin/omarchy-shell-overlay}"
+
+# Lock calls never wait on a refresh: suspend locking runs them under a hard
+# deadline. No stamp means the shell runs packaged QML, which needs no refresh.
+target=$1
+[[ ${target} == -q ]] && target=${2:-}
+if [[ ${target} != lock && -z ${OMARCHY_SHELL_OVERLAY_REFRESHING:-} && -s ${RUNTIME_STAMP} && -x ${OVERLAY_BIN} ]]; then
+  built_from=""
+  [[ -f ${SYNCED_MARK} ]] && read -r built_from <"${SYNCED_MARK}"
+  if [[ ${built_from} != "${OMARCHY_PATH}/shell" || ${PACKAGE_DB} -nt ${SYNCED_MARK} ]]; then
+    OMARCHY_SHELL_OVERLAY_REFRESHING=1 OMARCHY_PATH="${OMARCHY_PATH}" \
+      timeout 150 "${OVERLAY_BIN}" refresh >/dev/null 2>&1 || true
+  fi
+fi
+
+exec "${REAL}" "$@"

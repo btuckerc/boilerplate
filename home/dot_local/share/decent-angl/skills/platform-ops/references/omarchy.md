@@ -17,7 +17,10 @@ applies each `upstream.sha256` path independently. Matching hashes copy
 overlay QML. A changed packaged hash 3-way-merges overlay onto the new
 file using `~/.local/state/decent-angl/omarchy-shell-overlay-base/`; a
 conflict uses packaged QML for that path only. Other overlay files still
-apply. Do not wrap the shell in `bwrap`: a user namespace remaps root to
+apply. The running shell discovers plugins from that runtime tree, so
+`~/.local/bin/omarchy-shell` runs `omarchy-shell-overlay refresh` before any
+IPC call once a pacman transaction postdates the last build; otherwise a
+migration that adds a plugin fails with "not a known widget". Do not wrap the shell in `bwrap`: a user namespace remaps root to
 65534 and sets `NoNewPrivs`, which breaks sudo and lock-screen passwords.
 Use `omarchy-shell-overlay disable` to run stock popups and numbers,
 `enable` to put the overlay back, and `reset` after an Omarchy upgrade

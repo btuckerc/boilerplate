@@ -13,10 +13,13 @@ validator="$HOME/.local/bin/omarchy-roaming-sync"
 mkdir -p "$state_dir"
 overlay_bin="$HOME/.local/bin/omarchy-shell-overlay"
 if [[ -x "$overlay_bin" ]]; then
-  # Rebuild the runtime overlay now so the post-update shell restart keeps
-  # matching files and mergeable customizations. Conflicts stay packaged for
-  # that path only and are announced separately from the baseline alert.
-  "$overlay_bin" sync-runtime >/dev/null 2>&1 || true
+  # Bring the running shell's runtime tree up to date with the packages
+  # (omarchy-shell normally did this already, before the first migration
+  # reached the shell). refresh keeps the runtime stamp, so a shell running
+  # from that tree stays reachable even when no overlay path applies any more.
+  # Conflicts stay packaged for that path only and are announced separately
+  # from the baseline alert.
+  "$overlay_bin" refresh >/dev/null 2>&1 || true
   if grep -q '^SKIP ' "$state_dir/omarchy-shell-overlay.drift" 2>/dev/null \
     && [[ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ]] \
     && command -v notify-send >/dev/null 2>&1; then

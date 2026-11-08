@@ -20,6 +20,7 @@ exec	~/.local/bin/omarchy-agent-usage-omp	home/dot_local/bin/executable_omarchy-
 exec	~/.local/bin/omarchy-agent-usage-openrouter	home/dot_local/bin/executable_omarchy-agent-usage-openrouter
 exec	~/.local/bin/omarchy-agent-usage-update	home/dot_local/bin/executable_omarchy-agent-usage-update
 exec	~/.local/bin/omarchy-launch-shell	home/dot_local/bin/executable_omarchy-launch-shell
+exec	~/.local/bin/omarchy-shell	home/dot_local/bin/executable_omarchy-shell
 exec	~/.local/bin/omarchy-shell-overlay	home/dot_local/bin/executable_omarchy-shell-overlay
 exec	~/.local/bin/qs	home/dot_local/bin/executable_qs
 exec	~/.local/bin/quickshell	home/dot_local/bin/executable_quickshell

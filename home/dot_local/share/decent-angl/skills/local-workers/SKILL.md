@@ -9,9 +9,9 @@ Choose routing without asking the user to pick a model. Claude Opus high
 is the OMP director: own requirements, integration and acceptance; do trivial work directly.
 Use the `task` agent (Codex Luna, runs in parallel) as the default worker for
 bounded implementation, research, extraction, context >128K and images. Use
-`nous` (local Qwen, one request at a time) for small mechanical slices and
-supplied-log summaries with clear contracts and runnable checks when the GPU
-queue is idle; `scout` and `sonic` also run on nous.
+`nous` (local Qwen; vLLM batches 8 sequences, run at most 4 local children at
+once) for small mechanical slices and supplied-log summaries with clear
+contracts and runnable checks; `scout` and `sonic` also run on nous.
 Resolve uncertainty before delegation without pre-solving routine implementation.
 
 Use Sol for unresolved high-consequence design/security/concurrency
@@ -136,8 +136,9 @@ successful process exit is not verification. Give at most one focused repair
 after a failed check, then finish in the parent or choose a stronger model;
 ordinary steering remains available and there are no model-shopping loops.
 
-Run one nous request at a time: the GPU has one inference slot. The launcher
-locks concurrent workers on this workstation; other clients still need coordination. File tools
+Run at most four nous workers at once: vLLM batches eight sequences in one
+shared VRAM KV pool. The launcher holds four slots per workstation and returns
+75 when all are in use; other clients share the same pool. File tools
 run on the workstation; shell/web/further delegation are disabled. OpenCode
 permissions are not an OS sandbox, so use a scoped task directory or approved
 checkout and respect one-writer ownership. The parent handles builds.

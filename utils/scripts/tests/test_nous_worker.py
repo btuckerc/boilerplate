@@ -75,16 +75,26 @@ def test_compact_result_preserves_full_trace_and_scoped_invocation(fixture):
 
 
 def test_busy_and_offline_do_not_start_a_worker(fixture):
+    """vLLM batches eight sequences: a worker starts while a slot of four is free (the launcher
+    still kept llama.cpp's one-slot lock after the cutover, ledger M68), and is busy when none is."""
     root, command, env = fixture
     state = root / "state/nous-workers"
     state.mkdir(parents=True)
-    with (state / "worker.lock").open("a") as lock:
+    held = [(state / f"worker-{slot}.lock").open("a") for slot in range(4)]
+    for lock in held:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        result = subprocess.run(command + ["Task"], env=env, capture_output=True, text=True, timeout=5)
-        assert result.returncode == 75 and json.loads(result.stdout)["status"] == "busy"
+    result = subprocess.run(command + ["Task"], env=env, capture_output=True, text=True, timeout=5)
+    assert result.returncode == 75 and json.loads(result.stdout)["status"] == "busy"
+    result = subprocess.run(command + ["Task"], env=dict(env, OFFLINE="1"), capture_output=True, text=True, timeout=5)
+    assert result.returncode == 75  # busy before the backend is even asked
+    held.pop(1).close()
     result = subprocess.run(command + ["Task"], env=dict(env, OFFLINE="1"), capture_output=True, text=True, timeout=5)
     assert result.returncode == 69 and json.loads(result.stdout)["status"] == "unavailable"
     assert not (root / "invocation.json").exists()
+    result = subprocess.run(command + ["Task"], env=env, capture_output=True, text=True, timeout=5)
+    assert result.returncode == 0 and (root / "invocation.json").exists(), result.stderr
+    for lock in held:
+        lock.close()
 
 
 @pytest.mark.parametrize("cancel", [False, True], ids=["deadline", "caller_sigterm"])

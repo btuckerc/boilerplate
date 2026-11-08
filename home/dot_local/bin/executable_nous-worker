@@ -16,7 +16,21 @@ import urllib.request
 MODELS = {
     "qwen": "nous/Qwen3.8-27B-Swift-Heretic-MXFP4",
 }
+# vLLM batches 8 sequences in one VRAM KV pool that other clients share; at most this many
+# workers from this workstation at once (the local profile's task.maxConcurrency).
+SLOTS = 4
 
+
+def claim_slot(state):
+    """An open, flock'ed slot file, or None when every slot is held."""
+    for slot in range(SLOTS):
+        handle = (state/f"worker-{slot}.lock").open("a")
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return handle
+        except BlockingIOError:
+            handle.close()
+    return None
 
 
 class WorkerInterrupted(Exception):
@@ -70,12 +84,11 @@ def main():
         parser.error("opencode-baseline is required")
     state = Path(os.environ.get("XDG_STATE_HOME", str(Path.home()/".local/state"))) / "nous-workers"
     state.mkdir(parents=True, exist_ok=True, mode=0o700)
-    with (state/"worker.lock").open("a") as lock:
-        try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            print(json.dumps({"status":"busy", "message":"Another worker on this workstation owns the inference slot; continue other work."}))
-            return 75
+    lock = claim_slot(state)
+    if lock is None:
+        print(json.dumps({"status":"busy", "message":f"All {SLOTS} worker slots on this workstation are in use; continue other work."}))
+        return 75
+    with lock:
         port = 8080
         try:
             with urllib.request.urlopen(f"http://100.83.125.83:{port}/health", timeout=5) as response:

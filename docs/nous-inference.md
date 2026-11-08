@@ -775,22 +775,25 @@ nous-worker --dir /absolute/task-directory 'Read the task and make the bounded e
 nous-worker --dir /absolute/task-directory --session SESSION_ID 'Apply this follow-up.'
 ```
 
-Supported aliases: `qwen` (default), `ornith`, `nemotron`, `gemma`. `--read-only`
+The only model is `qwen` (the default, production's served model). `--read-only`
 disables edits. By default the worker can read/search/edit files; shell, web
 and further delegation tools are denied. These are OpenCode permissions, not
 an OS filesystem sandbox. Use a task checkout/directory and have the parent
 run required builds/tests. Project instructions still apply. Prompt text can
 come from stdin. The command neither chooses models for other sessions nor
-switches inference services. All supported choices use llama.cpp; serialize inference work.
+switches inference services. Production is vLLM, which batches up to 8
+sequences: run at most 4 workers at once (the slot locks below enforce it per
+workstation); independent tasks need not be serialized.
 
 The default output is a compact JSON summary with `verified: false` and an
 evidence path under `~/.local/state/nous-workers/`. Full events and stderr stay
 there; `--format json` returns the original events when explicitly needed.
 `--timeout 180` and `--steps 12` bound the default run. Deadline or caller
-cancellation stops the worker process group. A workstation lock returns exit
-75 if another launcher owns the slot, and backend health failure returns 69;
-the launcher never silently falls back to a paid model. This lock coordinates
-only this workstation, not other machines or direct OpenCode clients.
+cancellation stops the worker process group. Four workstation slot locks (vLLM
+batches eight sequences in one shared KV pool) return exit 75 when all four
+launchers are running, and backend health failure returns 69; the launcher
+never silently falls back to a paid model. The slots coordinate only this
+workstation, not other machines or direct OpenCode clients (ledger M68).
 Its per-process provider allowlist and main/title/compaction model selections
 keep auxiliary inference local too. These settings affect only this worker.
 

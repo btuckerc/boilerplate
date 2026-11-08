@@ -19,3 +19,8 @@ o.bind("SUPER + SHIFT + L", "Toggle workspace layout", "omarchy-hyprland-workspa
 
 -- Chromium PiP hide/show. SUPER+P is stock Pseudo window.
 o.bind("SUPER + ALT + P", "Toggle Chromium PiP", "omarchy-shell tux.chromium-pip toggle")
+
+-- Native Grok Bot from the Omarchy package. Replaces the grok.com webapp
+-- on this chord; grok.com remains a browser tab.
+hl.unbind("SUPER + SHIFT + ALT + A")
+o.bind("SUPER + SHIFT + ALT + A", "Grok Bot", { launch = "grok-bot", focus = "^grok-bot$" })

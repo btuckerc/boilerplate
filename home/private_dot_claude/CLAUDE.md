@@ -1,6 +1,6 @@
 # Durable Rules
 
-- Never commit or push unless the user explicitly asks.
+- Commit and push verified work without asking. Never force-push, rewrite published history, or commit secrets; keep unrelated changes out of your commits.
 - Never add AI attribution to commits or PRs: no Co-Authored-By trailers, "Generated with" lines or session links.
 - Keep credentials and machine-local runtime state out of Git and chezmoi.
 - Preserve unrelated user changes in dirty worktrees.

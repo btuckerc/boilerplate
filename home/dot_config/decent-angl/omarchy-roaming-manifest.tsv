@@ -34,3 +34,4 @@ file	~/.local/share/omarchy-shell-overlay/plugins/panels/network/Panel.qml	home/
 file	~/.local/share/omarchy-shell-overlay/plugins/panels/dropbox/Panel.qml	home/dot_local/share/omarchy-shell-overlay/plugins/panels/dropbox/Panel.qml
 file	~/.local/share/omarchy-shell-overlay/plugins/panels/tailscale/Panel.qml	home/dot_local/share/omarchy-shell-overlay/plugins/panels/tailscale/Panel.qml
 file	~/.local/share/omarchy-shell-overlay/plugins/bar/widgets/Workspaces.qml	home/dot_local/share/omarchy-shell-overlay/plugins/bar/widgets/Workspaces.qml
+file	~/.local/share/omarchy-shell-overlay/plugins/bar/Bar.qml	home/dot_local/share/omarchy-shell-overlay/plugins/bar/Bar.qml

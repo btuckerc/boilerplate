@@ -215,18 +215,30 @@ probe_copy_dotenv() {
 # shell on Linux, a sandbox-exec profile denying it on macOS. The jail is
 # proven before use: /bin/sh must fail inside it and true must run.
 probe_jail() {
-  local sh_real bash_path bash_real
+  local sh_real bash_path bash_real stub
   case "$HOST_OS" in
     Linux)
       sh_real="$(readlink -f /bin/sh)" || return 1
       bash_path="$(command -v bash)" || return 1
       bash_real="$(readlink -f "$bash_path")" || return 1
-      if ! command -v bwrap >/dev/null 2>&1 || [ "$bash_real" = "$sh_real" ]; then
-        printf 'PROBE   no shell jail: bwrap missing or /bin/sh is bash\n' >&2
+      if ! command -v bwrap >/dev/null 2>&1; then
+        printf 'PROBE   no shell jail: bwrap missing\n' >&2
         return 1
       fi
-      printf '#!%s\nexit 126\n' "$bash_path" >"$PROBE_ROOT/noshell" && chmod 700 "$PROBE_ROOT/noshell" || return 1
-      PROBE_JAIL=(bwrap --dev-bind / / --ro-bind "$PROBE_ROOT/noshell" "$sh_real" --die-with-parent --)
+      if [ "$bash_real" = "$sh_real" ]; then
+        # /bin/sh is bash (Arch): a bash-script stub bound over bash would be
+        # its own interpreter, so bind the coreutils false binary instead.
+        # Only omp and true run in the jail; neither needs bash.
+        stub="$(readlink -f "$(type -P false)")" || return 1
+        if [ "$stub" = "$sh_real" ]; then
+          printf 'PROBE   no shell jail: false resolves to the shell\n' >&2
+          return 1
+        fi
+      else
+        stub="$PROBE_ROOT/noshell"
+        printf '#!%s\nexit 126\n' "$bash_path" >"$stub" && chmod 700 "$stub" || return 1
+      fi
+      PROBE_JAIL=(bwrap --dev-bind / / --ro-bind "$stub" "$sh_real" --die-with-parent --)
       ;;
     Darwin)
       PROBE_JAIL=(sandbox-exec -p '(version 1)(allow default)(deny process-exec (literal "/bin/sh"))')

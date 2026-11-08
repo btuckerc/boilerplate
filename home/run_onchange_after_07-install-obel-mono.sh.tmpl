@@ -8,19 +8,19 @@
 # installed copies already match. Bump VERSION and every pin together.
 set -euo pipefail
 
-VERSION=1.000
+VERSION=1.003
 BASE=https://typographic.systems/download
 # zip  zip-sha256
 ZIPS=(
-    "ObelMono-${VERSION}-ttf.zip d39d480b4b52ac8cc9221b86f888ab7b19be8574b315e34fec14145731e0384d"
-    "ObelMonoMasked-${VERSION}-ttf.zip dfe976f2cd975d665a5b076594ee2c0b9c0f71354f7dc09b9b79269c16199bdb"
+    "ObelMono-${VERSION}-ttf.zip 40791dcdecb179eb42a0a853ce5c4d05c5e20eb5ef18b67275c9aef6f0eca81e"
+    "ObelMonoMasked-${VERSION}-ttf.zip 7191cfa1690598aff2ca5cfb51f31cd3437179587f20bd2ff99b852078bd0ca2"
 )
 # zip  font-file  font-sha256 (member path: <zip stem>/variable/<font-file>)
 FONTS=(
-    "ObelMono-${VERSION}-ttf.zip ObelMono[wght].ttf 24af8e60b67e6829bc6f7055e9fe459e9d93b2f730899e5a9a7ea37a9dd1dbf3"
-    "ObelMono-${VERSION}-ttf.zip ObelMono-Italic[wght].ttf 87f53cb557dc4824d667824c6f86d81285f0dfee1709e392a3c051afe1bd9425"
-    "ObelMonoMasked-${VERSION}-ttf.zip ObelMonoMasked[wght].ttf eb8e73b73a29ddf63eaa8d1a75637e11d4d122569dc5ad32ecf4b1db2eaafa72"
-    "ObelMonoMasked-${VERSION}-ttf.zip ObelMonoMasked-Italic[wght].ttf 73afbb72b55e5c2d49424ab47087e9d50c34a8be075198cdfb8d91d1c292a348"
+    "ObelMono-${VERSION}-ttf.zip ObelMono[wght].ttf a949a48772394fe7723c30763090392b0ac72de388b65764bc1005adef0d7d27"
+    "ObelMono-${VERSION}-ttf.zip ObelMono-Italic[wght].ttf 0fe6311309071d49858cb43278528cf3524e341cf4af2a81a9a3cd040651ffd2"
+    "ObelMonoMasked-${VERSION}-ttf.zip ObelMonoMasked[wght].ttf e527e3978fc26b7bb4853129c58132f377f9e624d77647b944672bec8b54f5af"
+    "ObelMonoMasked-${VERSION}-ttf.zip ObelMonoMasked-Italic[wght].ttf db6b228a2abf1fbc3ab632819fe614f55e413981eecf01fb4c1c54e8f739a5cd"
 )
 
 echo ""

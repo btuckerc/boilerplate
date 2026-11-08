@@ -72,7 +72,6 @@ stylua = "2.6.0"
 [settings]
 experimental = true
 legacy_version_file = true
-always_keep_download = false
 jobs = 2
 verbose = false
 # Keep operational one-offs like `mise exec -- chezmoi ...` from hydrating

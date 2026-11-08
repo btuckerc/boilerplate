@@ -6,6 +6,10 @@ After=network.target
 Type=simple
 User=tux
 Group=tux
+# A start beside a GPU that left the bus, or beside processes an earlier start left stuck in the
+# driver, only adds another unkillable process; the condition failing skips the start without
+# failing the unit, so Restart= does not retry it (ledger M84).
+ExecCondition=/usr/local/bin/llama-yield --condition
 WorkingDirectory=/srv/models
 # The spec (utils/nous/serve/production.toml) names the engine, model and every
 # knob; nous-eval reads it from here as the incumbent. The unit name predates

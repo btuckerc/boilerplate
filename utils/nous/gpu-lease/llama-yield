@@ -14,11 +14,178 @@ import sys
 import syslog
 import threading
 import time
+from pathlib import Path
 
 UNIT = "llama-yield-gpu.service"
 PLACEHOLDER = "llama-placeholder.service"
 SELF = "/usr/local/bin/llama-yield"
 BUSY = {"active", "activating", "deactivating", "reloading", "refreshing"}
+SYSFS = Path("/sys")
+CGROUP_ROOT = Path("/sys/fs/cgroup")
+RUN_DIR = Path("/run/llama-yield")
+LOCK = "/run/llama-yield.lock"
+GPU_UNIT = "llama.service"
+
+
+def gpu_devices():
+    try:
+        return sorted(p for p in (SYSFS / "bus/pci/drivers/amdgpu").iterdir()
+                      if re.fullmatch(r"[0-9a-fA-F]{4}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-7]", p.name))
+    except OSError:
+        return []
+
+
+def gpu_lost():
+    devices = gpu_devices()
+    if not devices:
+        return "GPU BDF unavailable: no amdgpu device is bound; reboot (or PCI remove+rescan) is needed"
+    for device in devices:
+        try:
+            config = (SYSFS / "bus/pci/devices" / device.name / "config").read_bytes()
+        except OSError:
+            return f"GPU {device.name} config cannot be read; reboot (or PCI remove+rescan) is needed"
+        if len(config) < 2 or config[:2] == bytes([255, 255]):
+            return f"GPU {device.name} is lost; reboot (or PCI remove+rescan) is needed"
+    return None
+
+
+def leftovers(unit):
+    cg = ctl("show", unit, "-p", "ControlGroup", "--value")
+    if not cg:
+        return []
+    root = CGROUP_ROOT / cg.lstrip("/")
+    pids = set()
+    for procfile in root.rglob("cgroup.procs"):
+        try:
+            pids.update(int(pid) for pid in procfile.read_text().split() if int(pid) != os.getpid())
+        except (OSError, ValueError):
+            continue
+    return sorted(pids)
+
+
+def production_condition():
+    """ExecCondition of llama.service: exit 1 (skip the start; no Restart) when the GPU left the bus
+    or the unit still holds processes from an earlier start. Starting into either only added one
+    more unkillable process: 22 of them on 2026-11-07 (ledger M84). A check that itself fails lets
+    the start go ahead: a bug here must not keep production down."""
+    try:
+        reason = gpu_lost()
+        pids = [] if reason else leftovers(GPU_UNIT)
+    except Exception as exc:
+        announce("llama-yield: condition: check failed (" + describe(exc) + "); starting anyway")
+        return 0
+    if pids:
+        reason = f"{len(pids)} leftover pid(s) {pids}; the GPU driver holds them; reboot"
+    if reason:
+        announce("llama-yield: condition: " + reason)
+        return 1
+    return 0
+
+
+def telemetry():
+    devices = gpu_devices()
+    if not devices:
+        return "GPU telemetry: ?"
+    device = SYSFS / "bus/pci/devices" / devices[0].name
+    def value(path):
+        try:
+            return path.read_text().strip()
+        except OSError:
+            return "?"
+    hwmons = sorted((device / "hwmon").glob("hwmon*"))
+    temps = []
+    for index, label in enumerate(("edge", "junction", "memory"), 1):
+        raw = next((value(hwmon / f"temp{index}_input") for hwmon in hwmons
+                    if (hwmon / f"temp{index}_input").exists()), "?")
+        try:
+            temp = f"{int(raw) / 1000:g}C"
+        except ValueError:
+            temp = "?"
+        temps.append(f"{label}={temp}")
+    power = "?"
+    for hwmon in hwmons:
+        power = value(hwmon / "power1_average")
+        if power == "?":
+            power = value(hwmon / "power1_input")
+        if power != "?":
+            break
+    fields = temps + [f"power={power}uW"]
+    for name in ("current_link_speed", "current_link_width", "max_link_speed", "max_link_width"):
+        fields.append(f"{name}={value(device / name)}")
+    def aer(path):
+        try:
+            match = re.search(r"^TOTAL_ERR_COR:\s*(\d+)", path.read_text(), re.M)
+            return match.group(1) if match else "?"
+        except OSError:
+            return "?"
+    fields.append("aer_gpu=" + aer(device / "aer_dev_correctable"))
+    try:
+        resolved = device.resolve()
+        pci_root = next(parent for parent in resolved.parents if parent.name.startswith("pci"))
+        rootport = next(parent for parent in resolved.parents if parent.parent == pci_root)
+        fields.append("aer_root=" + aer(rootport / "aer_dev_correctable"))
+    except (OSError, StopIteration):
+        fields.append("aer_root=?")
+    return "GPU telemetry: " + " ".join(fields)
+
+
+def down_marker(args, active, leased, lost, reason):
+    if (active or leased) and not lost:
+        for name in ("down-since", "production-down"):
+            path = RUN_DIR / name
+            if args.dry_run:
+                print(f"would remove {path}")
+            else:
+                path.unlink(missing_ok=True)
+        return
+    if args.dry_run:
+        print(f"would create {RUN_DIR} mode 0755 if missing")
+    else:
+        RUN_DIR.mkdir(mode=0o755, parents=True, exist_ok=True)
+        os.chmod(RUN_DIR, 0o755)
+    since_path = RUN_DIR / "down-since"
+    try:
+        since = float(since_path.read_text())
+        # finite and within (epoch, now]: anything else would also overflow time.gmtime below.
+        if not math.isfinite(since) or not 0 < since <= time.time():
+            raise ValueError(since)
+    except (OSError, ValueError):
+        # Missing, empty (an interrupted write), unparsable or out of range: start the
+        # clock now and persist it, or every pass would restart it and the ten-minute
+        # alert would never fire (release audit 20261108T070748-audit-e2f1). Written
+        # atomically so an interruption leaves the old file or the complete new one.
+        since = time.time()
+        if args.dry_run:
+            print(f"would write {since_path}")
+        else:
+            partial = RUN_DIR / ".down-since.tmp"
+            partial.write_text(str(since))
+            os.chmod(partial, 0o644)
+            os.replace(partial, since_path)
+    reason = reason or "llama.service is inactive"
+    if lost or time.time() - since > 600:
+        message = f"{reason}; down since {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime(since))}"
+        marker = RUN_DIR / "production-down"
+        if args.dry_run:
+            print(f"would write {marker}: {message}")
+        else:
+            marker.write_text(message + "\n")
+            os.chmod(marker, 0o644)
+
+
+def alert(args, active, leased, lost_reason, reason):
+    """The outage marker and, with the GPU present, a telemetry line. Reporting only: a failure
+    here (a full or read-only /run, an unreadable sysfs file) is logged and the pass goes on, so it
+    can never stop the watchdog from restoring production (ledger M84)."""
+    try:
+        down_marker(args, active, leased, bool(lost_reason), reason)
+    except Exception as exc:
+        announce("llama-watchdog: marker: " + describe(exc))
+    if not lost_reason:
+        try:
+            announce(telemetry())
+        except Exception as exc:
+            announce("llama-watchdog: telemetry: " + describe(exc))
 
 
 def write_all(fd, data):
@@ -123,24 +290,84 @@ def recover(args):
     if args.assume_bonsai_active:
         bonsai["ActiveState"] = "active"
     reason = None
-    if llama["UnitFileState"] not in {"enabled", "enabled-runtime"}:
+    lost_reason = gpu_lost()
+    active = llama["ActiveState"] == "active"
+    transitioning = llama["ActiveState"] in BUSY
+    leased = any(unit != UNIT or not args.restore for unit in leases())
+    if lost_reason:
+        reason = lost_reason
+    elif transitioning:
+        reason = "llama.service is active or transitioning"
+    elif leftovers(GPU_UNIT):
+        reason = "llama.service has leftover processes; the GPU driver holds them; reboot"
+    elif llama["UnitFileState"] not in {"enabled", "enabled-runtime"}:
         reason = "llama.service is not enabled (intentional stop)"
     elif bonsai["ActiveState"] in BUSY:
         reason = "bonsai.service is active or transitioning"
-    elif llama["ActiveState"] in BUSY:
-        reason = "llama.service is active or transitioning"
-    elif any(unit != UNIT or not args.restore for unit in leases()):
+    elif leased:
         reason = "a llama-yield lease is active"
-    elif not args.restore:
-        since = int(llama["InactiveEnterTimestampMonotonic"] or 0) / 1_000_000
-        if time.monotonic() - since <= 300:
-            reason = "llama.service has been inactive for at most five minutes"
+    alert(args, active, leased, lost_reason, reason)
     if reason:
         announce("llama-watchdog: skip: " + reason)
         return 0
+    if not args.restore:
+        since = int(llama["InactiveEnterTimestampMonotonic"] or 0) / 1_000_000
+        if time.monotonic() - since <= 300:
+            announce("llama-watchdog: skip: llama.service has been inactive for at most five minutes")
+            return 0
     announce("llama-watchdog: " + ("would start" if args.dry_run else "starting") + " llama.service")
     if not args.dry_run:
         ctl("--no-block", "start", "llama.service")
+    return 0
+
+
+def release_gpu(args):
+    """The stuck processes wait on GPU fences that only a driver teardown completes; amdgpu's
+    hot-unplug path force-completes them. Removal itself can hang if the driver is wedged, so run
+    this only when a reboot would be acceptable anyway."""
+    if os.geteuid() != 0:
+        raise PermissionError("--release-gpu requires root")
+    reason = gpu_lost()
+    if not reason:
+        raise OSError("--release-gpu refused: GPU is healthy")
+    devices = gpu_devices()
+    if not devices:
+        raise OSError("--release-gpu cannot identify the lost GPU BDF")
+    gpu = (SYSFS / "bus/pci/devices" / devices[0].name).resolve()
+    pci_root = next((parent for parent in gpu.parents if parent.name.startswith("pci")), None)
+    if pci_root is None:
+        raise OSError("--release-gpu cannot identify the PCI root")
+    rootport = next((parent for parent in gpu.parents if parent.parent == pci_root), None)
+    top = next((parent for parent in gpu.parents if rootport is not None and parent.parent == rootport), None)
+    if top is None:
+        raise OSError("--release-gpu cannot identify the top PCI device below the root port")
+    remove, rescan = SYSFS / "bus/pci/devices" / top.name / "remove", SYSFS / "bus/pci/rescan"
+    if args.dry_run:
+        print(f"would write 1 to {remove}")
+        print("would wait up to 120 seconds for llama.service leftovers to exit")
+        print(f"would write 1 to {rescan}")
+        return 0
+    remove.write_text("1")
+    deadline = time.monotonic() + 120
+    while True:
+        pids = leftovers(GPU_UNIT)
+        announce(f"llama-yield: release-gpu: {len(pids)} leftover pid(s)")
+        if not pids or time.monotonic() >= deadline:
+            break
+        time.sleep(1)
+    rescan.write_text("1")
+    announce("llama-yield: release-gpu: " + ("amdgpu device with readable config is back"
+                                             if gpu_lost() is None else "GPU did not return with readable config"))
+    return 0
+
+
+def leased_pass(args):
+    """A watchdog pass while a lease caller holds the lock: production is intentionally down, but
+    the GPU is under the lease's load, the likeliest time for it to fail, so its telemetry is logged
+    as on every pass, and a lost GPU raises the marker even during a lease (ledger M84)."""
+    lost = gpu_lost()
+    alert(args, False, not lost, lost, lost)
+    announce("llama-watchdog: skip: a llama-yield caller holds the lease")
     return 0
 
 
@@ -193,11 +420,17 @@ def main():
     ap.add_argument("--watchdog", action="store_true")
     ap.add_argument("--restore", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--placeholder-state", action="store_true", help=argparse.SUPPRESS)
+    ap.add_argument("--condition", action="store_true")
+    ap.add_argument("--release-gpu", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--assume-bonsai-active", action="store_true", help="dry-run policy probe only")
     ap.add_argument("--assume-llama-disabled", action="store_true", help="dry-run policy probe only")
     ap.add_argument("command", nargs=argparse.REMAINDER)
     args = ap.parse_args()
+    if args.condition:
+        return production_condition()
+    if args.release_gpu:
+        return release_gpu(args)
     if args.placeholder_state:
         if os.geteuid() != 0:
             ap.error("lease state requires root")
@@ -207,14 +440,19 @@ def main():
     if args.watchdog or args.restore:
         if not args.dry_run and os.geteuid() != 0:
             ap.error("recovery requires root")
-        reconcile_placeholder(args)
+        try:
+            reconcile_placeholder(args)
+        except (OSError, subprocess.CalledProcessError) as exc:
+            if not args.watchdog:
+                raise
+            # GPU checks, the outage marker and telemetry run whatever the placeholder does (M84).
+            announce("llama-watchdog: placeholder: " + describe(exc))
         if args.watchdog and not args.dry_run:
-            with open("/run/llama-yield.lock", "w") as lock:
+            with open(LOCK, "w") as lock:
                 try:
                     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 except BlockingIOError:
-                    announce("llama-watchdog: skip: a llama-yield caller holds the lease")
-                    return 0
+                    return leased_pass(args)
                 return recover(args)
         return recover(args)
     if args.dry_run:
@@ -232,6 +470,9 @@ def main():
     environment = {"HOME": "/home/tux", "USER": "tux", "LOGNAME": "tux",
                    "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin")}
     environment.update(value.split("=", 1) for value in args.env)
+    lost = gpu_lost()
+    if lost:
+        ap.error("refusing lease: " + lost)
     if os.geteuid() != 0:
         options = ["--runtime", str(args.runtime), "--directory", args.directory]
         if args.label is not None:
@@ -249,7 +490,7 @@ def main():
     for number in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
         signal.signal(number, lambda signum, frame: stop.append(signum))
     refusal = None
-    with open("/run/llama-yield.lock", "w") as lock:
+    with open(LOCK, "w") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:

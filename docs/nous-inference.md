@@ -416,9 +416,16 @@ delete the calibration and slow-state path and keep only the `/health` restart.
 | `utils/nous/serve/nous-serve`, `llama-speedcheck` | `/usr/local/bin/` (0755) |
 | `utils/nous/serve/production.toml` | `/etc/nous-inference/serve.toml` (0644) |
 | `utils/nous/llama.service`, `utils/nous/serve/llama-speedcheck.{service,timer}` | `/etc/systemd/system/` (0644) |
+| `utils/nous/gpu-lease/llama-yield` | `/usr/local/bin/` (0755), before the unit: its `ExecCondition` runs `llama-yield --condition` |
+
+A missing or older `llama-yield` (one without `--condition`) fails that
+condition, and production then never starts, so the recipe installs it first and
+checks it before the unit (see [GPU lease](#gpu-lease) for its other files).
 
 ```sh
-ssh nous 'cd ~/src/boilerplate/utils/nous && sudo install -m 0755 serve/nous-serve serve/llama-speedcheck /usr/local/bin/ \
+ssh nous 'cd ~/src/boilerplate/utils/nous && sudo install -m 0755 gpu-lease/llama-yield /usr/local/bin/ \
+  && /usr/local/bin/llama-yield --help | grep -q -- --condition \
+  && sudo install -m 0755 serve/nous-serve serve/llama-speedcheck /usr/local/bin/ \
   && sudo install -D -m 0644 serve/production.toml /etc/nous-inference/serve.toml \
   && sudo install -m 0644 llama.service serve/llama-speedcheck.service serve/llama-speedcheck.timer /etc/systemd/system/ \
   && sudo rm -f /etc/systemd/system/llama.service.d/mesa.conf \
@@ -450,8 +457,13 @@ or concurrency than llama.cpp serves: the cutover commit's changes under `home/`
 and propagate as for any shared-config change. Then it restores the unit and
 Mesa drop-in from `c7a0dbb`, the last llama.cpp commit (both files verified
 byte-identical to what ran in production), and uses `~/.config/llama/models.ini`
-(unmanaged, left in place). Both files are fetched and checked before either
-live file is touched:
+(unmanaged, left in place). That unit predates the GPU-loss guard, so the recipe
+adds the same `ExecCondition=/usr/local/bin/llama-yield --condition` line to it
+(ledger M84): without it a rollback onto a lost GPU, or beside processes stuck in
+the driver, would restart into it as before. Both files are fetched and checked
+before any live file is touched. Do not run `llama-yield --condition` by hand
+first: outside the unit's cgroup it counts a healthy running server's own
+processes as leftovers; the unit's condition runs after the restart's stop:
 
 ```sh
 ssh nous 'set -eu; cd ~/src/boilerplate; pre=c7a0dbbee72573e93167120f53f556ba4549f789; t=$(mktemp -d)
@@ -459,6 +471,9 @@ ssh nous 'set -eu; cd ~/src/boilerplate; pre=c7a0dbbee72573e93167120f53f556ba454
   git show "$pre:utils/nous/mesa/llama.service.d/mesa.conf" >"$t/mesa.conf"
   grep -q "^ExecStart=/opt/llama.cpp-vulkan-" "$t/llama.service"
   grep -q "^Environment=VK_DRIVER_FILES=" "$t/mesa.conf"
+  sed -i "/^\[Service\]\$/a ExecCondition=/usr/local/bin/llama-yield --condition" "$t/llama.service"
+  test "$(grep -cx "ExecCondition=/usr/local/bin/llama-yield --condition" "$t/llama.service")" = 1
+  /usr/local/bin/llama-yield --help | grep -q -- --condition
   sudo systemctl disable --now llama-speedcheck.timer
   sudo install -m 0644 "$t/llama.service" /etc/systemd/system/llama.service
   sudo install -m 0644 "$t/mesa.conf" /etc/systemd/system/llama.service.d/mesa.conf
@@ -491,6 +506,26 @@ the lease running until `--runtime` (`systemd-run --wait` leaves the unit
 running). `sudo systemctl stop llama-yield-gpu.service` also ends a lease and
 restores production; during the start job, only llama-yield's own restore (or
 the watchdog, after five minutes) brings production back.
+
+A GPU that leaves the PCI bus (its config space reads all ones; on
+2026-11-07 it did so mid-eval after a PCIe link error) cannot come back
+without a reboot or a PCI remove and rescan, and every process that opens it
+hangs in the driver for good. So `llama.service` first runs `llama-yield
+--condition`, which skips the start (no Restart retry) while the GPU is lost
+or the unit still holds processes from an earlier start; a check that fails
+lets the start go ahead. Leases are refused on a lost GPU, and the watchdog
+never starts production into one. Each watchdog pass logs one line of GPU
+edge/junction/memory temperature, power, PCIe link speed and width, and the
+GPU's and its root port's correctable AER counts (`journalctl -u
+llama-watchdog`), and writes `/run/llama-yield/production-down` once
+production has been down 10 minutes outside a lease, or at once for a lost
+GPU; the OMP status line shows it as `nous inference down` (ledger M84).
+
+Processes stuck that way wait on GPU fences with SIGKILL already pending; no
+signal frees them, only a driver teardown, which completes the fences. `sudo
+llama-yield --release-gpu` removes the GPU's PCI subtree, waits for them to
+exit and rescans the bus. The removal can itself hang in a wedged driver, so
+run it only when a reboot would be acceptable; otherwise reboot.
 
 Sources live in `utils/nous/gpu-lease/` and mirror these root-owned paths:
 

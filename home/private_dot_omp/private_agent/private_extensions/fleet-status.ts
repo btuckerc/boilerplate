@@ -1,7 +1,8 @@
 // Status-line warning while a fleet guard marker exists: config-drift and
 // omp-baseline-drift mean the last guard run failed; config-pending means work
 // held or deferred. The guards delete them on success. Details:
-// `decent-angl-sync status` and the marker files.
+// `decent-angl-sync status` and the marker files. On nous, llama-watchdog
+// writes /run/llama-yield/production-down while production inference is down.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -11,11 +12,12 @@ const markers = [
   ["config-drift", "config drift"],
   ["omp-baseline-drift", "omp drift"],
   ["config-pending", "config pending"],
+  ["/run/llama-yield/production-down", "nous inference down"],
 ];
 
 const present = (file) => {
   try {
-    return fs.statSync(path.join(dir, file)).size > 0;
+    return fs.statSync(path.isAbsolute(file) ? file : path.join(dir, file)).size > 0;
   } catch {
     return false;
   }

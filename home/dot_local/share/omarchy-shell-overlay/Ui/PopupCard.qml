@@ -3,6 +3,7 @@ import QtQuick.Shapes
 import Quickshell
 import Quickshell.Hyprland
 import qs.Commons
+import qs.Commons as Commons
 
 // Decent-angl overlay of Omarchy's PopupCard. Packaged file is untouched;
 // omarchy-launch-shell copies this into the runtime tree when enabled.
@@ -10,6 +11,8 @@ import qs.Commons
 // Flush unstroked card. Bar-adjacent corners grow additive concave
 // fillets outside the body so the popup reads as one blob with the bar.
 // A side flush with the screen drops that ear and sits on the display edge.
+// Since Omarchy 4.5 the bar window spans its whole screen, so placement is
+// measured from the painted strip (barThickness), not the window's size.
 PopupWindow {
   id: root
 
@@ -20,7 +23,7 @@ PopupWindow {
   property int padding: Style.spacing.popupPadding
   property int contentWidth: Style.space(280)
   property int contentHeight: Style.space(200)
-  property color borderColor: Color.popups.border
+  property color borderColor: Commons.Color.popups.border
   property var borderSpec: Border.none()
   property bool open: false
   property bool centerOnBar: false
@@ -34,10 +37,16 @@ PopupWindow {
   readonly property bool containsMouse: cardHover.hovered
   readonly property real screenW: popupScreen ? popupScreen.width : 0
   readonly property real screenH: popupScreen ? popupScreen.height : 0
-  readonly property real barW: anchorWindow ? anchorWindow.width : 0
-  readonly property real barH: anchorWindow ? anchorWindow.height : 0
+  // Thickness of the painted bar strip on this screen, notch floor
+  // included. The bar window spans its whole screen (only the strip inside
+  // it is painted and takes input), so the window's dimensions say nothing
+  // about the bar.
+  readonly property real barThickness: !bar ? 0
+    : (typeof bar.barSizeFor === "function" && popupScreen ? bar.barSizeFor(popupScreen.name) : bar.barSize)
   readonly property string barPos: bar ? bar.position : "top"
-  readonly property int barTuck: 0
+  // Overlap the bar strip by one logical pixel: at fractional scales (1.25)
+  // the strip's edge lands mid-pixel and a flush card leaves a hairline seam.
+  readonly property int barTuck: 1
   readonly property int barJoin: Math.max(Style.cornerRadius * 2, Style.space(10))
   readonly property int farRadius: Style.cornerRadius
   readonly property bool joinAlongX: barPos === "top" || barPos === "bottom"
@@ -46,10 +55,10 @@ PopupWindow {
   readonly property int joinPadStart: joinStart ? barJoin : 0
   readonly property int joinPadEnd: joinEnd ? barJoin : 0
   readonly property real availableCardWidth: screenW > 0
-    ? Math.max(120, screenW - ((bar && (bar.position === "left" || bar.position === "right")) ? barW : 0) - root.margin * 2)
+    ? Math.max(120, screenW - ((bar && (bar.position === "left" || bar.position === "right")) ? barThickness : 0) - root.margin * 2)
     : 0
   readonly property real availableCardHeight: screenH > 0
-    ? Math.max(120, screenH - ((bar && (bar.position === "top" || bar.position === "bottom")) ? barH : 0) - root.margin * 2)
+    ? Math.max(120, screenH - ((bar && (bar.position === "top" || bar.position === "bottom")) ? barThickness : 0) - root.margin * 2)
     : 0
   readonly property real verticalContentInset: padding * 2 + Border.top(borderSpec) + Border.bottom(borderSpec)
   readonly property int popoutAnimMs: 280
@@ -105,6 +114,9 @@ PopupWindow {
 
   visible: open || popoutClip.opacity > 0
   color: "transparent"
+  // A closing card stays mapped until its fade ends; it must not take clicks
+  // meant for the bar underneath while it does.
+  mask: Region { item: root.open ? popoutClip : null }
   implicitWidth: contentWidth + (joinAlongX ? joinPadStart + joinPadEnd : 0)
   implicitHeight: contentHeight + (joinAlongX ? 0 : joinPadStart + joinPadEnd)
 
@@ -159,17 +171,21 @@ PopupWindow {
       if (root.centerOnBar) {
         if (root.bar.position === "top" || root.bar.position === "bottom") {
           bodyX = root.clampAlongBar(window.width / 2 - bodyW / 2, bodyW, window.width)
-          bodyY = root.bar.position === "bottom" ? -bodyH + root.barTuck : window.height - root.barTuck
+          bodyY = root.bar.position === "bottom"
+            ? window.height - root.barThickness - bodyH + root.barTuck
+            : root.barThickness - root.barTuck
           root.joinStart = bodyX > 0.5
           root.joinEnd = bodyX + bodyW < window.width - 0.5
         } else {
-          bodyX = root.bar.position === "left" ? window.width - root.barTuck : -bodyW + root.barTuck
+          bodyX = root.bar.position === "left"
+            ? root.barThickness - root.barTuck
+            : window.width - root.barThickness - bodyW + root.barTuck
           bodyY = root.clampAlongBar(window.height / 2 - bodyH / 2, bodyH, window.height)
           root.joinStart = bodyY > 0.5
           root.joinEnd = bodyY + bodyH < window.height - 0.5
         }
       } else if (root.bar.position === "bottom") {
-        bodyY = -bodyH + root.barTuck
+        bodyY = window.height - root.barThickness - bodyH + root.barTuck
         var mappedBottom = window.contentItem.mapFromItem(target, localX, 0)
         bodyX = root.clampAlongBar(mappedBottom.x, bodyW, window.width)
         root.joinStart = bodyX > 0.5
@@ -177,21 +193,21 @@ PopupWindow {
       } else if (root.bar.position === "left") {
         localY = target.height / 2 - bodyH / 2
         var mappedLeft = window.contentItem.mapFromItem(target, 0, localY)
-        bodyX = window.width - root.barTuck
+        bodyX = root.barThickness - root.barTuck
         bodyY = root.clampAlongBar(mappedLeft.y, bodyH, window.height)
         root.joinStart = bodyY > 0.5
         root.joinEnd = bodyY + bodyH < window.height - 0.5
       } else if (root.bar.position === "right") {
         localY = target.height / 2 - bodyH / 2
         var mappedRight = window.contentItem.mapFromItem(target, 0, localY)
-        bodyX = -bodyW + root.barTuck
+        bodyX = window.width - root.barThickness - bodyW + root.barTuck
         bodyY = root.clampAlongBar(mappedRight.y, bodyH, window.height)
         root.joinStart = bodyY > 0.5
         root.joinEnd = bodyY + bodyH < window.height - 0.5
       } else {
         var mappedTop = window.contentItem.mapFromItem(target, localX, 0)
         bodyX = root.clampAlongBar(mappedTop.x, bodyW, window.width)
-        bodyY = window.height - root.barTuck
+        bodyY = root.barThickness - root.barTuck
         root.joinStart = bodyX > 0.5
         root.joinEnd = bodyX + bodyW < window.width - 0.5
       }
@@ -227,7 +243,7 @@ PopupWindow {
       far: root.farRadius
       startJoin: root.joinStart
       endJoin: root.joinEnd
-      fill: Color.popups.background
+      fill: Commons.Color.popups.background
     }
 
     Item {
@@ -245,6 +261,10 @@ PopupWindow {
       Item {
         id: contentHolder
         anchors.fill: parent
+        // Right-to-left languages read the card mirrored; the card itself
+        // stays where the bar puts it.
+        LayoutMirroring.enabled: Commons.I18n.rightToLeft
+        LayoutMirroring.childrenInherit: true
         anchors.topMargin: card.contentTopInset
         anchors.rightMargin: card.contentRightInset
         anchors.bottomMargin: card.contentBottomInset

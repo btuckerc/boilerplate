@@ -1,6 +1,7 @@
 # Durable Rules
 
 - Never commit or push unless the user explicitly asks.
+- Never add AI attribution to commits or PRs: no Co-Authored-By trailers, "Generated with" lines or session links.
 - Keep credentials and machine-local runtime state out of Git and chezmoi.
 - Preserve unrelated user changes in dirty worktrees.
 - Resolve destructive targets precisely; never use broad home, workspace-root, or unresolved-variable targets.

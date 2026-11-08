@@ -18,6 +18,9 @@ BRANCH="${DECENT_ANGL_BRANCH:-master}"
 # Full refname: a short "origin/master" would resolve a local branch of that name first.
 TRACKING="refs/remotes/$REMOTE/$BRANCH"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/decent-angl"
+# shasum is Perl's: on Arch it sits in /usr/bin/core_perl, off the systemd
+# unit's PATH. Prefer coreutils; both print "<hex>  <name>".
+if command -v sha256sum >/dev/null 2>&1; then SHA256=(sha256sum); else SHA256=(shasum -a 256); fi
 MARKER="$STATE_DIR/config-drift"
 LOG_FILE="$STATE_DIR/config-sync.log"
 LOCK_FILE="$STATE_DIR/config-sync.flock"
@@ -124,7 +127,7 @@ source_signature() {
   { git -C "$REPO_ROOT" rev-parse HEAD &&
     git -C "$REPO_ROOT" diff --no-renames --binary HEAD -- home .chezmoiroot &&
     git -C "$REPO_ROOT" ls-files -z --others --exclude-standard -- home .chezmoiroot |
-      (cd "$REPO_ROOT" && xargs -0 -r shasum -a 256 --); } | shasum -a 256
+      (cd "$REPO_ROOT" && xargs -0 -r "${SHA256[@]}" --); } | "${SHA256[@]}"
 }
 
 apply_excludes() {
@@ -762,7 +765,7 @@ check_publish_receipt() {
   if command -v sha256sum >/dev/null; then
     digest="$(sha256sum <"$packet")" || return 1
   else
-    digest="$(shasum -a 256 <"$packet")" || return 1
+    digest="$("${SHA256[@]}" <"$packet")" || return 1
   fi
   [[ "${digest%% *}" == "$expected" ]] || receipt_refusal "packet digest differs from packet_sha256" || return 1
   ranges="$(grep -E '^Audited-Range: ' "$packet" || true)"
@@ -945,7 +948,7 @@ guard() {
   if output="$(reconcile 2>&1)"; then status=0; else status=$?; fi
   if (( status == 0 )); then clear_marker; else write_marker "$output"; fi
   # Quiet while the result is unchanged. No model or Codex scheduler involved.
-  signature="$(printf '%s\n%s' "$status" "$output" | shasum -a 256 | awk '{print $1}')"
+  signature="$(printf '%s\n%s' "$status" "$output" | "${SHA256[@]}" | awk '{print $1}')"
   previous="$(cat "$STATE_DIR/config-guard-signature" 2>/dev/null || true)"
   if [[ "$signature" != "$previous" ]]; then
     printf '%s\n%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$output" >>"$LOG_FILE"

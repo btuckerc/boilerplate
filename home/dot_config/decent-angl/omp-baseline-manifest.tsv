@@ -38,7 +38,6 @@ file	~/.omp/agent/commands/review/index.ts	home/private_dot_omp/private_agent/pr
 file	~/.local/share/decent-angl/skills/omp-drive/SKILL.md	home/dot_local/share/decent-angl/skills/omp-drive/SKILL.md
 exec	~/.local/bin/omp-board	home/dot_local/bin/executable_omp-board
 exec	~/.local/bin/opnsense-store-secret	home/dot_local/bin/executable_opnsense-store-secret
-exec	~/.local/bin/omp-triage	home/dot_local/bin/executable_omp-triage
 exec	~/.local/bin/omp-quota	home/dot_local/bin/executable_omp-quota
 exec	~/.local/bin/council-yield	home/dot_local/bin/executable_council-yield
 exec	~/.local/bin/omp-agent-policy	home/dot_local/bin/executable_omp-agent-policy

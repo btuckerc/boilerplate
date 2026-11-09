@@ -100,8 +100,12 @@ IPC and temporary-directory settings, but drops session identity and provider
 credential variables; it is not marked as an agent-run child. `--net` gives a Sol worker
 network access while Codex can read the director's files: it requires
 director-level trust, the same as `--setup`.
-`agent-quota` prints both subscriptions' remaining quota. OMP remains for the
-zero-cloud `omp-local` session and legacy Codex-only roles.
+`agent-quota` prints both subscriptions' remaining quota. `agent-triage`
+(formerly `omp-triage`) is an optional advisory that names the lane a request
+fits. The status line shows fleet guard markers (`fleet: config drift`,
+`nous inference down`) as OMP's does, and `omp-board` accepts a Claude Code
+session as a board lock owner. OMP remains for the zero-cloud `omp-local`
+session and legacy Codex-only roles.
 
 Herdr is pinned through mise and configured at `~/.config/herdr/config.toml`.
 Run `herdr` once, start each `claude` (or `omp`) session in its own workspace
@@ -114,7 +118,7 @@ Runtime sessions and saved SSH-machine profiles remain machine-local.
 Reverting the director commit returns `.claude` to the global ignore list, so
 chezmoi stops managing it but leaves deployed files behind. After the revert
 reconciles, on each agent host remove `~/.claude/CLAUDE.md` and
-`~/.local/bin/{agent-run,agent-quota,claude-statusline,council-yield}`, drop the
+`~/.local/bin/{agent-run,agent-quota,agent-triage,claude-statusline,council-yield}`, drop the
 skill links with
 `find ~/.claude/skills -maxdepth 1 -type l -lname "$HOME/.local/share/decent-angl/*" -delete`,
 and strip the owned settings keys:

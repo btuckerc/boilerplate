@@ -2,7 +2,7 @@
 """Cwd-scoped board mutations with a lock and compare-and-swap.
 
 Harness-neutral despite the name: the lock owner is the nearest OMP or Claude Code ancestor
-process (the director session), so the `drive` skill works from either harness."""
+process (the director session), so board-driven work runs from either harness."""
 
 from __future__ import annotations
 

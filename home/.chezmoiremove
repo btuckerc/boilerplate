@@ -23,3 +23,5 @@
 .omp/agent/agents/opus.md
 # Retired 2026-11-08: council seats run through agent-run; council-yield reads its receipts.
 .local/bin/omp-council-yield
+# Retired 2026-11-08: omp-triage became agent-triage (labels are agent-run lanes).
+.local/bin/omp-triage

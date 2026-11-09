@@ -1,0 +1,14 @@
+# User layer over the theme's shell.toml (wins, survives theme switches and
+# Omarchy updates). Council-chosen bar: 32 logical = 40 physical rows at scale
+# 1.25, so the centre and every 4-px multiple land on whole pixels; square
+# 32-px icon slots; icons enlarged. Text stays 12 px.
+[bar]
+size-horizontal = 32
+icon-slot = 32
+icon-canvas = 16
+icon-font = 16
+icon-size = 14
+status-slot = 24
+
+[font]
+base-size = 12

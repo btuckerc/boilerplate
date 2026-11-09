@@ -7,9 +7,12 @@ import qs.Commons
 import qs.Ui
 
 // Decent-angl overlay of Omarchy's Workspaces widget. Packaged file is
-// untouched; omarchy-shell-overlay copies this into the runtime tree. Shown
-// (this monitor's active workspace) is the solid disc at 1, occupied is the
-// same disc at 0.45, and empty is the ring at 0.5. Numbers move to tooltips.
+// untouched; omarchy-shell-overlay copies this into the runtime tree. Each
+// workspace is a drawn square, not a glyph: font metrics put a dot glyph off
+// the bar's centre. Shown (this monitor's active workspace) is a 16x8 bar at
+// 1, occupied an 8x8 square at 0.55, empty the same square at 0.3. Sizes are
+// multiples of 4 logical px so edges land on whole pixels at scale 1.25.
+// Numbers move to tooltips.
 BarWidget {
   id: root
   moduleName: "omarchy.workspaces"
@@ -243,7 +246,7 @@ BarWidget {
     function refresh(): void { root.broadcast("refresh") }
   }
 
-  readonly property real trailingGap: root.vertical ? 0 : Style.spaceReal(1.5)
+  readonly property real trailingGap: 0
 
   implicitWidth: grid.implicitWidth + trailingGap
   implicitHeight: grid.implicitHeight
@@ -253,7 +256,7 @@ BarWidget {
     anchors.fill: parent
     anchors.rightMargin: root.trailingGap
     columns: root.vertical ? 1 : root.workspaceIds().length
-    columnSpacing: root.vertical ? 0 : Style.space(1)
+    columnSpacing: 0
     rowSpacing: root.vertical ? Style.space(2) : 0
 
     Repeater {
@@ -270,22 +273,30 @@ BarWidget {
         required property int index
 
         // A gap sets visiting workspaces apart from the monitor's own.
-        Layout.leftMargin: firstGuest && !root.vertical ? Style.space(6) : 0
-        Layout.topMargin: firstGuest && root.vertical ? Style.space(6) : 0
+        Layout.leftMargin: firstGuest && !root.vertical ? 8 : 0
+        Layout.topMargin: firstGuest && root.vertical ? 8 : 0
 
         bar: root.bar
-        text: (shown || occupied) ? "\u25CF" : "\u25CB"
+        text: ""
+        labelVisible: false
+        hasVisualContent: true
         tooltipText: "Workspace " + (slot === root.slots ? "0" : String(slot))
         opacity: shown ? 1 : (occupied ? 0.55 : 0.3)
-        horizontalMargin: 6
-        verticalPadding: 6
-        fixedWidth: root.vertical ? root.barSize : Style.space(20)
-        fixedHeight: root.barSize
+        fixedWidth: root.vertical ? root.barSize : 24
+        fixedHeight: root.vertical ? 24 : root.barSize
         onPressed: function() {
           if (shown) root.cycleLayout()
           else root.focusWorkspace(modelData)
         }
         onWheelMoved: function(delta) { root.scrollWorkspaces(delta) }
+
+        Rectangle {
+          anchors.centerIn: parent
+          width: shown && !root.vertical ? 16 : 8
+          height: shown && root.vertical ? 16 : 8
+          color: parent.foreground
+          scale: parent.pressScale
+        }
       }
     }
   }

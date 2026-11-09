@@ -1,0 +1,28 @@
+{{- /* chezmoi:modify-template */ -}}
+{{- /* The shell rewrites this file itself (bar edits, provider toggles, idle),
+     so own one fact only: no omarchy.menu button on the bar (the menu stays on
+     Super+Space). Unchanged input is emitted byte-for-byte. */ -}}
+{{- if not .chezmoi.stdin -}}
+{{- /* No file yet: leave creation to Omarchy. */ -}}
+{{- else -}}
+{{- $config := .chezmoi.stdin | fromJson -}}
+{{- $before := $config | toJson -}}
+{{- $bar := get $config "bar" | default dict -}}
+{{- $layout := get $bar "layout" | default dict -}}
+{{- range $section, $entries := $layout -}}
+{{- if kindIs "slice" $entries -}}
+{{- $kept := list -}}
+{{- range $entries -}}
+{{- if not (and (kindIs "map" .) (eq (get . "id") "omarchy.menu")) -}}
+{{- $kept = append $kept . -}}
+{{- end -}}
+{{- end -}}
+{{- $_ := set $layout $section $kept -}}
+{{- end -}}
+{{- end -}}
+{{- if eq $before ($config | toJson) -}}
+{{ .chezmoi.stdin }}
+{{- else -}}
+{{ $config | toPrettyJson }}
+{{ end -}}
+{{- end -}}

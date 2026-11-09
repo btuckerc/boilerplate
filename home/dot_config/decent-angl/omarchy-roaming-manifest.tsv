@@ -3,7 +3,8 @@
 # Excluded by design:
 # - ~/.config/hypr/hyprland.lua (Omarchy-owned bootstrap)
 # - ~/.config/hypr/monitors.lua (machine-local display state)
-# - ~/.config/omarchy/shell.json (package/plugin state unless intentionally promoted)
+# - ~/.config/omarchy/shell.json (package/plugin state; only the omarchy.menu removal is
+#   owned, by home/dot_config/omarchy/modify_private_shell.json, never the whole file)
 # - ~/.local/state/omarchy/current/* (Omarchy-owned generated state)
 file	~/.config/hypr/autostart.lua	home/dot_config/hypr/autostart.lua
 file	~/.config/hypr/bindings.lua	home/dot_config/hypr/bindings.lua
@@ -23,6 +24,7 @@ exec	~/.local/bin/omarchy-launch-shell	home/dot_local/bin/executable_omarchy-lau
 exec	~/.local/bin/omarchy-shell	home/dot_local/bin/executable_omarchy-shell
 exec	~/.local/bin/omarchy-menu-images	home/dot_local/bin/executable_omarchy-menu-images
 file	~/.config/omarchy/theme-picker-allowlist	home/dot_config/omarchy/theme-picker-allowlist
+file	~/.config/omarchy/shell.toml	home/dot_config/omarchy/shell.toml
 file	~/.config/omarchy/themes/tucker-dark/colors.toml	home/dot_config/omarchy/themes/tucker-dark/colors.toml
 file	~/.config/omarchy/themes/tucker-dark/preview.webp	home/dot_config/omarchy/themes/tucker-dark/preview.webp
 file	~/.config/omarchy/themes/tucker-dark/backgrounds/1-charcoal.webp	home/dot_config/omarchy/themes/tucker-dark/backgrounds/1-charcoal.webp

@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+
+# Show only allowlisted themes in the theme picker, then hand off to Omarchy's
+# own omarchy-menu-images unchanged.
+#
+# Both picker routes (the shell's row refresh and `omarchy theme switcher`) run
+# omarchy-theme-switcher, which builds a symlink directory of theme previews and
+# execs omarchy-menu-images on it by bare name, so ~/.local/bin wins. A call on
+# that directory gets a copy holding only the allowlisted slugs; every other
+# call (the wallpaper picker) passes straight through. A missing or empty
+# allowlist, or one matching nothing, leaves the picker stock.
+# `omarchy theme set` and `omarchy theme list` still see every theme.
+
+OMARCHY_PATH="${OMARCHY_PATH:-/usr/share/omarchy}"
+REAL="${OMARCHY_PATH}/bin/omarchy-menu-images"
+[[ -x ${REAL} ]] || REAL=/usr/share/omarchy/bin/omarchy-menu-images
+
+CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/omarchy/theme-selector"
+ALLOWLIST="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/theme-picker-allowlist"
+
+args=("$@")
+last=$((${#args[@]} - 1))
+if ((last >= 0)) && [[ ${args[last]%/} == "${CACHE}/previews" && -s ${ALLOWLIST} ]]; then
+  visible="${CACHE}/visible"
+  (
+    flock -w 5 9 || exit 1
+    rm -rf "${visible}.new" && mkdir -p "${visible}.new" || exit 1
+    while IFS= read -r slug; do
+      slug=${slug%%#*}
+      slug=${slug//[[:space:]]/}
+      [[ -n ${slug} ]] || continue
+      for preview in "${CACHE}/previews/${slug}".*; do
+        [[ -e ${preview} ]] && ln -s "$(readlink "${preview}")" "${visible}.new/${preview##*/}"
+      done
+    done <"${ALLOWLIST}"
+    [[ -n $(ls -A "${visible}.new") ]] || exit 1
+    rm -rf "${visible}" && mv "${visible}.new" "${visible}"
+  ) 9>"${CACHE}/visible.lock" && args[last]="${visible}"
+fi
+
+exec "${REAL}" "${args[@]}"

@@ -25,7 +25,7 @@ def main() -> int:
     assert opacity_binding, "opacity binding is missing"
     opacity = opacity_binding.group(1)
     assert "shown ? 1" in opacity, "shown opacity must be 1"
-    assert "occupied ? 0.45" in opacity, "occupied, not shown, opacity must be 0.45"
+    assert "occupied ? 0.55 : 0.3" in opacity, "occupied must read stronger (0.55) than empty (0.3)"
     tooltip = re.search(r"\btooltipText\s*:\s*(.+)", source)
     assert tooltip and "slot" in tooltip.group(1), "workspace number must move to the tooltip"
     return 0

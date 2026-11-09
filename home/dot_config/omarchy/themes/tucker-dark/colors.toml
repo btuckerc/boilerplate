@@ -1,0 +1,41 @@
+# Tucker Dark: neutral charcoal from the 2024 "Custom Dark (Tucker)" kitty
+# palette, gray chrome, restrained functional ANSI hues. Every app config is
+# generated from this file by Omarchy's templates.
+mode = "dark"
+
+accent = "#b0afac"
+selection = "#303030"
+selection_background = "#303030"
+selection_foreground = "#deddda"
+muted = "#858585"
+
+background = "#1d1d1d"
+dark_background = "#181818"
+darker_background = "#121212"
+lighter_background = "#272727"
+
+foreground = "#deddda"
+dark_foreground = "#8b8b8b"
+light_foreground = "#c0bfbc"
+bright_foreground = "#f2f1ee"
+
+hyprland_active_border = "rgb(8b8b8b)"
+hyprland_inactive_border = "rgb(444444)"
+active_border_color = "#b0afac"
+active_tab_background = "#b0afac"
+
+red = "#d98a8a"
+green = "#a3be8c"
+yellow = "#d8bc83"
+blue = "#8eafcf"
+magenta = "#b8a0c9"
+cyan = "#83b8b0"
+orange = "#d2a17a"
+brown = "#a3866c"
+
+bright_red = "#e8a0a0"
+bright_green = "#bad09e"
+bright_yellow = "#e8cf9b"
+bright_blue = "#a6c3df"
+bright_magenta = "#ccb4dc"
+bright_cyan = "#9acfc6"

@@ -276,7 +276,7 @@ BarWidget {
         bar: root.bar
         text: (shown || occupied) ? "\u25CF" : "\u25CB"
         tooltipText: "Workspace " + (slot === root.slots ? "0" : String(slot))
-        opacity: shown ? 1 : (occupied ? 0.45 : 0.5)
+        opacity: shown ? 1 : (occupied ? 0.55 : 0.3)
         horizontalMargin: 6
         verticalPadding: 6
         fixedWidth: root.vertical ? root.barSize : Style.space(20)

@@ -183,6 +183,32 @@ ensure_config_key() {
     fi
 }
 
+# apply keeps an existing /etc config, so changed defaults need a migration.
+migrate_config() {
+    local rev iface
+
+    rev="$(read_config_value CONFIG_REV 2>/dev/null || printf '1')"
+    [[ "$rev" =~ ^[0-9]+$ ]] || rev=1
+
+    if (( rev < 2 )); then
+        # The policy read sysfs as "" until rev 2, so these were dormant or
+        # misfiring. Ship them off; Ethernet downing broke cable hotplug.
+        set_config_value BAT_DOWN_UNLINKED_ETHERNET "off"
+        set_config_value UNBIND_RTL8111_SIDEBAND "off"
+        set_config_value ENABLE_GPP_ASPM_L1 "off"
+        # Undo earlier "ip link down" + "nmcli device disconnect".
+        for iface in /sys/class/net/enp*; do
+            [[ -d "$iface" ]] || continue
+            iface="${iface##*/}"
+            run_root ip link set "$iface" up >/dev/null 2>&1 || true
+            if command -v nmcli >/dev/null 2>&1; then
+                run_root nmcli device set "$iface" autoconnect yes >/dev/null 2>&1 || true
+            fi
+        done
+        set_config_value CONFIG_REV "2"
+    fi
+}
+
 apply_stack() {
     require_root_runner
 
@@ -207,13 +233,16 @@ apply_stack() {
     ensure_config_key BAT_GPU_DPM_STATE "battery"
     ensure_config_key AC_PCIE_ASPM "default"
     ensure_config_key BAT_PCIE_ASPM "powersave"
-    ensure_config_key BAT_DOWN_UNLINKED_ETHERNET "on"
-    ensure_config_key UNBIND_RTL8111_SIDEBAND "on"
-    ensure_config_key ENABLE_GPP_ASPM_L1 "on"
+    ensure_config_key BAT_DOWN_UNLINKED_ETHERNET "off"
+    ensure_config_key UNBIND_RTL8111_SIDEBAND "off"
+    ensure_config_key ENABLE_GPP_ASPM_L1 "off"
+    ensure_config_key AC_PANEL_POWER_SAVINGS "0"
+    ensure_config_key BAT_PANEL_POWER_SAVINGS "1"
     ensure_config_key AC_NMI_WATCHDOG "1"
     ensure_config_key BAT_NMI_WATCHDOG "0"
     ensure_config_key AC_DIRTY_WRITEBACK_CENTISECS "1500"
     ensure_config_key BAT_DIRTY_WRITEBACK_CENTISECS "6000"
+    migrate_config
 
     restart_policy_service
 }

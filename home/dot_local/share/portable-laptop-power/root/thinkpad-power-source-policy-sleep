@@ -1,7 +1,8 @@
 #!/bin/sh
-# Reapply AC/DC power policy and Curve Optimizer after resume.
+# Reapply AC/DC power policy and Curve Optimizer after resume. Queue it rather
+# than run it inline: system-sleep hooks block resume completion.
 case "$1" in
     post)
-        /usr/local/libexec/thinkpad-power-source-policy
+        /usr/bin/systemctl --no-block start thinkpad-power-source-policy.service
         ;;
 esac

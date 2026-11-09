@@ -24,11 +24,13 @@ AC_GPU_DPM_STATE="performance"
 BAT_GPU_DPM_STATE="battery"
 AC_PCIE_ASPM="default"
 BAT_PCIE_ASPM="powersave"
-BAT_DOWN_UNLINKED_ETHERNET="on"
+BAT_DOWN_UNLINKED_ETHERNET="off"
 AC_RYZENADJ_MODE="max-performance"
 BAT_RYZENADJ_MODE="power-saving"
-UNBIND_RTL8111_SIDEBAND="on"
-ENABLE_GPP_ASPM_L1="on"
+UNBIND_RTL8111_SIDEBAND="off"
+ENABLE_GPP_ASPM_L1="off"
+AC_PANEL_POWER_SAVINGS="0"
+BAT_PANEL_POWER_SAVINGS="1"
 AC_NMI_WATCHDOG="1"
 BAT_NMI_WATCHDOG="0"
 AC_DIRTY_WRITEBACK_CENTISECS="1500"
@@ -44,6 +46,20 @@ if [[ -r "$CONFIG_FILE" ]]; then
     . "$CONFIG_FILE"
 fi
 
+# Read one sysfs/procfs line. Do not write "$(<file 2>/dev/null)": with any
+# extra redirect or "||" bash drops the $(<file) fast path and expands to "".
+read_sysfs() {
+    local path="$1"
+    local fallback="${2:-}"
+    local value=""
+
+    if IFS= read -r value 2>/dev/null <"$path" || [[ -n "$value" ]]; then
+        printf '%s' "$value"
+    else
+        printf '%s' "$fallback"
+    fi
+}
+
 write_value_if_needed() {
     local path="$1"
     local target="$2"
@@ -52,7 +68,7 @@ write_value_if_needed() {
     [[ -e "$path" ]] || return 0
     [[ -w "$path" ]] || return 0
 
-    if ! current="$(<"$path" 2>/dev/null)"; then
+    if ! IFS= read -r current 2>/dev/null <"$path" && [[ -z "$current" ]]; then
         log_warn "unable to read $path"
         return 0
     fi
@@ -152,7 +168,9 @@ stop_idle_socket_activated_services_on_battery() {
     fi
 
     if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet docker.service 2>/dev/null; then
-        if command -v docker >/dev/null 2>&1 && [[ -z "$(docker ps -q 2>/dev/null)" ]]; then
+        local containers
+        # Stop only when the probe succeeds and reports no containers.
+        if command -v docker >/dev/null 2>&1 && containers="$(docker ps -q 2>/dev/null)" && [[ -z "$containers" ]]; then
             if ! systemctl stop docker.service >/dev/null 2>&1; then
                 log_warn "unable to stop docker.service"
             fi
@@ -160,12 +178,24 @@ stop_idle_socket_activated_services_on_battery() {
     fi
 
     if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet cups.service 2>/dev/null; then
-        if command -v lpstat >/dev/null 2>&1 && ! lpstat -W not-completed -o 2>/dev/null | grep -q .; then
+        local jobs
+        if command -v lpstat >/dev/null 2>&1 && jobs="$(lpstat -W not-completed -o 2>/dev/null)" && [[ -z "$jobs" ]]; then
             if ! systemctl stop cups.service >/dev/null 2>&1; then
                 log_warn "unable to stop cups.service"
             fi
         fi
     fi
+}
+
+set_panel_power_savings() {
+    local target="$1"
+    local path
+
+    [[ -n "$target" ]] || return 0
+    for path in /sys/class/drm/card*-eDP-*/amdgpu/panel_power_savings; do
+        [[ -e "$path" ]] || continue
+        write_value_if_needed "$path" "$target"
+    done
 }
 
 set_gpu_dpm_state() {
@@ -217,7 +247,7 @@ apply_runtime_pm() {
     # Do not touch the display function (class 0x030000).
     for pci_dev in /sys/bus/pci/devices/*; do
         [[ -d "$pci_dev" ]] || continue
-        class="$(<"$pci_dev/class" 2>/dev/null || true)"
+        class="$(read_sysfs "$pci_dev/class")"
         driver=""
         if [[ -L "$pci_dev/driver" ]]; then
             driver="$(basename "$(readlink -f "$pci_dev/driver")")"
@@ -233,12 +263,12 @@ apply_runtime_pm() {
 unbind_rtl8111_sideband() {
     local pci_dev vendor device driver unbind
 
-    [[ "${UNBIND_RTL8111_SIDEBAND:-on}" == "on" ]] || return 0
+    [[ "${UNBIND_RTL8111_SIDEBAND:-off}" == "on" ]] || return 0
 
     for pci_dev in /sys/bus/pci/devices/*; do
         [[ -d "$pci_dev" ]] || continue
-        vendor="$(<"$pci_dev/vendor" 2>/dev/null || true)"
-        device="$(<"$pci_dev/device" 2>/dev/null || true)"
+        vendor="$(read_sysfs "$pci_dev/vendor")"
+        device="$(read_sysfs "$pci_dev/device")"
         # RTL8111xP UART / IPMI / EHCI. Leave 0x8168 (the NIC) bound.
         case "$vendor:$device" in
             0x10ec:0x816a|0x10ec:0x816b|0x10ec:0x816c|0x10ec:0x816d) ;;
@@ -259,7 +289,7 @@ unbind_rtl8111_sideband() {
 enable_gpp_aspm_l1() {
     local dev current new
 
-    [[ "${ENABLE_GPP_ASPM_L1:-on}" == "on" ]] || return 0
+    [[ "${ENABLE_GPP_ASPM_L1:-off}" == "on" ]] || return 0
     command -v setpci >/dev/null 2>&1 || return 0
 
     # External GPP bridges only. Skip internal APU fabric (00:08.1 / 07:00.x).
@@ -291,28 +321,44 @@ apply_vm_power_tweaks() {
 }
 
 
+readonly ETHERNET_DOWN_STATE_DIR="/run/portable-laptop-power/ethernet-down"
+
+# Bring back only the interfaces this script took down. Leave the rest to
+# NetworkManager and the user.
+restore_downed_ethernet() {
+    local marker iface
+
+    for marker in "$ETHERNET_DOWN_STATE_DIR"/*; do
+        [[ -e "$marker" ]] || continue
+        iface="${marker##*/}"
+        if [[ -d "/sys/class/net/$iface" ]]; then
+            ip link set "$iface" up >/dev/null 2>&1 || log_warn "unable to restore ethernet $iface"
+        fi
+        rm -f "$marker"
+    done
+}
+
 apply_unlinked_ethernet() {
-    local iface_path iface carrier
+    local iface_path iface carrier operstate
 
-    if [[ "$ac_online" == "1" ]]; then
-        for iface_path in /sys/class/net/enp*; do
-            [[ -d "$iface_path" ]] || continue
-            iface="$(basename "$iface_path")"
-            ip link set "$iface" up >/dev/null 2>&1 || true
-        done
-        return
+    if [[ "$ac_online" == "1" || "${BAT_DOWN_UNLINKED_ETHERNET:-off}" != "on" ]]; then
+        restore_downed_ethernet
+        return 0
     fi
-
-    [[ "${BAT_DOWN_UNLINKED_ETHERNET:-on}" == "on" ]] || return 0
 
     for iface_path in /sys/class/net/enp*; do
         [[ -d "$iface_path" ]] || continue
         iface="$(basename "$iface_path")"
-        carrier="$(<"$iface_path/carrier" 2>/dev/null || printf '0')"
-        [[ "$carrier" != "1" ]] || continue
-        ip link set "$iface" down >/dev/null 2>&1 || log_warn "unable to down unused ethernet $iface"
-        if command -v nmcli >/dev/null 2>&1; then
-            nmcli device disconnect "$iface" >/dev/null 2>&1 || true
+        operstate="$(read_sysfs "$iface_path/operstate")"
+        [[ "$operstate" != "up" ]] || continue
+        # carrier is unreadable while the link is administratively down.
+        # Unknown means no action, never "unlinked".
+        carrier="$(read_sysfs "$iface_path/carrier")"
+        [[ "$carrier" == "0" ]] || continue
+        if ip link set "$iface" down >/dev/null 2>&1; then
+            mkdir -p "$ETHERNET_DOWN_STATE_DIR" && : >"$ETHERNET_DOWN_STATE_DIR/$iface"
+        else
+            log_warn "unable to down unused ethernet $iface"
         fi
     done
 }
@@ -402,6 +448,7 @@ target_platform_profile="$AC_PLATFORM_PROFILE"
 target_wifi_power_save="$AC_WIFI_POWER_SAVE"
 target_gpu_dpm_state="$AC_GPU_DPM_STATE"
 target_pcie_aspm="$AC_PCIE_ASPM"
+target_panel_power_savings="${AC_PANEL_POWER_SAVINGS:-}"
 
 if [[ "$ac_online" != "1" ]]; then
     target_profile="$BAT_POWER_PROFILE"
@@ -409,11 +456,13 @@ if [[ "$ac_online" != "1" ]]; then
     target_wifi_power_save="$BAT_WIFI_POWER_SAVE"
     target_gpu_dpm_state="$BAT_GPU_DPM_STATE"
     target_pcie_aspm="$BAT_PCIE_ASPM"
+    target_panel_power_savings="${BAT_PANEL_POWER_SAVINGS:-}"
 fi
 
 set_power_profile "$target_profile" "$target_platform_profile"
 set_wifi_power_save "$target_wifi_power_save"
 set_gpu_dpm_state "$target_gpu_dpm_state"
+set_panel_power_savings "$target_panel_power_savings"
 set_pcie_aspm "$target_pcie_aspm"
 apply_runtime_pm
 unbind_rtl8111_sideband
@@ -423,3 +472,9 @@ apply_unlinked_ethernet
 apply_battery_thresholds
 stop_idle_socket_activated_services_on_battery
 apply_curve_optimizer
+
+# The AC state can flip while this run is in progress; a start request queued
+# during the run merges into it. Re-run once if the state changed.
+if [[ -z "${PORTABLE_LAPTOP_POWER_RERUN:-}" ]] && [[ "$(read_sysfs "$AC_ONLINE_PATH")" != "$ac_online" ]]; then
+    PORTABLE_LAPTOP_POWER_RERUN=1 exec "$0"
+fi

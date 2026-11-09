@@ -6,6 +6,7 @@ ConditionPathExists=/sys/class/power_supply/AC/online
 [Service]
 Type=oneshot
 ExecStart=/usr/local/libexec/thinkpad-power-source-policy
+TimeoutStartSec=30s
 
 [Install]
 WantedBy=multi-user.target

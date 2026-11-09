@@ -619,7 +619,8 @@ or swap limit, so it swaps before llama is chosen:
   recursive greps refresh it. `nous-tmp-clean --dry-run` lists what it would remove.
 - `earlyoom` sends SIGTERM once available memory is at or below 5% and free
   swap at or below 10% (SIGKILL at 3% / 5%). It prefers chrome, pytest and
-  compilers and avoids llama-server, sshd, tailscaled, herdr and omp.
+  compilers and avoids vLLM (`vllm`, `VLLM::EngineCor`), llama-server, sshd,
+  tailscaled, herdr, omp and claude.
   Thresholds are measured against earlyoom's "user mem" (~120 GiB since the
   2026-10-01 upgrade to 128 GB), so SIGTERM fires near 6 GiB available.
 - `llama.service` drop-in `OOMScoreAdjust=-500`, so the kernel kills agents and

@@ -4,5 +4,7 @@
 # earlyoom fires just before the kernel's own OOM path thrashes the host for
 # minutes. Kill single processes, preferring browsers and build/test jobs;
 # avoid inference, remote access (herdr is the phone's session server) and
-# agent sessions unless nothing else is left.
-EARLYOOM_ARGS="-m 5,3 -s 10,5 -r 0 --prefer ^(chrome|chrome_crashpad|chromium|headless_shell|pytest|clang|cc1|cc1plus|ld|rustc|node)$ --avoid ^(llama-server|sshd|tailscaled|herdr|systemd|systemd-journal|dbus-daemon|omp)$"
+# agent sessions unless nothing else is left. Names are the 15-character process
+# names: vLLM's API server is `vllm` and its engine `VLLM::EngineCor`; llama-server
+# stays for the llama.cpp rollback; claude is the director harness since 2026-11-08.
+EARLYOOM_ARGS="-m 5,3 -s 10,5 -r 0 --prefer ^(chrome|chrome_crashpad|chromium|headless_shell|pytest|clang|cc1|cc1plus|ld|rustc|node)$ --avoid ^(vllm|VLLM::EngineCor|llama-server|sshd|tailscaled|herdr|systemd|systemd-journal|dbus-daemon|omp|claude)$"

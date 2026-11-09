@@ -156,8 +156,8 @@ independent auth and sessions. Read `~/src/omp-serve/README.md` and
   owned by tux that have gone unmodified for 12 h (2 h under memory pressure)
   and that no process references. `earlyoom` (`-m 5,3 -s 10,5`) kills single
   processes before the kernel OOM path thrashes the host, preferring
-  chrome/pytest/compilers and avoiding llama-server, sshd, tailscaled, herdr
-  and omp. llama has `OOMScoreAdjust=-500`; swap is a 32 GiB swapfile at
+  chrome/pytest/compilers and avoiding vLLM (`vllm`, `VLLM::EngineCor`),
+  llama-server, sshd, tailscaled, herdr, omp and claude. llama has `OOMScoreAdjust=-500`; swap is a 32 GiB swapfile at
   `/srv/models/.swap/swapfile` (keep that directory 0755); zswap (lzo, 10%) is
   on via GRUB; `tmp.mount` is masked, so `/tmp` is ext4 on `/`. Never cap the
   whole herdr/agent tree or set llama `MemorySwapMax=0` (rejected:

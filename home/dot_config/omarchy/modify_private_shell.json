@@ -1,7 +1,9 @@
 {{- /* chezmoi:modify-template */ -}}
 {{- /* The shell rewrites this file itself (bar edits, provider toggles, idle),
-     so own one fact only: no omarchy.menu button on the bar (the menu stays on
-     Super+Space). Unchanged input is emitted byte-for-byte. */ -}}
+     so own two facts only: no omarchy.menu button on the bar (the menu stays on
+     Super+Space), and the Tailscale widget polls every 120 s, not 30 s (it still
+     refreshes on panel open and after actions; power council 2026-11-08).
+     Unchanged input is emitted byte-for-byte. */ -}}
 {{- if not .chezmoi.stdin -}}
 {{- /* No file yet: leave creation to Omarchy. */ -}}
 {{- else -}}
@@ -14,6 +16,9 @@
 {{- $kept := list -}}
 {{- range $entries -}}
 {{- if not (and (kindIs "map" .) (eq (get . "id") "omarchy.menu")) -}}
+{{- if and (kindIs "map" .) (eq (get . "id") "omarchy.tailscale") (not (hasKey . "refreshIntervalSec")) -}}
+{{- $_ := set . "refreshIntervalSec" 120 -}}
+{{- end -}}
 {{- $kept = append $kept . -}}
 {{- end -}}
 {{- end -}}

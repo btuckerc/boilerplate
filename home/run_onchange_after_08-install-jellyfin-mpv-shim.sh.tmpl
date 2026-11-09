@@ -1,0 +1,16 @@
+{{- if eq .chezmoi.os "linux" -}}
+#!/usr/bin/env bash
+# Jellyfin MPV Shim: the native Jellyfin viewer on Omarchy (media-viewer council
+# 2026-11-09). Its library browser draws inside the mpv window, so there is no
+# webview; it direct-plays the library with VA-API and reports resume points.
+# Installed from the distro repo so `omarchy update` keeps it current. Sign in
+# from its window with Quick Connect; the token stays in users.json inside the
+# 0700 config directory.
+set -euo pipefail
+
+if ! command -v omarchy-pkg-add >/dev/null 2>&1; then
+    echo "omarchy-pkg-add not found; not an Omarchy host. Skipping Jellyfin MPV Shim."
+    exit 0
+fi
+omarchy-pkg-add jellyfin-mpv-shim
+{{- end }}

@@ -1,0 +1,21 @@
+# mpv options for Jellyfin MPV Shim. Its libmpv reads this file, not ~/.config/mpv
+# or /etc/mpv, and the shim defers to the hwdec set here (media-viewer council
+# 2026-11-09). Without VA-API, mpv decodes in software.
+hwdec=vaapi
+{{- if eq (get .decentangl "machine_id" | default "") "omarchy" }}
+# Measured on this laptop (AMD Renoir, on AC): VA-API decodes H.264 and HEVC
+# Main/Main10, and dmabuf-wayland hands those frames to Hyprland without a GL pass,
+# up to ~0.5 W less than gpu-next. Playback then sits within ~0.5 W of the Chromium
+# web app (the web app slightly lower on HEVC) at about a third of its CPU, with no
+# server transcode. AV1 (about 1% of the library) has no hardware decoder here: it
+# decodes in software, is converted and uploaded through VA-API for display: about
+# 0.4 W and ~135% CPU against gpu-next's ~49%, accepted. dmabuf-wayland needs a
+# VA-API device and a dmabuf-capable Wayland compositor (without them video fails
+# outright) and skips mpv's own tone mapping (the compositor maps PQ instead). HDR10
+# (24 of ~3300 items) was checked on one dark frame here: comparable to gpu-next,
+# slightly darker shadows; bright highlights not checked. Other hosts keep mpv's
+# default gpu-next until measured.
+vo=dmabuf-wayland
+{{- end }}
+# mpv-mpris cannot load into the shim's libmpv (undefined mpv_* symbols), so media
+# keys wait for the shim's own MPRIS in 3.2+.

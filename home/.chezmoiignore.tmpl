@@ -34,6 +34,13 @@ nvim.backup.*
 # Local mise configuration (machine-specific)
 .config/mise/mise.local.toml
 
+# Jellyfin MPV Shim keeps its server token and offline state beside the managed
+# conf.json and mpv.conf; ignoring them stops `chezmoi add` from importing them.
+.config/jellyfin-mpv-shim/users.json*
+.config/jellyfin-mpv-shim/cred.json
+.config/jellyfin-mpv-shim/offline
+.config/jellyfin-mpv-shim/offline/**
+
 # Python execution caches may exist in an edited source tree, but never deploy.
 **/__pycache__
 **/__pycache__/**
@@ -104,6 +111,8 @@ Applications/Codex Third.app/**
 .config/decent-angl/omarchy-roaming-manifest.tsv
 .config/hypr
 .config/hypr/**
+.config/jellyfin-mpv-shim
+.config/jellyfin-mpv-shim/**
 .config/omarchy
 .config/omarchy/**
 .config/systemd/user/omarchy-battery-monitor.service

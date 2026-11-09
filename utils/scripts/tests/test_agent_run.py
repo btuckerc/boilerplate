@@ -575,6 +575,27 @@ def test_statusline_snapshot_omission_and_bad_input(environment):
     assert p.stdout.strip() == "claude 5h 75% 7d 60% | codex 7d unknown remaining"
 
 
+def test_statusline_shows_fleet_markers(environment, tmp_path, monkeypatch):
+    env, _ = environment
+    env = dict(env, XDG_STATE_HOME=str(tmp_path / "state"))
+    markers = tmp_path / "state/decent-angl"
+    markers.mkdir(parents=True)
+    data = json.dumps({"model": {"display_name": "Opus"}, "workspace": {"current_dir": "/x/repo"}})
+    run = lambda: subprocess.run([sys.executable, str(STATUS)], input=data, env=env, capture_output=True, text=True).stdout.strip()
+    assert run() == "Opus · repo"
+    (markers / "config-drift").write_text("")  # empty markers do not count
+    assert run() == "Opus · repo"
+    (markers / "config-drift").write_text("x\n")
+    (markers / "config-pending").write_text("held\n")
+    assert run() == "Opus · repo · fleet: config drift, config pending"
+    status = load("claude_statusline", STATUS)
+    production = tmp_path / "production-down"
+    production.write_text("lost\n")
+    monkeypatch.setattr(status, "FLEET_MARKERS", (*status.FLEET_MARKERS[:3], (str(production), "nous inference down")))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    assert status.fleet() == "fleet: config drift, config pending, nous inference down"
+
+
 def test_validator_rejects_extra_keys_and_invalid_custom_schema():
     with pytest.raises(ValueError):
         runner.validate({"paths": [], "checks_run": [], "summary": "ok", "blockers": [], "extra": 1}, runner.RESULT_SCHEMA)

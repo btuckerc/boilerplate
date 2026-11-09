@@ -54,8 +54,8 @@ then run `decent-angl-sync reconcile`: it publishes, applies and installs pins.
 the checkout does not block publication, which checks the exported commit's
 OMP agent policy (`omp-baseline check-source`) with the commit's exact pinned
 OMP release, installing it into mise when the host still runs another. A
-release-audited publish sets `DECENT_ANGL_PUBLISH_RECEIPT` (the omp-audit
-`result.json` whose candidate is the outgoing commit) and
+release-audited publish sets `DECENT_ANGL_PUBLISH_RECEIPT` (the `agent-run
+audit` or `omp-audit` `result.json` whose candidate is the outgoing commit) and
 `DECENT_ANGL_PUBLISH_PACKET` (its packet, with one `Audited-Range: BASE..COMMIT`
 line); a receipt that is not an accepted PASS for exactly that commit and range
 refuses publication. If

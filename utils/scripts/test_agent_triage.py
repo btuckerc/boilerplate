@@ -15,8 +15,8 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "home/dot_local/bin/executable_omp-triage"
-spec = importlib.util.spec_from_loader("omp_triage", SourceFileLoader("omp_triage", str(SCRIPT)))
+SCRIPT = ROOT / "home/dot_local/bin/executable_agent-triage"
+spec = importlib.util.spec_from_loader("agent_triage", SourceFileLoader("agent_triage", str(SCRIPT)))
 assert spec and spec.loader
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
@@ -52,6 +52,7 @@ class TriageTests(unittest.TestCase):
         seen = []
         result = module.triage("fix the failing parser tests", "secret", opener_factory(self.payload(probabilities=probs), seen))
         self.assertEqual(result["choice"], module.LABELS[1])
+        self.assertEqual(result["command"], "agent-run ask --model luna")
         self.assertEqual(result["confidence"], 0.87)
         self.assertEqual(result["probabilities"], probs)
         self.assertEqual(result["cost"], 0.0002685)
@@ -60,6 +61,14 @@ class TriageTests(unittest.TestCase):
         self.assertEqual(seen[0][2]["state"], {"request": "fix the failing parser tests"})
         self.assertNotIn("secret", json.dumps(seen[0][2]))
         self.assertEqual(seen[0][0].get_header("Authorization"), "Bearer secret")
+
+    def test_labels_are_agent_run_lanes_or_the_director(self):
+        self.assertEqual(set(module.LABELS), set(module.CRITERIA))
+        self.assertEqual(set(module.LABELS), set(module.COMMANDS))
+        self.assertIsNone(module.COMMANDS["director"])
+        for label in ("local", "luna", "sol"):
+            self.assertTrue(module.COMMANDS[label].startswith("agent-run "))
+        self.assertNotIn("retain", module.LABELS)
 
     def test_malformed_and_unknown_choice_rejected(self):
         for payload in ({}, {"answers": {"route": {"choice": "cloud", "confidence": 1, "probabilities": {}}}}):

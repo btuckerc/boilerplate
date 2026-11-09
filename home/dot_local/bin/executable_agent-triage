@@ -1,5 +1,8 @@
 #!/usr/bin/python3
-"""One-shot, decision-only OMP triage through OpenRouter Jev."""
+"""One-shot, decision-only lane triage for the director through OpenRouter Jev.
+
+Optional and explicit: it suggests which agent-run lane (or the director itself) fits a request; it
+routes nothing, grants nothing and proves nothing. Formerly omp-triage, whose labels were OMP roles."""
 from __future__ import annotations
 
 import argparse
@@ -20,15 +23,22 @@ LABELS = (
     "local",
     "luna",
     "sol",
-    "retain",
+    "director",
 )
 CRITERIA = {
-    LABELS[0]: "Bounded mechanical file transform or extraction using supplied text, one file, cheap exact verification. The local 27B Qwen worker runs on nous (vLLM batches up to 8 sequences; run at most 4 local workers at once) and has passed only small bounded tasks; never use it for diagnosing unknown bugs, open design, or decisions with costly errors.",
-    LABELS[1]: "Capable coding model for ordinary implementation, tests, navigation, routine computer use and bounded debugging. Default for clear implementable work. Can use tools and run tests.",
-    LABELS[2]: "Frontier reasoning for ambiguous architecture, unexplained repeated failures, deep conflicting research or hard decisions. Higher cost; unnecessary for routine edits.",
-    LABELS[3]: "Context-dependent continuation or unclear request that cannot be safely classified from the provided text. Preserve the current model; do not guess.",
+    LABELS[0]: "Bounded mechanical file transform or extraction using supplied text, one file, cheap exact verification, no process execution needed by the worker (the director runs the check). The local 27B Qwen worker runs on nous (vLLM batches up to 8 sequences; run at most 4 local workers at once) and has passed only small bounded tasks; never use it for diagnosing unknown bugs, open design, or decisions with costly errors.",
+    LABELS[1]: "Read-only bounded extraction or summary of supplied or repository text with a clear output shape. Not for implementation, debugging or decisions.",
+    LABELS[2]: "Implementation in an isolated worktree with a clear contract and a runnable acceptance check (patch handback), including clearly hard work; or a read-only second look on high-consequence design, a conflict after focused investigation, or a check still failing after one repair.",
+    LABELS[3]: "Trivial or tightly coupled work, unresolved design, integration and verification, or a context-dependent or unclear request that cannot be safely classified from the provided text. The director keeps it; do not guess.",
 }
-INSTRUCTIONS = "Choose the cheapest suitable execution tier for this request based only on supplied evidence. Honor an explicit model or local-only request. Do not assume missing conversation or code context. This is task triage, not permission or proof the task will succeed."
+# How the director would run each choice; None means it does the work itself.
+COMMANDS = {
+    "local": "agent-run local",
+    "luna": "agent-run ask --model luna",
+    "sol": "agent-run sol (implementation) or agent-run ask --model sol (read-only)",
+    "director": None,
+}
+INSTRUCTIONS = "Choose the cheapest suitable execution lane for this request based only on supplied evidence. Honor an explicit model or local-only request. Do not assume missing conversation or code context. This is task triage, not permission or proof the task will succeed."
 
 
 def _env_file_key() -> str | None:
@@ -97,6 +107,7 @@ def _response(payload: dict[str, object], elapsed_ms: int) -> dict[str, object]:
         raise ValueError("invalid cost")
     return {
         "choice": choice,
+        "command": COMMANDS[choice],
         "confidence": confidence,
         "probabilities": probabilities,
         "elapsed_ms": elapsed_ms,
@@ -140,7 +151,7 @@ def triage(request: str, key: str, opener=urllib.request.urlopen) -> dict[str, o
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="One-shot decision-only OMP triage via OpenRouter Jev")
+    parser = argparse.ArgumentParser(description="One-shot decision-only agent-run lane triage via OpenRouter Jev")
     parser.add_argument("request", nargs="?", help="explicit request; otherwise read one request from stdin")
     args = parser.parse_args(argv)
     request = args.request if args.request is not None else sys.stdin.read()

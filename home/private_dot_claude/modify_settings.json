@@ -16,7 +16,9 @@
 {{- $config = setValueAtPath "modelSettings.claude-opus-5-5.effortLevel" "high" $config -}}
 {{- $config = setValueAtPath "permissions.defaultMode" "bypassPermissions" $config -}}
 {{- $config = setValueAtPath "skipDangerousModePermissionPrompt" true $config -}}
-{{- $config = setValueAtPath "attribution" false $config -}}
+{{- /* The object form: Claude Code's schema treats false as exactly this object and warns that
+     older versions reject a boolean, so hosts on different versions agree. */ -}}
+{{- $config = setValueAtPath "attribution" (dict "commit" "" "pr" "" "sessionUrl" false) $config -}}
 {{- /* Keep transcripts (Herdwick renders them); the default sweep deletes after 30 days. */ -}}
 {{- $config = setValueAtPath "cleanupPeriodDays" 3650 $config -}}
 {{- $config = setValueAtPath "statusLine" (dict "type" "command" "command" (joinPath .chezmoi.homeDir ".local/bin/claude-statusline")) $config -}}

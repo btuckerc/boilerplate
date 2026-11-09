@@ -5,8 +5,9 @@ description: Route checkable work to nous or Luna during multi-step coding, test
 
 # Local workers
 
-Choose routing without asking the user to pick a model. Claude Opus high
-is the OMP director: own requirements, integration and acceptance; do trivial work directly.
+Choose routing without asking the user to pick a model. Codex Sol high
+is the OMP director (Claude Code is the primary director harness, with its own
+`agent-run` lanes): own requirements, integration and acceptance; do trivial work directly.
 Use the `task` agent (Codex Luna, runs in parallel) as the default worker for
 bounded implementation, research, extraction, context >128K and images. Use
 `nous` (local Qwen; vLLM batches 8 sequences, run at most 4 local children at
@@ -20,7 +21,7 @@ after one focused repair. `architect` (xhigh) supplies read-only advice; `sol` (
 a scoped difficult implementation/diagnosis. Clearly hard work may go directly
 to Sol. Missing context, credentials or tools require prerequisites, not a
 larger model. Workers return blockers to the director; no recursive escalation chains.
-When to use Astra, Fable or a council is RULES.md, with the quota thresholds;
+When to use Astra or a council is RULES.md, with the quota thresholds;
 `omp-quota` prints both subscriptions' remaining quota on one line.
 In Codex, retain the current parent model unless explicitly configured otherwise.
 When a change needs a release audit, and why there is otherwise no review tax,

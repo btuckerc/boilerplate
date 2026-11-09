@@ -31,8 +31,11 @@ ssh nous 'CUDA_VISIBLE_DEVICES="" ~/.local/share/nous-triage-eval/venv/bin/pytho
 ```
 
 There is no automatic routing integration. Ordinary OMP work makes no Laya/Jev
-request. For an explicit cloud comparison, `omp-triage` takes supplied text and
-returns one advisory Jev decision; it uses the same criteria/instructions. The
+request. For an explicit cloud comparison, `agent-triage` (formerly `omp-triage`)
+takes supplied text and returns one advisory Jev decision. Since 2026-11-08 its
+labels are agent-run lanes (`local`, `luna`, `sol`, `director` in place of
+`retain`) with criteria for the Claude Code director, so its answers are not
+directly comparable with these fixtures' labels. The
 `synthetic-fixture.py` file contains the cases without credential-handling code.
 `jev-results.json` preserves the matched initial probe, including reported API
 cost. Do not equate API spend or token counts with Codex subscription allowance.

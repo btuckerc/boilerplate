@@ -68,8 +68,9 @@ description: Change the shared OMP baseline in chezmoi - upgrades, omp-baseline,
   decision is unmeasured.
 - Cloud inference is Codex-only; `cycleOrder` is default → task.
   Do not restore retired cloud providers or their removed agents. The optional
-  `omp-triage` decision helper is separate from OMP model routing and retains
-  its existing API-key plumbing.
+  `agent-triage` decision helper (formerly `omp-triage`; labels are agent-run
+  lanes) is separate from OMP model routing and keeps its OpenRouter key
+  plumbing (`omp-env`).
 - Keep `task.enableEffort: true` for per-task choices without an extra classifier.
   Omit effort to retain the agent default (medium; high for `sol` and `browser`, xhigh for
   `architect` and `auditor`). Always omit it for those two: a task

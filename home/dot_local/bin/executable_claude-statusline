@@ -7,6 +7,30 @@ from pathlib import Path
 import sys
 import tempfile
 
+# Fleet guard markers (as OMP's fleet-status extension shows them): config-drift and
+# omp-baseline-drift mean the last guard run failed, config-pending means work held or
+# deferred; the guards delete them on success. On nous, llama-watchdog writes
+# /run/llama-yield/production-down while production inference is down.
+FLEET_MARKERS = (
+    ("config-drift", "config drift"),
+    ("omp-baseline-drift", "omp drift"),
+    ("config-pending", "config pending"),
+    ("/run/llama-yield/production-down", "nous inference down"),
+)
+
+
+def fleet():
+    state = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state") / "decent-angl"
+    found = []
+    for name, label in FLEET_MARKERS:
+        path = Path(name) if os.path.isabs(name) else state / name
+        try:
+            if path.stat().st_size > 0:
+                found.append(label)
+        except OSError:
+            pass
+    return "fleet: " + ", ".join(found) if found else None
+
 
 def main():
     try:
@@ -43,6 +67,9 @@ def main():
                 value = (limits.get(period) or {}).get("used_percentage")
                 if isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value <= 100:
                     parts.append(f"{label} {value:g}% used")
+        warning = fleet()
+        if warning:
+            parts.append(warning)
         # Status input should not be able to inject terminal control sequences.
         print(" · ".join("".join(c for c in p if c.isprintable()) for p in parts))
     except Exception:

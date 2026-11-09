@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Cwd-scoped board mutations with a lock and compare-and-swap."""
+"""Cwd-scoped board mutations with a lock and compare-and-swap.
+
+Harness-neutral despite the name: the lock owner is the nearest OMP or Claude Code ancestor
+process (the director session), so the `drive` skill works from either harness."""
 
 from __future__ import annotations
 
@@ -125,6 +128,10 @@ def process_field(pid: int, field: str) -> str:
     return subprocess.check_output(["ps", "-o", f"{field}=", "-p", str(pid)], text=True).strip()
 
 
+# Director harness process names: OMP, and Claude Code (the director since 2026-11-08).
+OWNER_COMMS = {"omp", "oh-my-pi", "claude"}
+
+
 def owner_pid() -> int:
     override = os.environ.get("OMP_BOARD_OWNER")
     if override:
@@ -141,7 +148,7 @@ def owner_pid() -> int:
             exe = command.split(maxsplit=1)[0] if command else ""
         except (ValueError, subprocess.CalledProcessError, OSError):
             break
-        if comm in {"omp", "oh-my-pi"} or exe.endswith("/omp"):
+        if comm in OWNER_COMMS or exe.endswith(("/omp", "/claude")):
             return pid
         try:
             pid = int(process_field(pid, "ppid"))
@@ -271,7 +278,7 @@ def require_lock(root: Path, name: str) -> dict[str, str]:
     if not meta or lock_stale(meta):
         raise BoardError(f"lock not held: {name}", 75)
     if meta.get("host") == os.uname().nodename and meta.get("pid") != owner:
-        raise BoardError(f"lock held by another omp: {name} pid={meta.get('pid')}", 75)
+        raise BoardError(f"lock held by another session: {name} pid={meta.get('pid')}", 75)
     return meta
 
 
@@ -362,6 +369,11 @@ def render_index(active: str, rows: list[dict[str, str]]) -> str:
         lines.append(f"| {row['slug']} | {row['title']} | {row['open']} | {row['updated']} |")
     lines.append("")
     return "\n".join(lines)
+
+
+def cmd_owner(_args: argparse.Namespace) -> None:
+    """The host and pid this session's locks and card leases name."""
+    print(f"host={os.uname().nodename} pid={owner_pid()}")
 
 
 def cmd_root(args: argparse.Namespace) -> None:
@@ -668,6 +680,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cwd", default=None, help="project root; default is process cwd")
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("root")
+    sub.add_parser("owner")
     sub.add_parser("status")
     p = sub.add_parser("slug")
     p.add_argument("text")
@@ -707,6 +720,7 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
     commands = {
         "root": cmd_root,
+        "owner": cmd_owner,
         "status": cmd_status,
         "slug": cmd_slug,
         "init": cmd_init,

@@ -328,7 +328,7 @@ readonly ETHERNET_RECOVERED_MARKER="/var/lib/portable-laptop-power/ethernet-reco
 # disconnect", which also blocks autoconnect, and left no marker. Undo that
 # once, from the new policy, so no old run can redo it afterwards.
 recover_legacy_ethernet_downs() {
-    local iface_path iface
+    local iface_path iface failed=0
 
     [[ ! -e "$ETHERNET_RECOVERED_MARKER" ]] || return 0
     [[ "${BAT_DOWN_UNLINKED_ETHERNET:-off}" != "on" ]] || return 0
@@ -336,11 +336,17 @@ recover_legacy_ethernet_downs() {
     for iface_path in /sys/class/net/enp*; do
         [[ -d "$iface_path" ]] || continue
         iface="$(basename "$iface_path")"
-        ip link set "$iface" up >/dev/null 2>&1 || log_warn "unable to restore ethernet $iface"
-        if command -v nmcli >/dev/null 2>&1; then
-            nmcli device set "$iface" autoconnect yes >/dev/null 2>&1 || true
+        if ! ip link set "$iface" up >/dev/null 2>&1; then
+            log_warn "unable to restore ethernet $iface"
+            failed=1
+        fi
+        if command -v nmcli >/dev/null 2>&1 && ! nmcli device set "$iface" autoconnect yes >/dev/null 2>&1; then
+            log_warn "unable to re-enable autoconnect on $iface"
+            failed=1
         fi
     done
+    # Retry on the next pass until every step succeeded.
+    (( failed == 0 )) || return 0
     { mkdir -p "${ETHERNET_RECOVERED_MARKER%/*}" && : >"$ETHERNET_RECOVERED_MARKER"; } 2>/dev/null ||
         log_warn "unable to write $ETHERNET_RECOVERED_MARKER"
 }

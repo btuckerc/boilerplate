@@ -166,12 +166,18 @@ set_config_value() {
     rm -f "$temp_source" "$temp_target"
 }
 
-quiesce_policy_service() {
-    local waited=0
+# Wait for any running policy pass to finish. A running Type=oneshot is
+# "activating", which "systemctl is-active" reports as not active.
+wait_policy_service_idle() {
+    local waited=0 state
 
-    run_root systemctl stop "$TIMER_NAME" >/dev/null 2>&1 || true
-    while run_root systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; do
-        if (( waited >= 60 )); then
+    while :; do
+        state="$(run_root systemctl show -p ActiveState --value "$SERVICE_NAME" 2>/dev/null || true)"
+        case "$state" in
+            activating|deactivating|reloading|refreshing) ;;
+            *) return 0 ;;
+        esac
+        if (( waited >= 90 )); then
             echo "Timed out waiting for $SERVICE_NAME to finish." >&2
             exit 1
         fi
@@ -180,11 +186,18 @@ quiesce_policy_service() {
     done
 }
 
+quiesce_policy_service() {
+    run_root systemctl stop "$TIMER_NAME" >/dev/null 2>&1 || true
+    wait_policy_service_idle
+}
+
 restart_policy_service() {
     require_root_runner
     run_root systemctl daemon-reload
     run_root udevadm control --reload
     run_root systemctl enable "$SERVICE_NAME" "$TIMER_NAME" >/dev/null
+    # A pass that began before the install would absorb this start request.
+    wait_policy_service_idle
     run_root systemctl start "$SERVICE_NAME" "$TIMER_NAME"
 }
 

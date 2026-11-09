@@ -186,7 +186,14 @@ wait_policy_service_idle() {
     done
 }
 
+resume_policy_timer() {
+    run_root systemctl start "$TIMER_NAME" >/dev/null 2>&1 || true
+}
+
 quiesce_policy_service() {
+    # Whatever happens next, a failed apply must not leave the fallback
+    # timer stopped.
+    trap resume_policy_timer EXIT
     run_root systemctl stop "$TIMER_NAME" >/dev/null 2>&1 || true
     wait_policy_service_idle
 }

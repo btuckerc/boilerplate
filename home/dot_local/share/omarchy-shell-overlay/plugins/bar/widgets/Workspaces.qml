@@ -119,8 +119,10 @@ BarWidget {
   readonly property var liveIds: root.workspaceIds()
   onLiveIdsChanged: if (liveIds.join() !== ids.join()) ids = liveIds
 
+  // Straight to Hyprland's socket: going through bar.run would start a login
+  // shell first, which takes longer than the switch itself.
   function dispatch(expression) {
-    if (root.bar) root.bar.run("hyprctl dispatch " + Util.shellQuote(expression))
+    Hyprland.dispatch(expression)
   }
 
   function focusWorkspace(id) {

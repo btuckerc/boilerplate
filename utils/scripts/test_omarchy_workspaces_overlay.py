@@ -28,6 +28,7 @@ def main() -> int:
     assert "pressScale" not in source, "no scale transform on the mark (it would break pixel alignment)"
     assert "model: root.ids" in source, "marks build from the stable list so they animate rather than rebuild"
     assert "modeProc" not in source, "the unused layout-mode reader is gone"
+    assert "Hyprland.dispatch(expression)" in source and "hyprctl dispatch \" + Util.shellQuote(expression)" not in source, "workspace clicks go straight to the Hyprland socket"
     assert re.search(r"fixedWidth:\s*root.vertical \? root.barSize : 24", source), "24-px slots"
 
     opacity_binding = re.search(r"\bopacity\s*:\s*(.+)", source)

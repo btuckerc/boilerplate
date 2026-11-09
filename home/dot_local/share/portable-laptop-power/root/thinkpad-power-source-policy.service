@@ -2,6 +2,9 @@
 Description=Apply laptop power policy for the current AC state
 After=sysinit.target systemd-modules-load.service NetworkManager.service power-profiles-daemon.service
 ConditionPathExists=/sys/class/power_supply/AC/online
+# udev restarts this on every AC change. A flapping supply must not hit the
+# default 5-starts-per-10-s limit and drop the final state; passes are short.
+StartLimitIntervalSec=0
 
 [Service]
 Type=oneshot

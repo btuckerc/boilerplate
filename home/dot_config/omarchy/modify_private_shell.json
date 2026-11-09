@@ -4,14 +4,27 @@
 # Super+Space), and the Tailscale widget polls every 120 s, not 30 s (it still
 # refreshes on panel open and after actions; power council 2026-11-08).
 # Unchanged input is emitted byte-for-byte; jq keeps every number it does not
-# touch exactly as written. Input that is not JSON passes through unchanged.
+# touch exactly as written.
 set -eu
 tmp=$(mktemp)
 trap 'rm -f "$tmp"' EXIT
 cat >"$tmp"
 # No file yet: leave creation to Omarchy.
 [ -s "$tmp" ] || exit 0
-jq empty "$tmp" 2>/dev/null || { cat "$tmp"; exit 0; }
+# Rewrite only an input jq reads exactly as strict JSON does: one object, no
+# NaN/Infinity, no duplicate keys, no number or string jq would alter. Anything
+# else passes through unchanged.
+strict='
+import json, sys
+from decimal import Decimal
+def reject(value): raise ValueError(value)
+def pairs(items):
+    if len({k for k, _ in items}) != len(items): raise ValueError("duplicate key")
+    return dict(items)
+def load(text): return json.loads(text, parse_float=Decimal, parse_constant=reject, object_pairs_hook=pairs)
+with open(sys.argv[1], encoding="utf-8") as f: before = load(f.read())
+sys.exit(0 if isinstance(before, dict) and before == load(sys.stdin.read()) else 1)'
+jq -c . "$tmp" 2>/dev/null | python3 -c "$strict" "$tmp" 2>/dev/null || { cat "$tmp"; exit 0; }
 filter='
   if type == "object" and (.bar | type) == "object" and (.bar.layout | type) == "object" then
     .bar.layout |= with_entries(

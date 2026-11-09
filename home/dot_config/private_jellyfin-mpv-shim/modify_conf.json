@@ -13,7 +13,7 @@
 # defers to. A missing file starts as just these keys; the shim fills in the
 # rest. Credentials live in users.json, which chezmoi never manages. Unchanged
 # input is emitted byte-for-byte; jq keeps every number it does not touch
-# exactly as written. Input that is not a JSON object passes through unchanged.
+# exactly as written.
 set -eu
 want='{"remote_kbps": 2147483, "check_updates": false, "fullscreen": true}'
 tmp=$(mktemp)
@@ -21,9 +21,23 @@ trap 'rm -f "$tmp"' EXIT
 cat >"$tmp"
 if [ ! -s "$tmp" ]; then
   printf '%s\n' "$want" | jq .
-elif ! jq -e 'type == "object"' "$tmp" >/dev/null 2>&1; then
-  cat "$tmp"
-elif [ "$(jq -c . "$tmp")" = "$(jq -c --argjson w "$want" '. + $w' "$tmp")" ]; then
+  exit 0
+fi
+# Rewrite only an input jq reads exactly as strict JSON does: one object, no
+# NaN/Infinity, no duplicate keys, no number or string jq would alter. Anything
+# else passes through unchanged.
+strict='
+import json, sys
+from decimal import Decimal
+def reject(value): raise ValueError(value)
+def pairs(items):
+    if len({k for k, _ in items}) != len(items): raise ValueError("duplicate key")
+    return dict(items)
+def load(text): return json.loads(text, parse_float=Decimal, parse_constant=reject, object_pairs_hook=pairs)
+with open(sys.argv[1], encoding="utf-8") as f: before = load(f.read())
+sys.exit(0 if isinstance(before, dict) and before == load(sys.stdin.read()) else 1)'
+jq -c . "$tmp" 2>/dev/null | python3 -c "$strict" "$tmp" 2>/dev/null || { cat "$tmp"; exit 0; }
+if [ "$(jq -c . "$tmp")" = "$(jq -c --argjson w "$want" '. + $w' "$tmp")" ]; then
   cat "$tmp"
 else
   jq --argjson w "$want" '. + $w' "$tmp"

@@ -61,25 +61,51 @@ PopupWindow {
     ? Math.max(120, screenH - ((bar && (bar.position === "top" || bar.position === "bottom")) ? barThickness : 0) - root.margin * 2)
     : 0
   readonly property real verticalContentInset: padding * 2 + Border.top(borderSpec) + Border.bottom(borderSpec)
-  readonly property int popoutAnimMs: 280
-  readonly property real popoutMin: Math.max(Style.space(20), barJoin)
-  property real grow: 0
+  // Grow-out-of-bar reveal, as in KeyboardPanel: `extent` is the card's size
+  // away from the bar and always animates from what is on screen. Fixed
+  // durations, since Style.duration is 0 while Hyprland animations are off.
+  readonly property int openMs: 320
+  readonly property int closeMs: 180
+  readonly property int resizeMs: 180
+  readonly property var openCurve: [0.22, 0, 0.25, 1, 1, 1]
+  readonly property var closeCurve: [0.4, 0, 1, 1, 1, 1]
+  readonly property real popoutMin: Math.max(Style.space(20), barJoin * 2 + 2)
   readonly property real popoutFullW: implicitWidth
   readonly property real popoutFullH: implicitHeight
-  readonly property real popoutGrownW: joinAlongX ? popoutFullW : Math.max(popoutMin, popoutFullW * (0.06 + 0.94 * grow))
-  readonly property real popoutGrownH: joinAlongX ? Math.max(popoutMin, popoutFullH * (0.06 + 0.94 * grow)) : popoutFullH
+  readonly property real fullExtent: Math.max(popoutMin, joinAlongX ? popoutFullH : popoutFullW)
+  readonly property real extentTarget: open ? fullExtent : popoutMin
+  property real extent: popoutMin
+  property bool opening: false
+  property real contentReveal: 0
+  readonly property real popoutGrownW: joinAlongX ? popoutFullW : Math.min(popoutFullW, extent)
+  readonly property real popoutGrownH: joinAlongX ? Math.min(popoutFullH, extent) : popoutFullH
 
-  function playGrow(to) {
-    growAnim.stop()
-    if (to === 1)
-      grow = 0
-    Qt.callLater(function() {
-      if ((to === 1 && !root.open) || (to === 0 && root.open))
-        return
-      growAnim.to = to
-      growAnim.start()
-    })
+  function retarget() {
+    extentAnim.stop()
+    var to = extentTarget
+    if (Math.abs(extent - to) < 0.5) {
+      extent = to
+      return
+    }
+    extentAnim.from = extent
+    extentAnim.to = to
+    extentAnim.duration = !open ? closeMs : (opening ? openMs : resizeMs)
+    extentAnim.easing.bezierCurve = !open ? closeCurve : openCurve
+    extentAnim.start()
   }
+
+  function startMotion() {
+    opening = open
+    if (open) openingWindow.restart()
+    else openingWindow.stop()
+    retarget()
+    revealIn.stop()
+    revealOut.stop()
+    if (open) revealIn.start()
+    else revealOut.start()
+  }
+
+  onExtentTargetChanged: retarget()
 
   function fittedContentWidth(width, cap) {
     var desired = Math.max(1, Number(width) || 1)
@@ -121,19 +147,31 @@ PopupWindow {
   implicitHeight: contentHeight + (joinAlongX ? 0 : joinPadStart + joinPadEnd)
 
   onOpenChanged: {
-    playGrow(open ? 1 : 0)
+    startMotion()
     if (!bar) return
     if (open) bar.requestPopout(coordinatorKey)
     else if (bar.activePopout === coordinatorKey) bar.releasePopout(coordinatorKey)
   }
 
   NumberAnimation {
-    id: growAnim
+    id: extentAnim
     target: root
-    property: "grow"
-    duration: root.popoutAnimMs
-    easing.type: Easing.OutCubic
+    property: "extent"
+    easing.type: Easing.Bezier
   }
+
+  Timer {
+    id: openingWindow
+    interval: root.openMs
+    onTriggered: root.opening = false
+  }
+
+  SequentialAnimation {
+    id: revealIn
+    PauseAnimation { duration: 40 }
+    NumberAnimation { target: root; property: "contentReveal"; to: 1; duration: 120 }
+  }
+  NumberAnimation { id: revealOut; target: root; property: "contentReveal"; to: 0; duration: 60 }
 
   // Outside-click dismissal via Hyprland's focus grab. While `active`, input
   // is routed only to the listed windows; clicking anywhere else clears the
@@ -230,7 +268,10 @@ PopupWindow {
     width: root.popoutGrownW
     height: root.popoutGrownH
     clip: true
-    opacity: root.open ? 1.0 : 0
+    // Solid while open; closing, it fades over the last third of its way
+    // back into the bar and reaches 0 as it lands.
+    opacity: root.open ? 1
+      : Math.max(0, Math.min(1, (root.extent - root.popoutMin) / Math.max(1, 0.35 * (root.fullExtent - root.popoutMin))))
 
     HoverHandler {
       id: cardHover
@@ -269,11 +310,8 @@ PopupWindow {
         anchors.rightMargin: card.contentRightInset
         anchors.bottomMargin: card.contentBottomInset
         anchors.leftMargin: card.contentLeftInset
+        opacity: root.contentReveal
       }
-    }
-
-    Behavior on opacity {
-      NumberAnimation { duration: root.popoutAnimMs; easing.type: Easing.OutCubic }
     }
   }
 

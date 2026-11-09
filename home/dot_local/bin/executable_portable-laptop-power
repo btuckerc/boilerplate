@@ -166,6 +166,20 @@ set_config_value() {
     rm -f "$temp_source" "$temp_target"
 }
 
+quiesce_policy_service() {
+    local waited=0
+
+    run_root systemctl stop "$TIMER_NAME" >/dev/null 2>&1 || true
+    while run_root systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; do
+        if (( waited >= 60 )); then
+            echo "Timed out waiting for $SERVICE_NAME to finish." >&2
+            exit 1
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+}
+
 restart_policy_service() {
     require_root_runner
     run_root systemctl daemon-reload
@@ -185,7 +199,7 @@ ensure_config_key() {
 
 # apply keeps an existing /etc config, so changed defaults need a migration.
 migrate_config() {
-    local rev iface
+    local rev
 
     rev="$(read_config_value CONFIG_REV 2>/dev/null || printf '1')"
     [[ "$rev" =~ ^[0-9]+$ ]] || rev=1
@@ -196,15 +210,7 @@ migrate_config() {
         set_config_value BAT_DOWN_UNLINKED_ETHERNET "off"
         set_config_value UNBIND_RTL8111_SIDEBAND "off"
         set_config_value ENABLE_GPP_ASPM_L1 "off"
-        # Undo earlier "ip link down" + "nmcli device disconnect".
-        for iface in /sys/class/net/enp*; do
-            [[ -d "$iface" ]] || continue
-            iface="${iface##*/}"
-            run_root ip link set "$iface" up >/dev/null 2>&1 || true
-            if command -v nmcli >/dev/null 2>&1; then
-                run_root nmcli device set "$iface" autoconnect yes >/dev/null 2>&1 || true
-            fi
-        done
+        # The new policy undoes earlier Ethernet downs once, on its first run.
         set_config_value CONFIG_REV "2"
     fi
 }
@@ -212,8 +218,9 @@ migrate_config() {
 apply_stack() {
     require_root_runner
 
-    # Migrate the config before the new policy is installed: the timer can
-    # fire mid-apply, and the new policy honours flags the old one ignored.
+    # Quiesce the old policy, then migrate the config before the new policy is
+    # installed: the new policy honours flags the old one ignored.
+    quiesce_policy_service
     ensure_config_file
     ensure_config_key AC_RYZENADJ_CO_ALL "-30"
     ensure_config_key BAT_RYZENADJ_CO_ALL "-15"

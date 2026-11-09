@@ -10,8 +10,9 @@ import qs.Ui
 // untouched; omarchy-shell-overlay copies this into the runtime tree. Each
 // workspace is a drawn square, not a glyph: font metrics put a dot glyph off
 // the bar's centre. Shown (this monitor's active workspace) is a 16x8 bar at
-// 1, occupied an 8x8 square at 0.55, empty the same square at 0.3. Sizes are
-// multiples of 4 logical px so edges land on whole pixels at scale 1.25.
+// 1, occupied an 8x8 square at 0.55, empty the same square at 0.3, and a
+// switch morphs between them over 160 ms. Rest sizes are multiples of 4
+// logical px so edges land on whole pixels at scale 1.25.
 // Numbers move to tooltips.
 BarWidget {
   id: root
@@ -29,6 +30,11 @@ BarWidget {
     return screen ? Hyprland.monitorFor(screen) : Hyprland.focusedMonitor
   }
   readonly property string monitorName: root.monitor ? root.monitor.name : ""
+  // Device pixels per logical pixel, so marks can land on whole pixels.
+  readonly property real monitorScale: {
+    var scale = root.monitor && root.monitor.lastIpcObject ? Number(root.monitor.lastIpcObject.scale) : 1
+    return scale > 0 ? scale : 1
+  }
 
   // Connector -> block, from the file Hyprland keeps them in.
   property var blocks: ({})
@@ -106,6 +112,13 @@ BarWidget {
     return ids.concat(guests)
   }
 
+  // The list the marks are built from, replaced only when it really changes:
+  // Hyprland's workspace model refreshes on every switch, and a new array
+  // would rebuild every mark instead of letting the two that change animate.
+  property var ids: []
+  readonly property var liveIds: root.workspaceIds()
+  onLiveIdsChanged: if (liveIds.join() !== ids.join()) ids = liveIds
+
   function dispatch(expression) {
     if (root.bar) root.bar.run("hyprctl dispatch " + Util.shellQuote(expression))
   }
@@ -136,51 +149,6 @@ BarWidget {
     if (target !== ids[index]) root.focusWorkspace(target)
   }
 
-  // The workspace each monitor shows carries its layout: a square tiles, a
-  // circle scrolls, and a triangle floats. Clicking it cycles to the next one,
-  // as Super + L does.
-  property string activeMode: "dwindle"
-  property bool modeStale: false
-
-  function modeGlyph(mode) {
-    if (mode === "scrolling") return "󰝥"
-    if (mode === "floating") return "󰔶"
-    return "󱓻"
-  }
-
-  // A layout only changes through the layout commands, which ask for a refresh,
-  // or a config reload, so each workspace's mode is read once and cached rather
-  // than running the script on every workspace switch.
-  property var modeCache: ({})
-  property int modeGeneration: 0
-  property int modeProcWorkspace: -1
-  property int modeProcGeneration: 0
-
-  function showActiveMode() {
-    var mode = root.modeCache[root.activeWorkspaceId()]
-    if (mode !== undefined) root.activeMode = mode
-    else readMode()
-  }
-
-  function readMode() {
-    if (modeProc.running) {
-      root.modeStale = true
-      return
-    }
-    var id = root.activeWorkspaceId()
-    if (id === -1) return
-    root.modeProcWorkspace = id
-    root.modeProcGeneration = root.modeGeneration
-    modeProc.command = ["omarchy-hyprland-workspace-layout-current", String(id)]
-    modeProc.running = true
-  }
-
-  function refresh() {
-    root.modeCache = ({})
-    root.modeGeneration++
-    readMode()
-  }
-
   // The layout commands act on the focused workspace, so a click on another
   // monitor's bar focuses that monitor first.
   function cycleLayout() {
@@ -192,19 +160,10 @@ BarWidget {
     root.bar.run(command)
   }
 
-  Component.onCompleted: refresh()
-  onMonitorChanged: root.showActiveMode()
-
-  Connections {
-    target: root.monitor
-    function onActiveWorkspaceChanged() { root.showActiveMode() }
-  }
-
   Connections {
     target: Hyprland
     function onRawEvent(event) {
       var name = event ? String(event.name) : ""
-      if (name === "configreloaded") root.refresh()
       // Quickshell credits every workspace switch to the focused monitor, as
       // the event doesn't say which one switched, and misses the workspace a
       // monitor falls back to when its own is moved away. Moving workspaces
@@ -219,31 +178,13 @@ BarWidget {
     }
   }
 
-  Process {
-    id: modeProc
-    stdout: StdioCollector {
-      onStreamFinished: {
-        var mode = text.trim()
-        // A read that started before a refresh may predate the change.
-        if (!mode || root.modeProcGeneration !== root.modeGeneration) return
-        root.modeCache[root.modeProcWorkspace] = mode
-        if (root.modeProcWorkspace === root.activeWorkspaceId()) root.activeMode = mode
-      }
-    }
-    onExited: {
-      if (!root.modeStale) return
-      root.modeStale = false
-      // Deferred: the process still reports running while it signals exit.
-      Qt.callLater(root.showActiveMode)
-    }
-  }
-
-  // Super + L and the default layout change the mode without a focus change,
-  // so they ask every bar to read it again.
+  // Omarchy's layout scripts still call this after Super + L. The marks no
+  // longer show the layout, so there is nothing to read; the target stays so
+  // those calls keep succeeding.
   ShellIpc {
     target: "omarchy.workspaces"
 
-    function refresh(): void { root.broadcast("refresh") }
+    function refresh(): void {}
   }
 
   readonly property real trailingGap: 0
@@ -255,12 +196,12 @@ BarWidget {
     id: grid
     anchors.fill: parent
     anchors.rightMargin: root.trailingGap
-    columns: root.vertical ? 1 : root.workspaceIds().length
+    columns: root.vertical ? 1 : root.ids.length
     columnSpacing: 0
     rowSpacing: root.vertical ? Style.space(2) : 0
 
     Repeater {
-      model: root.workspaceIds()
+      model: root.ids
 
       WidgetButton {
         required property int modelData
@@ -269,7 +210,7 @@ BarWidget {
         readonly property bool occupied: workspace !== null && workspace.toplevels.values.length > 0
         readonly property bool shown: root.monitor !== null && root.monitor.activeWorkspace !== null && root.monitor.activeWorkspace.id === modelData
         readonly property int slot: root.slotOf(modelData)
-        readonly property bool firstGuest: root.blockOf(modelData) !== root.block && index > 0 && root.blockOf(root.workspaceIds()[index - 1]) === root.block
+        readonly property bool firstGuest: root.blockOf(modelData) !== root.block && index > 0 && root.blockOf(root.ids[index - 1]) === root.block
         required property int index
 
         // A gap sets visiting workspaces apart from the monitor's own.
@@ -281,7 +222,6 @@ BarWidget {
         labelVisible: false
         hasVisualContent: true
         tooltipText: "Workspace " + (slot === root.slots ? "0" : String(slot))
-        opacity: shown ? 1 : (occupied ? 0.55 : 0.3)
         fixedWidth: root.vertical ? root.barSize : 24
         fixedHeight: root.vertical ? 24 : root.barSize
         onPressed: function() {
@@ -290,12 +230,28 @@ BarWidget {
         }
         onWheelMoved: function(delta) { root.scrollWorkspaces(delta) }
 
+        // The mark morphs in place: on a switch the old bar shrinks to a
+        // square as the new square stretches into the bar, each from what is
+        // on screen, so quick switches retarget instead of queueing. Its
+        // length snaps to an even number of device pixels and its corner to a
+        // whole one, so it stays sharp and centred at every frame.
         Rectangle {
-          anchors.centerIn: parent
-          width: shown && !root.vertical ? 16 : 8
-          height: shown && root.vertical ? 16 : 8
+          readonly property real dpr: root.monitorScale
+          property real active: shown ? 1 : 0
+          Behavior on active {
+            NumberAnimation { duration: 160; easing.type: Easing.Bezier; easing.bezierCurve: [0.2, 0, 0.2, 1, 1, 1] }
+          }
+          readonly property real span: 2 * Math.round((8 + 8 * active) * dpr / 2) / dpr
+          width: root.vertical ? 8 : span
+          height: root.vertical ? span : 8
+          x: Math.round((parent.width - width) / 2 * dpr) / dpr
+          y: Math.round((parent.height - height) / 2 * dpr) / dpr
+          antialiasing: false
           color: parent.foreground
-          scale: parent.pressScale
+          opacity: shown ? 1 : (occupied ? 0.55 : 0.3)
+          Behavior on opacity {
+            NumberAnimation { duration: 160; easing.type: Easing.Bezier; easing.bezierCurve: [0.2, 0, 0.2, 1, 1, 1] }
+          }
         }
       }
     }

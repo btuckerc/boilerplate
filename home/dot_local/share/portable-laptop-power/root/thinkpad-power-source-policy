@@ -322,6 +322,28 @@ apply_vm_power_tweaks() {
 
 
 readonly ETHERNET_DOWN_STATE_DIR="/run/portable-laptop-power/ethernet-down"
+readonly ETHERNET_RECOVERED_MARKER="/var/lib/portable-laptop-power/ethernet-recovered-rev2"
+
+# Policies before rev 2 downed Ethernet ports and ran "nmcli device
+# disconnect", which also blocks autoconnect, and left no marker. Undo that
+# once, from the new policy, so no old run can redo it afterwards.
+recover_legacy_ethernet_downs() {
+    local iface_path iface
+
+    [[ ! -e "$ETHERNET_RECOVERED_MARKER" ]] || return 0
+    [[ "${BAT_DOWN_UNLINKED_ETHERNET:-off}" != "on" ]] || return 0
+
+    for iface_path in /sys/class/net/enp*; do
+        [[ -d "$iface_path" ]] || continue
+        iface="$(basename "$iface_path")"
+        ip link set "$iface" up >/dev/null 2>&1 || log_warn "unable to restore ethernet $iface"
+        if command -v nmcli >/dev/null 2>&1; then
+            nmcli device set "$iface" autoconnect yes >/dev/null 2>&1 || true
+        fi
+    done
+    { mkdir -p "${ETHERNET_RECOVERED_MARKER%/*}" && : >"$ETHERNET_RECOVERED_MARKER"; } 2>/dev/null ||
+        log_warn "unable to write $ETHERNET_RECOVERED_MARKER"
+}
 
 # Bring back only the interfaces this script took down. Leave the rest to
 # NetworkManager and the user.
@@ -356,7 +378,8 @@ apply_unlinked_ethernet() {
         carrier="$(read_sysfs "$iface_path/carrier")"
         [[ "$carrier" == "0" ]] || continue
         if ip link set "$iface" down >/dev/null 2>&1; then
-            mkdir -p "$ETHERNET_DOWN_STATE_DIR" && : >"$ETHERNET_DOWN_STATE_DIR/$iface"
+            { mkdir -p "$ETHERNET_DOWN_STATE_DIR" && : >"$ETHERNET_DOWN_STATE_DIR/$iface"; } 2>/dev/null ||
+                log_warn "unable to record ethernet $iface as downed"
         else
             log_warn "unable to down unused ethernet $iface"
         fi
@@ -468,16 +491,15 @@ apply_runtime_pm
 unbind_rtl8111_sideband
 enable_gpp_aspm_l1
 apply_vm_power_tweaks
+recover_legacy_ethernet_downs
 apply_unlinked_ethernet
 apply_battery_thresholds
 stop_idle_socket_activated_services_on_battery
 apply_curve_optimizer
 
 # The AC state can flip while this run is in progress; a start request queued
-# during the run merges into it. Re-run while the state changed, up to 5 passes
-# (the 5-minute timer covers anything beyond that).
-rerun="${PORTABLE_LAPTOP_POWER_RERUN:-0}"
-[[ "$rerun" =~ ^[0-9]+$ ]] || rerun=0
-if (( rerun < 4 )) && [[ "$(read_sysfs "$AC_ONLINE_PATH")" != "$ac_online" ]]; then
-    PORTABLE_LAPTOP_POWER_RERUN="$((rerun + 1))" exec "$0"
+# during the run merges into it. Re-run until a pass ends in the state it
+# applied. TimeoutStartSec bounds a supply that keeps flapping.
+if [[ "$(read_sysfs "$AC_ONLINE_PATH")" != "$ac_online" ]]; then
+    exec "$0"
 fi

@@ -55,26 +55,11 @@ PanelWindow {
   property int contentWidth: Style.space(280)
   property int contentHeight: Style.space(200)
 
-  // The card's height on screen. Content that arrives after the panel is up
-  // (a Wi-Fi scan, Bluetooth devices turning up) grows the card toward it
-  // rather than snapping it taller, cropping the new rows as it goes. Just
-  // after opening it snaps, while freshly built content first measures itself.
+  // The card's full height. What is on screen is `extent` below, which
+  // follows this from wherever it is, so content that arrives after the panel
+  // is up (a Wi-Fi scan, Bluetooth devices turning up) bends the motion rather
+  // than snapping the card taller.
   property real drawnHeight: contentHeight
-  property bool heightLive: false
-  Behavior on drawnHeight {
-    enabled: root.heightLive && root.morph >= 1
-    NumberAnimation {
-      duration: Style.duration(200)
-      easing.type: Easing.Bezier
-      easing.bezierCurve: Style.easeOut
-    }
-  }
-
-  Timer {
-    id: heightSettle
-    interval: 60
-    onTriggered: root.heightLive = root.open
-  }
   property var borderSpec: Border.none()
   property bool centerOnBar: false
   property bool open: false
@@ -129,40 +114,73 @@ PanelWindow {
   readonly property int joinPadStart: joinStart ? barJoin : 0
   readonly property int joinPadEnd: joinEnd ? barJoin : 0
 
-  // Grow-out-of-bar reveal: 0 is a sliver at the bar, 1 the whole card. A
-  // switch between panels morphs instead, so it snaps there.
-  readonly property int popoutAnimMs: 280
-  readonly property real popoutMin: Math.max(Style.space(20), barJoin)
+  // Grow-out-of-bar reveal. `extent` is the card's size away from the bar,
+  // from a sliver at the bar (popoutMin) to the whole card, and always
+  // animates from what is on screen: a reopen mid-close resumes, and content
+  // that lands mid-grow retargets instead of jumping. The durations are fixed
+  // because Style.duration is 0 while Hyprland animations are off, which keeps
+  // windows instant; only this card, its content fade and the workspace marks
+  // move. A switch between panels morphs instead, so it snaps there.
+  // popoutMin leaves room for both ears at full size from the first frame.
+  readonly property int openMs: 320
+  readonly property int closeMs: 180
+  readonly property int resizeMs: 180
+  readonly property var openCurve: [0.22, 0, 0.25, 1, 1, 1]
+  readonly property var closeCurve: [0.4, 0, 1, 1, 1, 1]
+  readonly property real popoutMin: Math.max(Style.space(20), barJoin * 2 + 2)
   readonly property bool popoutMotionFrozen: popoutSwitching || popoutSwitchClosing || takingOver
-  property real grow: 0
+  readonly property real fullExtent: Math.max(popoutMin, joinAlongX ? drawnHeight : contentWidth)
+  readonly property real extentTarget: open || popoutSwitching ? fullExtent : popoutMin
+  property real extent: popoutMin
+  property bool opening: false
+  property real contentReveal: 0
 
-  function playGrow(to) {
-    growAnim.stop()
-    if (popoutMotionFrozen) {
-      grow = to
+  function retarget() {
+    extentAnim.stop()
+    var to = extentTarget
+    if (popoutMotionFrozen || Math.abs(extent - to) < 0.5) {
+      extent = to
       return
     }
-    if (to === 1)
-      grow = 0
-    Qt.callLater(function() {
-      if (root.popoutMotionFrozen) {
-        root.grow = to
-        return
-      }
-      if ((to === 1 && !root.open) || (to === 0 && root.open))
-        return
-      growAnim.to = to
-      growAnim.start()
-    })
+    var closing = !open && !popoutSwitching
+    extentAnim.from = extent
+    extentAnim.to = to
+    extentAnim.duration = closing ? closeMs : (opening ? openMs : resizeMs)
+    extentAnim.easing.bezierCurve = closing ? closeCurve : openCurve
+    extentAnim.start()
   }
 
-  NumberAnimation {
-    id: growAnim
-    target: root
-    property: "grow"
-    duration: root.popoutAnimMs
-    easing.type: Easing.OutCubic
+  function revealContent(show) {
+    revealIn.stop()
+    revealOut.stop()
+    if (popoutMotionFrozen) contentReveal = show ? 1 : 0
+    else if (show) revealIn.start()
+    else revealOut.start()
   }
+
+  onExtentTargetChanged: retarget()
+  onPopoutMotionFrozenChanged: if (popoutMotionFrozen) retarget()
+
+  NumberAnimation {
+    id: extentAnim
+    target: root
+    property: "extent"
+    easing.type: Easing.Bezier
+  }
+
+  Timer {
+    id: openingWindow
+    interval: root.openMs
+    onTriggered: root.opening = false
+  }
+
+  // Content fades in once the card is under way and out at once on close.
+  SequentialAnimation {
+    id: revealIn
+    PauseAnimation { duration: 40 }
+    NumberAnimation { target: root; property: "contentReveal"; to: 1; duration: 120 }
+  }
+  NumberAnimation { id: revealOut; target: root; property: "contentReveal"; to: 0; duration: 60 }
 
   function close() {
     if (owner && "close" in owner) owner.close()
@@ -215,9 +233,11 @@ PanelWindow {
   // forwarded to registered bar buttons so switching between panel icons
   // works in one click even when the overlay surface is above the bar.
   readonly property real _barStripSize: bar ? barThickness + gap : 0
+  // Empty once logically closed, so the closing card never takes a click
+  // meant for the windows behind it.
   mask: Region {
-    width: root.screenW
-    height: root.screenH
+    width: root.open ? root.screenW : 0
+    height: root.open ? root.screenH : 0
   }
 
   // Track every layout change between the bar's contentItem and the
@@ -346,9 +366,7 @@ PanelWindow {
   // Coordinate on `open`, not `visible`. `visible` lags into the fade-out
   // animation, which made ownership transfer to a sibling popup race.
   onOpenChanged: {
-    heightLive = false
     if (open) {
-      heightSettle.restart()
       if (content) contentRequested = true
       focusPrimed = false
       beginFocusPrime()
@@ -360,7 +378,7 @@ PanelWindow {
       focusPrimed = false
     }
     if (!bar) {
-      playGrow(open ? 1 : 0)
+      startMotion()
       return
     }
     if (open) {
@@ -376,7 +394,15 @@ PanelWindow {
       if (bar.activePopout === coordinatorKey) bar.releasePopout(coordinatorKey)
       if (popoutSwitchClosing) closeSwitchTimer.restart()
     }
-    playGrow(open ? 1 : 0)
+    startMotion()
+  }
+
+  function startMotion() {
+    opening = open
+    if (open) openingWindow.restart()
+    else openingWindow.stop()
+    retarget()
+    revealContent(open)
   }
 
   Timer {
@@ -602,36 +628,22 @@ PanelWindow {
     id: card
     readonly property real fullW: root.morphed(root.morphFrom.width, root.contentWidth)
     readonly property real fullH: root.morphed(root.morphFrom.height, root.drawnHeight)
-    readonly property real reveal: 0.06 + 0.94 * root.grow
     x: root.morphed(root.morphFrom.x, root.cardOrigin.x) + (root.barPos === "right" ? fullW - width : 0)
     y: root.morphed(root.morphFrom.y, root.cardOrigin.y) + (root.barPos === "bottom" ? fullH - height : 0)
-    width: root.joinAlongX || root.grow >= 1 ? fullW : Math.max(root.popoutMin, fullW * reveal)
-    height: !root.joinAlongX || root.grow >= 1 ? fullH : Math.max(root.popoutMin, fullH * reveal)
+    width: root.joinAlongX ? fullW : Math.min(fullW, root.extent)
+    height: !root.joinAlongX ? fullH : Math.min(fullH, root.extent)
     // While it morphs, grows or reveals, the content keeps its own size and
     // the card crops it.
-    clip: root.morph < 1 || root.grow < 1 || root.drawnHeight < root.contentHeight - 0.5
+    clip: root.morph < 1 || root.extent < root.fullExtent - 0.5
     color: "transparent"
     borderSpec: root.borderSpec
     padding: root.padding
     radius: Style.cornerRadius
 
-    // The card fades in as it grows out of the bar from just under full size,
-    // toward the icon it hangs from, and goes in two thirds of the time. On a
-    // switch within a section of the bar it doesn't: the card morphs over from
-    // the last one.
-    property real shown: root.open || root.popoutSwitching ? 1 : 0
-    Behavior on shown {
-      id: showing
-      // The card giving way on a switch still fades out, briefly over the one
-      // taking its place, so there's no empty frame while that one maps.
-      enabled: !root.takingOver && !(root.popoutSwitching && root.morph < 1)
-      NumberAnimation {
-        duration: Style.duration(showing.targetValue > 0 ? 180 : 120)
-        easing.type: Easing.Bezier
-        easing.bezierCurve: Style.easeOut
-      }
-    }
-    opacity: shown
+    // Solid while open. Closing, it fades over the last third of its way back
+    // into the bar and reaches 0 as it lands, which unmaps the surface.
+    opacity: root.open || root.popoutSwitching ? 1
+      : Math.max(0, Math.min(1, (root.extent - root.popoutMin) / Math.max(1, 0.35 * (root.fullExtent - root.popoutMin))))
 
     // Swallow clicks on the card so they don't bubble to the dismissal
     // MouseArea behind us.
@@ -652,8 +664,9 @@ PanelWindow {
       LayoutMirroring.childrenInherit: true
       anchors.topMargin: card.contentTopInset + (root.barPos === "bottom" ? card.height - card.fullH : 0)
       anchors.leftMargin: card.contentLeftInset + (root.barPos === "right" ? card.width - card.fullW : 0)
-      // Fades in with the morph, done by the time the card has mostly landed.
-      opacity: Math.min(1, root.morph * 1.6)
+      // Fades in with the morph, done by the time the card has mostly landed,
+      // and with the reveal as the card grows.
+      opacity: Math.min(1, root.morph * 1.6) * root.contentReveal
 
       Loader {
         id: contentLoader

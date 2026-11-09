@@ -3,6 +3,6 @@
 # than run it inline: system-sleep hooks block resume completion.
 case "$1" in
     post)
-        /usr/bin/systemctl --no-block start thinkpad-power-source-policy.service
+        /usr/bin/systemctl --no-block restart thinkpad-power-source-policy.service
         ;;
 esac

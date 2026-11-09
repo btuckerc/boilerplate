@@ -1,3 +1,4 @@
 # SYSTEMD_WANTS only acts when the device first becomes active, not on every
-# change event, so queue the oneshot on each Mains change instead.
-ACTION=="change", SUBSYSTEM=="power_supply", ATTR{type}=="Mains", RUN+="/usr/bin/systemctl --no-block start thinkpad-power-source-policy.service"
+# change event. "start" would merge into a pass already running and could be
+# lost, so restart: the policy is idempotent and starts over from the new state.
+ACTION=="change", SUBSYSTEM=="power_supply", ATTR{type}=="Mains", RUN+="/usr/bin/systemctl --no-block restart thinkpad-power-source-policy.service"

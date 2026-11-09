@@ -360,7 +360,11 @@ restore_downed_ethernet() {
         [[ -e "$marker" ]] || continue
         iface="${marker##*/}"
         if [[ -d "/sys/class/net/$iface" ]]; then
-            ip link set "$iface" up >/dev/null 2>&1 || log_warn "unable to restore ethernet $iface"
+            if ! ip link set "$iface" up >/dev/null 2>&1; then
+                # Keep the marker so the next pass retries.
+                log_warn "unable to restore ethernet $iface"
+                continue
+            fi
         fi
         rm -f "$marker"
     done
@@ -503,9 +507,9 @@ apply_battery_thresholds
 stop_idle_socket_activated_services_on_battery
 apply_curve_optimizer
 
-# The AC state can flip while this run is in progress; a start request queued
-# during the run merges into it. Re-run until a pass ends in the state it
-# applied. TimeoutStartSec bounds a supply that keeps flapping.
+# udev and the resume hook restart this unit, so a later AC change starts a
+# fresh pass. Also re-run here until a pass ends in the state it applied (covers
+# the timer path). TimeoutStartSec bounds a supply that keeps flapping.
 if [[ "$(read_sysfs "$AC_ONLINE_PATH")" != "$ac_online" ]]; then
     exec "$0"
 fi

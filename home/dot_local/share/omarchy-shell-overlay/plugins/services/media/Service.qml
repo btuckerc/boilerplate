@@ -435,8 +435,8 @@ Item {
   // volume and OSD. That script resolves a DSP sink through to the physical
   // sink it feeds on every press, from the live routing. An ALSA sink is its
   // own physical sink. A DSP sink, such as a speaker tuning, plays into the
-  // ALSA sink its output stream targets, so the keys act on that one here too;
-  // anything else falls back to the script.
+  // ALSA sink its playback stream targets, so the keys act on that one here
+  // too; anything else, a capture stream included, falls back to the script.
   readonly property var defaultSink: Pipewire.defaultAudioSink
   readonly property bool defaultIsAlsa: defaultSink !== null && String(defaultSink.name).indexOf("alsa_output.") === 0
   readonly property var dspStream: {
@@ -445,13 +445,16 @@ Item {
     var nodes = Pipewire.nodes.values
     for (var i = 0; i < nodes.length; i++) {
       var n = nodes[i]
-      if (n && n.isStream && String(n.name).indexOf(name) === 0) return n
+      // Quickshell marks a playback stream as a sink: it feeds one.
+      if (n && n.isStream && n.isSink && String(n.name).indexOf(name) === 0) return n
     }
     return null
   }
   readonly property var volumeSink: {
     if (defaultIsAlsa) return defaultSink
-    var target = dspStream && dspStream.properties ? String(dspStream.properties["target.object"] || "") : ""
+    var props = dspStream ? dspStream.properties : null
+    if (!props || props["media.class"] !== "Stream/Output/Audio") return null
+    var target = String(props["target.object"] || "")
     if (target.indexOf("alsa_output.") !== 0) return null
     var nodes = Pipewire.nodes.values
     for (var i = 0; i < nodes.length; i++) {

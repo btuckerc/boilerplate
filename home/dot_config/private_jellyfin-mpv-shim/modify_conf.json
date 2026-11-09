@@ -1,29 +1,30 @@
-{{- /* chezmoi:modify-template */ -}}
-{{- /* Jellyfin MPV Shim rewrites conf.json itself (every setting, plus window
-     size and track memory), so own only what it would otherwise get wrong here
-     (media-viewer council 2026-11-09):
-     - remote_kbps = local_kbps: the shim treats the server's Tailscale address
-       (100.64/10, not "private") as remote and would cap it at 10 Mbps, which
-       transcodes the top of a library that otherwise direct-plays. Deciding
-       local vs remote also makes it fetch checkip.amazonaws.com once per
-       item; that is the shim's own behaviour and no setting avoids it.
-     - check_updates false: pacman owns updates.
-     - fullscreen true: playback opens fullscreen; the browser stays windowed.
-     Hardware decoding is pinned in mpv.conf beside this file, which the shim
-     defers to. A missing file starts as just these keys; the shim fills in the
-     rest. Credentials live in users.json, which chezmoi never manages. */ -}}
-{{- $want := dict "remote_kbps" 2147483 "check_updates" false "fullscreen" true -}}
-{{- if not .chezmoi.stdin -}}
-{{ $want | toPrettyJson }}
-{{- else -}}
-{{- $config := .chezmoi.stdin | fromJson -}}
-{{- $before := $config | toJson -}}
-{{- range $k, $v := $want -}}
-{{- $_ := set $config $k $v -}}
-{{- end -}}
-{{- if eq $before ($config | toJson) -}}
-{{ .chezmoi.stdin }}
-{{- else -}}
-{{ $config | toPrettyJson }}
-{{- end -}}
-{{- end -}}
+#!/bin/sh
+# Jellyfin MPV Shim rewrites conf.json itself (every setting, plus window size
+# and track memory), so own only what it would otherwise get wrong here
+# (media-viewer council 2026-11-09):
+# - remote_kbps = local_kbps: the shim treats the server's Tailscale address
+#   (100.64/10, not "private") as remote and would cap it at 10 Mbps, which
+#   transcodes the top of a library that otherwise direct-plays. Deciding local
+#   vs remote also makes it fetch checkip.amazonaws.com once per item; that is
+#   the shim's own behaviour and no setting avoids it.
+# - check_updates false: pacman owns updates.
+# - fullscreen true: playback opens fullscreen; the browser stays windowed.
+# Hardware decoding is pinned in mpv.conf beside this file, which the shim
+# defers to. A missing file starts as just these keys; the shim fills in the
+# rest. Credentials live in users.json, which chezmoi never manages. Unchanged
+# input is emitted byte-for-byte; jq keeps every number it does not touch
+# exactly as written. Input that is not a JSON object passes through unchanged.
+set -eu
+want='{"remote_kbps": 2147483, "check_updates": false, "fullscreen": true}'
+tmp=$(mktemp)
+trap 'rm -f "$tmp"' EXIT
+cat >"$tmp"
+if [ ! -s "$tmp" ]; then
+  printf '%s\n' "$want" | jq .
+elif ! jq -e 'type == "object"' "$tmp" >/dev/null 2>&1; then
+  cat "$tmp"
+elif [ "$(jq -c . "$tmp")" = "$(jq -c --argjson w "$want" '. + $w' "$tmp")" ]; then
+  cat "$tmp"
+else
+  jq --argjson w "$want" '. + $w' "$tmp"
+fi

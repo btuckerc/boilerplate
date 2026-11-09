@@ -1,33 +1,29 @@
-{{- /* chezmoi:modify-template */ -}}
-{{- /* The shell rewrites this file itself (bar edits, provider toggles, idle),
-     so own two facts only: no omarchy.menu button on the bar (the menu stays on
-     Super+Space), and the Tailscale widget polls every 120 s, not 30 s (it still
-     refreshes on panel open and after actions; power council 2026-11-08).
-     Unchanged input is emitted byte-for-byte. */ -}}
-{{- if not .chezmoi.stdin -}}
-{{- /* No file yet: leave creation to Omarchy. */ -}}
-{{- else -}}
-{{- $config := .chezmoi.stdin | fromJson -}}
-{{- $before := $config | toJson -}}
-{{- $bar := get $config "bar" | default dict -}}
-{{- $layout := get $bar "layout" | default dict -}}
-{{- range $section, $entries := $layout -}}
-{{- if kindIs "slice" $entries -}}
-{{- $kept := list -}}
-{{- range $entries -}}
-{{- if not (and (kindIs "map" .) (eq (get . "id") "omarchy.menu")) -}}
-{{- if and (kindIs "map" .) (eq (get . "id") "omarchy.tailscale") (not (hasKey . "refreshIntervalSec")) -}}
-{{- $_ := set . "refreshIntervalSec" 120 -}}
-{{- end -}}
-{{- $kept = append $kept . -}}
-{{- end -}}
-{{- end -}}
-{{- $_ := set $layout $section $kept -}}
-{{- end -}}
-{{- end -}}
-{{- if eq $before ($config | toJson) -}}
-{{ .chezmoi.stdin }}
-{{- else -}}
-{{ $config | toPrettyJson }}
-{{ end -}}
-{{- end -}}
+#!/bin/sh
+# The shell rewrites this file itself (bar edits, provider toggles, idle), so own
+# two facts only: no omarchy.menu button on the bar (the menu stays on
+# Super+Space), and the Tailscale widget polls every 120 s, not 30 s (it still
+# refreshes on panel open and after actions; power council 2026-11-08).
+# Unchanged input is emitted byte-for-byte; jq keeps every number it does not
+# touch exactly as written. Input that is not JSON passes through unchanged.
+set -eu
+tmp=$(mktemp)
+trap 'rm -f "$tmp"' EXIT
+cat >"$tmp"
+# No file yet: leave creation to Omarchy.
+[ -s "$tmp" ] || exit 0
+jq empty "$tmp" 2>/dev/null || { cat "$tmp"; exit 0; }
+filter='
+  if type == "object" and (.bar | type) == "object" and (.bar.layout | type) == "object" then
+    .bar.layout |= with_entries(
+      if (.value | type) == "array" then
+        .value |= map(
+          select(((type == "object") and .id == "omarchy.menu") | not)
+          | if type == "object" and .id == "omarchy.tailscale" and (has("refreshIntervalSec") | not)
+            then .refreshIntervalSec = 120 else . end)
+      else . end)
+  else . end'
+if [ "$(jq -c . "$tmp")" = "$(jq -c "$filter" "$tmp")" ]; then
+  cat "$tmp"
+else
+  jq "$filter" "$tmp"
+fi

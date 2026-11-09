@@ -58,8 +58,15 @@ PanelWindow {
   // The card's full height. What is on screen is `extent` below, which
   // follows this from wherever it is, so content that arrives after the panel
   // is up (a Wi-Fi scan, Bluetooth devices turning up) bends the motion rather
-  // than snapping the card taller.
+  // than snapping the card taller. It follows the content only while open,
+  // and a tick late: panels empty their lists the moment they close (audio
+  // clears its rows), in the same event as `open` turning false, and the card
+  // must shrink from the size it was shown at, not collapse under it.
   property real drawnHeight: contentHeight
+  onContentHeightChanged: Qt.callLater(root.followContentHeight)
+  function followContentHeight() {
+    if (root.open) root.drawnHeight = root.contentHeight
+  }
   property var borderSpec: Border.none()
   property bool centerOnBar: false
   property bool open: false
@@ -174,13 +181,14 @@ PanelWindow {
     onTriggered: root.opening = false
   }
 
-  // Content fades in once the card is under way and out at once on close.
+  // Content fades in once the card is under way. On close it goes at once:
+  // panels clear their lists as they close, and a fade would show that.
   SequentialAnimation {
     id: revealIn
     PauseAnimation { duration: 40 }
     NumberAnimation { target: root; property: "contentReveal"; to: 1; duration: 120 }
   }
-  NumberAnimation { id: revealOut; target: root; property: "contentReveal"; to: 0; duration: 60 }
+  NumberAnimation { id: revealOut; target: root; property: "contentReveal"; to: 0; duration: 0 }
 
   function close() {
     if (owner && "close" in owner) owner.close()
@@ -367,6 +375,7 @@ PanelWindow {
   // animation, which made ownership transfer to a sibling popup race.
   onOpenChanged: {
     if (open) {
+      drawnHeight = contentHeight
       if (content) contentRequested = true
       focusPrimed = false
       beginFocusPrime()
@@ -634,7 +643,7 @@ PanelWindow {
     height: !root.joinAlongX ? fullH : Math.min(fullH, root.extent)
     // While it morphs, grows or reveals, the content keeps its own size and
     // the card crops it.
-    clip: root.morph < 1 || root.extent < root.fullExtent - 0.5
+    clip: root.morph < 1 || root.extent < root.fullExtent - 0.5 || root.drawnHeight < root.contentHeight - 0.5
     color: "transparent"
     borderSpec: root.borderSpec
     padding: root.padding

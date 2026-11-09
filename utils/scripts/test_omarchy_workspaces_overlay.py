@@ -20,12 +20,14 @@ def main() -> int:
     assert re.search(r"\btext\s*:\s*\"\"", source), "the button carries no text"
     assert re.search(r"\blabelVisible\s*:\s*false", source), "the label stays hidden"
     assert re.search(r"\bhasVisualContent\s*:\s*true", source), "an empty text must not hide the button"
-    mark = re.search(r"Rectangle\s*\{(.*?)\n\s*\}", source, re.S)
-    assert mark, "each workspace draws a Rectangle mark"
-    body = mark.group(1)
-    assert "anchors.centerIn: parent" in body, "the mark is centred by geometry"
-    assert re.search(r"width:\s*shown && !root.vertical \? 16 : 8", body), "shown is a 16-px bar, others 8"
-    assert re.search(r"height:\s*shown && root.vertical \? 16 : 8", body), "marks are 8 px thick"
+    assert "Rectangle {" in source, "each workspace draws a Rectangle mark"
+    assert re.search(r"property real active:\s*shown \? 1 : 0", source), "the mark morphs between square (0) and bar (1)"
+    assert re.search(r"Behavior on active", source) and re.search(r"Behavior on opacity", source), "length and opacity animate"
+    assert "2 * Math.round((8 + 8 * active) * dpr / 2) / dpr" in source, "length snaps to an even number of device pixels"
+    assert "antialiasing: false" in source, "edges stay hard on whole pixels"
+    assert "pressScale" not in source, "no scale transform on the mark (it would break pixel alignment)"
+    assert "model: root.ids" in source, "marks build from the stable list so they animate rather than rebuild"
+    assert "modeProc" not in source, "the unused layout-mode reader is gone"
     assert re.search(r"fixedWidth:\s*root.vertical \? root.barSize : 24", source), "24-px slots"
 
     opacity_binding = re.search(r"\bopacity\s*:\s*(.+)", source)

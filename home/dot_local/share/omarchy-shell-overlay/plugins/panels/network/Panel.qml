@@ -322,9 +322,19 @@ Panel {
 
   // KeyboardPanel primes layer-shell focus whenever the panel opens. That's
   // what makes the SUPER+CTRL+W keybind land here with navigation ready.
+  // The refresh waits for the card to finish growing (KeyboardPanel's 320 ms
+  // open): it starts processes and a rescan whose answers rebuild rows, and
+  // doing that mid-grow stalled the motion for about 100 ms. The card opens on
+  // the last-known list and updates right after.
+  Timer {
+    id: openRefresh
+    interval: 340
+    onTriggered: if (root.opened) root.refresh(true)
+  }
+
   onOpenedChanged: {
     if (opened) {
-      refresh(true)
+      openRefresh.restart()
       selectedIndex = wifiNetworks.length > 0 ? 0 : -1
       wifiActionFocused = false
       focusSection = hasCaptivePortal ? "portal" : (wifiNetworks.length > 0 ? "wifi" : "dns")
@@ -333,6 +343,7 @@ Panel {
       syncBandIndex()
       cursorActive = hasCaptivePortal
     } else {
+      openRefresh.stop()
       // Drop a restart armed by this open: without it a close/reopen inside
       // the 100ms window reuses the running timer and re-enables the scanner
       // almost immediately, undoing the deferral #6605 restored.

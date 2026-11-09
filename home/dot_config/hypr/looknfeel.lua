@@ -47,8 +47,10 @@ hl.workspace_rule({
 	border_size = 2,
 })
 
--- Make windows carrying Omarchy's default-opacity tag fully opaque.
-o.window({ tag = "default-opacity" }, {
+-- Make windows Omarchy marks translucent fully opaque. Omarchy 4.5 renamed
+-- the tag from default-opacity to transparent-window; the old name matched
+-- nothing, so terminals drew the wallpaper through at 0.985/0.96.
+o.window({ tag = "transparent-window" }, {
 	opacity = "1.0 override 1.0 override",
 })
 

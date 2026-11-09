@@ -12,4 +12,7 @@ ExecStart=/usr/local/libexec/thinkpad-power-source-policy
 TimeoutStartSec=60s
 
 [Install]
-WantedBy=multi-user.target
+# Omarchy orders power-profiles-daemon after multi-user.target, and this unit
+# runs after the daemon. Hanging it off multi-user.target made an ordering
+# cycle that systemd broke by dropping the daemon's boot start job.
+WantedBy=graphical.target

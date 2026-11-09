@@ -202,7 +202,9 @@ restart_policy_service() {
     require_root_runner
     run_root systemctl daemon-reload
     run_root udevadm control --reload
-    run_root systemctl enable "$SERVICE_NAME" "$TIMER_NAME" >/dev/null
+    # reenable drops the old multi-user.target.wants link when [Install] moves.
+    run_root systemctl reenable "$SERVICE_NAME" >/dev/null
+    run_root systemctl enable "$TIMER_NAME" >/dev/null
     # A pass that began before the install would absorb this start request.
     wait_policy_service_idle
     run_root systemctl start "$SERVICE_NAME" "$TIMER_NAME"

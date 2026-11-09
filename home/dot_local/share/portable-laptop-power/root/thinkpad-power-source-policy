@@ -63,7 +63,7 @@ read_sysfs() {
 write_value_if_needed() {
     local path="$1"
     local target="$2"
-    local current
+    local current=""
 
     [[ -e "$path" ]] || return 0
     [[ -w "$path" ]] || return 0
@@ -474,7 +474,10 @@ stop_idle_socket_activated_services_on_battery
 apply_curve_optimizer
 
 # The AC state can flip while this run is in progress; a start request queued
-# during the run merges into it. Re-run once if the state changed.
-if [[ -z "${PORTABLE_LAPTOP_POWER_RERUN:-}" ]] && [[ "$(read_sysfs "$AC_ONLINE_PATH")" != "$ac_online" ]]; then
-    PORTABLE_LAPTOP_POWER_RERUN=1 exec "$0"
+# during the run merges into it. Re-run while the state changed, up to 5 passes
+# (the 5-minute timer covers anything beyond that).
+rerun="${PORTABLE_LAPTOP_POWER_RERUN:-0}"
+[[ "$rerun" =~ ^[0-9]+$ ]] || rerun=0
+if (( rerun < 4 )) && [[ "$(read_sysfs "$AC_ONLINE_PATH")" != "$ac_online" ]]; then
+    PORTABLE_LAPTOP_POWER_RERUN="$((rerun + 1))" exec "$0"
 fi

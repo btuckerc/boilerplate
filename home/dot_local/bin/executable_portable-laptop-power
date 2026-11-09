@@ -212,17 +212,8 @@ migrate_config() {
 apply_stack() {
     require_root_runner
 
-    install_managed_file 0755 "$POLICY_SOURCE_PATH" "$POLICY_PATH"
-    install_managed_file 0644 "$SERVICE_SOURCE_PATH" "$SERVICE_PATH"
-    install_managed_file 0644 "$TIMER_SOURCE_PATH" "$TIMER_PATH"
-    install_managed_file 0644 "$UDEV_RULE_SOURCE_PATH" "$UDEV_RULE_PATH"
-    install_managed_file 0644 "$LOGIND_DROPIN_SOURCE_PATH" "$LOGIND_DROPIN_PATH"
-    install_managed_file 0644 "$SLEEP_DROPIN_SOURCE_PATH" "$SLEEP_DROPIN_PATH"
-    install_managed_file 0755 "$SLEEP_HOOK_SOURCE_PATH" "$SLEEP_HOOK_PATH"
-    install_managed_file 0644 "$MODULES_LOAD_SOURCE_PATH" "$MODULES_LOAD_PATH"
-    install_managed_file 0644 "$CMDLINE_SOURCE_PATH" "$CMDLINE_PATH"
-    install_managed_file 0644 "$IWLWIFI_SOURCE_PATH" "$IWLWIFI_PATH"
-
+    # Migrate the config before the new policy is installed: the timer can
+    # fire mid-apply, and the new policy honours flags the old one ignored.
     ensure_config_file
     ensure_config_key AC_RYZENADJ_CO_ALL "-30"
     ensure_config_key BAT_RYZENADJ_CO_ALL "-15"
@@ -243,6 +234,17 @@ apply_stack() {
     ensure_config_key AC_DIRTY_WRITEBACK_CENTISECS "1500"
     ensure_config_key BAT_DIRTY_WRITEBACK_CENTISECS "6000"
     migrate_config
+
+    install_managed_file 0755 "$POLICY_SOURCE_PATH" "$POLICY_PATH"
+    install_managed_file 0644 "$SERVICE_SOURCE_PATH" "$SERVICE_PATH"
+    install_managed_file 0644 "$TIMER_SOURCE_PATH" "$TIMER_PATH"
+    install_managed_file 0644 "$UDEV_RULE_SOURCE_PATH" "$UDEV_RULE_PATH"
+    install_managed_file 0644 "$LOGIND_DROPIN_SOURCE_PATH" "$LOGIND_DROPIN_PATH"
+    install_managed_file 0644 "$SLEEP_DROPIN_SOURCE_PATH" "$SLEEP_DROPIN_PATH"
+    install_managed_file 0755 "$SLEEP_HOOK_SOURCE_PATH" "$SLEEP_HOOK_PATH"
+    install_managed_file 0644 "$MODULES_LOAD_SOURCE_PATH" "$MODULES_LOAD_PATH"
+    install_managed_file 0644 "$CMDLINE_SOURCE_PATH" "$CMDLINE_PATH"
+    install_managed_file 0644 "$IWLWIFI_SOURCE_PATH" "$IWLWIFI_PATH"
 
     restart_policy_service
 }

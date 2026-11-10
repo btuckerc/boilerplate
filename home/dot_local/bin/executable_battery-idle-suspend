@@ -26,11 +26,16 @@ check_battery() {
 }
 
 check_locked() {
+  # A secured session lock (the compositor confirmed it), not merely a requested
+  # one: `lock isLocked` is already true while a lock is still pending.
   (( require_locked )) || return 0
-  local locked rc
-  locked=$(timeout "${1:-10}" omarchy-shell lock isLocked 2>/dev/null); rc=$?
+  local status rc secure
+  status=$(timeout "${1:-10}" omarchy-shell lock status 2>/dev/null); rc=$?
   (( rc == 124 )) && { say "defer: lock query timed out"; exit 14; }
-  [[ $locked == true ]] || { say "skip: session not locked"; exit 10; }
+  (( rc == 0 )) || { say "skip: lock state unavailable (rc=$rc)"; exit 10; }
+  secure=$(jq -r 'if type == "object" and (.secure | type) == "boolean" then .secure else error("unexpected reply") end' \
+      <<<"$status" 2>/dev/null) || { say "defer: lock query gave no answer"; exit 14; }
+  [[ $secure == true ]] || { say "skip: session not securely locked"; exit 10; }
 }
 
 check_audio() {

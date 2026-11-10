@@ -35,7 +35,11 @@ check_locked() {
   (( rc == 0 )) || { say "skip: lock state unavailable (rc=$rc)"; exit 10; }
   secure=$(jq -r 'if type == "object" and (.secure | type) == "boolean" then .secure else error("unexpected reply") end' \
       <<<"$status" 2>/dev/null) || { say "defer: lock query gave no answer"; exit 14; }
-  [[ $secure == true ]] || { say "skip: session not securely locked"; exit 10; }
+  case $secure in
+    true) ;;
+    false) say "skip: session not securely locked"; exit 10 ;;
+    *) say "defer: lock query gave no answer"; exit 14 ;;
+  esac
 }
 
 check_audio() {

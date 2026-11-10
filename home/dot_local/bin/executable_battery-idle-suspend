@@ -37,7 +37,7 @@ check_audio() {
   # Audio-only playback (music, podcasts) takes no Wayland idle inhibitor.
   # The probe must answer exactly true or false; anything else defers.
   local streams playing
-  streams=$(timeout 5 pactl -f json list sink-inputs 2>/dev/null) || { say "defer: audio query failed"; exit 14; }
+  streams=$(timeout "${1:-5}" pactl -f json list sink-inputs 2>/dev/null) || { say "defer: audio query failed"; exit 14; }
   # jq can print a value and still fail on trailing garbage: require both.
   playing=$(jq -r 'if type == "array" then any(.[]; .corked == false) else error("unexpected reply") end' <<<"$streams" 2>/dev/null) ||
     { say "defer: audio query gave no answer"; exit 14; }
@@ -63,10 +63,10 @@ check_inhibitors() {
   return 0
 }
 
-# Cheap checks first, then the slow audio probe. Then a final pass over the
-# state that can change under the probes (a plug-in, a fingerprint unlock with
-# no compositor input, a job taking an inhibitor), run back to back right before
-# systemctl and bounded to FINAL_BUDGET_MS: a slower pass defers. A read-then-act
+# A first pass gives an early, specific answer. Then every check runs again back
+# to back right before systemctl, bounded to FINAL_BUDGET_MS (measured ~45 ms:
+# lock IPC ~20, pactl ~10, ListInhibitors ~6), so no answer the suspend relies on
+# is older than that bound; a slower pass defers. A read-then-act
 # check cannot be atomic (logind has no idle-inhibitor-aware sleep call;
 # systemctl itself refuses on sleep block inhibitors), so a change inside that
 # bound is not caught; if it is an unlock, omarchy's lock-before-sleep inhibitor
@@ -90,6 +90,7 @@ check_audio
 start=$(uptime_ms) || exit 14
 check_battery
 check_locked 0.3
+check_audio 0.3
 check_inhibitors 0.3
 now=$(uptime_ms) || exit 14
 elapsed_ms=$(( now - start ))

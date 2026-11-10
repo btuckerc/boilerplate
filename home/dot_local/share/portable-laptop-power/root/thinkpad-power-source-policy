@@ -345,8 +345,9 @@ bl_put() { printf '%s %s\n' "$2" "$3" >"$1.tmp" && mv -f "$1.tmp" "$1"; }
 bl_mv() { mv -f "$1" "$2" 2>/dev/null || { log_warn "unable to move $1"; return 1; }; }
 bl_rm() { rm -f "$1" 2>/dev/null || { log_warn "unable to remove $1"; return 1; }; }
 # Write and read back. A failed restore keeps its record so the next AC pass
-# retries; a failed cap drops its record (the read-back proves the cap did not
-# land) so the next battery pass caps afresh.
+# retries. A failed cap read-back may be the user changing the level right
+# after the write, so the session counts as handled (user wins; the cap may be
+# skipped once).
 bl_set() { force_write_value "$1" "$2"; [[ "$(read_sysfs "$1")" == "$2" ]] || { log_warn "backlight write $2 to $1 did not stick"; return 1; }; }
 
 bl_read() {
@@ -407,7 +408,7 @@ apply_battery_backlight_cap() {
         cap=$(( max * 10#$pct / 100 ))
         if (( cur > cap )); then
             bl_put "$base.capping" "$cur" "$cap" 2>/dev/null || { log_warn "unable to record backlight state for $name; not capping"; continue; }
-            bl_set "$dev/brightness" "$cap" || { bl_rm "$base.capping" || true; continue; }
+            bl_set "$dev/brightness" "$cap" || true
             bl_mv "$base.capping" "$base.capped" || true
         else
             bl_put "$base.capped" "-" "$cap" 2>/dev/null || log_warn "unable to record backlight state for $name"

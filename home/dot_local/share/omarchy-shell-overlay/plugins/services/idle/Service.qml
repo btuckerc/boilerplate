@@ -368,6 +368,8 @@ Item {
   // lock now instead of animating until the lock deadline, and so its closing
   // cannot cancel the lock.
   onOnBatteryChanged: {
+    // On AC nothing suspends; also stop a helper that is still running its checks.
+    if (!root.onBattery) stopSuspend("on-ac")
     // Unplugged while already idle (no new idle transition will come): arm the
     // suspend from now.
     if (root.onBattery && root.idleEnabled && root.batterySuspendEnabled && idleMonitor.isIdle && !suspendTimer.running)

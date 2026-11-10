@@ -18,15 +18,23 @@ require_locked=0
 
 say() { printf 'battery-idle-suspend: %s\n' "$*"; }
 
-if [[ $(cat /sys/class/power_supply/AC/online 2>/dev/null) == 1 ]]; then
-  say "skip: on AC"; exit 13
-fi
+# Only an AC reading of exactly 0 counts as battery; a failed read defers.
+check_battery() {
+  local ac
+  ac=$(cat /sys/class/power_supply/AC/online 2>/dev/null) || { say "defer: AC state unreadable"; exit 14; }
+  [[ $ac == 0 ]] || { say "skip: on AC (online=$ac)"; exit 13; }
+}
 
-if (( require_locked )); then
+check_locked() {
+  (( require_locked )) || return 0
+  local locked rc
   locked=$(timeout 10 omarchy-shell lock isLocked 2>/dev/null); rc=$?
   (( rc == 124 )) && { say "defer: lock query timed out"; exit 14; }
   [[ $locked == true ]] || { say "skip: session not locked"; exit 10; }
-fi
+}
+
+check_battery
+check_locked
 
 # Block-mode inhibitors for idle or sleep (systemd-inhibit --what=idle, fwupd...).
 # Delay-mode ones (NetworkManager, the lock-before-sleep hook) do not count.
@@ -48,10 +56,10 @@ if [[ $playing == true ]]; then
   say "skip: audio playing"; exit 12
 fi
 
-# The checks above take a moment; do not suspend if AC came back meanwhile.
-if [[ $(cat /sys/class/power_supply/AC/online 2>/dev/null) == 1 ]]; then
-  say "skip: on AC"; exit 13
-fi
+# The probes take a moment: AC may have come back, or a fingerprint unlock (no
+# compositor input) may have happened meanwhile. Check both again last.
+check_battery
+check_locked
 
 say "suspend-then-hibernate"
 exec systemctl --no-ask-password suspend-then-hibernate

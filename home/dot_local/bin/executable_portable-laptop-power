@@ -258,6 +258,7 @@ apply_stack() {
     ensure_config_key ENABLE_GPP_ASPM_L1 "off"
     ensure_config_key AC_PANEL_POWER_SAVINGS "0"
     ensure_config_key BAT_PANEL_POWER_SAVINGS "1"
+    ensure_config_key BAT_BACKLIGHT_MAX_PERCENT "60"
     ensure_config_key AC_NMI_WATCHDOG "1"
     ensure_config_key BAT_NMI_WATCHDOG "0"
     ensure_config_key AC_DIRTY_WRITEBACK_CENTISECS "1500"
@@ -382,6 +383,7 @@ print_status() {
     printf 'dirty_writeback_centisecs=%s\n' "$(read_path /proc/sys/vm/dirty_writeback_centisecs || printf 'unknown')"
     printf 'rtl8111_02_00_1=%s\n' "$(read_path /sys/bus/pci/devices/0000:02:00.1/power/runtime_status || printf 'missing')"
     printf 'rtl8111_02_00_4=%s\n' "$(read_path /sys/bus/pci/devices/0000:02:00.4/power/runtime_status || printf 'missing')"
+    printf 'bat_backlight_max_percent=%s\n' "$(read_config_value BAT_BACKLIGHT_MAX_PERCENT 2>/dev/null || printf 'unset')"
 
 }
 

@@ -31,6 +31,7 @@ UNBIND_RTL8111_SIDEBAND="off"
 ENABLE_GPP_ASPM_L1="off"
 AC_PANEL_POWER_SAVINGS="0"
 BAT_PANEL_POWER_SAVINGS="1"
+BAT_BACKLIGHT_MAX_PERCENT="off"
 AC_NMI_WATCHDOG="1"
 BAT_NMI_WATCHDOG="0"
 AC_DIRTY_WRITEBACK_CENTISECS="1500"
@@ -321,6 +322,60 @@ apply_vm_power_tweaks() {
 }
 
 
+readonly LAST_AC_STATE_PATH="/run/portable-laptop-power/last-ac-online"
+readonly BACKLIGHT_STATE_DIR="/run/portable-laptop-power/backlight"
+
+# On an AC -> battery change, lower each backlight above the cap to the cap and
+# remember the old level. On battery -> AC, put the old level back, but only if
+# the backlight still sits at the cap (the user did not change it meanwhile).
+# Passes without a change (timer, repeat udev events) never touch brightness,
+# so this cannot fight the brightness keys. Restore compares levels only: a
+# user who steps back to exactly the cap on battery counts as "left alone".
+# /run survives suspend/hibernate, so unplugging while asleep counts as a
+# change at resume.
+apply_battery_backlight_cap() {
+    local last_ac="$1"
+    local pct="${BAT_BACKLIGHT_MAX_PERCENT:-off}"
+    local dev name max cur cap saved_prev="" saved_cap=""
+
+    # No recorded state (first pass after boot or install) on battery counts as
+    # an unplug, so booting on battery also starts at the cap.
+    [[ -z "$last_ac" && "$ac_online" != "1" ]] && last_ac=1
+    [[ -n "$last_ac" && "$last_ac" != "$ac_online" ]] || return 0
+
+    for dev in /sys/class/backlight/*; do
+        [[ -e "$dev/brightness" && -e "$dev/max_brightness" ]] || continue
+        name="${dev##*/}"
+        cur="$(read_sysfs "$dev/brightness")"
+        [[ "$cur" =~ ^[0-9]+$ ]] || continue
+
+        if [[ "$ac_online" == "1" ]]; then
+            [[ -r "$BACKLIGHT_STATE_DIR/$name" ]] || continue
+            saved_prev="" saved_cap=""
+            read -r saved_prev saved_cap <"$BACKLIGHT_STATE_DIR/$name" 2>/dev/null || true
+            rm -f "$BACKLIGHT_STATE_DIR/$name"
+            if [[ "$saved_prev" =~ ^[0-9]+$ && "$saved_cap" =~ ^[0-9]+$ && "$cur" == "$saved_cap" ]]; then
+                force_write_value "$dev/brightness" "$saved_prev"
+            fi
+            continue
+        fi
+
+        [[ "$pct" =~ ^[0-9]{1,2}$ ]] && (( 10#$pct >= 1 )) || continue
+        max="$(read_sysfs "$dev/max_brightness")"
+        [[ "$max" =~ ^[0-9]+$ ]] && (( max > 0 )) || continue
+        cap=$(( max * 10#$pct / 100 ))
+        (( cur > cap )) || continue
+        force_write_value "$dev/brightness" "$cap"
+        { mkdir -p "$BACKLIGHT_STATE_DIR" && printf '%s %s\n' "$cur" "$cap" >"$BACKLIGHT_STATE_DIR/$name"; } 2>/dev/null ||
+            log_warn "unable to record backlight state for $name"
+    done
+}
+
+record_ac_state() {
+    { mkdir -p "${LAST_AC_STATE_PATH%/*}" && printf '%s\n' "$ac_online" >"$LAST_AC_STATE_PATH"; } 2>/dev/null ||
+        log_warn "unable to write $LAST_AC_STATE_PATH"
+}
+
 readonly ETHERNET_DOWN_STATE_DIR="/run/portable-laptop-power/ethernet-down"
 readonly ETHERNET_RECOVERED_MARKER="/var/lib/portable-laptop-power/ethernet-recovered-rev2"
 
@@ -476,6 +531,7 @@ fi
 resolve_thresholds
 
 ac_online="$(<"$AC_ONLINE_PATH")"
+last_ac_online="$(read_sysfs "$LAST_AC_STATE_PATH")"
 target_profile="$AC_POWER_PROFILE"
 target_platform_profile="$AC_PLATFORM_PROFILE"
 target_wifi_power_save="$AC_WIFI_POWER_SAVE"
@@ -496,6 +552,8 @@ set_power_profile "$target_profile" "$target_platform_profile"
 set_wifi_power_save "$target_wifi_power_save"
 set_gpu_dpm_state "$target_gpu_dpm_state"
 set_panel_power_savings "$target_panel_power_savings"
+apply_battery_backlight_cap "$last_ac_online"
+record_ac_state
 set_pcie_aspm "$target_pcie_aspm"
 apply_runtime_pm
 unbind_rtl8111_sideband

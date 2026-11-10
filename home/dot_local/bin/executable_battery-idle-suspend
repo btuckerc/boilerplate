@@ -73,16 +73,26 @@ check_inhibitors() {
 # still locks the session as it suspends.
 FINAL_BUDGET_MS=300
 
+# Milliseconds of CLOCK_BOOTTIME (/proc/uptime: monotonic, not adjustable by
+# NTP or the user, 10 ms resolution). Wall-clock time could step backwards.
+uptime_ms() {
+  local up
+  read -r up _ </proc/uptime || { say "defer: /proc/uptime unreadable"; exit 14; }
+  [[ $up =~ ^([0-9]+)\.([0-9]{2})$ ]] || { say "defer: /proc/uptime unparsable"; exit 14; }
+  printf '%s' $(( 10#${BASH_REMATCH[1]} * 1000 + 10#${BASH_REMATCH[2]} * 10 ))
+}
+
 check_battery
 check_locked
 check_inhibitors
 check_audio
 
-start=${EPOCHREALTIME//[!0-9]/}
+start=$(uptime_ms) || exit 14
 check_battery
 check_locked 0.3
 check_inhibitors 0.3
-elapsed_ms=$(( (${EPOCHREALTIME//[!0-9]/} - start) / 1000 ))
+now=$(uptime_ms) || exit 14
+elapsed_ms=$(( now - start ))
 (( elapsed_ms <= FINAL_BUDGET_MS )) || { say "defer: final checks took ${elapsed_ms} ms"; exit 14; }
 
 say "suspend-then-hibernate (final checks ${elapsed_ms} ms)"

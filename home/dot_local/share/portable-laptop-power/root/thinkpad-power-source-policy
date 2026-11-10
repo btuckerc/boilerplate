@@ -326,48 +326,56 @@ readonly LAST_AC_STATE_PATH="/run/portable-laptop-power/last-ac-online"
 readonly BACKLIGHT_STATE_DIR="/run/portable-laptop-power/backlight"
 
 # On an AC -> battery change, lower each backlight above the cap to the cap and
-# remember the old level. On battery -> AC, put the old level back, but only if
-# the backlight still sits at the cap (the user did not change it meanwhile).
-# Passes without a change (timer, repeat udev events) never touch brightness,
-# so this cannot fight the brightness keys. Restore compares levels only: a
-# user who steps back to exactly the cap on battery counts as "left alone".
-# /run survives suspend/hibernate, so unplugging while asleep counts as a
-# change at resume.
+# remember the old level. On AC, put a remembered level back, but only if the
+# backlight still sits at the cap (the user did not change it meanwhile).
+# Battery passes without a change (timer, repeat udev events) never touch
+# brightness, so this cannot fight the brightness keys. Restore compares levels
+# only: a user who steps back to exactly the cap on battery counts as "left
+# alone". /run survives suspend/hibernate, so unplugging while asleep counts as
+# a change at resume.
+#
+# A pass can be killed at any point (udev restarts the unit on every AC
+# change), so the old level is recorded before the cap is written, and every AC
+# pass consumes a record whether or not it saw the change itself.
 apply_battery_backlight_cap() {
     local last_ac="$1"
     local pct="${BAT_BACKLIGHT_MAX_PERCENT:-off}"
-    local dev name max cur cap saved_prev="" saved_cap=""
+    local dev name max cur cap state saved_prev="" saved_cap=""
 
     # No recorded state (first pass after boot or install) on battery counts as
     # an unplug, so booting on battery also starts at the cap.
     [[ -z "$last_ac" && "$ac_online" != "1" ]] && last_ac=1
-    [[ -n "$last_ac" && "$last_ac" != "$ac_online" ]] || return 0
 
     for dev in /sys/class/backlight/*; do
         [[ -e "$dev/brightness" && -e "$dev/max_brightness" ]] || continue
         name="${dev##*/}"
+        state="$BACKLIGHT_STATE_DIR/$name"
         cur="$(read_sysfs "$dev/brightness")"
         [[ "$cur" =~ ^[0-9]+$ ]] || continue
 
         if [[ "$ac_online" == "1" ]]; then
-            [[ -r "$BACKLIGHT_STATE_DIR/$name" ]] || continue
+            [[ -r "$state" ]] || continue
             saved_prev="" saved_cap=""
-            read -r saved_prev saved_cap <"$BACKLIGHT_STATE_DIR/$name" 2>/dev/null || true
-            rm -f "$BACKLIGHT_STATE_DIR/$name"
+            read -r saved_prev saved_cap <"$state" 2>/dev/null || true
             if [[ "$saved_prev" =~ ^[0-9]+$ && "$saved_cap" =~ ^[0-9]+$ && "$cur" == "$saved_cap" ]]; then
                 force_write_value "$dev/brightness" "$saved_prev"
             fi
+            rm -f "$state"
             continue
         fi
 
+        [[ -n "$last_ac" && "$last_ac" != "$ac_online" ]] || continue
         [[ "$pct" =~ ^[0-9]{1,2}$ ]] && (( 10#$pct >= 1 )) || continue
         max="$(read_sysfs "$dev/max_brightness")"
         [[ "$max" =~ ^[0-9]+$ ]] && (( max > 0 )) || continue
         cap=$(( max * 10#$pct / 100 ))
         (( cur > cap )) || continue
+        if ! { mkdir -p "$BACKLIGHT_STATE_DIR" && printf '%s %s\n' "$cur" "$cap" >"$state.tmp" &&
+            mv -f "$state.tmp" "$state"; } 2>/dev/null; then
+            log_warn "unable to record backlight state for $name; not capping"
+            continue
+        fi
         force_write_value "$dev/brightness" "$cap"
-        { mkdir -p "$BACKLIGHT_STATE_DIR" && printf '%s %s\n' "$cur" "$cap" >"$BACKLIGHT_STATE_DIR/$name"; } 2>/dev/null ||
-            log_warn "unable to record backlight state for $name"
     done
 }
 

@@ -33,31 +33,39 @@ check_locked() {
   [[ $locked == true ]] || { say "skip: session not locked"; exit 10; }
 }
 
+check_audio() {
+  # Audio-only playback (music, podcasts) takes no Wayland idle inhibitor.
+  local streams playing
+  streams=$(timeout 5 pactl -f json list sink-inputs 2>/dev/null) &&
+    playing=$(jq -r 'if type == "array" then any(.[]; .corked == false) else error("unexpected reply") end' <<<"$streams" 2>/dev/null) ||
+    { say "defer: audio query failed"; exit 14; }
+  [[ $playing == true ]] && { say "skip: audio playing"; exit 12; }
+  return 0
+}
+
+check_inhibitors() {
+  # Block-mode inhibitors for idle or sleep (systemd-inhibit --what=idle,
+  # fwupd...). Delay-mode ones (NetworkManager, lock-before-sleep) do not count.
+  local inhibitors blockers
+  inhibitors=$(timeout 5 busctl --json=short call org.freedesktop.login1 /org/freedesktop/login1 \
+      org.freedesktop.login1.Manager ListInhibitors 2>/dev/null) &&
+    blockers=$(jq -r '.data[0] | if type == "array" then . else error("unexpected reply") end
+      | map(select(.[3] == "block") | select(.[0] | split(":") | any(. == "idle" or . == "sleep")) | "\(.[1]) (\(.[2]))")
+      | join(", ")' <<<"$inhibitors" 2>/dev/null) ||
+    { say "defer: inhibitor query failed"; exit 14; }
+  [[ -n $blockers ]] && { say "skip: inhibited by $blockers"; exit 11; }
+  return 0
+}
+
+# Cheap checks first, then the slow audio probe. The state that can change
+# under the probe (an inhibitor taken by a starting job, a plug-in, a
+# fingerprint unlock with no compositor input) is checked again last, right
+# before systemctl; a change in the milliseconds after that is not caught.
 check_battery
 check_locked
-
-# Block-mode inhibitors for idle or sleep (systemd-inhibit --what=idle, fwupd...).
-# Delay-mode ones (NetworkManager, the lock-before-sleep hook) do not count.
-inhibitors=$(timeout 5 busctl --json=short call org.freedesktop.login1 /org/freedesktop/login1 \
-    org.freedesktop.login1.Manager ListInhibitors 2>/dev/null) &&
-  blockers=$(jq -r '.data[0] | if type == "array" then . else error("unexpected reply") end
-    | map(select(.[3] == "block") | select(.[0] | split(":") | any(. == "idle" or . == "sleep")) | "\(.[1]) (\(.[2]))")
-    | join(", ")' <<<"$inhibitors" 2>/dev/null) ||
-  { say "defer: inhibitor query failed"; exit 14; }
-if [[ -n $blockers ]]; then
-  say "skip: inhibited by $blockers"; exit 11
-fi
-
-# Audio-only playback (music, podcasts) takes no Wayland idle inhibitor.
-streams=$(timeout 5 pactl -f json list sink-inputs 2>/dev/null) &&
-  playing=$(jq -r 'if type == "array" then any(.[]; .corked == false) else error("unexpected reply") end' <<<"$streams" 2>/dev/null) ||
-  { say "defer: audio query failed"; exit 14; }
-if [[ $playing == true ]]; then
-  say "skip: audio playing"; exit 12
-fi
-
-# The probes take a moment: AC may have come back, or a fingerprint unlock (no
-# compositor input) may have happened meanwhile. Check both again last.
+check_inhibitors
+check_audio
+check_inhibitors
 check_battery
 check_locked
 

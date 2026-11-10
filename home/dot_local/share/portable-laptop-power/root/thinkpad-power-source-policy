@@ -322,66 +322,97 @@ apply_vm_power_tweaks() {
 }
 
 
-readonly LAST_AC_STATE_PATH="/run/portable-laptop-power/last-ac-online"
 readonly BACKLIGHT_STATE_DIR="/run/portable-laptop-power/backlight"
 
-# On an AC -> battery change, lower each backlight above the cap to the cap and
-# remember the old level. On AC, put a remembered level back, but only if the
-# backlight still sits at the cap (the user did not change it meanwhile).
-# Battery passes without a change (timer, repeat udev events) never touch
-# brightness, so this cannot fight the brightness keys. Restore compares levels
-# only: a user who steps back to exactly the cap on battery counts as "left
-# alone". /run survives suspend/hibernate, so unplugging while asleep counts as
-# a change at resume.
+# Battery backlight cap. On battery, lower each backlight above
+# BAT_BACKLIGHT_MAX_PERCENT to the cap once per battery session; on AC, put the
+# old level back if the backlight still sits at the cap (the user left it
+# alone). Later battery passes (timer, repeat udev events) never re-clamp, so
+# this cannot fight the brightness keys. A user who steps back to exactly the
+# cap counts as "left alone". /run survives suspend/hibernate; it is empty after
+# boot, so booting on battery also starts at the cap.
 #
-# A pass can be killed at any point (udev restarts the unit on every AC
-# change), so the old level is recorded before the cap is written, and every AC
-# pass consumes a record whether or not it saw the change itself.
-apply_battery_backlight_cap() {
-    local last_ac="$1"
-    local pct="${BAT_BACKLIGHT_MAX_PERCENT:-off}"
-    local dev name max cur cap state saved_prev="" saved_cap=""
+# Per-device record "<prev> <cap>" (prev "-" = nothing to restore), in one of
+# three states moved by rename:
+#   <dev>.capping    written before the cap; the cap may not be applied yet
+#   <dev>.capped     this battery session is handled
+#   <dev>.restoring  an AC pass is putting <prev> back
+# udev restarts the unit on every AC change, so a pass can die after any step.
+# Each step is idempotent and the next pass, on either power source, finishes
+# or undoes it, so a kill can never strand the cap on AC or re-clamp a level the
+# user chose; the worst case is one skipped cap.
+bl_put() { printf '%s %s\n' "$2" "$3" >"$1.tmp" && mv -f "$1.tmp" "$1"; }
+bl_mv() { mv -f "$1" "$2" 2>/dev/null || { log_warn "unable to move $1"; return 1; }; }
+bl_rm() { rm -f "$1" 2>/dev/null || { log_warn "unable to remove $1"; return 1; }; }
+# Write and read back. A failed restore keeps its record so the next AC pass
+# retries; a failed cap drops its record (the read-back proves the cap did not
+# land) so the next battery pass caps afresh.
+bl_set() { force_write_value "$1" "$2"; [[ "$(read_sysfs "$1")" == "$2" ]] || { log_warn "backlight write $2 to $1 did not stick"; return 1; }; }
 
-    # No recorded state (first pass after boot or install) on battery counts as
-    # an unplug, so booting on battery also starts at the cap.
-    [[ -z "$last_ac" && "$ac_online" != "1" ]] && last_ac=1
+bl_read() {
+    rec_prev="" rec_cap=""
+    read -r rec_prev rec_cap <"$1" 2>/dev/null || true
+    [[ "$rec_cap" =~ ^[0-9]+$ ]]
+}
+
+apply_battery_backlight_cap() {
+    local pct="${BAT_BACKLIGHT_MAX_PERCENT:-off}"
+    local dev name base cur max cap state rec_prev rec_cap
 
     for dev in /sys/class/backlight/*; do
         [[ -e "$dev/brightness" && -e "$dev/max_brightness" ]] || continue
         name="${dev##*/}"
-        state="$BACKLIGHT_STATE_DIR/$name"
+        base="$BACKLIGHT_STATE_DIR/$name"
         cur="$(read_sysfs "$dev/brightness")"
         [[ "$cur" =~ ^[0-9]+$ ]] || continue
 
         if [[ "$ac_online" == "1" ]]; then
-            [[ -r "$state" ]] || continue
-            saved_prev="" saved_cap=""
-            read -r saved_prev saved_cap <"$state" 2>/dev/null || true
-            if [[ "$saved_prev" =~ ^[0-9]+$ && "$saved_cap" =~ ^[0-9]+$ && "$cur" == "$saved_cap" ]]; then
-                force_write_value "$dev/brightness" "$saved_prev"
+            for state in capping capped; do
+                [[ -e "$base.$state" ]] || continue
+                bl_mv "$base.$state" "$base.restoring" || continue 2
+            done
+            [[ -e "$base.restoring" ]] || continue
+            if bl_read "$base.restoring" && [[ "$rec_prev" =~ ^[0-9]+$ && "$cur" == "$rec_cap" ]]; then
+                bl_set "$dev/brightness" "$rec_prev" || continue
             fi
-            rm -f "$state"
+            bl_rm "$base.restoring" || true
             continue
         fi
 
-        [[ -n "$last_ac" && "$last_ac" != "$ac_online" ]] || continue
+        mkdir -p "$BACKLIGHT_STATE_DIR" 2>/dev/null || { log_warn "unable to create $BACKLIGHT_STATE_DIR"; continue; }
+
+        # Unplugged during a restore: if the restore never happened, this
+        # battery session is still capped; otherwise start a new one.
+        if [[ -e "$base.restoring" ]]; then
+            if bl_read "$base.restoring" && [[ "$cur" == "$rec_cap" ]]; then
+                bl_mv "$base.restoring" "$base.capped" || true
+                continue
+            fi
+            bl_rm "$base.restoring" || true
+        fi
+        [[ -e "$base.capped" ]] && continue
+
+        # A pass killed between the record and the cap write leaves .capping.
+        # Whether the cap landed and whether the user changed the level since
+        # cannot be told apart, so the user wins: the session counts as handled
+        # (its cap may be skipped) and the record still drives the restore.
+        if [[ -e "$base.capping" ]]; then
+            bl_mv "$base.capping" "$base.capped" || true
+            continue
+        fi
+
         [[ "$pct" =~ ^[0-9]{1,2}$ ]] && (( 10#$pct >= 1 )) || continue
         max="$(read_sysfs "$dev/max_brightness")"
         [[ "$max" =~ ^[0-9]+$ ]] && (( max > 0 )) || continue
         cap=$(( max * 10#$pct / 100 ))
-        (( cur > cap )) || continue
-        if ! { mkdir -p "$BACKLIGHT_STATE_DIR" && printf '%s %s\n' "$cur" "$cap" >"$state.tmp" &&
-            mv -f "$state.tmp" "$state"; } 2>/dev/null; then
-            log_warn "unable to record backlight state for $name; not capping"
-            continue
+        if (( cur > cap )); then
+            bl_put "$base.capping" "$cur" "$cap" 2>/dev/null || { log_warn "unable to record backlight state for $name; not capping"; continue; }
+            bl_set "$dev/brightness" "$cap" || { bl_rm "$base.capping" || true; continue; }
+            bl_mv "$base.capping" "$base.capped" || true
+        else
+            bl_put "$base.capped" "-" "$cap" 2>/dev/null || log_warn "unable to record backlight state for $name"
         fi
-        force_write_value "$dev/brightness" "$cap"
     done
-}
-
-record_ac_state() {
-    { mkdir -p "${LAST_AC_STATE_PATH%/*}" && printf '%s\n' "$ac_online" >"$LAST_AC_STATE_PATH"; } 2>/dev/null ||
-        log_warn "unable to write $LAST_AC_STATE_PATH"
 }
 
 readonly ETHERNET_DOWN_STATE_DIR="/run/portable-laptop-power/ethernet-down"
@@ -539,7 +570,6 @@ fi
 resolve_thresholds
 
 ac_online="$(<"$AC_ONLINE_PATH")"
-last_ac_online="$(read_sysfs "$LAST_AC_STATE_PATH")"
 target_profile="$AC_POWER_PROFILE"
 target_platform_profile="$AC_PLATFORM_PROFILE"
 target_wifi_power_save="$AC_WIFI_POWER_SAVE"
@@ -560,8 +590,7 @@ set_power_profile "$target_profile" "$target_platform_profile"
 set_wifi_power_save "$target_wifi_power_save"
 set_gpu_dpm_state "$target_gpu_dpm_state"
 set_panel_power_savings "$target_panel_power_savings"
-apply_battery_backlight_cap "$last_ac_online"
-record_ac_state
+apply_battery_backlight_cap
 set_pcie_aspm "$target_pcie_aspm"
 apply_runtime_pm
 unbind_rtl8111_sideband

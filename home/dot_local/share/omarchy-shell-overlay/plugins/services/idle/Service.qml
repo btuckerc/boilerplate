@@ -15,6 +15,15 @@ import qs.Commons
 // 120 fps screensaver costs ~3 W on this panel, and a screensaver that exits
 // on its own (a bar dropdown holding keyboard focus) cancels the pending lock,
 // leaving the display lit indefinitely.
+//
+// On battery the idle laptop also suspends (suspend-then-hibernate, so logind's
+// HibernateDelaySec applies) idle.batterySuspend seconds after the last input
+// (default 360: one minute after lock + blank; 0 disables; with a lock it is at
+// least lock + 10 s, since only a locked session is suspended). Any input cancels
+// it, also on the lock screen. A wake without input re-suspends after
+// batterySuspendRetry seconds (default 300). battery-idle-suspend declines while
+// audio plays or a logind idle/sleep block inhibitor is held (protect a long job
+// with `systemd-inhibit --what=idle <cmd>`); the retry tries again later.
 Item {
   id: root
 
@@ -34,15 +43,24 @@ Item {
   readonly property int batteryScreensaverSeconds: secondsFromConfig(idleConfig.batteryScreensaver, defaultBatteryScreensaverSeconds)
   readonly property int screensaverTimeoutSeconds: onBattery ? batteryScreensaverSeconds : acScreensaverSeconds
   readonly property int lockTimeoutSeconds: secondsFromConfig(idleConfig.lock, defaultLockSeconds)
+  // With a lock configured the helper only suspends a locked session, so the
+  // effective deadline is at least 10 s past the lock.
+  readonly property int batterySuspendConfigSeconds: secondsFromConfig(idleConfig.batterySuspend, 360)
+  readonly property int batterySuspendSeconds: batterySuspendConfigSeconds > 0 && lockEnabled
+    ? Math.max(batterySuspendConfigSeconds, lockTimeoutSeconds + 10) : batterySuspendConfigSeconds
+  readonly property int batterySuspendRetrySeconds: Math.max(60, secondsFromConfig(idleConfig.batterySuspendRetry, 300))
+  readonly property bool batterySuspendEnabled: batterySuspendSeconds > 0
   readonly property bool screensaverEnabled: screensaverTimeoutSeconds > 0
   readonly property bool lockEnabled: lockTimeoutSeconds > 0
   readonly property bool idleTimersEnabled: acScreensaverSeconds > 0 || batteryScreensaverSeconds > 0 || lockEnabled
+    || batterySuspendEnabled
   // The first idle point ignores the power source: changing IdleMonitor.timeout
   // recreates the compositor's idle notification and restarts the countdown, so
   // unplugging 100 s into idle would push the lock past its deadline. Each
   // cycle measures its screensaver and lock delays from this fixed point.
-  readonly property int firstIdleTimeoutSeconds: IdleModel.firstIdleTimeout(
-    IdleModel.firstIdleTimeout(acScreensaverSeconds, batteryScreensaverSeconds), lockTimeoutSeconds)
+  readonly property int firstIdleTimeoutSeconds: IdleModel.firstIdleTimeout(IdleModel.firstIdleTimeout(
+    IdleModel.firstIdleTimeout(acScreensaverSeconds, batteryScreensaverSeconds), lockTimeoutSeconds),
+    batterySuspendSeconds)
   readonly property int screensaverDelaySeconds: IdleModel.delayAfterFirstIdle(screensaverTimeoutSeconds, firstIdleTimeoutSeconds)
   readonly property int lockDelaySeconds: IdleModel.delayAfterFirstIdle(lockTimeoutSeconds, firstIdleTimeoutSeconds)
   readonly property bool idleEnabled: stayAwakeStateLoaded && !stayAwake
@@ -58,6 +76,7 @@ Item {
   property string lastEventAt: ""
   property var screensaverWindows: ({})
   property int screensaverWindowCount: 0
+  property int lastSuspendExit: -1
 
   function secondsFromConfig(value, fallback) {
     return IdleModel.secondsFromConfig(value, fallback)
@@ -109,7 +128,7 @@ Item {
     }
     // The first idle point is shared by both power sources, so on this source
     // there may be nothing to arm (e.g. battery with lock=0).
-    if (!root.screensaverEnabled && !root.lockEnabled) {
+    if (!root.screensaverEnabled && !root.lockEnabled && !(root.onBattery && root.batterySuspendEnabled)) {
       logEvent("idle-cycle-skip", "no stage enabled on this power source")
       return
     }
@@ -118,6 +137,12 @@ Item {
     root.idledThisCycle = true
     root.screensaverStartedThisCycle = false
     resetScreensaverWindows()
+
+    // Armed on either source and checked when it fires, so unplugging mid-idle
+    // still suspends. lockSystem leaves it running; only input or a cancel stops
+    // it, so one still running here means no input since: keep its deadline.
+    if (root.batterySuspendEnabled && !suspendTimer.running)
+      armSuspend(Math.max(0, root.batterySuspendSeconds - root.firstIdleTimeoutSeconds))
 
     // Set this cycle's deadlines once: a bound interval would restart a pending
     // timer from the moment shell.json changes, locking early or late.
@@ -138,8 +163,40 @@ Item {
     }
   }
 
+  function armSuspend(seconds) {
+    suspendTimer.interval = seconds * 1000
+    suspendTimer.restart()
+  }
+
+  function stopSuspend(reason) {
+    if (!suspendTimer.running && !suspendProcess.running) return
+    suspendTimer.stop()
+    // A helper still running its checks must not go on to suspend.
+    if (suspendProcess.running) suspendProcess.running = false
+    logEvent("suspend-cancel", reason)
+  }
+
+  function suspendIfStillIdle() {
+    if (!root.idleEnabled || !root.batterySuspendEnabled || !root.onBattery || !idleMonitor.isIdle) {
+      logEvent("suspend-skip", "enabled=" + root.idleEnabled + " battery=" + root.onBattery + " idle=" + idleMonitor.isIdle)
+      return
+    }
+    logEvent("suspend", "battery idle")
+    // battery-idle-suspend (boilerplate ~/.local/bin) declines while a logind
+    // idle/sleep block inhibitor is held or audio is playing, and never asks for
+    // a password. With a lock configured it only suspends a locked session, so a
+    // retry after a wake the user answered without compositor input (lid open +
+    // fingerprint unlock) cannot suspend a session in use.
+    // exec: the helper replaces the shell, so stopSuspend's SIGTERM reaches it.
+    runProcess(suspendProcess, "suspend", "exec battery-idle-suspend" + (root.lockEnabled ? " --require-locked" : ""))
+    // Timers do not count suspended time. If the laptop wakes and nobody
+    // touches it, try again after the retry interval.
+    armSuspend(root.batterySuspendRetrySeconds)
+  }
+
   function cancelIdleCycle(reason) {
     logEvent("idle-cycle-cancel", reason || "requested")
+    stopSuspend(reason || "requested")
     screensaverTimer.stop()
     lockTimer.stop()
     screensaverLaunchGraceTimer.stop()
@@ -195,6 +252,11 @@ Item {
     }
   }
 
+  function screensaverLaunchBlip() {
+    return root.idledThisCycle && root.screensaverStartedThisCycle
+      && (root.screensaverWindowCount > 0 || screensaverLaunchGraceTimer.running)
+  }
+
   function handleActiveSignal() {
     if (!root.idledThisCycle) return
 
@@ -212,6 +274,10 @@ Item {
 
   function handleIdleChanged() {
     logEvent("idle-monitor", idleMonitor.isIdle ? "idle" : "active")
+    // After the lock the cycle is over, but input on the lock screen must
+    // still stop a pending suspend. The screensaver's own launch blip is not
+    // input (the same exception handleActiveSignal makes).
+    if (!idleMonitor.isIdle && !screensaverLaunchBlip()) stopSuspend("activity")
     if (!root.idleEnabled || !root.idleTimersEnabled) return
 
     if (idleMonitor.isIdle) startIdleCycle()
@@ -232,15 +298,20 @@ Item {
       lock: root.lockTimeoutSeconds,
       screensaverDelay: root.screensaverDelaySeconds,
       lockDelay: root.lockDelaySeconds,
+      batterySuspend: root.batterySuspendSeconds,
+      batterySuspendRetry: root.batterySuspendRetrySeconds,
+      lastSuspendExit: root.lastSuspendExit,
       screensaverWindows: root.screensaverWindowCount,
       timers: {
         screensaver: screensaverTimer.running,
         lock: lockTimer.running,
+        suspend: suspendTimer.running,
         screensaverLaunchGrace: screensaverLaunchGraceTimer.running
       },
       processes: {
         screensaver: screensaverProcess.running,
         lock: lockProcess.running,
+        suspend: suspendProcess.running,
         wake: wakeProcess.running
       },
       lastEvent: root.lastEvent,
@@ -291,11 +362,16 @@ Item {
 
   // With both timeouts at 0 the monitor stops reporting, so nothing else would end a running cycle.
   onIdleTimersEnabledChanged: if (!idleTimersEnabled) cancelIdleCycle("idle-timers-disabled")
+  onBatterySuspendEnabledChanged: if (!batterySuspendEnabled) stopSuspend("battery-suspend-disabled")
 
   // Unplugged while an AC screensaver is up and battery has no screensaver:
   // lock now instead of animating until the lock deadline, and so its closing
   // cannot cancel the lock.
   onOnBatteryChanged: {
+    // Unplugged while already idle (no new idle transition will come): arm the
+    // suspend from now.
+    if (root.onBattery && root.idleEnabled && root.batterySuspendEnabled && idleMonitor.isIdle && !suspendTimer.running)
+      armSuspend(root.batterySuspendSeconds)
     if (root.onBattery && root.batteryScreensaverSeconds <= 0 && root.idleEnabled && root.idledThisCycle
         && root.screensaverStartedThisCycle && root.lockEnabled)
       root.lockSystem("on-battery-during-screensaver")
@@ -345,6 +421,28 @@ Item {
     id: lockProcess
     onExited: function(exitCode, exitStatus) { root.logEvent("process-exit", "lock exitCode=" + exitCode + " status=" + exitStatus) }
   }
+  Timer {
+    id: suspendTimer
+    repeat: false
+    onTriggered: root.suspendIfStillIdle()
+  }
+
+  Process {
+    id: suspendProcess
+    onExited: function(exitCode, exitStatus) {
+      root.lastSuspendExit = exitCode
+      root.logEvent("process-exit", "suspend exitCode=" + exitCode + " status=" + exitStatus)
+      // 10 = not locked. Still idle on battery (e.g. a fingerprint unlock after a
+      // wake, then nobody touched anything): lock now; the retry suspends later.
+      if (exitCode === 10 && root.idleEnabled && root.onBattery && root.lockEnabled && idleMonitor.isIdle) {
+        // Count the retry from now, so the next attempt cannot land seconds
+        // after an unlock that preceded this refusal.
+        root.armSuspend(root.batterySuspendRetrySeconds)
+        root.lockSystem("suspend-needs-lock")
+      }
+    }
+  }
+
   Process {
     id: wakeProcess
     onExited: function(exitCode, exitStatus) { root.logEvent("process-exit", "wake exitCode=" + exitCode + " status=" + exitStatus) }

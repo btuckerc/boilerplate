@@ -1,0 +1,57 @@
+#!/bin/bash
+# Called by the omarchy-shell idle overlay when the laptop has been idle on
+# battery. Suspends (suspend-then-hibernate, so logind's HibernateDelaySec
+# applies) only when nothing says to stay up. Never asks for a password: a
+# refused request must not leave a polkit dialog behind the lock screen.
+#
+#   battery-idle-suspend [--require-locked]
+#
+# Exit codes: 0 suspend requested, 10 not locked, 11 idle/sleep block
+# inhibitor held, 12 audio playing, 13 on AC, 14 a safety check could not be
+# answered or timed out (deferred to the caller's retry), other = systemctl's
+# failure.
+
+set -u
+
+require_locked=0
+[[ ${1:-} == --require-locked ]] && require_locked=1
+
+say() { printf 'battery-idle-suspend: %s\n' "$*"; }
+
+if [[ $(cat /sys/class/power_supply/AC/online 2>/dev/null) == 1 ]]; then
+  say "skip: on AC"; exit 13
+fi
+
+if (( require_locked )); then
+  locked=$(timeout 10 omarchy-shell lock isLocked 2>/dev/null); rc=$?
+  (( rc == 124 )) && { say "defer: lock query timed out"; exit 14; }
+  [[ $locked == true ]] || { say "skip: session not locked"; exit 10; }
+fi
+
+# Block-mode inhibitors for idle or sleep (systemd-inhibit --what=idle, fwupd...).
+# Delay-mode ones (NetworkManager, the lock-before-sleep hook) do not count.
+inhibitors=$(timeout 5 busctl --json=short call org.freedesktop.login1 /org/freedesktop/login1 \
+    org.freedesktop.login1.Manager ListInhibitors 2>/dev/null) &&
+  blockers=$(jq -r '.data[0] | if type == "array" then . else error("unexpected reply") end
+    | map(select(.[3] == "block") | select(.[0] | split(":") | any(. == "idle" or . == "sleep")) | "\(.[1]) (\(.[2]))")
+    | join(", ")' <<<"$inhibitors" 2>/dev/null) ||
+  { say "defer: inhibitor query failed"; exit 14; }
+if [[ -n $blockers ]]; then
+  say "skip: inhibited by $blockers"; exit 11
+fi
+
+# Audio-only playback (music, podcasts) takes no Wayland idle inhibitor.
+streams=$(timeout 5 pactl -f json list sink-inputs 2>/dev/null) &&
+  playing=$(jq -r 'if type == "array" then any(.[]; .corked == false) else error("unexpected reply") end' <<<"$streams" 2>/dev/null) ||
+  { say "defer: audio query failed"; exit 14; }
+if [[ $playing == true ]]; then
+  say "skip: audio playing"; exit 12
+fi
+
+# The checks above take a moment; do not suspend if AC came back meanwhile.
+if [[ $(cat /sys/class/power_supply/AC/online 2>/dev/null) == 1 ]]; then
+  say "skip: on AC"; exit 13
+fi
+
+say "suspend-then-hibernate"
+exec systemctl --no-ask-password suspend-then-hibernate

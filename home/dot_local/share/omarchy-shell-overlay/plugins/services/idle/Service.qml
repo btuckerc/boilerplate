@@ -168,6 +168,9 @@ Item {
     suspendTimer.restart()
   }
 
+  // Stops a pending timer or a helper still running its checks. A request the
+  // helper already handed to logind cannot be retracted (no API); see
+  // battery-idle-suspend.
   function stopSuspend(reason) {
     if (!suspendTimer.running && !suspendProcess.running) return
     suspendTimer.stop()

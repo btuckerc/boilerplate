@@ -35,39 +35,45 @@ check_locked() {
 
 check_audio() {
   # Audio-only playback (music, podcasts) takes no Wayland idle inhibitor.
+  # The probe must answer exactly true or false; anything else defers.
   local streams playing
-  streams=$(timeout 5 pactl -f json list sink-inputs 2>/dev/null) &&
-    playing=$(jq -r 'if type == "array" then any(.[]; .corked == false) else error("unexpected reply") end' <<<"$streams" 2>/dev/null) ||
-    { say "defer: audio query failed"; exit 14; }
-  [[ $playing == true ]] && { say "skip: audio playing"; exit 12; }
-  return 0
+  streams=$(timeout 5 pactl -f json list sink-inputs 2>/dev/null) || { say "defer: audio query failed"; exit 14; }
+  playing=$(jq -r 'if type == "array" then any(.[]; .corked == false) else error("unexpected reply") end' <<<"$streams" 2>/dev/null)
+  case $playing in
+    true) say "skip: audio playing"; exit 12 ;;
+    false) ;;
+    *) say "defer: audio query gave no answer"; exit 14 ;;
+  esac
 }
 
 check_inhibitors() {
   # Block-mode inhibitors for idle or sleep (systemd-inhibit --what=idle,
   # fwupd...). Delay-mode ones (NetworkManager, lock-before-sleep) do not count.
-  local inhibitors blockers
-  inhibitors=$(timeout 5 busctl --json=short call org.freedesktop.login1 /org/freedesktop/login1 \
-      org.freedesktop.login1.Manager ListInhibitors 2>/dev/null) &&
-    blockers=$(jq -r '.data[0] | if type == "array" then . else error("unexpected reply") end
-      | map(select(.[3] == "block") | select(.[0] | split(":") | any(. == "idle" or . == "sleep")) | "\(.[1]) (\(.[2]))")
-      | join(", ")' <<<"$inhibitors" 2>/dev/null) ||
-    { say "defer: inhibitor query failed"; exit 14; }
-  [[ -n $blockers ]] && { say "skip: inhibited by $blockers"; exit 11; }
+  # The reply must parse to an explicit answer ("ok:" + list); anything else defers.
+  local reply answer
+  reply=$(timeout 5 busctl --json=short call org.freedesktop.login1 /org/freedesktop/login1 \
+      org.freedesktop.login1.Manager ListInhibitors 2>/dev/null) || { say "defer: inhibitor query failed"; exit 14; }
+  answer=$(jq -r '.data[0] | if type == "array" then . else error("unexpected reply") end
+      | "ok:" + (map(select(.[3] == "block") | select(.[0] | split(":") | any(. == "idle" or . == "sleep")) | "\(.[1]) (\(.[2]))") | join(", "))' \
+      <<<"$reply" 2>/dev/null)
+  [[ $answer == ok:* ]] || { say "defer: inhibitor query gave no answer"; exit 14; }
+  [[ -n ${answer#ok:} ]] && { say "skip: inhibited by ${answer#ok:}"; exit 11; }
   return 0
 }
 
-# Cheap checks first, then the slow audio probe. The state that can change
-# under the probe (an inhibitor taken by a starting job, a plug-in, a
-# fingerprint unlock with no compositor input) is checked again last, right
-# before systemctl; a change in the milliseconds after that is not caught.
+# Cheap checks first, then the slow audio probe, then battery and lock again,
+# and the inhibitor query as the very last step before systemctl: a job that
+# takes an inhibitor while any earlier probe runs is still seen. logind offers
+# no atomic "check idle inhibitors and sleep" (systemctl only checks sleep
+# inhibitors), so an idle-only inhibitor taken in the few milliseconds between
+# that last query and the request is not caught.
 check_battery
 check_locked
 check_inhibitors
 check_audio
-check_inhibitors
 check_battery
 check_locked
+check_inhibitors
 
 say "suspend-then-hibernate"
 exec systemctl --no-ask-password suspend-then-hibernate

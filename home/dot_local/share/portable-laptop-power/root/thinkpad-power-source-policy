@@ -340,7 +340,10 @@ readonly BACKLIGHT_STATE_DIR="/run/portable-laptop-power/backlight"
 # udev restarts the unit on every AC change, so a pass can die after any step.
 # Each step is idempotent and the next pass, on either power source, finishes
 # or undoes it, so a kill can never strand the cap on AC or re-clamp a level the
-# user chose; the worst case is one skipped cap.
+# user chose; the worst case is one skipped cap. The brightness is re-read right
+# before every decision that leads to a write. sysfs has no compare-and-swap, so
+# a key press landing between that read and the write (one syscall) can still
+# be overwritten once.
 bl_put() { printf '%s %s\n' "$2" "$3" >"$1.tmp" && mv -f "$1.tmp" "$1"; }
 bl_mv() { mv -f "$1" "$2" 2>/dev/null || { log_warn "unable to move $1"; return 1; }; }
 bl_rm() { rm -f "$1" 2>/dev/null || { log_warn "unable to remove $1"; return 1; }; }
@@ -373,7 +376,7 @@ apply_battery_backlight_cap() {
                 bl_mv "$base.$state" "$base.restoring" || continue 2
             done
             [[ -e "$base.restoring" ]] || continue
-            if bl_read "$base.restoring" && [[ "$rec_prev" =~ ^[0-9]+$ && "$cur" == "$rec_cap" ]]; then
+            if bl_read "$base.restoring" && [[ "$rec_prev" =~ ^[0-9]+$ && "$(read_sysfs "$dev/brightness")" == "$rec_cap" ]]; then
                 bl_set "$dev/brightness" "$rec_prev" || continue
             fi
             bl_rm "$base.restoring" || true
@@ -385,7 +388,7 @@ apply_battery_backlight_cap() {
         # Unplugged during a restore: if the restore never happened, this
         # battery session is still capped; otherwise start a new one.
         if [[ -e "$base.restoring" ]]; then
-            if bl_read "$base.restoring" && [[ "$cur" == "$rec_cap" ]]; then
+            if bl_read "$base.restoring" && [[ "$(read_sysfs "$dev/brightness")" == "$rec_cap" ]]; then
                 bl_mv "$base.restoring" "$base.capped" || true
                 continue
             fi
@@ -408,7 +411,10 @@ apply_battery_backlight_cap() {
         cap=$(( max * 10#$pct / 100 ))
         if (( cur > cap )); then
             bl_put "$base.capping" "$cur" "$cap" 2>/dev/null || { log_warn "unable to record backlight state for $name; not capping"; continue; }
-            bl_set "$dev/brightness" "$cap" || true
+            # A change since the first read is the user's: keep it, session handled.
+            if [[ "$(read_sysfs "$dev/brightness")" == "$cur" ]]; then
+                bl_set "$dev/brightness" "$cap" || true
+            fi
             bl_mv "$base.capping" "$base.capped" || true
         else
             bl_put "$base.capped" "-" "$cap" 2>/dev/null || log_warn "unable to record backlight state for $name"

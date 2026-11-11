@@ -19,9 +19,11 @@ password at most once (none when a key already works). Each host keeps its own
 ~/.ssh/id_ed25519_fleet; private keys never leave their host. Authorized lines
 are pinned with from= to the source's tailnet IPs and tagged
 "decent-angl-fleet:<host>". Aliases go in ~/.ssh/config.d/decent-angl-fleet.conf,
-included from the top of ~/.ssh/config. Unmanaged lines and Host entries are
-never edited: a key already authorized by hand, or an alias already defined
-in ~/.ssh/config, is reported and left as is.
+included at the end of ~/.ssh/config after "Match all", so hand-written
+settings always win. After writing an alias, `ssh -G` must show it resolving
+to the intended host, user and fleet key with no agent forwarding; otherwise
+the alias is withdrawn and the conflicting settings are reported. Unmanaged
+authorized_keys lines are never edited.
 """
 import argparse
 import getpass
@@ -79,13 +81,16 @@ ensure_key() {
   echo "@@PUB $pub"
 }
 
+# tg(): a line's last field, ignoring trailing blanks and CR (OpenSSH accepts both).
+TG='function tg(  l,a,n){l=$0; sub(/[ \t\r]+$/,"",l); n=split(l,a," "); return n?a[n]:""} '
+
 authorize() {  # tag line blob
   prep; nolink "$AK"; [ -f "$AK" ] || : >"$AK"; chmod 600 "$AK"
-  if grep -F -e "$3" "$AK" | awk -v t="$1" '$NF != t' | grep -q .; then
+  if grep -F -e "$3" "$AK" | awk -v t="$1" "$TG"'tg() != t' | grep -q .; then
     echo "@@UNMANAGED"; return 0
   fi
   t=$(mktemp "$D/.ak.XXXXXX")
-  awk -v t="$1" '$NF != t' "$AK" >"$t"
+  awk -v t="$1" "$TG"'tg() != t' "$AK" >"$t"
   printf '%s\n' "$2" >>"$t"
   chmod 600 "$t"; mv "$t" "$AK"
   echo "@@AUTHORIZED"
@@ -94,9 +99,9 @@ authorize() {  # tag line blob
 deauthorize() {  # tag
   [ -f "$AK" ] || return 0
   nolink "$AK"
-  awk -v t="$1" '$NF==t{f=1} END{exit !f}' "$AK" || return 0
+  awk -v t="$1" "$TG"'tg()==t{f=1} END{exit !f}' "$AK" || return 0
   t=$(mktemp "$D/.ak.XXXXXX")
-  awk -v t="$1" '$NF != t' "$AK" >"$t"
+  awk -v t="$1" "$TG"'tg() != t' "$AK" >"$t"
   chmod 600 "$t"; mv "$t" "$AK"
   echo "@@REMOVED"
 }
@@ -106,43 +111,48 @@ without_block() {  # name file
     '$0==b{s=1;next} s&&$0==e{s=0;next} !s' "$2"
 }
 
-ensure_include() {  # the Include must be the first directive, or earlier lines win
+put_mf() {  # name [block]: rewrite the managed file without (or with a new) block for name
+  t=$(mktemp "$D/.mf.XXXXXX")
+  without_block "$1" "$MF" >"$t"
+  [ $# -lt 2 ] || printf '%s\n' "$2" >>"$t"
+  chmod 600 "$t"; mv "$t" "$MF"
+}
+
+ensure_include() {  # last, after Match all: hand-written config always wins
   nolink "$CFG"; [ -f "$CFG" ] || : >"$CFG"; chmod 600 "$CFG"
-  first=$(awk '!/^[ \t]*(#|$)/{print; exit}' "$CFG")
-  [ "$first" = "$INC" ] && return 0
+  grep -qxF "$INC" "$CFG" && return 0
   t=$(mktemp "$D/.cfg.XXXXXX")
-  { printf '%s\n\n' "$INC"; grep -vxF "$INC" "$CFG" || :; } >"$t"
+  {
+    cat "$CFG"
+    if [ -s "$CFG" ] && [ -n "$(tail -c 1 "$CFG")" ]; then echo; fi
+    printf '\nMatch all\n%s\n' "$INC"
+  } >"$t"
   chmod 600 "$t"; mv "$t" "$CFG"
 }
 
-claimed() {  # alias: does the unmanaged config already treat it differently from any other name?
-  [ -f "$CFG" ] || return 1
-  nolink "$CFG"
-  t=$(mktemp "$D/.probe.XXXXXX")
-  grep -vxF "$INC" "$CFG" >"$t" || :
-  d=fleet-ssh-probe-q7z
-  if a=$(ssh -G -F "$t" "$1" 2>/dev/null) && b=$(ssh -G -F "$t" "$d" 2>/dev/null); then
-    rm -f "$t"
-    b=$(printf '%s\n' "$b" | sed "s/$d/$1/g")
-    [ "$a" != "$b" ]
-  else
-    rm -f "$t"; return 0
-  fi
+problems() {  # alias fqdn user: how `ssh alias` differs from what the managed block intends
+  out=$(ssh -G "$1" </dev/null 2>/dev/null) || { echo " (ssh -G failed)"; return 0; }
+  printf '%s\n' "$out" | awk -v h="$2" -v u="$3" '
+    $1=="hostname"{hh=$2} $1=="user"{uu=$2} $1=="forwardagent"{fa=$2}
+    $1=="identityfile" && $2 ~ /id_ed25519_fleet$/ {k=1}
+    END{ if (tolower(hh)!=tolower(h)) printf " HostName %s", hh
+         if (uu!=u) printf " User %s", uu
+         if (fa!="no") printf " ForwardAgent %s", fa
+         if (!k) printf " (no fleet key)" }'
 }
 
-set_host() {  # name alias block
+set_host() {  # name alias block fqdn user
   prep; nolink "$MF"; [ -f "$MF" ] || : >"$MF"; chmod 600 "$MF"
-  if claimed "$2"; then
-    echo "@@COLLISION config"; return 0
+  if without_block "$1" "$MF" | awk -v a="$2" 'tolower($1)=="host"{for(i=2;i<=NF;i++) if($i==a) f=1} END{exit !f}'; then
+    echo "@@COLLISION managed"; return 0
   fi
-  t=$(mktemp "$D/.mf.XXXXXX")
-  without_block "$1" "$MF" >"$t"
-  if awk -v a="$2" 'tolower($1)=="host"{for(i=2;i<=NF;i++) if($i==a) f=1} END{exit !f}' "$t"; then
-    rm -f "$t"; echo "@@COLLISION managed"; return 0
-  fi
-  printf '%s\n' "$3" >>"$t"
-  chmod 600 "$t"; mv "$t" "$MF"
+  put_mf "$1" "$3"
   ensure_include
+  why=$(problems "$2" "$4" "$5")
+  if [ -n "$why" ]; then
+    put_mf "$1"
+    echo "@@COLLISION config:$why"; return 0
+  fi
   echo "@@HOSTSET"
 }
 
@@ -150,9 +160,7 @@ unset_host() {  # name
   [ -f "$MF" ] || return 0
   nolink "$MF"
   grep -qxF "# BEGIN $TAG $1" "$MF" || return 0
-  t=$(mktemp "$D/.mf.XXXXXX")
-  without_block "$1" "$MF" >"$t"
-  chmod 600 "$t"; mv "$t" "$MF"
+  put_mf "$1"
   echo "@@REMOVED"
 }
 
@@ -161,7 +169,7 @@ list() {
     awk -v b="# BEGIN $TAG " 'index($0,b)==1{n=substr($0,length(b)+1)} n!="" && tolower($1)=="host"{print "@@HOST " n " " $2; n=""}' "$MF"
   fi
   if [ -f "$AK" ]; then
-    awk -v p="$TAG:" 'index($NF,p)==1{print "@@TAG " substr($NF,length(p)+1)}' "$AK"
+    awk -v p="$TAG:" "$TG"'{f=tg()} index(f,p)==1{print "@@TAG " substr(f,length(p)+1)}' "$AK"
   fi
 }
 
@@ -340,8 +348,10 @@ def report_auth(results, where, src):
 
 def report_host(results, where, alias):
     """True when the managed alias is in place (and safe to verify)."""
-    if "COLLISION config" in results:
-        say("  %s: ~/.ssh/config already configures %s by hand; not adding a managed alias (pick another with --alias/--as)" % (where, alias))
+    hit = [r for r in results if r.startswith("COLLISION config:")]
+    if hit:
+        say("  %s: your ssh config already decides%s for %s, so no managed alias was added; "
+            "pick another with --alias/--as" % (where, hit[0][len("COLLISION config:"):], alias))
     elif "COLLISION managed" in results:
         say("  %s: another managed link already uses alias %s; pick a different --alias/--as" % (where, alias))
     else:
@@ -402,14 +412,15 @@ def link(me, peer, direction, user, alias, local_alias, yes):
             report_auth(rem.run(("authorize", "%s:%s" % (TAG, me.name), auth_line(me, ktype, blob), blob)),
                         peer.name, me.name)
             to = report_host(run_local(("set_host", peer.name, alias,
-                                        host_block(peer.name, alias, peer.fqdn, user))), me.name, alias)
+                                        host_block(peer.name, alias, peer.fqdn, user), peer.fqdn, user)),
+                             me.name, alias)
             ok &= to
         if frm:
             ktype, blob = pub_from(rem.run(("ensure_key", "%s@%s fleet" % (user, peer.name))))
             report_auth(run_local(("authorize", "%s:%s" % (TAG, peer.name), auth_line(peer, ktype, blob), blob)),
                         me.name, peer.name)
             frm = report_host(rem.run(("set_host", me.name, local_alias,
-                                       host_block(me.name, local_alias, me.fqdn, local_user))),
+                                       host_block(me.name, local_alias, me.fqdn, local_user), me.fqdn, local_user)),
                               peer.name, local_alias)
             ok &= frm
         if to or frm:

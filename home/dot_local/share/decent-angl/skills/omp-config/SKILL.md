@@ -99,8 +99,8 @@ description: Change the shared OMP baseline in chezmoi - upgrades, omp-baseline,
   are symlinked from the default profile. Keep its `models.yml` vLLM block in
   step with the default one. Cloud sessions do not route work to it.
 - Keep local child agents background-capable for native steering. At natural
-  model/tool boundaries, the director may send one failed-check repair, then
-  cancel/escalate a remaining failure or budget overrun; ordinary clarification
+  model/tool boundaries, the director sends failed-check repairs while each makes
+  progress, then cancels/escalates a failure that stops moving or a budget overrun; ordinary clarification
   and requirement steering is not artificially capped.
   Avoid transcript polling, custom watchdogs and advisor loops.
   For a bounded local job with no independent parent work, prefer the native

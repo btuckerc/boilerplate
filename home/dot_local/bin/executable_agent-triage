@@ -28,7 +28,7 @@ LABELS = (
 CRITERIA = {
     LABELS[0]: "Bounded mechanical file transform or extraction using supplied text, one file, cheap exact verification, no process execution needed by the worker (the director runs the check). The local 27B Qwen worker runs on nous (vLLM batches up to 8 sequences; run at most 4 local workers at once) and has passed only small bounded tasks; never use it for diagnosing unknown bugs, open design, or decisions with costly errors.",
     LABELS[1]: "Read-only bounded extraction or summary of supplied or repository text with a clear output shape. Not for implementation, debugging or decisions.",
-    LABELS[2]: "Implementation in an isolated worktree with a clear contract and a runnable acceptance check (patch handback), including clearly hard work; or a read-only second look on high-consequence design, a conflict after focused investigation, or a check still failing after one repair.",
+    LABELS[2]: "Implementation in an isolated worktree with a clear contract and a runnable acceptance check (patch handback), including clearly hard work; or a read-only second look on high-consequence design, a conflict after focused investigation, or a check a focused repair did not move.",
     LABELS[3]: "Trivial or tightly coupled work, unresolved design, integration and verification, or a context-dependent or unclear request that cannot be safely classified from the provided text. The director keeps it; do not guess.",
 }
 # How the director would run each choice; None means it does the work itself.

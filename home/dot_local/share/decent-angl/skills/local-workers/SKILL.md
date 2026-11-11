@@ -17,7 +17,7 @@ Resolve uncertainty before delegation without pre-solving routine implementation
 
 Use Sol for unresolved high-consequence design/security/concurrency
 decisions, conflicting evidence after focused investigation, or a failed check
-after one focused repair. `architect` (xhigh) supplies read-only advice; `sol` (high) owns
+that a focused repair did not move. `architect` (xhigh) supplies read-only advice; `sol` (high) owns
 a scoped difficult implementation/diagnosis. Clearly hard work may go directly
 to Sol. Missing context, credentials or tools require prerequisites, not a
 larger model. Workers return blockers to the director; no recursive escalation chains.
@@ -108,8 +108,8 @@ enables image input, but no visual acceptance has been demonstrated, so the
 Native local children remain background-capable so the director can inspect
 compact `read proc://` status at natural checkpoints, message corrections with
 `write agent://<id>` as evidence and requirements warrant, and cancel
-(`write proc://<id>/kill`) or escalate a blocker or budget overrun. Allow
-at most one failed-check repair; normal clarification and requirement steering
+(`write proc://<id>/kill`) or escalate a blocker or budget overrun. Repair
+failed checks while each attempt makes progress; normal clarification and requirement steering
 is not capped. Steering is delivered at model/tool boundaries;
 do not poll full transcripts or add a watchdog loop.
 

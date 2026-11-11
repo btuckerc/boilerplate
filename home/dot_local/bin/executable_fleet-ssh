@@ -39,7 +39,7 @@ PROG = "fleet-ssh"
 TAG = "decent-angl-fleet"
 FLEET_JSON = Path.home() / ".config/decent-angl/fleet.json"
 NAME_RE = re.compile(r"[a-z0-9][a-z0-9-]*\Z")
-ALIAS_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
+ALIAS_RE = re.compile(r"[a-z0-9][a-z0-9._-]*\Z")  # lowercase: ssh lowercases host arguments
 USER_RE = re.compile(r"[a-z_][a-z0-9_.-]*\Z", re.I)
 FQDN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9.-]*\Z")
 IP_RE = re.compile(r"[0-9A-Fa-f:.]+\Z")
@@ -94,7 +94,7 @@ authorize() {  # tag line blob
 deauthorize() {  # tag
   [ -f "$AK" ] || return 0
   nolink "$AK"
-  grep -q " $1\$" "$AK" || return 0
+  awk -v t="$1" '$NF==t{f=1} END{exit !f}' "$AK" || return 0
   t=$(mktemp "$D/.ak.XXXXXX")
   awk -v t="$1" '$NF != t' "$AK" >"$t"
   chmod 600 "$t"; mv "$t" "$AK"
@@ -123,8 +123,7 @@ claimed() {  # alias: does the unmanaged config already treat it differently fro
   d=fleet-ssh-probe-q7z
   if a=$(ssh -G -F "$t" "$1" 2>/dev/null) && b=$(ssh -G -F "$t" "$d" 2>/dev/null); then
     rm -f "$t"
-    a=$(printf '%s\n' "$a" | tr 'A-Z' 'a-z')
-    b=$(printf '%s\n' "$b" | sed "s/$d/$1/g" | tr 'A-Z' 'a-z')
+    b=$(printf '%s\n' "$b" | sed "s/$d/$1/g")
     [ "$a" != "$b" ]
   else
     rm -f "$t"; return 0
@@ -167,7 +166,9 @@ list() {
 }
 
 verify() {  # alias
-  if ssh -o BatchMode=yes -o ControlMaster=no -o ControlPath=none -o ConnectTimeout=10 "$1" true </dev/null; then
+  if ssh -o BatchMode=yes -o ControlMaster=no -o ControlPath=none -o ConnectTimeout=10 \
+      -o ForwardAgent=no -o ForwardX11=no -o ClearAllForwardings=yes -o PermitLocalCommand=no \
+      "$1" true </dev/null; then
     echo "@@OK"
   else
     echo "@@FAIL"
@@ -338,12 +339,15 @@ def report_auth(results, where, src):
 
 
 def report_host(results, where, alias):
+    """True when the managed alias is in place (and safe to verify)."""
     if "COLLISION config" in results:
         say("  %s: ~/.ssh/config already configures %s by hand; not adding a managed alias (pick another with --alias/--as)" % (where, alias))
     elif "COLLISION managed" in results:
         say("  %s: another managed link already uses alias %s; pick a different --alias/--as" % (where, alias))
     else:
         say("  %s: ssh %s is ready" % (where, alias))
+        return True
+    return False
 
 
 # --- commands ----------------------------------------------------------------
@@ -397,16 +401,19 @@ def link(me, peer, direction, user, alias, local_alias, yes):
             ktype, blob = pub_from(run_local(("ensure_key", "%s@%s fleet" % (local_user, me.name))))
             report_auth(rem.run(("authorize", "%s:%s" % (TAG, me.name), auth_line(me, ktype, blob), blob)),
                         peer.name, me.name)
-            report_host(run_local(("set_host", peer.name, alias, host_block(peer.name, alias, peer.fqdn, user))),
-                        me.name, alias)
+            to = report_host(run_local(("set_host", peer.name, alias,
+                                        host_block(peer.name, alias, peer.fqdn, user))), me.name, alias)
+            ok &= to
         if frm:
             ktype, blob = pub_from(rem.run(("ensure_key", "%s@%s fleet" % (user, peer.name))))
             report_auth(run_local(("authorize", "%s:%s" % (TAG, peer.name), auth_line(peer, ktype, blob), blob)),
                         me.name, peer.name)
-            report_host(rem.run(("set_host", me.name, local_alias,
-                                 host_block(me.name, local_alias, me.fqdn, local_user))),
-                        peer.name, local_alias)
-        say("Verifying with keys only...")
+            frm = report_host(rem.run(("set_host", me.name, local_alias,
+                                       host_block(me.name, local_alias, me.fqdn, local_user))),
+                              peer.name, local_alias)
+            ok &= frm
+        if to or frm:
+            say("Verifying with keys only...")
         if to:
             good = "OK" in run_local(("verify", alias))
             ok &= good

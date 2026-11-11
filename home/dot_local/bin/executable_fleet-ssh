@@ -40,6 +40,8 @@ FLEET_JSON = Path.home() / ".config/decent-angl/fleet.json"
 NAME_RE = re.compile(r"[a-z0-9][a-z0-9-]*\Z")
 ALIAS_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 USER_RE = re.compile(r"[a-z_][a-z0-9_.-]*\Z", re.I)
+FQDN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9.-]*\Z")
+IP_RE = re.compile(r"[0-9A-Fa-f:.]+\Z")
 
 # Runs under sh on both ends. Machine-readable results are "@@" lines on stdout;
 # messages for the person go to stderr.
@@ -318,19 +320,29 @@ def report_host(results, where, alias):
 
 # --- commands ----------------------------------------------------------------
 
-def check_names(alias, local_alias, user):
+def check_node(n):
+    if not NAME_RE.match(n.name) or not FQDN_RE.match(n.fqdn):
+        die("tailnet peer %r has no usable MagicDNS name" % (n.fqdn or n.host))
+    if not n.ips or not all(IP_RE.match(ip) for ip in n.ips):
+        die("tailnet peer %s has no usable IPs" % n.name)
+
+
+def check_names(alias, local_alias, users):
     for a in (alias, local_alias):
         if a is not None and not ALIAS_RE.match(a):
             die("bad alias %r" % a)
-    if not USER_RE.match(user):
-        die("bad user %r" % user)
+    for u in users:
+        if not USER_RE.match(u):
+            die("bad user %r" % u)
 
 
 def link(me, peer, direction, user, alias, local_alias, yes):
     local_user = getpass.getuser()
     alias = alias or peer.name
     local_alias = local_alias or me.name
-    check_names(alias, local_alias, user)
+    check_names(alias, local_alias, (user, local_user))
+    check_node(me)
+    check_node(peer)
     if peer.fqdn.lower() == me.fqdn.lower():
         die("TARGET is this host")
     to = direction in ("to", "both")

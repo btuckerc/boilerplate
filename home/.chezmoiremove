@@ -25,3 +25,7 @@
 .local/bin/omp-council-yield
 # Retired 2026-11-08: omp-triage became agent-triage (labels are agent-run lanes).
 .local/bin/omp-triage
+# Retired 2026-11-10: Omarchy ships openrouter and codex collectors (codex counts omp
+# sessions too); omarchy-agent-usage-update hands openrouter the omp-env key.
+.local/bin/omarchy-agent-usage-openrouter
+.local/bin/omarchy-agent-usage-omp

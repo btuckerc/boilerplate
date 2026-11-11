@@ -1,8 +1,11 @@
 #!/bin/sh
 # The shell rewrites this file itself (bar edits, provider toggles, idle), so own
-# two facts only: no omarchy.menu button on the bar (the menu stays on
-# Super+Space), and the Tailscale widget polls every 120 s, not 30 s (it still
-# refreshes on panel open and after actions; power council 2026-11-08).
+# three facts only: no omarchy.menu button on the bar (the menu stays on
+# Super+Space); the Tailscale widget polls every 120 s, not 30 s (it still
+# refreshes on panel open and after actions; power council 2026-11-08); and the
+# agents panel never hides Claude, Codex, OpenRouter or the nous inference record,
+# while the packaged `local` record stays off, since `inference` counts the same
+# tokens on the server.
 # Unchanged input is emitted byte-for-byte; jq keeps every number it does not
 # touch exactly as written.
 set -eu
@@ -32,7 +35,13 @@ filter='
         .value |= map(
           select(((type == "object") and .id == "omarchy.menu") | not)
           | if type == "object" and .id == "omarchy.tailscale" and (has("refreshIntervalSec") | not)
-            then .refreshIntervalSec = 120 else . end)
+            then .refreshIntervalSec = 120 else . end
+          | if type == "object" and .id == "omarchy.agents"
+            then .providers = ((.providers // {})
+              | with_entries(select((.key | IN("claude", "codex", "openrouter", "inference"))
+                  and (.value | type) == "object" and .value.enabled == false | not))
+              | .local = ((.local // {}) | .enabled = false))
+            else . end)
       else . end)
   else . end'
 if [ "$(jq -c . "$tmp")" = "$(jq -c "$filter" "$tmp")" ]; then

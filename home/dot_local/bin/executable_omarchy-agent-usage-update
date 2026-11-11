@@ -4,20 +4,30 @@
 # omarchy:args=[--force] [--limits-only] [--except <agent>] [agent...]
 # omarchy:examples=omarchy agent usage-update | omarchy agent usage-update claude | omarchy agent usage-update --except codex
 
-# Packaged Omarchy only walks $OMARCHY_PATH/bin. This wrapper also picks up
-# user collectors in ~/.local/bin so a new agent is still just a collector.
-# Packaged collectors win when both sides ship the same agent id.
-
-USAGE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/agents/usage"
-mkdir -p "$USAGE_DIR"
+# Shadows the packaged command on PATH only to add two things, so everything
+# the package does (account refresh, autoswitch, new collectors) still comes
+# from the package after every Omarchy update:
+# - user collectors in ~/.local/bin whose id the package doesn't ship;
+# - the OpenRouter key omp-env keeps in ~/.omp/agent/.env, which the packaged
+#   collector doesn't read.
 
 OMARCHY_ROOT="${OMARCHY_PATH:-/usr/share/omarchy}"
+USAGE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/agents/usage"
+
+if [[ -z ${OPENROUTER_API_KEY:-} && -r ${OMP_ENV_FILE:-$HOME/.omp/agent/.env} ]]; then
+  key=$(sed -n 's/^OPENROUTER_API_KEY=//p' "${OMP_ENV_FILE:-$HOME/.omp/agent/.env}" | tail -n 1)
+  key=${key%\"}; key=${key#\"}; key=${key%\'}; key=${key#\'}
+  [[ -n $key ]] && export OPENROUTER_API_KEY="$key"
+  unset key
+fi
+
+"$OMARCHY_ROOT/bin/omarchy-agent-usage-update" "$@" &
+packaged=$!
 
 flags=()
 only=()
 declare -A excluded
-
-while [[ $# -gt 0 ]]; do
+while (($# > 0)); do
   case "$1" in
   --force | --limits-only) flags+=("$1") ;;
   --except)
@@ -30,48 +40,39 @@ while [[ $# -gt 0 ]]; do
 done
 
 wanted() {
-  local agent="$1"
-  [[ -n ${excluded[$agent]} ]] && return 1
-  (( ${#only[@]} == 0 )) && return 0
+  [[ -n ${excluded[$1]:-} ]] && return 1
+  ((${#only[@]} == 0)) && return 0
   local candidate
   for candidate in "${only[@]}"; do
-    [[ $candidate == "$agent" ]] && return 0
+    [[ $candidate == "$1" ]] && return 0
   done
   return 1
 }
 
 collect() {
-  local collector="$1" agent="$2"
   local record tmp
-  if ! record=$("$collector" "${flags[@]}") || [[ -z $record ]] || ! jq -e . >/dev/null 2>&1 <<<"$record"; then
-    echo "omarchy-agent-usage-update: $agent collector failed" >&2
+  if ! record=$("$1" "${flags[@]}") || [[ -z $record ]] || ! jq -e . >/dev/null 2>&1 <<<"$record"; then
+    echo "omarchy-agent-usage-update: $2 collector failed" >&2
     return 1
   fi
-  tmp=$(mktemp "$USAGE_DIR/.$agent.XXXXXX")
+  tmp=$(mktemp "$USAGE_DIR/.$2.XXXXXX")
   printf '%s\n' "$record" >"$tmp"
-  mv "$tmp" "$USAGE_DIR/$agent.json"
+  mv "$tmp" "$USAGE_DIR/$2.json"
 }
 
-declare -A collectors
-for dir in "${OMARCHY_ROOT}/bin" "${HOME}/.local/bin"; do
-  [[ -d $dir ]] || continue
-  for collector in "$dir"/omarchy-agent-usage-*; do
-    [[ -x $collector ]] || continue
-    agent="${collector##*/omarchy-agent-usage-}"
-    [[ $agent == "update" ]] && continue
-    [[ -n ${collectors[$agent]:-} ]] && continue
-    collectors[$agent]="$collector"
-  done
-done
-
+mkdir -p "$USAGE_DIR"
 pids=()
-for agent in "${!collectors[@]}"; do
+for collector in "$HOME"/.local/bin/omarchy-agent-usage-*; do
+  [[ -x $collector ]] || continue
+  agent="${collector##*/omarchy-agent-usage-}"
+  [[ $agent == "update" || -e $OMARCHY_ROOT/bin/omarchy-agent-usage-$agent ]] && continue
   wanted "$agent" || continue
-  collect "${collectors[$agent]}" "$agent" &
+  collect "$collector" "$agent" &
   pids+=($!)
 done
 
 status=0
+wait "$packaged" || status=1
 for pid in "${pids[@]}"; do
   wait "$pid" || status=1
 done

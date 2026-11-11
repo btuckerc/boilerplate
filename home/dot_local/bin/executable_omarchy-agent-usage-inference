@@ -1,0 +1,161 @@
+#!/usr/bin/python3
+# omarchy:summary=Print the self-hosted inference usage record as JSON
+# omarchy:args=[--force] [--limits-only]
+# omarchy:hidden=true
+"""Self-hosted inference servers as one agents-panel record.
+
+Endpoints are the `inference_endpoints` of every `role: inference` host in
+~/.config/decent-angl/fleet.json. Each answers /metrics (vLLM, or llama-server
+started with --metrics). The servers count tokens per process, so the deltas
+between polls are kept in $XDG_STATE_HOME/decent-angl/inference-usage.json;
+tokens served while this machine was not polling land on the day they are
+next seen, and a restart nobody observed loses what the old process served.
+Read-only: never sends a prompt and never touches a service.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+import fcntl
+import json
+import os
+import re
+import sys
+import urllib.request
+from pathlib import Path
+
+HOME = Path.home()
+FLEET = Path(os.environ.get("XDG_CONFIG_HOME", HOME / ".config")) / "decent-angl" / "fleet.json"
+STATE = Path(os.environ.get("XDG_STATE_HOME", HOME / ".local" / "state")) / "decent-angl" / "inference-usage.json"
+KEEP_DAYS = 400
+METRIC = re.compile(r'^([a-z_:]+)\{([^}]*)\}\s+([0-9.eE+-]+)$|^([a-z_:]+)\s+([0-9.eE+-]+)$')
+MODEL_LABEL = re.compile(r'model_name="([^"]*)"')
+# (prompt, cached prompt, output) counters per server family. vLLM's prompt
+# counter includes prefix-cache hits; llama-server's counts only what it
+# processed.
+PROMPT_INCLUDES_CACHED = {"vllm": True, "llamacpp": False}
+COUNTERS = {
+  "vllm": ("vllm:prompt_tokens_total", "vllm:prefix_cache_hits_total", "vllm:generation_tokens_total"),
+  "llamacpp": ("llamacpp:prompt_tokens_total", "llamacpp:prompt_tokens_cached_total", "llamacpp:tokens_predicted_total"),
+}
+
+
+def endpoints() -> list[tuple[str, str]]:
+  try:
+    hosts = json.loads(FLEET.read_text()).get("hosts", [])
+  except (OSError, ValueError):
+    return []
+  return [
+    (str(host.get("id") or url), str(url).rstrip("/"))
+    for host in hosts if isinstance(host, dict) and host.get("role") == "inference"
+    for url in (host.get("inference_endpoints") or {}).values()
+  ]
+
+
+def get(url: str) -> str:
+  with urllib.request.urlopen(url, timeout=3) as response:
+    return response.read(1 << 20).decode("utf-8", "replace")
+
+
+def models_served(text: str) -> dict[str, list[float]]:
+  """Per model: [uncached prompt tokens, cached prompt tokens, output tokens]."""
+  served: dict[str, list[float]] = {}
+  for line in text.splitlines():
+    match = METRIC.match(line.strip())
+    if not match:
+      continue
+    name, labels, value = (match[1], match[2], match[3]) if match[1] else (match[4], "", match[5])
+    for family, names in COUNTERS.items():
+      if name in names:
+        label = MODEL_LABEL.search(labels)
+        model = label[1] if label else family
+        counts = served.setdefault(model, [0.0, 0.0, 0.0])
+        index = names.index(name)
+        counts[index] += float(value)
+        if index == 1 and PROMPT_INCLUDES_CACHED[family]:
+          counts[0] -= float(value)
+  return served
+
+
+def main() -> int:
+  hosts = endpoints()
+  now = dt.datetime.now()
+  today = now.date()
+  record = {
+    "schemaVersion": 1, "id": "inference", "name": "Local inference",
+    "updatedAt": dt.datetime.now(dt.timezone.utc).isoformat(),
+    "ready": False, "hasLocalStats": False, "hasPromptStats": False,
+    "tierLabel": "", "usageStatusText": "", "authHelpText": "",
+    "limits": [], "limitsStale": False, "limitsFetchedAt": 0,
+  }
+  if not hosts:
+    record.update(stats({}, today))
+    print(json.dumps(record, separators=(",", ":")))
+    return 0
+
+  STATE.parent.mkdir(parents=True, exist_ok=True)
+  with open(STATE.with_suffix(".lock"), "w") as lock:
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    try:
+      state = json.loads(STATE.read_text())
+    except (OSError, ValueError):
+      state = {}
+    last = state.setdefault("last", {})
+    days = state.setdefault("days", {})
+    down = []
+    for host, url in hosts:
+      try:
+        served = models_served(get(url + "/metrics"))
+      except OSError:
+        down.append(host)
+        continue
+      for model, now_counts in served.items():
+        key = f"{url} {model}"
+        before = last.get(key, [0.0, 0.0, 0.0])
+        # A counter below its last reading means the server restarted.
+        delta = [n - b if n >= b else n for n, b in zip(now_counts, before)]
+        last[key] = now_counts
+        if any(delta):
+          bucket = days.setdefault(today.isoformat(), {}).setdefault(model, [0, 0, 0])
+          bucket[0] += max(0, round(delta[0]))
+          bucket[1] += max(0, round(delta[2]))
+          bucket[2] += max(0, round(delta[1]))
+    for day in sorted(days)[:-KEEP_DAYS]:
+      del days[day]
+    tmp = STATE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(state, separators=(",", ":")))
+    os.replace(tmp, STATE)
+
+  record.update(stats(days, today))
+  record["ready"] = True
+  record["hasLocalStats"] = bool(days)
+  record["tierLabel"] = " · ".join(dict.fromkeys(host for host, _ in hosts))
+  if down:
+    record["usageStatusText"] = "Server down"
+    record["authHelpText"] = f"{', '.join(down)} did not answer /metrics; totals resume when it does."
+  print(json.dumps(record, separators=(",", ":")))
+  return 0
+
+
+def stats(days: dict, today: dt.date) -> dict:
+  recent = [(today - dt.timedelta(days=offset)).isoformat() for offset in range(6, -1, -1)]
+  usage: dict[str, dict[str, int]] = {}
+  for buckets in days.values():
+    for model, (inp, out, cached) in buckets.items():
+      entry = usage.setdefault(model, {"inputTokens": 0, "outputTokens": 0, "cacheReadInputTokens": 0, "cacheCreationInputTokens": 0})
+      entry["inputTokens"] += inp
+      entry["outputTokens"] += out
+      entry["cacheReadInputTokens"] += cached
+  today_by_model = {model: sum(v) for model, v in days.get(today.isoformat(), {}).items() if sum(v)}
+  active = sorted(day for day, buckets in days.items() if any(sum(v) for v in buckets.values()))
+  return {
+    "todayPrompts": 0, "todaySessions": 0,
+    "todayTotalTokens": sum(today_by_model.values()), "todayTokensByModel": today_by_model,
+    "recentDays": [{"date": day, "messageCount": sum(sum(v) for v in days.get(day, {}).values())} for day in recent],
+    "totalPrompts": 0, "totalSessions": 0,
+    "activeDays": len(active), "activeDates": active, "modelUsage": usage,
+  }
+
+
+if __name__ == "__main__":
+  sys.exit(main())

@@ -21,6 +21,11 @@
 {{- $config = setValueAtPath "attribution" (dict "commit" "" "pr" "" "sessionUrl" false) $config -}}
 {{- /* Keep transcripts (Herdwick renders them); the default sweep deletes after 30 days. */ -}}
 {{- $config = setValueAtPath "cleanupPeriodDays" 3650 $config -}}
+{{- /* No auto-memory: durable guidance belongs in the managed config and rules, not in
+     per-project memory files. autoMemoryEnabled=false stops reads and writes; autoDreamEnabled
+     stops background consolidation. */ -}}
+{{- $config = setValueAtPath "autoMemoryEnabled" false $config -}}
+{{- $config = setValueAtPath "autoDreamEnabled" false $config -}}
 {{- $config = setValueAtPath "statusLine" (dict "type" "command" "command" (joinPath .chezmoi.homeDir ".local/bin/claude-statusline")) $config -}}
 {{- if and .chezmoi.stdin (eq $before ($config | toJson)) -}}
 {{ .chezmoi.stdin }}

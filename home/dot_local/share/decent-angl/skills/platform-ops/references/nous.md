@@ -62,8 +62,12 @@ independent auth and sessions. Read `~/src/omp-serve/README.md` and
 `docs/omp-workspace-hosting-2026-09-19.md` for deployment details.
 
 - SSH: `ssh tux@nous`; MacBook also has a local `ssh nous` alias using its
-  existing `~/.ssh/id_rsa`, with agent forwarding disabled. Other clients
-  install their own public key; do not copy private keys between machines.
+  existing `~/.ssh/id_rsa`, with agent forwarding disabled. Link other
+  hosts with `fleet-ssh` (wizard; `link HOST --direction both|to|from`,
+  `status`, `unlink`), run on the new host: one password prompt for the
+  target, per-host `~/.ssh/id_ed25519_fleet`, `from=`-pinned lines tagged
+  `decent-angl-fleet:<host>`, aliases in
+  `~/.ssh/config.d/decent-angl-fleet.conf`. Never copy private keys.
 - API: `http://nous:8080/v1`; health: `http://nous:8080/health`.
 - OMP uses the built-in, no-auth `vllm` provider at
   `http://100.83.125.83:8080/v1`, configured in

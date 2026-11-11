@@ -1,0 +1,499 @@
+#!/usr/bin/env python3
+"""fleet-ssh: link this host with another tailnet host for SSH, one or both ways.
+
+Usage:
+  fleet-ssh                      interactive wizard
+  fleet-ssh link TARGET [--direction both|to|from] [--user USER]
+                 [--alias ALIAS] [--as LOCAL_ALIAS] [--yes]
+  fleet-ssh unlink TARGET        remove the managed link on both ends
+  fleet-ssh status               list managed links and test each alias
+
+Directions, from the host you run it on:
+  to    this host -> TARGET    (this host's key is authorized on TARGET)
+  from  TARGET -> this host    (TARGET's key is authorized here)
+  both  both of the above
+
+One SSH connection to TARGET does all remote work, so you type TARGET's
+password at most once (none when a key already works). Each host keeps its own
+~/.ssh/id_ed25519_fleet; private keys never leave their host. Authorized lines
+are pinned with from= to the source's tailnet IPs and tagged
+"decent-angl-fleet:<host>". Aliases go in ~/.ssh/config.d/decent-angl-fleet.conf,
+included from the top of ~/.ssh/config. Unmanaged lines and Host entries are
+never edited: a key already authorized by hand, or an alias already defined
+in ~/.ssh/config, is reported and left as is.
+"""
+import argparse
+import getpass
+import json
+import os
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+PROG = "fleet-ssh"
+TAG = "decent-angl-fleet"
+FLEET_JSON = Path.home() / ".config/decent-angl/fleet.json"
+NAME_RE = re.compile(r"[a-z0-9][a-z0-9-]*\Z")
+ALIAS_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
+USER_RE = re.compile(r"[a-z_][a-z0-9_.-]*\Z", re.I)
+
+# Runs under sh on both ends. Machine-readable results are "@@" lines on stdout;
+# messages for the person go to stderr.
+OPS = r'''
+set -eu
+umask 077
+D="$HOME/.ssh"
+KEY="$D/id_ed25519_fleet"
+AK="$D/authorized_keys"
+CFG="$D/config"
+MF="$D/config.d/decent-angl-fleet.conf"
+INC="Include ~/.ssh/config.d/decent-angl-fleet.conf"
+
+fail() { echo "fleet-ssh: $(uname -n): $*" >&2; exit 1; }
+nolink() { [ ! -L "$1" ] || fail "$1 is a symlink; edit it by hand"; }
+prep() { mkdir -p "$D/config.d"; chmod 700 "$D" "$D/config.d"; }
+
+ensure_key() {
+  prep
+  if [ ! -f "$KEY" ]; then
+    ssh-keygen -q -t ed25519 -N '' -C "$1" -f "$KEY" </dev/null >/dev/null
+    echo "  created $KEY on $(uname -n)" >&2
+  fi
+  [ -f "$KEY.pub" ] || ssh-keygen -y -f "$KEY" >"$KEY.pub"
+  echo "@@PUB $(cat "$KEY.pub")"
+}
+
+authorize() {  # tag line blob
+  prep; nolink "$AK"; [ -f "$AK" ] || : >"$AK"; chmod 600 "$AK"
+  if grep -F -e "$3" "$AK" | awk -v t="$1" '$NF != t' | grep -q .; then
+    echo "@@UNMANAGED"; return 0
+  fi
+  t=$(mktemp "$D/.ak.XXXXXX")
+  awk -v t="$1" '$NF != t' "$AK" >"$t"
+  printf '%s\n' "$2" >>"$t"
+  chmod 600 "$t"; mv "$t" "$AK"
+  echo "@@AUTHORIZED"
+}
+
+deauthorize() {  # tag
+  [ -f "$AK" ] || return 0
+  nolink "$AK"
+  grep -q " $1\$" "$AK" || return 0
+  t=$(mktemp "$D/.ak.XXXXXX")
+  awk -v t="$1" '$NF != t' "$AK" >"$t"
+  chmod 600 "$t"; mv "$t" "$AK"
+  echo "@@REMOVED"
+}
+
+without_block() {  # name file
+  awk -v b="# BEGIN $TAG $1" -v e="# END $TAG $1" \
+    '$0==b{s=1;next} s&&$0==e{s=0;next} !s' "$2"
+}
+
+ensure_include() {
+  nolink "$CFG"; [ -f "$CFG" ] || : >"$CFG"; chmod 600 "$CFG"
+  grep -qxF "$INC" "$CFG" && return 0
+  t=$(mktemp "$D/.cfg.XXXXXX")
+  { printf '%s\n\n' "$INC"; cat "$CFG"; } >"$t"
+  chmod 600 "$t"; mv "$t" "$CFG"
+}
+
+set_host() {  # name alias block
+  prep; nolink "$MF"; [ -f "$MF" ] || : >"$MF"; chmod 600 "$MF"
+  if [ -f "$CFG" ] && awk -v a="$2" 'tolower($1)=="host"{for(i=2;i<=NF;i++) if($i==a) f=1} END{exit !f}' "$CFG"; then
+    echo "@@COLLISION config"; return 0
+  fi
+  t=$(mktemp "$D/.mf.XXXXXX")
+  without_block "$1" "$MF" >"$t"
+  if awk -v a="$2" 'tolower($1)=="host"{for(i=2;i<=NF;i++) if($i==a) f=1} END{exit !f}' "$t"; then
+    rm -f "$t"; echo "@@COLLISION managed"; return 0
+  fi
+  printf '%s\n' "$3" >>"$t"
+  chmod 600 "$t"; mv "$t" "$MF"
+  ensure_include
+  echo "@@HOSTSET"
+}
+
+unset_host() {  # name
+  [ -f "$MF" ] || return 0
+  nolink "$MF"
+  grep -qxF "# BEGIN $TAG $1" "$MF" || return 0
+  t=$(mktemp "$D/.mf.XXXXXX")
+  without_block "$1" "$MF" >"$t"
+  chmod 600 "$t"; mv "$t" "$MF"
+  echo "@@REMOVED"
+}
+
+list() {
+  if [ -f "$MF" ]; then
+    awk -v b="# BEGIN $TAG " 'index($0,b)==1{n=substr($0,length(b)+1)} n!="" && tolower($1)=="host"{print "@@HOST " n " " $2; n=""}' "$MF"
+  fi
+  if [ -f "$AK" ]; then
+    awk -v p="$TAG:" 'index($NF,p)==1{print "@@TAG " substr($NF,length(p)+1)}' "$AK"
+  fi
+}
+
+verify() {  # alias
+  if ssh -o BatchMode=yes -o ControlMaster=no -o ControlPath=none -o ConnectTimeout=10 "$1" true </dev/null; then
+    echo "@@OK"
+  else
+    echo "@@FAIL"
+  fi
+}
+'''.replace("$TAG", TAG)
+
+
+def die(msg, code=1):
+    sys.stderr.write("%s: %s\n" % (PROG, msg))
+    raise SystemExit(code)
+
+
+def say(msg=""):
+    sys.stderr.write(msg + "\n")
+
+
+# --- tailnet -----------------------------------------------------------------
+
+class Node(object):
+    def __init__(self, raw):
+        self.fqdn = (raw.get("DNSName") or "").rstrip(".")
+        self.name = self.fqdn.split(".")[0].lower() if self.fqdn else (raw.get("HostName") or "").lower()
+        self.host = (raw.get("HostName") or "").lower()
+        self.ips = list(raw.get("TailscaleIPs") or [])
+        self.online = bool(raw.get("Online", True))
+        self.os = raw.get("OS") or ""
+
+
+def tailscale_bin():
+    for cand in (shutil.which("tailscale"), "/usr/local/bin/tailscale", "/opt/homebrew/bin/tailscale",
+                 "/Applications/Tailscale.app/Contents/MacOS/Tailscale"):
+        if cand and os.access(cand, os.X_OK):
+            return cand
+    die("tailscale CLI not found")
+
+
+def tailnet():
+    out = subprocess.run([tailscale_bin(), "status", "--json"], stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE, universal_newlines=True)
+    if out.returncode != 0:
+        die("tailscale status failed: %s" % out.stderr.strip())
+    data = json.loads(out.stdout)
+    me = Node(data["Self"])
+    peers = [Node(p) for p in (data.get("Peer") or {}).values()]
+    if not me.fqdn or not me.ips:
+        die("this host has no tailnet name or IP (is Tailscale up, with MagicDNS on?)")
+    return me, peers
+
+
+def find_peer(peers, target):
+    t = target.lower().rstrip(".")
+    hits = [p for p in peers if t in (p.name, p.host, p.fqdn.lower())]
+    if len(hits) == 1:
+        return hits[0]
+    if not hits:
+        die("no tailnet peer named %r; peers: %s" % (target, ", ".join(sorted(p.name for p in peers))))
+    die("%r matches several peers: %s" % (target, ", ".join(p.fqdn for p in hits)))
+
+
+def fleet_user(name):
+    """User from fleet.json's ssh field (user@host), when this host is listed."""
+    try:
+        hosts = json.loads(FLEET_JSON.read_text()).get("hosts", [])
+    except (OSError, ValueError):
+        return None
+    for h in hosts:
+        ssh = h.get("ssh", "")
+        if "@" in ssh and ssh.split("@", 1)[1].lower() == name:
+            return ssh.split("@", 1)[0]
+    return None
+
+
+# --- running the sh ops ------------------------------------------------------
+
+def script(*calls):
+    return OPS + "\n" + "\n".join(" ".join(shlex.quote(str(a)) for a in c) for c in calls) + "\n"
+
+
+def parse(stdout):
+    res = []
+    for line in stdout.splitlines():
+        if line.startswith("@@"):
+            res.append(line[2:])
+        elif line.strip():
+            say("  " + line)
+    return res
+
+
+def run_local(*calls):
+    p = subprocess.run(["sh", "-s"], input=script(*calls), stdout=subprocess.PIPE, universal_newlines=True)
+    if p.returncode != 0:
+        die("local step failed (exit %d)" % p.returncode)
+    return parse(p.stdout)
+
+
+class Remote(object):
+    """One multiplexed SSH connection; the only place a password is asked."""
+
+    def __init__(self, user, node):
+        self.dest = "%s@%s" % (user, node.fqdn)
+        self.node = node
+        self.dir = tempfile.mkdtemp(prefix="fleet-ssh-", dir="/tmp" if os.path.isdir("/tmp") else None)
+        self.sock = os.path.join(self.dir, "m")
+
+    def open(self):
+        say("Connecting to %s (enter its password if asked)..." % self.dest)
+        key = Path.home() / ".ssh/id_ed25519_fleet"
+        rc = subprocess.call(["ssh", "-o", "ControlMaster=yes", "-o", "ControlPath=" + self.sock,
+                              "-o", "ControlPersist=600", "-o", "StrictHostKeyChecking=accept-new",
+                              "-o", "ConnectTimeout=15", "-o", "ForwardAgent=no"]
+                             + (["-i", str(key)] if key.is_file() else []) + ["-fN", self.dest])
+        if rc != 0:
+            self.cleanup()
+            die("could not connect to %s" % self.dest)
+
+    def run(self, *calls):
+        p = subprocess.run(["ssh", "-o", "ControlMaster=no", "-o", "ControlPath=" + self.sock,
+                            self.dest, "sh -s"],
+                           input=script(*calls), stdout=subprocess.PIPE, universal_newlines=True)
+        if p.returncode != 0:
+            die("step on %s failed (exit %d)" % (self.node.name, p.returncode))
+        return parse(p.stdout)
+
+    def close(self):
+        subprocess.call(["ssh", "-o", "ControlPath=" + self.sock, "-O", "exit", self.dest],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.cleanup()
+
+    def cleanup(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+
+def pub_from(results):
+    for r in results:
+        if r.startswith("PUB "):
+            parts = r[4:].split()
+            if len(parts) >= 2:
+                return parts[0], parts[1]
+    die("no public key returned")
+
+
+def auth_line(src, ktype, blob):
+    return 'from="%s" %s %s %s:%s' % (",".join(src.ips), ktype, blob, TAG, src.name)
+
+
+def host_block(name, alias, fqdn, user):
+    return "\n".join([
+        "# BEGIN %s %s" % (TAG, name),
+        "Host %s" % alias,
+        "  HostName %s" % fqdn,
+        "  User %s" % user,
+        "  IdentityFile ~/.ssh/id_ed25519_fleet",
+        "  IdentitiesOnly yes",
+        "  ForwardAgent no",
+        "  StrictHostKeyChecking accept-new",
+        "  ConnectTimeout 10",
+        "# END %s %s" % (TAG, name),
+    ])
+
+
+def report_auth(results, where, src):
+    if "UNMANAGED" in results:
+        say("  %s already authorizes %s's key on an unmanaged line; left as is" % (where, src))
+    else:
+        say("  %s now accepts %s's fleet key (from= %s's tailnet IPs)" % (where, src, src))
+
+
+def report_host(results, where, alias):
+    if "COLLISION config" in results:
+        say("  %s: ~/.ssh/config already defines Host %s by hand; not adding a managed alias (pick another with --alias/--as)" % (where, alias))
+    elif "COLLISION managed" in results:
+        say("  %s: another managed link already uses alias %s; pick a different --alias/--as" % (where, alias))
+    else:
+        say("  %s: ssh %s is ready" % (where, alias))
+
+
+# --- commands ----------------------------------------------------------------
+
+def check_names(alias, local_alias, user):
+    for a in (alias, local_alias):
+        if a is not None and not ALIAS_RE.match(a):
+            die("bad alias %r" % a)
+    if not USER_RE.match(user):
+        die("bad user %r" % user)
+
+
+def link(me, peer, direction, user, alias, local_alias, yes):
+    local_user = getpass.getuser()
+    alias = alias or peer.name
+    local_alias = local_alias or me.name
+    check_names(alias, local_alias, user)
+    if peer.fqdn.lower() == me.fqdn.lower():
+        die("TARGET is this host")
+    to = direction in ("to", "both")
+    frm = direction in ("from", "both")
+
+    say("Plan:")
+    if to:
+        say("  %s -> %s   on %s run: ssh %s   (%s@%s)" % (me.name, peer.name, me.name, alias, user, peer.fqdn))
+    if frm:
+        say("  %s -> %s   on %s run: ssh %s   (%s@%s)" % (peer.name, me.name, peer.name, local_alias, local_user, me.fqdn))
+    if not peer.online:
+        say("  note: tailscale reports %s offline" % peer.name)
+    if not yes:
+        if not sys.stdin.isatty():
+            die("not a terminal; pass --yes to proceed")
+        if input("Proceed? [Y/n] ").strip().lower() not in ("", "y", "yes"):
+            die("cancelled", 0)
+
+    rem = Remote(user, peer)
+    rem.open()
+    ok = True
+    try:
+        if to:
+            ktype, blob = pub_from(run_local(("ensure_key", "%s@%s fleet" % (local_user, me.name))))
+            report_auth(rem.run(("authorize", "%s:%s" % (TAG, me.name), auth_line(me, ktype, blob), blob)),
+                        peer.name, me.name)
+            report_host(run_local(("set_host", peer.name, alias, host_block(peer.name, alias, peer.fqdn, user))),
+                        me.name, alias)
+        if frm:
+            ktype, blob = pub_from(rem.run(("ensure_key", "%s@%s fleet" % (user, peer.name))))
+            report_auth(run_local(("authorize", "%s:%s" % (TAG, peer.name), auth_line(peer, ktype, blob), blob)),
+                        me.name, peer.name)
+            report_host(rem.run(("set_host", me.name, local_alias,
+                                 host_block(me.name, local_alias, me.fqdn, local_user))),
+                        peer.name, local_alias)
+        say("Verifying with keys only...")
+        if to:
+            good = "OK" in run_local(("verify", alias))
+            ok &= good
+            say("  %s -> %s: %s" % (me.name, peer.name, "ok" if good else "FAILED"))
+        if frm:
+            good = "OK" in rem.run(("verify", local_alias))
+            ok &= good
+            say("  %s -> %s: %s" % (peer.name, me.name, "ok" if good else "FAILED"))
+            if not good:
+                say("  check that sshd runs here (Linux: sudo systemctl enable --now sshd; "
+                    "macOS: System Settings > General > Sharing > Remote Login)")
+    finally:
+        rem.close()
+    if not ok:
+        raise SystemExit(1)
+
+
+def managed(results):
+    hosts = {}
+    tags = []
+    for r in results:
+        if r.startswith("HOST "):
+            _, name, alias = r.split(" ", 2)
+            hosts[name] = alias
+        elif r.startswith("TAG "):
+            tags.append(r[4:])
+    return hosts, tags
+
+
+def unlink(me, peers, target):
+    t = target.lower()
+    match = [p for p in peers if t in (p.name, p.host, p.fqdn.lower())]
+    name = match[0].name if len(match) == 1 else t
+    if not NAME_RE.match(name):
+        die("bad host name %r" % name)
+    hosts, tags = managed(run_local(("list",)))
+    if name not in hosts and name not in tags:
+        die("no managed link with %s here" % name)
+    alias = hosts.get(name)
+    if alias:
+        say("Removing this host's entries on %s (key login via %s)..." % (name, alias))
+        p = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ControlMaster=no", "-o", "ControlPath=none",
+                            alias, "sh -s"], input=script(("deauthorize", "%s:%s" % (TAG, me.name)),
+                                                          ("unset_host", me.name)),
+                           stdout=subprocess.PIPE, universal_newlines=True)
+        if p.returncode == 0:
+            parse(p.stdout)
+            say("  done on %s" % name)
+        else:
+            say("  could not reach %s; run there: fleet-ssh unlink %s" % (name, me.name))
+    else:
+        say("No alias for %s here; to finish, run there: fleet-ssh unlink %s" % (name, me.name))
+    run_local(("deauthorize", "%s:%s" % (TAG, name)), ("unset_host", name))
+    say("  removed %s's key and alias on %s" % (name, me.name))
+
+
+def status(me):
+    hosts, tags = managed(run_local(("list",)))
+    if not hosts and not tags:
+        say("No managed links on %s." % me.name)
+        return
+    say("%s -> (aliases here):" % me.name)
+    for name, alias in sorted(hosts.items()):
+        r = run_local(("verify", alias))
+        say("  %-12s ssh %-12s %s" % (name, alias, "ok" if "OK" in r else "FAILED"))
+    if tags:
+        say("-> %s (keys accepted here from): %s" % (me.name, ", ".join(sorted(tags))))
+
+
+def ask(prompt, default=None, choices=None):
+    while True:
+        hint = " [%s]" % default if default else ""
+        if choices:
+            hint = " (%s)%s" % ("/".join(choices), hint)
+        try:
+            v = input("%s%s: " % (prompt, hint)).strip() or (default or "")
+        except EOFError:
+            die("cancelled", 0)
+        if v and (not choices or v in choices):
+            return v
+
+
+def wizard(me, peers):
+    if not sys.stdin.isatty():
+        die("no terminal for the wizard; use: fleet-ssh link TARGET ...")
+    online = sorted(p.name for p in peers if p.online)
+    say("This host: %s (%s). Online peers: %s" % (me.name, getpass.getuser(), ", ".join(online) or "none"))
+    default = "nous" if me.name != "nous" else None
+    peer = find_peer(peers, ask("Link with which host", default))
+    say("Directions:  to = %s -> %s   from = %s -> %s   both = two-way" % (me.name, peer.name, peer.name, me.name))
+    direction = ask("Direction", "both", ["both", "to", "from"])
+    user = ask("Your user on %s" % peer.name, fleet_user(peer.name) or getpass.getuser())
+    alias = ask("Alias for %s on this host" % peer.name, peer.name) if direction != "from" else None
+    local_alias = ask("Alias for this host on %s" % peer.name, me.name) if direction != "to" else None
+    link(me, peer, direction, user, alias, local_alias, yes=False)
+
+
+def main(argv):
+    ap = argparse.ArgumentParser(prog=PROG, description=__doc__.split("\n")[0])
+    sub = ap.add_subparsers(dest="cmd")
+    lk = sub.add_parser("link", help="link with TARGET")
+    lk.add_argument("target")
+    lk.add_argument("--direction", choices=["both", "to", "from"], default="both")
+    lk.add_argument("--user", help="your user on TARGET (default: fleet.json, else this user)")
+    lk.add_argument("--alias", help="alias for TARGET on this host (default: its tailnet name)")
+    lk.add_argument("--as", dest="local_alias", help="alias for this host on TARGET (default: its tailnet name)")
+    lk.add_argument("--yes", action="store_true", help="skip the confirmation")
+    ul = sub.add_parser("unlink", help="remove the managed link with TARGET")
+    ul.add_argument("target")
+    sub.add_parser("status", help="list managed links and test them")
+    args = ap.parse_args(argv)
+
+    me, peers = tailnet()
+    if args.cmd is None:
+        wizard(me, peers)
+    elif args.cmd == "link":
+        peer = find_peer(peers, args.target)
+        user = args.user or fleet_user(peer.name) or getpass.getuser()
+        link(me, peer, args.direction, user, args.alias, args.local_alias, args.yes)
+    elif args.cmd == "unlink":
+        unlink(me, peers, args.target)
+    elif args.cmd == "status":
+        status(me)
+
+
+if __name__ == "__main__":
+    try:
+        main(sys.argv[1:])
+    except KeyboardInterrupt:
+        die("interrupted", 130)

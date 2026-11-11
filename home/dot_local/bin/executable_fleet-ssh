@@ -34,6 +34,7 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -64,7 +65,23 @@ INC="Include ~/.ssh/config.d/decent-angl-fleet.conf"
 
 fail() { echo "fleet-ssh: $(uname -n): $*" >&2; exit 1; }
 nolink() { [ ! -L "$1" ] || fail "$1 is a symlink; edit it by hand"; }
-prep() { mkdir -p "$D/config.d"; chmod 700 "$D" "$D/config.d"; }
+# Alias-change journal: JC (or JA when ~/.ssh/config was absent) is written first, JM last;
+# JM present = a change may be half done. Commit removes JM first.
+JM="$D/config.d/.decent-angl-fleet.journal-managed"
+JC="$D/config.d/.decent-angl-fleet.journal-config"
+JA="$D/config.d/.decent-angl-fleet.journal-noconfig"
+prep() { mkdir -p "$D/config.d"; chmod 700 "$D" "$D/config.d"; recover; }
+
+recover_if() { if [ -f "$JM" ]; then recover; fi; }
+
+recover() {  # roll back an alias change that did not commit
+  [ -f "$JM" ] || { rm -f "$JC" "$JA"; return 0; }
+  nolink "$MF"; nolink "$CFG"
+  if [ -f "$JA" ]; then rm -f "$CFG"; elif [ -f "$JC" ]; then mv -f "$JC" "$CFG"; fi
+  mv -f "$JM" "$MF"
+  rm -f "$JC" "$JA"
+  echo "  fleet-ssh: restored ssh config on $(uname -n) from an unfinished alias change" >&2
+}
 
 ensure_key() {
   prep; nolink "$KEY"; nolink "$KEY.pub"
@@ -86,9 +103,23 @@ ensure_key() {
 # tg(): a line's last field, ignoring trailing blanks and CR (OpenSSH accepts both).
 TG='function tg(  l,a,n){l=$0; sub(/[ \t\r]+$/,"",l); n=split(l,a," "); return n?a[n]:""} '
 
-authorize() {  # tag line blob
+fp() { ssh-keygen -lf "$1" 2>/dev/null | awk 'NR==1{print $2}'; }
+
+unmanaged_has() {  # tag "type blob": does an active unmanaged authorized_keys line hold this key?
+  t=$(mktemp "$D/.fp.XXXXXX")
+  printf '%s\n' "$2" >"$t"; want=$(fp "$t")
+  [ -n "$want" ] || { rm -f "$t"; fail "could not fingerprint the key"; }
+  r=1
+  if awk -v t="$1" "$TG"'tg() != t' "$AK" | while IFS= read -r line; do
+       printf '%s\n' "$line" >"$t"
+       [ "$(fp "$t")" = "$want" ] && echo hit
+     done | grep -q hit; then r=0; fi
+  rm -f "$t"; return $r
+}
+
+authorize() {  # tag line blob "type blob"
   prep; nolink "$AK"; [ -f "$AK" ] || : >"$AK"; chmod 600 "$AK"
-  if grep -F -e "$3" "$AK" | grep -v '^[[:space:]]*#' | awk -v t="$1" "$TG"'tg() != t' | grep -q .; then
+  if unmanaged_has "$1" "$4"; then
     echo "@@UNMANAGED"; return 0
   fi
   t=$(mktemp "$D/.ak.XXXXXX")
@@ -170,22 +201,15 @@ problems() {  # alias fqdn user: how `ssh alias` differs from what the managed b
          if (!k) printf " (no fleet key)" }'
 }
 
-restore_host() {
-  mv -f "$bak" "$MF"
-  if [ "$had" = 1 ]; then chmod 600 "$cbak"; mv -f "$cbak" "$CFG"; else rm -f "$cbak" "$CFG"; fi
-}
-
 set_host() {  # name alias block fqdn user
-  prep; nolink "$MF"; [ -f "$MF" ] || : >"$MF"; chmod 600 "$MF"
+  prep; nolink "$MF"; nolink "$CFG"; [ -f "$MF" ] || : >"$MF"; chmod 600 "$MF"
   if without_block "$1" "$MF" | awk -v a="$2" 'tolower($1)=="host"{for(i=2;i<=NF;i++) if($i==a) f=1} END{exit !f}'; then
     echo "@@COLLISION managed"; return 0
   fi
-  nolink "$CFG"
-  bak=$(mktemp "$D/.mfbak.XXXXXX"); cat "$MF" >"$bak"
-  cbak=$(mktemp "$D/.cfgbak.XXXXXX"); had=0
-  if [ -f "$CFG" ]; then cat "$CFG" >"$cbak"; had=1; fi
-  # A refusal or any exit before the commit below puts both files back, byte for byte.
-  trap 'restore_host' EXIT
+  if [ -f "$CFG" ]; then cat "$CFG" >"$JC.tmp"; mv -f "$JC.tmp" "$JC"; rm -f "$JA"; else : >"$JA"; rm -f "$JC"; fi
+  cat "$MF" >"$JM.tmp"; mv -f "$JM.tmp" "$JM"
+  trap 'recover' EXIT
+  trap 'recover; trap - EXIT; exit 130' INT TERM HUP PIPE
   put_mf "$1"                       # judge the alias without this link's old block
   ensure_include
   why=$(taken "$2")
@@ -194,10 +218,10 @@ set_host() {  # name alias block fqdn user
     why=$(problems "$2" "$4" "$5")
   fi
   if [ -n "$why" ]; then
-    restore_host; trap - EXIT
+    recover 2>/dev/null; trap - EXIT INT TERM HUP PIPE
     echo "@@COLLISION config:$why"; return 0
   fi
-  trap - EXIT; rm -f "$bak" "$cbak"
+  rm -f "$JM"; rm -f "$JC" "$JA"; trap - EXIT INT TERM HUP PIPE   # commit
   echo "@@HOSTSET"
 }
 
@@ -298,17 +322,23 @@ def fleet_user(name):
 # --- running the sh ops ------------------------------------------------------
 
 def script(*calls):
-    return OPS + "\n" + "\n".join(" ".join(shlex.quote(str(a)) for a in c) for c in calls) + "\n"
+    # BEGIN/END prove the steps really ran (a forced command= or a broken shell would skip them);
+    # every run first finishes rolling back any unfinished alias change.
+    body = "\n".join(" ".join(shlex.quote(str(a)) for a in c) for c in calls)
+    return OPS + "\necho @@BEGIN\nrecover_if\n" + body + "\necho @@END\n"
 
 
-def parse(stdout):
+def parse(stdout, where="this host"):
     res = []
     for line in stdout.splitlines():
         if line.startswith("@@"):
             res.append(line[2:])
         elif line.strip():
             say("  " + line)
-    return res
+    if not res or res[0] != "BEGIN" or res[-1] != "END":
+        die("fleet-ssh steps did not run to completion on %s (a forced command= on the key, "
+            "or an unusual login shell?)" % where)
+    return res[1:-1]
 
 
 def run_local(*calls):
@@ -316,6 +346,12 @@ def run_local(*calls):
     if p.returncode != 0:
         die("local step failed (exit %d)" % p.returncode)
     return parse(p.stdout)
+
+
+# Every connection fleet-ssh makes: no agent, X11, port forwarding or LocalCommand,
+# whatever ~/.ssh/config says (command-line options win).
+NOFWD = ["-o", "ForwardAgent=no", "-o", "ForwardX11=no", "-o", "ClearAllForwardings=yes",
+         "-o", "PermitLocalCommand=no"]
 
 
 class Remote(object):
@@ -331,20 +367,24 @@ class Remote(object):
         say("Connecting to %s (enter its password if asked)..." % self.dest)
         key = Path.home() / ".ssh/id_ed25519_fleet"
         rc = subprocess.call(["ssh", "-o", "ControlMaster=yes", "-o", "ControlPath=" + self.sock,
-                              "-o", "ControlPersist=600", "-o", "StrictHostKeyChecking=accept-new",
-                              "-o", "ConnectTimeout=15", "-o", "ForwardAgent=no"]
+                              "-o", "ControlPersist=60", "-o", "StrictHostKeyChecking=accept-new",
+                              "-o", "ConnectTimeout=15"] + NOFWD
                              + (["-i", str(key)] if key.is_file() else []) + ["-fN", self.dest])
         if rc != 0:
             self.cleanup()
             die("could not connect to %s%s" % (self.dest, "; " + hint if hint else ""))
 
     def run(self, *calls):
+        # Only ever through the open master: if it is gone, stop rather than reconnect.
+        if subprocess.call(["ssh", "-o", "ControlPath=" + self.sock, "-O", "check", self.dest],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) != 0:
+            die("lost the connection to %s; nothing further was changed there, rerun to finish" % self.node.name)
         p = subprocess.run(["ssh", "-o", "ControlMaster=no", "-o", "ControlPath=" + self.sock,
-                            self.dest, "sh -s"],
+                            "-o", "BatchMode=yes"] + NOFWD + [self.dest, "sh -s"],
                            input=script(*calls), stdout=subprocess.PIPE, universal_newlines=True)
         if p.returncode != 0:
             die("step on %s failed (exit %d)" % (self.node.name, p.returncode))
-        return parse(p.stdout)
+        return parse(p.stdout, self.node.name)
 
     def close(self):
         subprocess.call(["ssh", "-o", "ControlPath=" + self.sock, "-O", "exit", self.dest],
@@ -449,12 +489,12 @@ def link(me, peer, direction, user, alias, local_alias, yes):
             die("cancelled", 0)
 
     rem = Remote(user, peer)
-    rem.open()
     ok = True
     try:
+        rem.open()
         if to:
             ktype, blob = pub_from(run_local(("ensure_key", "%s@%s fleet" % (local_user, me.name))))
-            report_auth(rem.run(("authorize", "%s:%s" % (TAG, me.name), auth_line(me, ktype, blob), blob)),
+            report_auth(rem.run(("authorize", "%s:%s" % (TAG, me.name), auth_line(me, ktype, blob), blob, ktype + " " + blob)),
                         peer.name, me.name)
             to = report_host(run_local(("set_host", peer.name, alias,
                                         host_block(peer.name, alias, peer.fqdn, user), peer.fqdn, user)),
@@ -462,7 +502,7 @@ def link(me, peer, direction, user, alias, local_alias, yes):
             ok &= to
         if frm:
             ktype, blob = pub_from(rem.run(("ensure_key", "%s@%s fleet" % (user, peer.name))))
-            report_auth(run_local(("authorize", "%s:%s" % (TAG, peer.name), auth_line(peer, ktype, blob), blob)),
+            report_auth(run_local(("authorize", "%s:%s" % (TAG, peer.name), auth_line(peer, ktype, blob), blob, ktype + " " + blob)),
                         me.name, peer.name)
             frm = report_host(rem.run(("set_host", me.name, local_alias,
                                        host_block(me.name, local_alias, me.fqdn, local_user), me.fqdn, local_user)),
@@ -516,9 +556,9 @@ def unlink(me, peers, target, user, local_only):
     check_node(me)
     check_node(peer)
     rem = Remote(user, peer)
-    rem.open(hint="nothing was changed; if %s is gone for good, run: fleet-ssh unlink %s --local-only"
-             % (peer.name, peer.name))
     try:
+        rem.open(hint="nothing was changed; if %s is gone for good, run: fleet-ssh unlink %s --local-only"
+                 % (peer.name, peer.name))
         there = rem.run(("deauthorize", "%s:%s" % (TAG, me.name)), ("unset_host", me.name))
     finally:
         rem.close()
@@ -597,7 +637,14 @@ def main(argv):
         status(me)
 
 
+def _terminate(signum, frame):
+    # SIGTERM/SIGHUP unwind like Ctrl-C, so the SSH master is closed and temp files removed.
+    raise SystemExit(128 + signum)
+
+
 if __name__ == "__main__":
+    signal.signal(signal.SIGTERM, _terminate)
+    signal.signal(signal.SIGHUP, _terminate)
     try:
         main(sys.argv[1:])
     except KeyboardInterrupt:

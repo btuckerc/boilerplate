@@ -1,0 +1,90 @@
+#!/usr/bin/env python3
+"""agent-discover: exhaustive defect discovery before a release audit.
+
+A release audit is a gate: it stops once it can justify BLOCK, so repeated
+audits surface a few defects per round. Discovery instead runs several
+independent reviewers that each try to list every defect, then estimates how
+many remain from how much their findings overlap (capture-recapture, model Mh:
+Chao and first-order jackknife, as recommended for software inspections by
+Briand, El Emam, Freimut and Laitenberger, IEEE TSE 26(6), 2000).
+
+Usage:
+  agent-discover brief            print the reviewer preamble (prepend to the contract)
+  agent-discover schema           print the findings JSON schema (for agent-run --schema)
+  agent-discover estimate FILE    estimate from merged findings
+
+FILE is JSON {"reviewers": {"r1": ["D1", "D3"], "r2": [...], ...}}: for each
+reviewer, the IDs of the distinct defects (merged by root cause) it reported.
+"""
+import json
+import sys
+from collections import Counter
+
+PREAMBLE = """# Exhaustive defect discovery
+
+You are one of several independent reviewers of one fixed candidate. Your job is
+discovery, not a verdict: find EVERY defect you can, not just enough to reject
+it. Do not stop after the first few; keep going until you have worked through
+every contract item below against every function and changed path. Read-only:
+make no edits and spawn nothing. Prefer concrete, reproducible counterexamples;
+read-only probes are encouraged. List each distinct root cause separately.
+Severity: blocker breaks the contract; major is a likely defect; minor is
+cosmetic or improbable.
+"""
+
+SCHEMA = {
+    "type": "object", "additionalProperties": False, "required": ["findings", "coverage_note"],
+    "properties": {
+        "findings": {"type": "array", "items": {
+            "type": "object", "additionalProperties": False,
+            "required": ["severity", "location", "claim", "counterexample"],
+            "properties": {
+                "severity": {"type": "string", "enum": ["blocker", "major", "minor"]},
+                "location": {"type": "string"},
+                "claim": {"type": "string"},
+                "counterexample": {"type": "string"},
+            }}},
+        "coverage_note": {"type": "string"},
+    },
+}
+
+
+def estimate(reviewers):
+    """Capture-recapture totals from per-reviewer sets of distinct defect IDs."""
+    k = len(reviewers)
+    if k < 2:
+        raise ValueError("capture-recapture needs at least two independent reviewers")
+    seen = Counter(d for ids in reviewers.values() for d in set(ids))
+    found = len(seen)
+    freq = Counter(seen.values())
+    f1, f2 = freq.get(1, 0), freq.get(2, 0)
+    chao = found + f1 * (f1 - 1) / (2 * (f2 + 1))      # bias-corrected Chao (Mh)
+    jack = found + f1 * (k - 1) / k                     # first-order jackknife (Mh)
+    return {
+        "reviewers": k, "found": found, "found_by_one": f1, "found_by_two": f2,
+        "per_reviewer": {r: len(set(ids)) for r, ids in reviewers.items()},
+        "estimate_chao": round(chao, 1), "estimate_jackknife": round(jack, 1),
+        "remaining_chao": round(chao - found, 1), "remaining_jackknife": round(jack - found, 1),
+    }
+
+
+def main(argv):
+    if len(argv) == 1 and argv[0] == "brief":
+        sys.stdout.write(PREAMBLE)
+    elif len(argv) == 1 and argv[0] == "schema":
+        print(json.dumps(SCHEMA, indent=1))
+    elif len(argv) == 2 and argv[0] == "estimate":
+        with open(argv[1]) as fh:
+            data = json.load(fh)
+        try:
+            print(json.dumps(estimate(data["reviewers"]), indent=1))
+        except (KeyError, TypeError, ValueError) as exc:
+            sys.exit("agent-discover: %s" % exc)
+    else:
+        sys.stderr.write(__doc__)
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

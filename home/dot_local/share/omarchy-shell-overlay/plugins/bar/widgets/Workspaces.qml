@@ -8,9 +8,9 @@ import qs.Ui
 
 // Decent-angl overlay of Omarchy's Workspaces widget. Packaged file is
 // untouched; omarchy-shell-overlay copies this into the runtime tree. Each
-// workspace is a drawn square, not a glyph: font metrics put a dot glyph off
-// the bar's centre. Shown (this monitor's active workspace) is a 16x8 bar at
-// 1, occupied an 8x8 square at 0.55, empty the same square at 0.3, and a
+// workspace is a drawn dot, not a glyph: font metrics put a dot glyph off
+// the bar's centre. Shown (this monitor's active workspace) is a 16x8 pill at
+// 1, occupied an 8x8 circle at 0.55, empty the same circle at 0.3, and a
 // switch morphs between them over 160 ms. Rest sizes are multiples of 4
 // logical px so edges land on whole pixels at scale 1.25.
 // Numbers move to tooltips.
@@ -232,11 +232,12 @@ BarWidget {
         }
         onWheelMoved: function(delta) { root.scrollWorkspaces(delta) }
 
-        // The mark morphs in place: on a switch the old bar shrinks to a
-        // square as the new square stretches into the bar, each from what is
+        // The mark morphs in place: on a switch the old pill shrinks to a
+        // circle as the new circle stretches into the pill, each from what is
         // on screen, so quick switches retarget instead of queueing. Its
         // length snaps to an even number of device pixels and its corner to a
-        // whole one, so it stays sharp and centred at every frame.
+        // whole one, so it stays centred at every frame. The corner radius is
+        // half the short side, so any thickness or length stays fully round.
         Rectangle {
           readonly property real dpr: root.monitorScale
           property real active: shown ? 1 : 0
@@ -248,7 +249,8 @@ BarWidget {
           height: root.vertical ? span : 8
           x: Math.round((parent.width - width) / 2 * dpr) / dpr
           y: Math.round((parent.height - height) / 2 * dpr) / dpr
-          antialiasing: false
+          radius: Math.min(width, height) / 2
+          antialiasing: true
           color: parent.foreground
           opacity: shown ? 1 : (occupied ? 0.55 : 0.3)
           Behavior on opacity {

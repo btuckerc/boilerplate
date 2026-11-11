@@ -69,18 +69,17 @@ fail() { echo "fleet-ssh: $(uname -n): $*" >&2; exit 1; }
 nolink() { [ ! -L "$1" ] || fail "$1 is a symlink; edit it by hand"; }
 prep() { mkdir -p "$D/config.d"; chmod 700 "$D" "$D/config.d"; }
 
-# One fleet-ssh change at a time per account. A lock whose owner is gone is taken over.
-LK="$D/config.d/.decent-angl-fleet.lock"; LOCKED=0
-lock() {
-  [ "$LOCKED" = 0 ] || return 0
-  prep
-  if ! mkdir "$LK" 2>/dev/null; then
-    o=$(cat "$LK/pid" 2>/dev/null || :)
-    if [ -n "$o" ] && ps -p "$o" >/dev/null 2>&1; then fail "another fleet-ssh run (pid $o) is changing ssh files here; retry when it ends"; fi
-    rm -rf "$LK"; mkdir "$LK" 2>/dev/null || fail "could not take $LK"
-  fi
-  echo $$ >"$LK/pid"; LOCKED=1
-  trap 'rm -rf "$LK"' EXIT
+# One fleet-ssh step script at a time per account: an flock on fd 9, held by this shell until it
+# exits (the kernel drops it when the process dies, so there is no stale lock to judge).
+take_lock() {
+  prep; LKF="$D/config.d/.decent-angl-fleet.lock"; nolink "$LKF"
+  command -v python3 >/dev/null 2>&1 || fail "python3 is required"
+  exec 9>>"$LKF"
+  python3 -c 'import fcntl, sys
+try:
+    fcntl.flock(9, fcntl.LOCK_EX | fcntl.LOCK_NB)
+except OSError:
+    sys.exit(75)' || fail "another fleet-ssh run is changing ssh files here; retry when it ends"
 }
 
 ensure_key() {
@@ -118,7 +117,7 @@ unmanaged_has() {  # tag "type blob": does an active unmanaged authorized_keys l
 }
 
 authorize() {  # tag line blob "type blob"
-  lock; nolink "$AK"; [ -f "$AK" ] || : >"$AK"; chmod 600 "$AK"
+  prep; nolink "$AK"; [ -f "$AK" ] || : >"$AK"; chmod 600 "$AK"
   if unmanaged_has "$1" "$4"; then
     echo "@@UNMANAGED"; return 0
   fi
@@ -130,7 +129,7 @@ authorize() {  # tag line blob "type blob"
 }
 
 deauthorize() {  # tag
-  lock; [ -f "$AK" ] || return 0
+  [ -f "$AK" ] || return 0
   nolink "$AK"
   awk -v t="$1" "$TG"'tg()==t{f=1} END{exit !f}' "$AK" || return 0
   t=$(mktemp "$D/.ak.XXXXXX")
@@ -173,7 +172,7 @@ mentioned() {  # alias probe: is it used as a word, outside comments, in any fil
       done | grep .
 }
 
-taken() {  # alias user: print why it cannot be claimed; free = unmentioned and resolves exactly like an unknown name
+taken() {  # alias: print why it cannot be claimed; free = unmentioned and resolves exactly like an unknown name
   p="fleet-ssh-probe-$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
   if m=$(mentioned "$1" "$p"); then echo " (named in $(printf '%s' "$m" | head -n 1))"; return 0; fi
   fa=$(mktemp "$D/.ga.XXXXXX"); fb=$(mktemp "$D/.gb.XXXXXX")
@@ -182,13 +181,6 @@ taken() {  # alias user: print why it cannot be claimed; free = unmentioned and 
     if ! cmp -s "$fa" "$fb"; then
       { grep -vxF -f "$fb" "$fa"; grep -vxF -f "$fa" "$fb" | sed 's/^/not /'; } | awk '{printf " %s %s", $1, $2}'
       echo " (hand config for this name)"
-    else  # free; would settings that apply to every name beat the managed block (read before it)?
-      awk -v a="$1" -v u="$2" -v me="$(id -un)" '
-        $1=="hostname"{hh=$2} $1=="user"{uu=$2} $1=="forwardagent"{fa=$2} $1=="stricthostkeychecking"{sk=$2}
-        END{ if (tolower(hh)!=tolower(a)) printf " HostName %s", hh
-             if (uu!=me && uu!=u) printf " User %s", uu
-             if (fa!="no") printf " ForwardAgent %s", fa
-             if (sk=="false" || sk=="no") printf " StrictHostKeyChecking no" }' "$fb"
     fi
   else
     echo " (ssh -G failed)"
@@ -196,8 +188,9 @@ taken() {  # alias user: print why it cannot be claimed; free = unmentioned and 
   rm -f "$fa" "$fb"
 }
 
-problems() {  # alias fqdn user: how `ssh alias` differs from what the managed block intends
-  out=$(ssh -G "$1" </dev/null 2>/dev/null) || { echo " (ssh -G failed)"; return 0; }
+problems() {  # alias fqdn user [config]: how `ssh alias` differs from what the managed block intends
+  if [ $# -ge 4 ]; then out=$(ssh -G -F "$4" "$1" </dev/null 2>/dev/null) || { echo " (ssh -G failed)"; return 0; }
+  else out=$(ssh -G "$1" </dev/null 2>/dev/null) || { echo " (ssh -G failed)"; return 0; }; fi
   printf '%s\n' "$out" | awk -v h="$2" -v u="$3" '
     $1=="hostname"{hh=$2} $1=="user"{uu=$2} $1=="forwardagent"{fa=$2} $1=="stricthostkeychecking"{sk=$2}
     $1=="identityfile" && $2 ~ /id_ed25519_fleet$/ {k=1}
@@ -213,22 +206,38 @@ block_of() {  # name: the managed block for name, if any
   awk -v b="# BEGIN $TAG $1" -v e="# END $TAG $1" '$0==b{s=1} s{print} s&&$0==e{s=0}' "$MF"
 }
 
-# Decide first (read-only), then change with one atomic rename; nothing is removed before the
-# decision, so an interruption leaves either the previous state or the new one.
+simulate() {  # alias block fqdn user: problems() for the config as it would be after the change
+  d=$(mktemp -d "$D/config.d/.sim.XXXXXX")
+  { if [ -f "$MF" ]; then cat "$MF"; fi; printf '%s\n' "$2"; } >"$d/m.conf"
+  if [ -f "$CFG" ] && grep -qxF "$INC" "$CFG"; then
+    awk -v inc="$INC" -v rep="Include \"$d/m.conf\"" '$0==inc{print rep; next} {print}' "$CFG" >"$d/c.conf"
+  else
+    { if [ -f "$CFG" ]; then cat "$CFG"; echo; fi; printf 'Match all\nInclude "%s"\n' "$d/m.conf"; } >"$d/c.conf"
+  fi
+  # -F skips the system file, which ssh reads after the user's: append it in the same place.
+  if [ -f /etc/ssh/ssh_config ]; then printf '\nMatch all\nInclude /etc/ssh/ssh_config\n' >>"$d/c.conf"; fi
+  problems "$1" "$3" "$4" "$d/c.conf"
+  rm -rf "$d"
+}
+
+# Decide first (read-only, including a simulation of the result), then change with one atomic
+# rename. Interruption leaves the previous or the new state; a managed block that does not
+# resolve as intended (whatever the cause) is removed by the next run.
 set_host() {  # name alias block fqdn user
-  lock; nolink "$MF"; nolink "$CFG"; [ -f "$MF" ] || : >"$MF"; chmod 600 "$MF"
+  prep; nolink "$MF"; nolink "$CFG"; [ -f "$MF" ] || : >"$MF"; chmod 600 "$MF"
   cur=$(block_of "$1")
   if [ -n "$cur" ]; then
     [ "$cur" = "$3" ] || { echo "@@CHANGED"; return 0; }
     ensure_include
     why=$(problems "$2" "$4" "$5")
-    if [ -n "$why" ]; then echo "@@COLLISION config:$why"; else echo "@@HOSTSET"; fi
+    if [ -n "$why" ]; then put_mf "$1"; echo "@@COLLISION config:$why"; else echo "@@HOSTSET"; fi
     return 0
   fi
-  if awk -v a="$2" 'tolower($1)=="host"{for(i=2;i<=NF;i++) if($i==a) f=1} END{exit !f}' "$MF"; then
+  if awk -v a="$2" 'tolower($1)=="match" && tolower($2)=="originalhost" && $3==a{f=1} END{exit !f}' "$MF"; then
     echo "@@COLLISION managed"; return 0
   fi
-  why=$(taken "$2" "$5")
+  why=$(taken "$2")
+  [ -n "$why" ] || why=$(simulate "$2" "$3" "$4" "$5")
   if [ -n "$why" ]; then echo "@@COLLISION config:$why"; return 0; fi
   ensure_include
   put_mf "$1" "$3"
@@ -241,7 +250,7 @@ set_host() {  # name alias block fqdn user
 }
 
 unset_host() {  # name
-  lock; [ -f "$MF" ] || return 0
+  [ -f "$MF" ] || return 0
   nolink "$MF"
   grep -qxF "# BEGIN $TAG $1" "$MF" || return 0
   put_mf "$1"
@@ -250,7 +259,7 @@ unset_host() {  # name
 
 list() {
   if [ -f "$MF" ]; then
-    awk -v b="# BEGIN $TAG " 'index($0,b)==1{n=substr($0,length(b)+1)} n!="" && tolower($1)=="host"{print "@@HOST " n " " $2; n=""}' "$MF"
+    awk -v b="# BEGIN $TAG " 'index($0,b)==1{n=substr($0,length(b)+1)} n!="" && tolower($1)=="match" && tolower($2)=="originalhost"{print "@@HOST " n " " $3; n=""}' "$MF"
   fi
   if [ -f "$AK" ]; then
     awk -v p="$TAG:" "$TG"'{f=tg()} index(f,p)==1{print "@@TAG " substr(f,length(p)+1)}' "$AK"
@@ -339,7 +348,7 @@ def fleet_user(name):
 def script(*calls):
     # BEGIN/END prove the steps really ran (a forced command= or a broken shell would skip them).
     body = "\n".join(" ".join(shlex.quote(str(a)) for a in c) for c in calls)
-    return OPS + "\necho @@BEGIN\n" + body + "\necho @@END\n"
+    return OPS + "\ntake_lock\necho @@BEGIN\n" + body + "\necho @@END\n"
 
 
 def parse(stdout, where="this host"):
@@ -427,7 +436,8 @@ def auth_line(src, ktype, blob):
 def host_block(name, alias, fqdn, user):
     return "\n".join([
         "# BEGIN %s %s" % (TAG, name),
-        "Host %s" % alias,
+        # originalhost: matches only the name typed, never another alias's expanded HostName
+        "Match originalhost %s" % alias,
         "  HostName %s" % fqdn,
         "  User %s" % user,
         "  IdentityFile ~/.ssh/id_ed25519_fleet",

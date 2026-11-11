@@ -20,8 +20,8 @@ password at most once (none when a key already works). Each host keeps its own
 are pinned with from= to the source's tailnet IPs and tagged
 "decent-angl-fleet:<host>". Aliases go in ~/.ssh/config.d/decent-angl-fleet.conf,
 included at the end of ~/.ssh/config after "Match all". An alias is only
-claimed when it is free: no Host/Match line in ~/.ssh/config names it and
-`ssh -G` resolves it exactly like a random unknown name. After writing, `ssh -G`
+claimed when it is free: ~/.ssh/config never uses it as a word outside
+comments, and `ssh -G` output for it is identical to a random unknown name's. After writing, `ssh -G`
 must show the intended host, user and fleet key, no agent forwarding and
 host-key checking on; otherwise the previous managed file is restored and the
 deciding settings are reported. Unmanaged authorized_keys lines are never
@@ -88,7 +88,7 @@ TG='function tg(  l,a,n){l=$0; sub(/[ \t\r]+$/,"",l); n=split(l,a," "); return n
 
 authorize() {  # tag line blob
   prep; nolink "$AK"; [ -f "$AK" ] || : >"$AK"; chmod 600 "$AK"
-  if grep -F -e "$3" "$AK" | awk -v t="$1" "$TG"'tg() != t' | grep -q .; then
+  if grep -F -e "$3" "$AK" | grep -v '^[[:space:]]*#' | awk -v t="$1" "$TG"'tg() != t' | grep -q .; then
     echo "@@UNMANAGED"; return 0
   fi
   t=$(mktemp "$D/.ak.XXXXXX")
@@ -132,18 +132,26 @@ ensure_include() {  # last, after Match all: hand-written config always wins
   chmod 600 "$t"; mv "$t" "$CFG"
 }
 
-named() {  # alias: does a Host or Match line in ~/.ssh/config name it (any quoting or "=")?
-  [ -f "$CFG" ] || return 1
-  tr 'A-Z"=,' 'a-z   ' <"$CFG" | awk -v a="$1" '($1=="host"||$1=="match"){for(i=2;i<=NF;i++){t=$i; sub(/^!/,"",t); if(t==a) f=1}} END{exit !f}'
+mentioned() {  # alias probe: is it used as a word, outside comments, in any file ssh reads for either name?
+  { ssh -G -v "$1" </dev/null; ssh -G -v "$2" </dev/null; } 2>&1 >/dev/null \
+    | tr -d '\r' | sed -n 's/^debug1: Reading configuration data //p' | sort -u \
+    | while IFS= read -r f; do
+        [ "$f" != "$MF" ] && [ -r "$f" ] || continue
+        sed 's/^[[:space:]]*#.*//' "$f" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9._\n-' ' ' \
+          | awk -v a="$1" '{for(i=1;i<=NF;i++) if($i==a) f=1} END{exit !f}' && echo "$f"
+      done | grep .
 }
 
-taken() {  # alias: print why it is not free; free = resolves exactly like an unknown name
-  if named "$1"; then echo " a Host/Match line in ~/.ssh/config"; return 0; fi
+taken() {  # alias: print why it is not free; free = unmentioned and resolves exactly like an unknown name
   p="fleet-ssh-probe-$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+  if m=$(mentioned "$1" "$p"); then echo " (named in $(printf '%s' "$m" | head -n 1))"; return 0; fi
   fa=$(mktemp "$D/.ga.XXXXXX"); fb=$(mktemp "$D/.gb.XXXXXX")
   if ssh -G "$1" </dev/null >"$fa" 2>/dev/null && ssh -G "$p" </dev/null 2>/dev/null | sed "s/$p/$1/g" >"$fb" \
       && [ -s "$fa" ] && [ -s "$fb" ]; then
-    grep -vxF -f "$fb" "$fa" | awk '{printf " %s %s", $1, $2}'
+    if ! cmp -s "$fa" "$fb"; then
+      { grep -vxF -f "$fb" "$fa"; grep -vxF -f "$fa" "$fb" | sed 's/^/not /'; } | awk '{printf " %s %s", $1, $2}'
+      echo " (hand config for this name)"
+    fi
   else
     echo " (ssh -G failed)"
   fi
@@ -162,12 +170,22 @@ problems() {  # alias fqdn user: how `ssh alias` differs from what the managed b
          if (!k) printf " (no fleet key)" }'
 }
 
+restore_host() {
+  mv -f "$bak" "$MF"
+  if [ "$had" = 1 ]; then chmod 600 "$cbak"; mv -f "$cbak" "$CFG"; else rm -f "$cbak" "$CFG"; fi
+}
+
 set_host() {  # name alias block fqdn user
   prep; nolink "$MF"; [ -f "$MF" ] || : >"$MF"; chmod 600 "$MF"
   if without_block "$1" "$MF" | awk -v a="$2" 'tolower($1)=="host"{for(i=2;i<=NF;i++) if($i==a) f=1} END{exit !f}'; then
     echo "@@COLLISION managed"; return 0
   fi
+  nolink "$CFG"
   bak=$(mktemp "$D/.mfbak.XXXXXX"); cat "$MF" >"$bak"
+  cbak=$(mktemp "$D/.cfgbak.XXXXXX"); had=0
+  if [ -f "$CFG" ]; then cat "$CFG" >"$cbak"; had=1; fi
+  # A refusal or any exit before the commit below puts both files back, byte for byte.
+  trap 'restore_host' EXIT
   put_mf "$1"                       # judge the alias without this link's old block
   ensure_include
   why=$(taken "$2")
@@ -176,10 +194,10 @@ set_host() {  # name alias block fqdn user
     why=$(problems "$2" "$4" "$5")
   fi
   if [ -n "$why" ]; then
-    mv "$bak" "$MF"                 # previous managed state, byte for byte
+    restore_host; trap - EXIT
     echo "@@COLLISION config:$why"; return 0
   fi
-  rm -f "$bak"
+  trap - EXIT; rm -f "$bak" "$cbak"
   echo "@@HOSTSET"
 }
 

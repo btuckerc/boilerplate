@@ -72,9 +72,10 @@ JC="$D/config.d/.decent-angl-fleet.journal-config"
 JA="$D/config.d/.decent-angl-fleet.journal-noconfig"
 prep() { mkdir -p "$D/config.d"; chmod 700 "$D" "$D/config.d"; recover; }
 
-recover_if() { if [ -f "$JM" ]; then recover; fi; }
+recover_if() { if [ -e "$JM" ] || [ -L "$JM" ]; then recover; fi; }
 
 recover() {  # roll back an alias change that did not commit
+  for j in "$JM" "$JC" "$JA"; do [ ! -L "$j" ] || rm -f "$j"; done   # journals are only ever regular files
   [ -f "$JM" ] || { rm -f "$JC" "$JA"; return 0; }
   nolink "$MF"; nolink "$CFG"
   if [ -f "$JA" ]; then rm -f "$CFG"; elif [ -f "$JC" ]; then mv -f "$JC" "$CFG"; fi
@@ -206,8 +207,9 @@ set_host() {  # name alias block fqdn user
   if without_block "$1" "$MF" | awk -v a="$2" 'tolower($1)=="host"{for(i=2;i<=NF;i++) if($i==a) f=1} END{exit !f}'; then
     echo "@@COLLISION managed"; return 0
   fi
-  if [ -f "$CFG" ]; then cat "$CFG" >"$JC.tmp"; mv -f "$JC.tmp" "$JC"; rm -f "$JA"; else : >"$JA"; rm -f "$JC"; fi
-  cat "$MF" >"$JM.tmp"; mv -f "$JM.tmp" "$JM"
+  t=$(mktemp "$D/config.d/.j.XXXXXX")   # fresh names only: never write through a planted path
+  if [ -f "$CFG" ]; then cat "$CFG" >"$t"; mv -f "$t" "$JC"; rm -f "$JA"; else mv -f "$t" "$JA"; rm -f "$JC"; fi
+  t=$(mktemp "$D/config.d/.j.XXXXXX"); cat "$MF" >"$t"; mv -f "$t" "$JM"
   trap 'recover' EXIT
   trap 'recover; trap - EXIT; exit 130' INT TERM HUP PIPE
   put_mf "$1"                       # judge the alias without this link's old block
@@ -375,12 +377,13 @@ class Remote(object):
             die("could not connect to %s%s" % (self.dest, "; " + hint if hint else ""))
 
     def run(self, *calls):
-        # Only ever through the open master: if it is gone, stop rather than reconnect.
+        # Only ever through the open master: ProxyCommand=false makes any fallback to a fresh
+        # connection fail (a live master never consults it); the check gives a clear message.
         if subprocess.call(["ssh", "-o", "ControlPath=" + self.sock, "-O", "check", self.dest],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) != 0:
             die("lost the connection to %s; nothing further was changed there, rerun to finish" % self.node.name)
         p = subprocess.run(["ssh", "-o", "ControlMaster=no", "-o", "ControlPath=" + self.sock,
-                            "-o", "BatchMode=yes"] + NOFWD + [self.dest, "sh -s"],
+                            "-o", "BatchMode=yes", "-o", "ProxyCommand=false"] + NOFWD + [self.dest, "sh -s"],
                            input=script(*calls), stdout=subprocess.PIPE, universal_newlines=True)
         if p.returncode != 0:
             die("step on %s failed (exit %d)" % (self.node.name, p.returncode))

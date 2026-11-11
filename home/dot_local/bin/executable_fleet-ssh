@@ -33,6 +33,11 @@ Design (each choice removes a class of failure):
   target's password is asked at most once.
 - Every step reports an explicit result; a missing one is a failure. The final
   check runs the real `ssh NAME` with a random nonce.
+- Scope: checks are non-interactive. `ssh -G` shows the route, and the final
+  login runs without a terminal, so config that branches on a terminal (for
+  example `Match exec "test -t 0"`) or fails only interactively is outside
+  what fleet-ssh can confirm. Renaming a local account invalidates its records
+  (fleet-ssh refuses them rather than guessing).
 - Links are recorded per user@host in ~/.local/state/decent-angl/fleet-ssh.json,
   so status and unlink need neither Tailscale nor guesses, and unlink removes
   only what that link installed. Each host serializes fleet-ssh with an flock.
@@ -110,6 +115,12 @@ ensure_key() {  # comment
   fi
   if pub=$(ssh-keygen -y -P '' -f "$KEY" </dev/null 2>/dev/null); then
     set -- $pub
+    # ssh offers the .pub's key; a stale .pub would offer a key the private file cannot sign for.
+    cur=$(awk '{ sub(/\r$/, "") } !/^[ \t]*(#|$)/ { print $1, $2; exit }' "$KEY.pub" 2>/dev/null) || cur=""
+    if [ "$cur" != "$1 $2" ]; then
+      t=$(newtmp "$KEY.pub"); printf '%s %s %s\n' "$1" "$2" "${3:-fleet-ssh}" >"$t"; chmod 644 "$t"; mv -f "$t" "$KEY.pub"
+      printf '  rewrote %s from %s\n' "$KEY.pub" "$KEY" >&2
+    fi
   else  # passphrase-protected: usable only when the agent holds exactly this .pub's key
     [ -f "$KEY.pub" ] || fail "$KEY is passphrase-protected and has no $KEY.pub"
     set -- $(awk '{ sub(/\r$/, "") } !/^[ \t]*(#|$)/ { print $1, $2; exit }' "$KEY.pub")
@@ -136,7 +147,7 @@ authorize() {  # tag line
 
 deauthorize() {  # tag
   regular "$AK"
-  if [ -f "$AK" ]; then
+  if [ -f "$AK" ] && awk -v t="$1" "$OURS"'ours(t) { f=1 } END { exit !f }' "$AK"; then
     t=$(newtmp "$AK")
     awk -v t="$1" "$OURS"'!ours(t)' "$AK" >"$t" || { rm -f "$t"; fail "could not read $AK"; }
     commit "$t" "$AK"
@@ -144,11 +155,11 @@ deauthorize() {  # tag
   printf '@@DONE deauthorize\n'
 }
 
-has_tag() {  # tag: a valid key line carrying the tag is present
+has_tag() {  # tag type blob: a valid line with the tag holds exactly this key
   r=no
   if [ -f "$AK" ]; then
     t=$(newtmp "$AK")
-    awk -v t="$1" "$OURS"'ours(t)' "$AK" | while IFS= read -r line; do
+    awk -v t="$1" -v k="$2" -v b="$3" "$OURS"'ours(t) { n=split($0, a, " "); for (i = 1; i < n; i++) if (a[i] == k && a[i+1] == b) { print; next } }' "$AK" | while IFS= read -r line; do
       printf '%s\n' "$line" >"$t"; ssh-keygen -l -f "$t" >/dev/null 2>&1 && echo yes
     done | grep -q yes && r=yes
     rm -f "$t"
@@ -170,14 +181,14 @@ render() {  # regenerate the managed config from the users list (only valid line
   commit "$t" "$MF"
 }
 
-include_state() {  # ok | missing | misplaced: our Include must be the final "Match all" + Include pair
+include_state() {  # ok | missing | misplaced: any line naming our file (any spelling) must be in the final pair
   [ -f "$CFG" ] || { echo missing; return 0; }
-  awk -v inc="$INC" '{ l=$0; sub(/^[ \t]+/, "", l); sub(/[ \t\r]+$/, "", l) }
+  awk '{ l=tolower($0); sub(/^[ \t]+/, "", l); sub(/[ \t\r]+$/, "", l); gsub(/[ \t]*=[ \t]*/, " ", l); gsub(/"/, "", l) }
     l == "" || l ~ /^#/ { next }
-    { d[++n] = l; if (l == inc) at[n] = 1 }
-    END { last = 0; for (i = 1; i <= n; i++) if (d[i] != inc && d[i] != "Match all") last = i
-          for (i in at) if (i + 0 < last) { print "misplaced"; exit }
-          if (n >= 2 && d[n] == inc && d[n-1] == "Match all") print "ok"; else print "missing" }' "$CFG"
+    { d[++n] = l; inc[n] = (index(l, "decent-angl-fleet.conf") > 0); ma[n] = (l ~ /^match[ \t]+all$/) }
+    END { last = 0; for (i = 1; i <= n; i++) if (!inc[i] && !ma[i]) last = i
+          for (i = 1; i <= n; i++) if (inc[i] && i < last) { print "misplaced"; exit }
+          if (n >= 2 && inc[n] && ma[n-1]) print "ok"; else print "missing" }' "$CFG"
 }
 
 append_include() {
@@ -220,11 +231,15 @@ set_user() {  # name fqdn user: `ssh name` logs in as user on exactly the tailne
   fi
   why=$(unsafe "$1" "$2" "") || why=" (ssh -G failed)"
   if [ -n "$why" ]; then drop_user "$1" "$3" "$2"; printf '@@SKIP alias%s\n' "$why"; return 0; fi
-  t=$(users_without "$1" "$3" "$2"); awk -v n="$1" '$1 != n' "$t" >"$t.n" || fail "could not filter $US"
-  printf '%s %s %s\n' "$1" "$3" "$2" >>"$t.n"; rm -f "$t"; commit "$t.n" "$US"; render
+  old=$(newtmp "$US"); if [ -f "$US" ]; then cat "$US" >"$old" || { rm -f "$old"; fail "could not read $US"; }; fi
+  t=$(newtmp "$US"); { if [ -f "$US" ]; then awk -v n="$1" '$1 != n' "$US"; fi; } >"$t" || { rm -f "$t" "$old"; fail "could not read $US"; }
+  printf '%s %s %s\n' "$1" "$3" "$2" >>"$t"; commit "$t" "$US"; render
   [ "$st" = ok ] || append_include
   why=$(unsafe "$1" "$2" "$3") || why=" (ssh -G failed)"
-  if [ -n "$why" ]; then drop_user "$1" "$3" "$2"; printf '@@SKIP alias%s\n' "$why"; return 0; fi
+  if [ -n "$why" ]; then   # put the previous list back exactly (another user's line for NAME included)
+    commit "$old" "$US"; render; printf '@@SKIP alias%s\n' "$why"; return 0
+  fi
+  rm -f "$old"
   printf '@@DONE alias\n'
 }
 
@@ -235,6 +250,13 @@ unset_user() {  # name user fqdn: drop the line only if it is still exactly this
 }
 
 verify() {  # dest user nonce: does `ssh dest` log in as user and run exactly our command?
+  case "$1" in *@*)   # no alias: prove the key login itself, untouched by ssh config
+    out=$(ssh -F none -o IdentitiesOnly=yes -i "$KEY" -o BatchMode=yes -o ConnectTimeout=10 -o ForwardAgent=no \
+            -o StrictHostKeyChecking=accept-new -o RequestTTY=no "$1" "id -un; printf %s $3" </dev/null 2>/dev/null) || out=""
+    if [ "$out" = "$2
+$3" ]; then printf '@@VERIFY ok\n'; else printf '@@VERIFY fail\n'; fi
+    return 0 ;;
+  esac
   out=$(ssh -o BatchMode=yes -o ConnectTimeout=10 -o ControlPath=none -o ForwardAgent=no -o AddKeysToAgent=no \
           -o StrictHostKeyChecking=accept-new -o ClearAllForwardings=yes -o RequestTTY=no -o RemoteCommand=none \
           -o PermitLocalCommand=no "$1" "id -un; printf %s $3" </dev/null 2>/dev/null) || out=""
@@ -370,7 +392,22 @@ def host_lock():
 
 def script(calls, lock):
     body = "\n".join(" ".join(shlex.quote(str(a)) for a in c) for c in calls)
-    return OPS + ("\ntake_lock" if lock else "") + "\necho @@BEGIN\n" + body + "\necho @@END\n"
+    return (OPS + ("\ntake_lock" if lock else "") + "\necho @@BEGIN\nprintf '@@WHO %s\\n' \"$(id -un)\"\n"
+            + body + "\necho @@END\n")
+
+
+def run_step(argv, script_text):
+    """Run one step in its own process group; on timeout the whole group goes (no orphan ssh)."""
+    p = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, universal_newlines=True,
+                         start_new_session=True, pass_fds=(LOCK_FD,) if LOCK_FD is not None else ())
+    try:
+        out, _ = p.communicate(script_text, timeout=STEP_TIMEOUT)
+    except BaseException:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(p.pid, signal.SIGKILL)
+        p.wait()
+        raise
+    return p.returncode, out
 
 
 def parse(stdout, where):
@@ -386,15 +423,21 @@ def parse(stdout, where):
     return res[1:-1]
 
 
+def as_account(results, user, where):
+    """Steps must have run as the account they were meant for (not, say, via a ForceCommand sudo)."""
+    if "WHO %s" % user not in results:
+        die("steps on %s ran as %s, not %s; nothing further was done"
+            % (where, ([r[4:] for r in results if r.startswith("WHO ")] or ["?"])[0], user))
+    return results
+
+
 def run_local(*calls):
     # Local steps inherit this process's locked descriptor, so the lock outlives this process
     # until the step itself ends (a killed parent cannot let another run in mid-step).
-    p = subprocess.run(["sh", "-s"], input=script(calls, lock=False), stdout=subprocess.PIPE,
-                       universal_newlines=True, timeout=STEP_TIMEOUT,
-                       pass_fds=(LOCK_FD,) if LOCK_FD is not None else ())
-    if p.returncode != 0:
-        die("a step failed on this host (exit %d)" % p.returncode)
-    return parse(p.stdout, "this host")
+    rc, out = run_step(["sh", "-s"], script(calls, lock=False))
+    if rc != 0:
+        die("a step failed on this host (exit %d)" % rc)
+    return as_account(parse(out, "this host"), local_user(), "this host")
 
 
 # fleet-ssh's own connections read no ssh config at all.
@@ -406,18 +449,17 @@ class Remote(object):
     """One multiplexed connection to user@fqdn; the only place a password is asked."""
 
     def __init__(self, user, fqdn):
+        self.user = user
         self.dest = "%s@%s" % (user, fqdn)
         self.dir = tempfile.mkdtemp(prefix="fleet-ssh-", dir="/tmp" if os.path.isdir("/tmp") else None)
         self.sock = os.path.join(self.dir, "m")
 
     def open(self, hint=""):
         say("Connecting to %s (enter its password if asked)..." % self.dest)
-        # Every default identity file this account has (not every agent key, which can exhaust
-        # the server's MaxAuthTries), then the password.
-        ident = ["-o", "IdentitiesOnly=yes"]
-        for name in ("id_rsa", "id_ecdsa", "id_ecdsa_sk", "id_ed25519", "id_ed25519_sk"):
-            if (HOME / ".ssh" / name).is_file():
-                ident += ["-i", str(HOME / ".ssh" / name)]
+        # Only the fleet key (plus its certificate, if any), then the password: a bounded number
+        # of attempts, whatever the agent or other key files hold.
+        key = HOME / ".ssh/id_ed25519"
+        ident = ["-o", "IdentitiesOnly=yes"] + (["-i", str(key)] if key.is_file() else [])
         rc = subprocess.call(BASE + ident + ["-o", "ControlMaster=yes", "-o", "ControlPath=" + self.sock,
                                              "-o", "ControlPersist=300", "-fN", self.dest])
         if rc != 0:
@@ -425,14 +467,12 @@ class Remote(object):
 
     def run(self, calls, lock=True):
         # Only through the open master: ProxyCommand=false makes any fallback connection fail.
-        p = subprocess.run(BASE + ["-T", "-o", "BatchMode=yes", "-o", "ControlMaster=no",
+        rc, out = run_step(BASE + ["-T", "-o", "BatchMode=yes", "-o", "ControlMaster=no",
                                    "-o", "ControlPath=" + self.sock, "-o", "ProxyCommand=false",
-                                   self.dest, "sh -s"],
-                           input=script(calls, lock), stdout=subprocess.PIPE, universal_newlines=True,
-                           timeout=STEP_TIMEOUT)
-        if p.returncode != 0:
-            die("a step failed on %s (exit %d)" % (self.dest, p.returncode))
-        return parse(p.stdout, self.dest)
+                                   self.dest, "sh -s"], script(calls, lock))
+        if rc != 0:
+            die("a step failed on %s (exit %d)" % (self.dest, rc))
+        return as_account(parse(out, self.dest), self.user, self.dest)
 
     def close(self):
         subprocess.call(["ssh", "-F", "none", "-o", "ControlPath=" + self.sock, "-O", "exit", self.dest],
@@ -550,7 +590,9 @@ def link(me, peer, direction, user, yes):
             out = rem.run(calls)
             need(out, *(["DONE authorize"] if to else []))
             if frm:
-                need(run_local(("authorize", peer_tag, pub_line(out, peer.ips, peer_tag))), "DONE authorize")
+                line = pub_line(out, peer.ips, peer_tag)
+                rec["key_here"] = " ".join(line.split()[1:3])
+                need(run_local(("authorize", peer_tag, line)), "DONE authorize")
                 rec["alias_there"] = alias_report(out, peer.name, me.name, lu)
                 if rec["alias_there"]:
                     need(out, "DONE alias")
@@ -559,6 +601,9 @@ def link(me, peer, direction, user, yes):
                 rec["alias_here"] = alias_report(here, me.name, peer.name, user)
                 if rec["alias_here"]:
                     need(here, "DONE alias")
+                    for k, other in records["links"].items():   # `ssh NAME` now means this account
+                        if k != key and isinstance(other, dict) and other.get("name") == peer.name:
+                            other["alias_here"] = False
             save_records(records)
             say("Checking with the real ssh command...")
             if to:
@@ -604,6 +649,11 @@ def record_ok(key, r, lu):
     fqdn, user, name = str(r.get("fqdn", "")), str(r.get("user", "")), str(r.get("name", ""))
     if not (FQDN_RE.match(fqdn) and USER_RE.match(user) and key == "%s@%s" % (user, fqdn)
             and name == fqdn.split(".")[0] and r.get("tag_here") == "%s:%s@%s" % (TAG, user, fqdn)):
+        return False
+    if not (isinstance(r.get("to"), bool) and isinstance(r.get("from"), bool) and (r["to"] or r["from"])):
+        return False
+    if "key_here" in r and not (isinstance(r["key_here"], str) and len(r["key_here"].split()) == 2
+                                and key_blob_ok(*r["key_here"].split())):
         return False
     there = r.get("there")
     if not isinstance(there, list) or not there:
@@ -671,9 +721,13 @@ def status():
             bad |= not good
             parts.append("ssh %s %s" % (target, "works" if good else "FAILED"))
         if r.get("from"):
-            present = "TAG yes" in run_local(("has_tag", r["tag_here"]))
-            bad |= not present
-            parts.append("its key %s here" % ("installed" if present else "MISSING"))
+            if "key_here" not in r:
+                bad = True
+                parts.append("its key UNKNOWN here (rerun the link)")
+            else:
+                present = "TAG yes" in run_local(("has_tag", r["tag_here"]) + tuple(r["key_here"].split()))
+                bad |= not present
+                parts.append("its key %s here" % ("installed" if present else "MISSING"))
         say("  %-36s %s" % (key, "; ".join(parts)))
     if bad:
         raise SystemExit(1)

@@ -20,6 +20,7 @@ file	~/.config/omarchy/defaults/agent	home/dot_config/omarchy/defaults/agent
 exec	~/.config/omarchy/hooks/post-update.d/10-decent-angl-compat	home/dot_config/omarchy/hooks/post-update.d/executable_10-decent-angl-compat
 exec	~/.local/bin/omarchy-agent-usage-inference	home/dot_local/bin/executable_omarchy-agent-usage-inference
 exec	~/.local/bin/omarchy-agent-usage-update	home/dot_local/bin/executable_omarchy-agent-usage-update
+exec	~/.local/bin/omarchy-launch-screensaver	home/dot_local/bin/executable_omarchy-launch-screensaver
 exec	~/.local/bin/omarchy-launch-shell	home/dot_local/bin/executable_omarchy-launch-shell
 exec	~/.local/bin/omarchy-shell	home/dot_local/bin/executable_omarchy-shell
 exec	~/.local/bin/omarchy-menu-images	home/dot_local/bin/executable_omarchy-menu-images

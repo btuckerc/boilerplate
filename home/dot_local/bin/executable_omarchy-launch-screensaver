@@ -1,0 +1,30 @@
+#!/bin/bash
+# Wraps Omarchy's omarchy-launch-screensaver (first in PATH, so the idle service
+# and menus reach this copy).
+#
+# Close open bar dropdowns first. A dropdown is a full-screen layer surface that
+# holds keyboard focus, so Hyprland maps the screensaver window without focus;
+# omarchy-screensaver then sees itself unfocused and exits within a second, and
+# the idle service treats the closed window as a dismissal and cancels the
+# pending lock. With a dropdown left open the screensaver only flashes every
+# 150 s and the display never locks or blanks.
+
+set -u
+
+if command -v omarchy-shell >/dev/null 2>&1; then
+  ids=$(timeout 2 omarchy-shell shell listPlugins 2>/dev/null |
+    jq -r '.[] | select(.enabled and ((.kinds // []) | index("bar-widget"))) | .id' 2>/dev/null) || ids=""
+  for id in $ids; do
+    timeout 1 omarchy-shell -q shell hide "$id" >/dev/null 2>&1
+  done
+  # Let the closing surfaces drop keyboard focus before the screensaver maps.
+  [[ -n $ids ]] && sleep 0.2
+fi
+
+self=$(readlink -f -- "${BASH_SOURCE[0]}")
+IFS=: read -r -a dirs <<<"$PATH"
+for dir in "${dirs[@]}"; do
+  candidate="$dir/omarchy-launch-screensaver"
+  [[ -x $candidate && $(readlink -f -- "$candidate") != "$self" ]] && exec "$candidate" "$@"
+done
+exec /usr/share/omarchy/bin/omarchy-launch-screensaver "$@"

@@ -1,39 +1,48 @@
 #!/usr/bin/env python3
-"""fleet-ssh: link this host with another tailnet host for SSH, one or both ways.
+"""fleet-ssh: let this host and another tailnet host SSH to each other by name.
 
 Usage:
   fleet-ssh                      interactive wizard
-  fleet-ssh link TARGET [--direction both|to|from] [--user USER]
-                 [--alias ALIAS] [--as LOCAL_ALIAS] [--yes]
-  fleet-ssh unlink TARGET [--user USER] [--local-only]
-                                 remove the managed link on both ends
-  fleet-ssh status               list managed links and test each alias
+  fleet-ssh link TARGET [--direction both|to|from] [--user USER] [--yes]
+  fleet-ssh unlink TARGET [--local-only]
+  fleet-ssh status
 
 Directions, from the host you run it on:
-  to    this host -> TARGET    (this host's key is authorized on TARGET)
-  from  TARGET -> this host    (TARGET's key is authorized here)
+  to    this host -> TARGET: afterwards `ssh TARGET` works here
+  from  TARGET -> this host: afterwards `ssh <this host>` works there
   both  both of the above
 
-One SSH connection to TARGET does all remote work, so you type TARGET's
-password at most once (none when a key already works). Each host keeps its own
-~/.ssh/id_ed25519_fleet; private keys never leave their host. Authorized lines
-are pinned with from= to the source's tailnet IPs and tagged
-"decent-angl-fleet:<host>". Aliases go in ~/.ssh/config.d/decent-angl-fleet.conf,
-included at the end of ~/.ssh/config after "Match all". An alias is claimed
-only when it is free (no file ssh reads for it uses the name as a word outside
-comments, and `ssh -G` resolves it exactly like a random unknown name) and no
-setting that applies to every host would override it. The decision is made
-before anything is written; the change is one atomic rename, and the result is
-checked with `ssh -G` (intended host, user and fleet key, no agent forwarding,
-host-key checking on) or the new block is removed again. A link whose alias
-settings changed must be unlinked first. One fleet-ssh change runs at a time
-per account. Unmanaged authorized_keys lines are never edited.
+Design (each choice removes a class of failure):
+- Names are tailnet names (MagicDNS resolves them), so fleet-ssh never decides
+  which machine a name reaches. It adds only `Match originalhost NAME` /
+  `User USER` / `HostKeyAlias FQDN` blocks (so `ssh NAME` must meet the same
+  host key as the tailnet name), in a file it regenerates from its own list
+  (~/.ssh/config.d/decent-angl-fleet.users), included at the end of
+  ~/.ssh/config: anything you wrote yourself still wins. If your config sends
+  NAME to another machine, no block is written for it.
+- Keys are each account's default ~/.ssh/id_ed25519 (created if missing), so a
+  plain `ssh NAME` offers it. The public half is derived from the private key
+  (or, for a passphrase-protected key, read from a regular, parseable .pub).
+- authorized_keys lines are pinned with from=<source tailnet IPs> and tagged
+  decent-angl-fleet:<user>@<fqdn>; only non-comment lines with exactly that
+  tag are ever replaced or removed.
+- fleet-ssh's own connections use `ssh -F none`: nothing in ~/.ssh/config can
+  redirect, wrap or alter them. One connection does all remote work, so the
+  target's password is asked at most once.
+- Every step reports an explicit result; a missing one is a failure. The final
+  check runs the real `ssh NAME` with a random nonce.
+- Links are recorded in ~/.local/state/decent-angl/fleet-ssh.json, so status
+  and unlink need neither Tailscale nor guesses. Each host serializes fleet-ssh
+  changes with an flock.
 """
 import argparse
+import contextlib
+import fcntl
 import getpass
 import json
 import os
 import re
+import secrets
 import shlex
 import shutil
 import signal
@@ -44,37 +53,39 @@ from pathlib import Path
 
 PROG = "fleet-ssh"
 TAG = "decent-angl-fleet"
-FLEET_JSON = Path.home() / ".config/decent-angl/fleet.json"
-NAME_RE = re.compile(r"[a-z0-9][a-z0-9-]*\Z")
-ALIAS_RE = re.compile(r"[a-z0-9][a-z0-9._-]*\Z")  # lowercase: ssh lowercases host arguments
-USER_RE = re.compile(r"[a-z_][a-z0-9_.-]*\Z", re.I)
-FQDN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9.-]*\Z")
-IP_RE = re.compile(r"[0-9A-Fa-f:.]+\Z")
+HOME = Path.home()
+STATE = HOME / ".local/state/decent-angl"
+RECORDS = STATE / "fleet-ssh.json"
+LOCK = HOME / ".ssh/.decent-angl-fleet.lock"
+FLEET_JSON = HOME / ".config/decent-angl/fleet.json"
+NAME_RE = re.compile(r"[a-z0-9]([a-z0-9-]*[a-z0-9])?\Z")
+FQDN_RE = re.compile(r"[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+\Z")
+USER_RE = re.compile(r"[a-z_][a-z0-9_.-]{0,31}\Z")
+IP_RE = re.compile(r"[0-9a-f:.]{2,39}\Z")
 KTYPE_RE = re.compile(r"(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)|sk-[a-z0-9-]+@openssh\.com)\Z")
 BLOB_RE = re.compile(r"[A-Za-z0-9+/]+={0,3}\Z")
+TAG_RE = re.compile(r"decent-angl-fleet:[a-z_][a-z0-9_.-]{0,31}@[a-z0-9.-]+\Z")
+STEP_TIMEOUT = 120
 
-# Runs under sh on both ends. Machine-readable results are "@@" lines on stdout;
-# messages for the person go to stderr.
+# Runs under sh on both ends; arguments are validated in Python and passed with shlex.quote.
+# Results are "@@" lines on stdout; messages for the person go to stderr.
 OPS = r'''
-set -eu
+set -euf
 umask 077
-D="$HOME/.ssh"
-KEY="$D/id_ed25519_fleet"
-AK="$D/authorized_keys"
-CFG="$D/config"
-MF="$D/config.d/decent-angl-fleet.conf"
+D="$HOME/.ssh"; KEY="$D/id_ed25519"; AK="$D/authorized_keys"; CFG="$D/config"
+CD="$D/config.d"; US="$CD/decent-angl-fleet.users"; MF="$CD/decent-angl-fleet.conf"
 INC="Include ~/.ssh/config.d/decent-angl-fleet.conf"
+fail() { printf 'fleet-ssh: %s: %s\n' "$(uname -n)" "$*" >&2; exit 1; }
+regular() { [ ! -L "$1" ] || fail "$1 is a symlink; fix it by hand"; [ ! -e "$1" ] || [ -f "$1" ] || fail "$1 is not a regular file"; }
+prep() { mkdir -p "$CD"; chmod 700 "$D" "$CD"; }
+put() {  # file: replace it atomically with stdin (temp file in the same directory)
+  t=$(mktemp "$(dirname "$1")/.fleet-ssh.XXXXXX"); cat >"$t"; chmod 600 "$t"; mv -f "$t" "$1"
+}
 
-fail() { echo "fleet-ssh: $(uname -n): $*" >&2; exit 1; }
-nolink() { [ ! -L "$1" ] || fail "$1 is a symlink; edit it by hand"; }
-prep() { mkdir -p "$D/config.d"; chmod 700 "$D" "$D/config.d"; }
-
-# One fleet-ssh step script at a time per account: an flock on fd 9, held by this shell until it
-# exits (the kernel drops it when the process dies, so there is no stale lock to judge).
-take_lock() {
-  prep; LKF="$D/config.d/.decent-angl-fleet.lock"; nolink "$LKF"
+take_lock() {  # flock held by this shell until it exits; the kernel drops it if the shell dies
+  prep; regular "$D/.decent-angl-fleet.lock"
   command -v python3 >/dev/null 2>&1 || fail "python3 is required"
-  exec 9>>"$LKF"
+  exec 9>>"$D/.decent-angl-fleet.lock"
   python3 -c 'import fcntl, sys
 try:
     fcntl.flock(9, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -82,200 +93,92 @@ except OSError:
     sys.exit(75)' || fail "another fleet-ssh run is changing ssh files here; retry when it ends"
 }
 
-ensure_key() {
-  prep; nolink "$KEY"; nolink "$KEY.pub"
+ensure_key() {  # comment
+  prep; regular "$KEY"; regular "$KEY.pub"
   if [ ! -e "$KEY" ]; then
-    ssh-keygen -q -t ed25519 -N '' -C "$1" -f "$KEY" </dev/null >/dev/null
-    echo "  created $KEY on $(uname -n)" >&2
+    t=$(mktemp -d "$D/.fleet-ssh-key.XXXXXX")
+    ssh-keygen -q -t ed25519 -N '' -C "$1" -f "$t/k" </dev/null >/dev/null || { rm -rf "$t"; fail "ssh-keygen failed"; }
+    mv -f "$t/k.pub" "$KEY.pub"; mv -f "$t/k" "$KEY"; rmdir "$t"
+    printf '  created %s on %s\n' "$KEY" "$(uname -n)" >&2
   fi
-  [ -f "$KEY" ] || fail "$KEY is not a regular file"
-  [ -e "$KEY.pub" ] || ssh-keygen -y -f "$KEY" >"$KEY.pub"
-  [ -f "$KEY.pub" ] || fail "$KEY.pub is not a regular file"
-  pub=$(head -n 1 "$KEY.pub")
-  case "$pub" in
-    "ssh-ed25519 "*|"ssh-rsa "*|"ecdsa-sha2-"*|"sk-"*) ;;
-    *) fail "$KEY.pub does not hold a public key" ;;
-  esac
-  echo "@@PUB $pub"
+  if pub=$(ssh-keygen -y -P '' -f "$KEY" </dev/null 2>/dev/null); then :
+  elif [ -f "$KEY.pub" ] && ssh-keygen -l -f "$KEY.pub" >/dev/null 2>&1; then pub=$(head -n 1 "$KEY.pub")
+  else fail "$KEY is passphrase-protected and has no usable $KEY.pub"; fi
+  set -- $pub
+  printf '@@PUB %s %s\n' "$1" "$2"
 }
 
-# tg(): a line's last field, ignoring trailing blanks and CR (OpenSSH accepts both).
-TG='function tg(  l,a,n){l=$0; sub(/[ \t\r]+$/,"",l); n=split(l,a," "); return n?a[n]:""} '
-
-fp() { ssh-keygen -lf "$1" 2>/dev/null | awk 'NR==1{print $2}'; }
-
-unmanaged_has() {  # tag "type blob": does an active unmanaged authorized_keys line hold this key?
-  t=$(mktemp "$D/.fp.XXXXXX")
-  printf '%s\n' "$2" >"$t"; want=$(fp "$t")
-  [ -n "$want" ] || { rm -f "$t"; fail "could not fingerprint the key"; }
-  r=1
-  if awk -v t="$1" "$TG"'tg() != t' "$AK" | while IFS= read -r line; do
-       printf '%s\n' "$line" >"$t"
-       [ "$(fp "$t")" = "$want" ] && echo hit
-     done | grep -q hit; then r=0; fi
-  rm -f "$t"; return $r
+# akeep TAG: authorized_keys without our lines for TAG. Ours = not a comment and the last
+# field, ignoring trailing blanks and CR, is exactly TAG.
+akeep() {
+  awk -v t="$1" '{ l=$0; sub(/[ \t\r]+$/, "", l); n=split(l, a, " ")
+                   if (l !~ /^[ \t]*#/ && n > 0 && a[n] == t) next; print }' "$AK"
 }
 
-authorize() {  # tag line blob "type blob"
-  prep; nolink "$AK"; [ -f "$AK" ] || : >"$AK"; chmod 600 "$AK"
-  if unmanaged_has "$1" "$4"; then
-    echo "@@UNMANAGED"; return 0
-  fi
-  t=$(mktemp "$D/.ak.XXXXXX")
-  awk -v t="$1" "$TG"'tg() != t' "$AK" >"$t"
-  printf '%s\n' "$2" >>"$t"
-  chmod 600 "$t"; mv "$t" "$AK"
-  echo "@@AUTHORIZED"
+authorize() {  # tag line
+  prep; regular "$AK"; [ -e "$AK" ] || : >"$AK"
+  kept=$(akeep "$1") || fail "could not read $AK"
+  { if [ -n "$kept" ]; then printf '%s\n' "$kept"; fi; printf '%s\n' "$2"; } | put "$AK"
+  printf '@@DONE authorize\n'
 }
 
 deauthorize() {  # tag
-  [ -f "$AK" ] || return 0
-  nolink "$AK"
-  awk -v t="$1" "$TG"'tg()==t{f=1} END{exit !f}' "$AK" || return 0
-  t=$(mktemp "$D/.ak.XXXXXX")
-  awk -v t="$1" "$TG"'tg() != t' "$AK" >"$t"
-  chmod 600 "$t"; mv "$t" "$AK"
-  echo "@@REMOVED"
+  if [ -e "$AK" ]; then
+    regular "$AK"
+    kept=$(akeep "$1") || fail "could not read $AK"
+    { if [ -n "$kept" ]; then printf '%s\n' "$kept"; fi; } | put "$AK"
+  fi
+  printf '@@DONE deauthorize\n'
 }
 
-without_block() {  # name file
-  awk -v b="# BEGIN $TAG $1" -v e="# END $TAG $1" \
-    '$0==b{s=1;next} s&&$0==e{s=0;next} !s' "$2"
+render() {  # regenerate the managed config from the users list (only valid lines survive)
+  { printf '# Generated by fleet-ssh from %s; edits are overwritten.\n' "$US"
+    if [ -f "$US" ]; then
+      awk 'NF == 3 && $1 ~ /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/ && $2 ~ /^[a-z_][a-z0-9_.-]*$/ &&
+           $3 ~ /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/ {
+             printf "Match originalhost %s\n  User %s\n  HostKeyAlias %s\n", $1, $2, $3 }' "$US"
+    fi; } | put "$MF"
 }
 
-put_mf() {  # name [block]: rewrite the managed file without (or with a new) block for name
-  t=$(mktemp "$D/.mf.XXXXXX")
-  without_block "$1" "$MF" >"$t"
-  [ $# -lt 2 ] || printf '%s\n' "$2" >>"$t"
-  chmod 600 "$t"; mv "$t" "$MF"
-}
-
-ensure_include() {  # last, after Match all: hand-written config always wins
-  nolink "$CFG"; [ -f "$CFG" ] || : >"$CFG"; chmod 600 "$CFG"
+ensure_include() {  # once, at the end, after "Match all": hand-written settings are read first
+  regular "$CFG"; [ -e "$CFG" ] || : >"$CFG"
   grep -qxF "$INC" "$CFG" && return 0
-  t=$(mktemp "$D/.cfg.XXXXXX")
-  {
-    cat "$CFG"
+  { cat "$CFG"
     if [ -s "$CFG" ] && [ -n "$(tail -c 1 "$CFG")" ]; then echo; fi
-    printf '\nMatch all\n%s\n' "$INC"
-  } >"$t"
-  chmod 600 "$t"; mv "$t" "$CFG"
+    printf '\nMatch all\n%s\n' "$INC"; } | put "$CFG"
 }
 
-mentioned() {  # alias probe: is it used as a word, outside comments, in any file ssh reads for either name?
-  { ssh -G -v "$1" </dev/null; ssh -G -v "$2" </dev/null; } 2>&1 >/dev/null \
-    | tr -d '\r' | sed -n 's/^debug1: Reading configuration data //p' | sort -u \
-    | while IFS= read -r f; do
-        [ "$f" != "$MF" ] && [ -r "$f" ] || continue
-        sed 's/^[[:space:]]*#.*//' "$f" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9._\n-' ' ' \
-          | awk -v a="$1" '{for(i=1;i<=NF;i++) if($i==a) f=1} END{exit !f}' && echo "$f"
-      done | grep .
-}
-
-taken() {  # alias: print why it cannot be claimed; free = unmentioned and resolves exactly like an unknown name
-  p="fleet-ssh-probe-$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
-  if m=$(mentioned "$1" "$p"); then echo " (named in $(printf '%s' "$m" | head -n 1))"; return 0; fi
-  fa=$(mktemp "$D/.ga.XXXXXX"); fb=$(mktemp "$D/.gb.XXXXXX")
-  if ssh -G "$1" </dev/null >"$fa" 2>/dev/null && ssh -G "$p" </dev/null 2>/dev/null | sed "s/$p/$1/g" >"$fb" \
-      && [ -s "$fa" ] && [ -s "$fb" ]; then
-    if ! cmp -s "$fa" "$fb"; then
-      { grep -vxF -f "$fb" "$fa"; grep -vxF -f "$fa" "$fb" | sed 's/^/not /'; } | awk '{printf " %s %s", $1, $2}'
-      echo " (hand config for this name)"
-    fi
-  else
-    echo " (ssh -G failed)"
+set_user() {  # name fqdn user: make `ssh name` log in as user, unless the name goes elsewhere
+  prep; regular "$US"; regular "$MF"; regular "$CFG"
+  h=$(ssh -G "$1" </dev/null 2>/dev/null | awk '$1 == "hostname" { print tolower($2); exit }') || h=""
+  if [ "$h" != "$1" ] && [ "$h" != "$2" ]; then
+    printf '@@SKIP alias %s\n' "${h:-unknown}"; return 0
   fi
-  rm -f "$fa" "$fb"
+  { if [ -f "$US" ]; then awk -v n="$1" '$1 != n' "$US"; fi; printf '%s %s %s\n' "$1" "$3" "$2"; } | put "$US"
+  render; ensure_include
+  printf '@@DONE alias\n'
 }
 
-problems() {  # alias fqdn user [config]: how `ssh alias` differs from what the managed block intends
-  if [ $# -ge 4 ]; then out=$(ssh -G -F "$4" "$1" </dev/null 2>/dev/null) || { echo " (ssh -G failed)"; return 0; }
-  else out=$(ssh -G "$1" </dev/null 2>/dev/null) || { echo " (ssh -G failed)"; return 0; }; fi
-  printf '%s\n' "$out" | awk -v h="$2" -v u="$3" '
-    $1=="hostname"{hh=$2} $1=="user"{uu=$2} $1=="forwardagent"{fa=$2} $1=="stricthostkeychecking"{sk=$2}
-    $1=="identityfile" && $2 ~ /id_ed25519_fleet$/ {k=1}
-    END{ if (tolower(hh)!=tolower(h)) printf " HostName %s", hh
-         if (uu!=u) printf " User %s", uu
-         if (fa!="no") printf " ForwardAgent %s", fa
-         if (sk=="false" || sk=="no") printf " StrictHostKeyChecking no"
-         if (!k) printf " (no fleet key)" }'
+unset_user() {  # name
+  prep; regular "$US"; regular "$MF"
+  if [ -f "$US" ]; then awk -v n="$1" '$1 != n' "$US" | put "$US"; render; fi
+  printf '@@DONE unalias\n'
 }
 
-block_of() {  # name: the managed block for name, if any
-  [ -f "$MF" ] || return 0
-  awk -v b="# BEGIN $TAG $1" -v e="# END $TAG $1" '$0==b{s=1} s{print} s&&$0==e{s=0}' "$MF"
+verify() {  # dest nonce: does the real `ssh dest` log in and run exactly our command?
+  out=$(ssh -o BatchMode=yes -o ConnectTimeout=10 -o ControlPath=none -o ForwardAgent=no -o StrictHostKeyChecking=accept-new \
+          -o ClearAllForwardings=yes -o RequestTTY=no -o RemoteCommand=none -o PermitLocalCommand=no \
+          "$1" "printf %s $2" </dev/null 2>/dev/null) || out=""
+  if [ "$out" = "$2" ]; then printf '@@VERIFY ok\n'; else printf '@@VERIFY fail\n'; fi
 }
 
-simulate() {  # alias block fqdn user: problems() for the config as it would be after the change
-  d=$(mktemp -d "$D/config.d/.sim.XXXXXX")
-  { if [ -f "$MF" ]; then cat "$MF"; fi; printf '%s\n' "$2"; } >"$d/m.conf"
-  if [ -f "$CFG" ] && grep -qxF "$INC" "$CFG"; then
-    awk -v inc="$INC" -v rep="Include \"$d/m.conf\"" '$0==inc{print rep; next} {print}' "$CFG" >"$d/c.conf"
-  else
-    { if [ -f "$CFG" ]; then cat "$CFG"; echo; fi; printf 'Match all\nInclude "%s"\n' "$d/m.conf"; } >"$d/c.conf"
-  fi
-  # -F skips the system file, which ssh reads after the user's: append it in the same place.
-  if [ -f /etc/ssh/ssh_config ]; then printf '\nMatch all\nInclude /etc/ssh/ssh_config\n' >>"$d/c.conf"; fi
-  problems "$1" "$3" "$4" "$d/c.conf"
-  rm -rf "$d"
+has_tag() {  # tag
+  if [ -f "$AK" ] && awk -v t="$1" '{ l=$0; sub(/[ \t\r]+$/, "", l); n=split(l, a, " ")
+       if (l !~ /^[ \t]*#/ && n > 0 && a[n] == t) f=1 } END { exit !f }' "$AK"; then
+    printf '@@TAG yes\n'
+  else printf '@@TAG no\n'; fi
 }
-
-# Decide first (read-only, including a simulation of the result), then change with one atomic
-# rename. Interruption leaves the previous or the new state; a managed block that does not
-# resolve as intended (whatever the cause) is removed by the next run.
-set_host() {  # name alias block fqdn user
-  prep; nolink "$MF"; nolink "$CFG"; [ -f "$MF" ] || : >"$MF"; chmod 600 "$MF"
-  cur=$(block_of "$1")
-  if [ -n "$cur" ]; then
-    [ "$cur" = "$3" ] || { echo "@@CHANGED"; return 0; }
-    ensure_include
-    why=$(problems "$2" "$4" "$5")
-    if [ -n "$why" ]; then put_mf "$1"; echo "@@COLLISION config:$why"; else echo "@@HOSTSET"; fi
-    return 0
-  fi
-  if awk -v a="$2" 'tolower($1)=="match" && tolower($2)=="originalhost" && $3==a{f=1} END{exit !f}' "$MF"; then
-    echo "@@COLLISION managed"; return 0
-  fi
-  why=$(taken "$2")
-  [ -n "$why" ] || why=$(simulate "$2" "$3" "$4" "$5")
-  if [ -n "$why" ]; then echo "@@COLLISION config:$why"; return 0; fi
-  ensure_include
-  put_mf "$1" "$3"
-  why=$(problems "$2" "$4" "$5")
-  if [ -n "$why" ]; then
-    put_mf "$1"          # name had no block before: removing it is the previous state exactly
-    echo "@@COLLISION config:$why"; return 0
-  fi
-  echo "@@HOSTSET"
-}
-
-unset_host() {  # name
-  [ -f "$MF" ] || return 0
-  nolink "$MF"
-  grep -qxF "# BEGIN $TAG $1" "$MF" || return 0
-  put_mf "$1"
-  echo "@@REMOVED"
-}
-
-list() {
-  if [ -f "$MF" ]; then
-    awk -v b="# BEGIN $TAG " 'index($0,b)==1{n=substr($0,length(b)+1)} n!="" && tolower($1)=="match" && tolower($2)=="originalhost"{print "@@HOST " n " " $3; n=""}' "$MF"
-  fi
-  if [ -f "$AK" ]; then
-    awk -v p="$TAG:" "$TG"'{f=tg()} index(f,p)==1{print "@@TAG " substr(f,length(p)+1)}' "$AK"
-  fi
-}
-
-verify() {  # alias
-  if ssh -o BatchMode=yes -o ControlMaster=no -o ControlPath=none -o ConnectTimeout=10 \
-      -o ForwardAgent=no -o ForwardX11=no -o ClearAllForwardings=yes -o PermitLocalCommand=no \
-      "$1" true </dev/null; then
-    echo "@@OK"
-  else
-    echo "@@FAIL"
-  fi
-}
-'''.replace("$TAG", TAG)
+'''
 
 
 def die(msg, code=1):
@@ -291,67 +194,107 @@ def say(msg=""):
 
 class Node(object):
     def __init__(self, raw):
-        self.fqdn = (raw.get("DNSName") or "").rstrip(".")
-        self.name = self.fqdn.split(".")[0].lower() if self.fqdn else (raw.get("HostName") or "").lower()
-        self.host = (raw.get("HostName") or "").lower()
-        self.ips = list(raw.get("TailscaleIPs") or [])
+        self.fqdn = (raw.get("DNSName") or "").rstrip(".").lower()
+        self.name = self.fqdn.split(".")[0]
+        self.ips = [ip.lower() for ip in (raw.get("TailscaleIPs") or [])]
         self.online = bool(raw.get("Online", True))
-        self.os = raw.get("OS") or ""
 
-
-def tailscale_bin():
-    for cand in (shutil.which("tailscale"), "/usr/local/bin/tailscale", "/opt/homebrew/bin/tailscale",
-                 "/Applications/Tailscale.app/Contents/MacOS/Tailscale"):
-        if cand and os.access(cand, os.X_OK):
-            return cand
-    die("tailscale CLI not found")
+    def valid(self):
+        return (NAME_RE.match(self.name) and FQDN_RE.match(self.fqdn) and self.ips
+                and all(IP_RE.match(ip) for ip in self.ips))
 
 
 def tailnet():
-    out = subprocess.run([tailscale_bin(), "status", "--json"], stdout=subprocess.PIPE,
-                         stderr=subprocess.PIPE, universal_newlines=True)
-    if out.returncode != 0:
-        die("tailscale status failed: %s" % out.stderr.strip())
-    data = json.loads(out.stdout)
-    me = Node(data["Self"])
-    peers = [Node(p) for p in (data.get("Peer") or {}).values()]
-    if not me.fqdn or not me.ips:
-        die("this host has no tailnet name or IP (is Tailscale up, with MagicDNS on?)")
+    exe = next((c for c in (shutil.which("tailscale"), "/usr/local/bin/tailscale", "/opt/homebrew/bin/tailscale",
+                            "/Applications/Tailscale.app/Contents/MacOS/Tailscale")
+                if c and os.access(c, os.X_OK)), None)
+    if not exe:
+        die("tailscale CLI not found")
+    p = subprocess.run([exe, "status", "--json"], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                       universal_newlines=True, timeout=30)
+    if p.returncode != 0:
+        die("tailscale status failed: %s" % p.stderr.strip())
+    data = json.loads(p.stdout)
+    me = Node(data.get("Self") or {})
+    if not me.valid():
+        die("this host has no usable tailnet name and IPs (is Tailscale up, with MagicDNS on?)")
+    peers = [n for n in (Node(p) for p in (data.get("Peer") or {}).values()) if n.valid()]
     return me, peers
 
 
 def find_peer(peers, target):
     t = target.lower().rstrip(".")
-    hits = [p for p in peers if t in (p.name, p.host, p.fqdn.lower())]
+    hits = [p for p in peers if t in (p.name, p.fqdn)]
     if len(hits) == 1:
         return hits[0]
     if not hits:
-        die("no tailnet peer named %r; peers: %s" % (target, ", ".join(sorted(p.name for p in peers))))
-    die("%r matches several peers: %s" % (target, ", ".join(p.fqdn for p in hits)))
+        die("no tailnet peer named %r; peers: %s" % (target, ", ".join(sorted(p.name for p in peers)) or "none"))
+    die("%r matches several peers: %s; use the full name" % (target, ", ".join(p.fqdn for p in hits)))
 
 
-def fleet_user(name):
-    """User from fleet.json's ssh field (user@host), when this host is listed."""
+def fleet_user(peer):
+    """Default user for a peer from fleet.json ("ssh": "user@host"), if listed."""
     try:
         hosts = json.loads(FLEET_JSON.read_text()).get("hosts", [])
-    except (OSError, ValueError):
-        return None
-    for h in hosts:
-        ssh = h.get("ssh", "")
-        if "@" in ssh and ssh.split("@", 1)[1].lower() == name:
-            return ssh.split("@", 1)[0]
+        for h in hosts:
+            ssh = str(h.get("ssh", ""))
+            if "@" in ssh and ssh.split("@", 1)[1].lower().rstrip(".") in (peer.name, peer.fqdn):
+                return ssh.split("@", 1)[0]
+    except (OSError, ValueError, AttributeError, TypeError):
+        pass
     return None
 
 
-# --- running the sh ops ------------------------------------------------------
+def local_user():
+    u = getpass.getuser()
+    if not USER_RE.match(u):
+        die("unsupported local user name %r" % u)
+    return u
 
-def script(*calls):
-    # BEGIN/END prove the steps really ran (a forced command= or a broken shell would skip them).
+
+# --- records and lock -------------------------------------------------------
+
+def load_records():
+    try:
+        data = json.loads(RECORDS.read_text())
+        return data if isinstance(data, dict) and isinstance(data.get("links"), dict) else {"links": {}}
+    except (OSError, ValueError):
+        return {"links": {}}
+
+
+def save_records(data):
+    STATE.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(STATE), prefix=".fleet-ssh.")
+    with os.fdopen(fd, "w") as fh:
+        json.dump(data, fh, indent=1, sort_keys=True)
+    os.replace(tmp, str(RECORDS))
+
+
+@contextlib.contextmanager
+def host_lock():
+    """The same lock the step scripts take, held by this process for the whole operation."""
+    LOCK.parent.mkdir(mode=0o700, exist_ok=True)
+    if LOCK.is_symlink():
+        die("%s is a symlink; fix it by hand" % LOCK)
+    fd = os.open(str(LOCK), os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            die("another fleet-ssh run is changing ssh files here; retry when it ends")
+        yield
+    finally:
+        os.close(fd)
+
+
+# --- running steps ------------------------------------------------------------
+
+def script(calls, lock):
     body = "\n".join(" ".join(shlex.quote(str(a)) for a in c) for c in calls)
-    return OPS + "\ntake_lock\necho @@BEGIN\n" + body + "\necho @@END\n"
+    return OPS + ("\ntake_lock" if lock else "") + "\necho @@BEGIN\n" + body + "\necho @@END\n"
 
 
-def parse(stdout, where="this host"):
+def parse(stdout, where):
     res = []
     for line in stdout.splitlines():
         if line.startswith("@@"):
@@ -365,274 +308,239 @@ def parse(stdout, where="this host"):
 
 
 def run_local(*calls):
-    p = subprocess.run(["sh", "-s"], input=script(*calls), stdout=subprocess.PIPE, universal_newlines=True)
+    # This process already holds the host lock, so local steps do not take it again.
+    p = subprocess.run(["sh", "-s"], input=script(calls, lock=False), stdout=subprocess.PIPE,
+                       universal_newlines=True, timeout=STEP_TIMEOUT)
     if p.returncode != 0:
-        die("local step failed (exit %d)" % p.returncode)
-    return parse(p.stdout)
+        die("a step failed on this host (exit %d)" % p.returncode)
+    return parse(p.stdout, "this host")
 
 
-# Every connection fleet-ssh makes: no agent, X11, port forwarding or LocalCommand,
-# whatever ~/.ssh/config says (command-line options win).
-NOFWD = ["-o", "ForwardAgent=no", "-o", "ForwardX11=no", "-o", "ClearAllForwardings=yes",
-         "-o", "PermitLocalCommand=no"]
+# fleet-ssh's own connections read no ssh config at all.
+BASE = ["ssh", "-F", "none", "-o", "ForwardAgent=no", "-o", "ClearAllForwardings=yes", "-o", "RequestTTY=no",
+        "-o", "ConnectTimeout=15", "-o", "ServerAliveInterval=15", "-o", "StrictHostKeyChecking=accept-new"]
 
 
 class Remote(object):
-    """One multiplexed SSH connection; the only place a password is asked."""
+    """One multiplexed connection to user@fqdn; the only place a password is asked."""
 
-    def __init__(self, user, node):
-        self.dest = "%s@%s" % (user, node.fqdn)
-        self.node = node
+    def __init__(self, user, fqdn):
+        self.dest = "%s@%s" % (user, fqdn)
         self.dir = tempfile.mkdtemp(prefix="fleet-ssh-", dir="/tmp" if os.path.isdir("/tmp") else None)
         self.sock = os.path.join(self.dir, "m")
 
-    def open(self, hint=None):
+    def open(self, hint=""):
         say("Connecting to %s (enter its password if asked)..." % self.dest)
-        key = Path.home() / ".ssh/id_ed25519_fleet"
-        rc = subprocess.call(["ssh", "-o", "ControlMaster=yes", "-o", "ControlPath=" + self.sock,
-                              "-o", "ControlPersist=60", "-o", "StrictHostKeyChecking=accept-new",
-                              "-o", "ConnectTimeout=15"] + NOFWD
-                             + (["-i", str(key)] if key.is_file() else []) + ["-fN", self.dest])
+        key = HOME / ".ssh/id_ed25519"
+        ident = ["-o", "IdentitiesOnly=yes"] + (["-i", str(key)] if key.is_file() else [])
+        rc = subprocess.call(BASE + ident + ["-o", "ControlMaster=yes", "-o", "ControlPath=" + self.sock,
+                                             "-o", "ControlPersist=300", "-fN", self.dest])
         if rc != 0:
-            self.cleanup()
-            die("could not connect to %s%s" % (self.dest, "; " + hint if hint else ""))
+            die("could not connect to %s%s" % (self.dest, hint))
 
-    def run(self, *calls):
-        # Only ever through the open master: ProxyCommand=false makes any fallback to a fresh
-        # connection fail (a live master never consults it); the check gives a clear message.
-        if subprocess.call(["ssh", "-o", "ControlPath=" + self.sock, "-O", "check", self.dest],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) != 0:
-            die("lost the connection to %s; nothing further was changed there, rerun to finish" % self.node.name)
-        p = subprocess.run(["ssh", "-o", "ControlMaster=no", "-o", "ControlPath=" + self.sock,
-                            "-o", "BatchMode=yes", "-o", "ProxyCommand=false"] + NOFWD + [self.dest, "sh -s"],
-                           input=script(*calls), stdout=subprocess.PIPE, universal_newlines=True)
+    def run(self, calls, lock=True):
+        # Only through the open master: ProxyCommand=false makes any fallback connection fail.
+        p = subprocess.run(BASE + ["-T", "-o", "BatchMode=yes", "-o", "ControlMaster=no",
+                                   "-o", "ControlPath=" + self.sock, "-o", "ProxyCommand=false",
+                                   self.dest, "sh -s"],
+                           input=script(calls, lock), stdout=subprocess.PIPE, universal_newlines=True,
+                           timeout=STEP_TIMEOUT)
         if p.returncode != 0:
-            die("step on %s failed (exit %d)" % (self.node.name, p.returncode))
-        return parse(p.stdout, self.node.name)
+            die("a step failed on %s (exit %d)" % (self.dest, p.returncode))
+        return parse(p.stdout, self.dest)
 
     def close(self):
-        subprocess.call(["ssh", "-o", "ControlPath=" + self.sock, "-O", "exit", self.dest],
+        subprocess.call(["ssh", "-F", "none", "-o", "ControlPath=" + self.sock, "-O", "exit", self.dest],
                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        self.cleanup()
-
-    def cleanup(self):
         shutil.rmtree(self.dir, ignore_errors=True)
 
 
-def pub_from(results):
-    for r in results:
-        if r.startswith("PUB "):
-            parts = r[4:].split()
-            if len(parts) >= 2 and KTYPE_RE.match(parts[0]) and BLOB_RE.match(parts[1]):
-                return parts[0], parts[1]
-            die("returned public key is malformed")
-    die("no public key returned")
+def need(results, *acks):
+    for a in acks:
+        if a not in results:
+            die("a step did not confirm '%s'; nothing was assumed" % a)
 
 
-def auth_line(src, ktype, blob):
-    return 'from="%s" %s %s %s:%s' % (",".join(src.ips), ktype, blob, TAG, src.name)
+def pub_line(results, src_ips, tag):
+    pubs = [r.split()[1:3] for r in results if r.startswith("PUB ")]
+    if len(pubs) != 1 or len(pubs[0]) != 2 or not KTYPE_RE.match(pubs[0][0]) or not BLOB_RE.match(pubs[0][1]):
+        die("did not get a valid public key")
+    return 'from="%s" %s %s %s' % (",".join(src_ips), pubs[0][0], pubs[0][1], tag)
 
 
-def host_block(name, alias, fqdn, user):
-    return "\n".join([
-        "# BEGIN %s %s" % (TAG, name),
-        # originalhost: matches only the name typed, never another alias's expanded HostName
-        "Match originalhost %s" % alias,
-        "  HostName %s" % fqdn,
-        "  User %s" % user,
-        "  IdentityFile ~/.ssh/id_ed25519_fleet",
-        "  IdentitiesOnly yes",
-        "  ForwardAgent no",
-        "  StrictHostKeyChecking accept-new",
-        "  ConnectTimeout 10",
-        "# END %s %s" % (TAG, name),
-    ])
-
-
-def report_auth(results, where, src):
-    if "UNMANAGED" in results:
-        say("  %s already authorizes %s's key on an unmanaged line; left as is" % (where, src))
-    else:
-        say("  %s now accepts %s's fleet key (from= %s's tailnet IPs)" % (where, src, src))
-
-
-def report_host(results, where, alias):
-    """True when the managed alias is in place (and safe to verify)."""
-    if "CHANGED" in results:
-        say("  %s: this link's alias exists with other settings; run fleet-ssh unlink first, then link again" % where)
+def alias_report(results, where, name, user):
+    skip = [r for r in results if r.startswith("SKIP alias ")]
+    if skip:
+        say("  %s: your ssh config sends '%s' to %s, so fleet-ssh left it alone (use ssh %s@<full name>)"
+            % (where, name, skip[0].split(" ", 2)[2], user))
         return False
-    hit = [r for r in results if r.startswith("COLLISION config:")]
-    if hit:
-        say("  %s: your ssh config already decides%s for %s, so no managed alias was added; "
-            "pick another with --alias/--as" % (where, hit[0][len("COLLISION config:"):], alias))
-    elif "COLLISION managed" in results:
-        say("  %s: another managed link already uses alias %s; pick a different --alias/--as" % (where, alias))
-    else:
-        say("  %s: ssh %s is ready" % (where, alias))
-        return True
-    return False
+    say("  %s: ssh %s -> %s@%s" % (where, name, user, name))
+    return True
+
+
+def dest(rec, side, name, user, fqdn):
+    """What to test: the alias when fleet-ssh wrote it, else user@fqdn explicitly."""
+    return name if rec.get("alias_" + side) else "%s@%s" % (user, fqdn)
 
 
 # --- commands ----------------------------------------------------------------
 
-def check_node(n):
-    if not NAME_RE.match(n.name) or not FQDN_RE.match(n.fqdn):
-        die("tailnet peer %r has no usable MagicDNS name" % (n.fqdn or n.host))
-    if not n.ips or not all(IP_RE.match(ip) for ip in n.ips):
-        die("tailnet peer %s has no usable IPs" % n.name)
-
-
-def check_names(alias, local_alias, users):
-    for a in (alias, local_alias):
-        if a is not None and not ALIAS_RE.match(a):
-            die("bad alias %r" % a)
-    for u in users:
-        if not USER_RE.match(u):
-            die("bad user %r" % u)
-
-
-def link(me, peer, direction, user, alias, local_alias, yes):
-    local_user = getpass.getuser()
-    alias = alias or peer.name
-    local_alias = local_alias or me.name
-    check_names(alias, local_alias, (user, local_user))
-    check_node(me)
-    check_node(peer)
-    if peer.fqdn.lower() == me.fqdn.lower():
+def link(me, peer, direction, user, yes):
+    lu = local_user()
+    if not USER_RE.match(user):
+        die("bad user %r" % user)
+    if peer.fqdn == me.fqdn:
         die("TARGET is this host")
-    to = direction in ("to", "both")
-    frm = direction in ("from", "both")
-
+    to, frm = direction in ("to", "both"), direction in ("from", "both")
+    my_tag, peer_tag = "%s:%s@%s" % (TAG, lu, me.fqdn), "%s:%s@%s" % (TAG, user, peer.fqdn)
     say("Plan:")
     if to:
-        say("  %s -> %s   on %s run: ssh %s   (%s@%s)" % (me.name, peer.name, me.name, alias, user, peer.fqdn))
+        say("  here:  ssh %s   (as %s@%s)" % (peer.name, user, peer.fqdn))
     if frm:
-        say("  %s -> %s   on %s run: ssh %s   (%s@%s)" % (peer.name, me.name, peer.name, local_alias, local_user, me.fqdn))
+        say("  there: ssh %s   (as %s@%s, run on %s)" % (me.name, lu, me.fqdn, peer.name))
     if not peer.online:
         say("  note: tailscale reports %s offline" % peer.name)
     if not yes:
         if not sys.stdin.isatty():
             die("not a terminal; pass --yes to proceed")
-        if input("Proceed? [Y/n] ").strip().lower() not in ("", "y", "yes"):
+        try:
+            if input("Proceed? [Y/n] ").strip().lower() not in ("", "y", "yes"):
+                die("cancelled", 0)
+        except EOFError:
             die("cancelled", 0)
 
-    rem = Remote(user, peer)
-    ok = True
-    try:
-        rem.open()
-        if to:
-            ktype, blob = pub_from(run_local(("ensure_key", "%s@%s fleet" % (local_user, me.name))))
-            report_auth(rem.run(("authorize", "%s:%s" % (TAG, me.name), auth_line(me, ktype, blob), blob, ktype + " " + blob)),
-                        peer.name, me.name)
-            to = report_host(run_local(("set_host", peer.name, alias,
-                                        host_block(peer.name, alias, peer.fqdn, user), peer.fqdn, user)),
-                             me.name, alias)
-            ok &= to
-        if frm:
-            ktype, blob = pub_from(rem.run(("ensure_key", "%s@%s fleet" % (user, peer.name))))
-            report_auth(run_local(("authorize", "%s:%s" % (TAG, peer.name), auth_line(peer, ktype, blob), blob, ktype + " " + blob)),
-                        me.name, peer.name)
-            frm = report_host(rem.run(("set_host", me.name, local_alias,
-                                       host_block(me.name, local_alias, me.fqdn, local_user), me.fqdn, local_user)),
-                              peer.name, local_alias)
-            ok &= frm
-        if to or frm:
-            say("Verifying with keys only...")
-        if to:
-            good = "OK" in run_local(("verify", alias))
-            ok &= good
-            say("  %s -> %s: %s" % (me.name, peer.name, "ok" if good else "FAILED"))
-        if frm:
-            good = "OK" in rem.run(("verify", local_alias))
-            ok &= good
-            say("  %s -> %s: %s" % (peer.name, me.name, "ok" if good else "FAILED"))
-            if not good:
-                say("  check that sshd runs here (Linux: sudo systemctl enable --now sshd; "
-                    "macOS: System Settings > General > Sharing > Remote Login)")
-    finally:
-        rem.close()
+    with host_lock():
+        mine = run_local(("ensure_key", "%s@%s" % (lu, me.name))) if to else []
+        rem = Remote(user, peer.fqdn)
+        ok = True
+        try:
+            rem.open()
+            # Record first: whatever happens next, `fleet-ssh unlink` can clean up both ends.
+            records = load_records()
+            rec = records["links"].get(peer.fqdn) or {}
+            rec.update({"name": peer.name, "user": user, "to": to or rec.get("to", False),
+                        "from": frm or rec.get("from", False), "tag_there": my_tag,
+                        "name_there": me.name, "tag_here": peer_tag})
+            records["links"][peer.fqdn] = rec
+            save_records(records)
+            calls = []
+            if frm:
+                calls += [("ensure_key", "%s@%s" % (user, peer.name))]
+            if to:
+                calls += [("authorize", my_tag, pub_line(mine, me.ips, my_tag))]
+            if frm:
+                calls += [("set_user", me.name, me.fqdn, lu)]
+            there = rem.run(calls)
+            need(there, *(["DONE authorize"] if to else []))
+            if frm:
+                need(run_local(("authorize", peer_tag, pub_line(there, peer.ips, peer_tag))), "DONE authorize")
+                rec["alias_there"] = alias_report(there, peer.name, me.name, lu)
+                if rec["alias_there"]:
+                    need(there, "DONE alias")
+            if to:
+                here = run_local(("set_user", peer.name, peer.fqdn, user))
+                rec["alias_here"] = alias_report(here, me.name, peer.name, user)
+                if rec["alias_here"]:
+                    need(here, "DONE alias")
+            save_records(records)
+            say("Checking with the real ssh command...")
+            if to:
+                good = "VERIFY ok" in run_local(("verify", dest(rec, "here", peer.name, user, peer.fqdn),
+                                                 secrets.token_hex(16)))
+                ok &= good
+                say("  ssh %s: %s" % (peer.name, "works" if good else "FAILED"))
+            if frm:
+                good = "VERIFY ok" in rem.run([("verify", dest(rec, "there", me.name, lu, me.fqdn),
+                                                secrets.token_hex(16))], lock=False)
+                ok &= good
+                say("  ssh %s on %s: %s" % (me.name, peer.name, "works" if good else "FAILED"))
+                if not good:
+                    say("  (is sshd running here? Linux: sudo systemctl enable --now sshd; "
+                        "macOS: System Settings > General > Sharing > Remote Login)")
+        finally:
+            rem.close()
     if not ok:
         raise SystemExit(1)
 
 
-def managed(results):
-    hosts = {}
-    tags = []
-    for r in results:
-        if r.startswith("HOST "):
-            _, name, alias = r.split(" ", 2)
-            hosts[name] = alias
-        elif r.startswith("TAG "):
-            tags.append(r[4:])
-    return hosts, tags
+def find_record(records, target):
+    t = target.lower().rstrip(".")
+    hits = [(f, r) for f, r in records["links"].items() if t in (f, r.get("name"))]
+    if len(hits) != 1:
+        die("no single recorded link matches %r (recorded: %s)"
+            % (target, ", ".join(sorted(records["links"])) or "none"))
+    return hits[0]
 
 
-def unlink(me, peers, target, user, local_only):
-    if local_only:
-        t = target.lower()
-        match = [p for p in peers if t in (p.name, p.host, p.fqdn.lower())]
-        name = match[0].name if len(match) == 1 else t
-        if not NAME_RE.match(name):
-            die("bad host name %r" % name)
-        removed = run_local(("deauthorize", "%s:%s" % (TAG, name)), ("unset_host", name))
-        say("%s: removed %d managed entr%s for %s (its side is untouched)"
-            % (me.name, len(removed), "y" if len(removed) == 1 else "ies", name))
+def unlink(target, local_only):
+    with host_lock():
+        records = load_records()
+        fqdn, r = find_record(records, target)
+        if not (FQDN_RE.match(fqdn) and NAME_RE.match(str(r.get("name", ""))) and USER_RE.match(str(r.get("user", "")))
+                and NAME_RE.match(str(r.get("name_there", ""))) and TAG_RE.match(str(r.get("tag_there", "")))
+                and TAG_RE.match(str(r.get("tag_here", "")))):
+            die("the record for %s is damaged; remove it from %s by hand" % (fqdn, RECORDS))
+        if not local_only:
+            rem = Remote(r["user"], fqdn)
+            try:
+                rem.open(hint="; nothing was changed. If %s is gone for good: fleet-ssh unlink %s --local-only"
+                         % (r["name"], r["name"]))
+                there = rem.run([("deauthorize", r["tag_there"]), ("unset_user", r["name_there"])])
+                need(there, "DONE deauthorize", "DONE unalias")
+            finally:
+                rem.close()
+            say("  %s: removed this host's key and name" % r["name"])
+        here = run_local(("deauthorize", r["tag_here"]), ("unset_user", r["name"]))
+        need(here, "DONE deauthorize", "DONE unalias")
+        del records["links"][fqdn]
+        save_records(records)
+        say("  this host: removed %s's key and name" % r["name"])
+
+
+def status():
+    records = load_records()
+    if not records["links"]:
+        say("No recorded links.")
         return
-    peer = find_peer(peers, target)
-    user = user or fleet_user(peer.name) or getpass.getuser()
-    check_names(None, None, (user,))
-    check_node(me)
-    check_node(peer)
-    rem = Remote(user, peer)
-    try:
-        rem.open(hint="nothing was changed; if %s is gone for good, run: fleet-ssh unlink %s --local-only"
-                 % (peer.name, peer.name))
-        there = rem.run(("deauthorize", "%s:%s" % (TAG, me.name)), ("unset_host", me.name))
-    finally:
-        rem.close()
-    here = run_local(("deauthorize", "%s:%s" % (TAG, peer.name)), ("unset_host", peer.name))
-    say("  %s: removed %d managed entries; %s: removed %d" % (peer.name, len(there), me.name, len(here)))
-
-
-def status(me):
-    hosts, tags = managed(run_local(("list",)))
-    if not hosts and not tags:
-        say("No managed links on %s." % me.name)
-        return
-    say("%s -> (aliases here):" % me.name)
-    for name, alias in sorted(hosts.items()):
-        r = run_local(("verify", alias))
-        say("  %-12s ssh %-12s %s" % (name, alias, "ok" if "OK" in r else "FAILED"))
-    if tags:
-        say("-> %s (keys accepted here from): %s" % (me.name, ", ".join(sorted(tags))))
-
-
-def ask(prompt, default=None, choices=None):
-    while True:
-        hint = " [%s]" % default if default else ""
-        if choices:
-            hint = " (%s)%s" % ("/".join(choices), hint)
-        try:
-            v = input("%s%s: " % (prompt, hint)).strip() or (default or "")
-        except EOFError:
-            die("cancelled", 0)
-        if v and (not choices or v in choices):
-            return v
+    bad = False
+    for fqdn, r in sorted(records["links"].items()):
+        parts = []
+        if r.get("to"):
+            good = "VERIFY ok" in run_local(("verify", dest(r, "here", r["name"], r["user"], fqdn),
+                                             secrets.token_hex(16)))
+            bad |= not good
+            parts.append("ssh %s %s" % (r["name"], "works" if good else "FAILED"))
+        if r.get("from"):
+            present = "TAG yes" in run_local(("has_tag", r["tag_here"]))
+            bad |= not present
+            parts.append("its key %s here" % ("accepted" if present else "MISSING"))
+        say("  %-28s %s" % (fqdn, "; ".join(parts)))
+    if bad:
+        raise SystemExit(1)
 
 
 def wizard(me, peers):
     if not sys.stdin.isatty():
         die("no terminal for the wizard; use: fleet-ssh link TARGET ...")
+
+    def ask(prompt, default=None, choices=None):
+        while True:
+            hint = (" (%s)" % "/".join(choices) if choices else "") + (" [%s]" % default if default else "")
+            try:
+                v = input("%s%s: " % (prompt, hint)).strip() or (default or "")
+            except EOFError:
+                die("cancelled", 0)
+            if v and (not choices or v in choices):
+                return v
+
     online = sorted(p.name for p in peers if p.online)
-    say("This host: %s (%s). Online peers: %s" % (me.name, getpass.getuser(), ", ".join(online) or "none"))
-    default = "nous" if me.name != "nous" else None
+    say("This host: %s (%s). Online peers: %s" % (me.name, local_user(), ", ".join(online) or "none"))
+    default = "nous" if any(p.name == "nous" for p in peers) else None
     peer = find_peer(peers, ask("Link with which host", default))
-    say("Directions:  to = %s -> %s   from = %s -> %s   both = two-way" % (me.name, peer.name, peer.name, me.name))
+    say("Directions: to = ssh %s from here; from = ssh %s from there; both" % (peer.name, me.name))
     direction = ask("Direction", "both", ["both", "to", "from"])
-    user = ask("Your user on %s" % peer.name, fleet_user(peer.name) or getpass.getuser())
-    alias = ask("Alias for %s on this host" % peer.name, peer.name) if direction != "from" else None
-    local_alias = ask("Alias for this host on %s" % peer.name, me.name) if direction != "to" else None
-    link(me, peer, direction, user, alias, local_alias, yes=False)
+    user = ask("Your user on %s" % peer.name, fleet_user(peer) or local_user())
+    link(me, peer, direction, user, yes=False)
 
 
 def main(argv):
@@ -642,32 +550,27 @@ def main(argv):
     lk.add_argument("target")
     lk.add_argument("--direction", choices=["both", "to", "from"], default="both")
     lk.add_argument("--user", help="your user on TARGET (default: fleet.json, else this user)")
-    lk.add_argument("--alias", help="alias for TARGET on this host (default: its tailnet name)")
-    lk.add_argument("--as", dest="local_alias", help="alias for this host on TARGET (default: its tailnet name)")
     lk.add_argument("--yes", action="store_true", help="skip the confirmation")
-    ul = sub.add_parser("unlink", help="remove the managed link with TARGET")
+    ul = sub.add_parser("unlink", help="remove a recorded link on both ends")
     ul.add_argument("target")
-    ul.add_argument("--user", help="your user on TARGET (default: fleet.json, else this user)")
-    ul.add_argument("--local-only", action="store_true", help="only remove this host's side (TARGET is gone)")
-    sub.add_parser("status", help="list managed links and test them")
+    ul.add_argument("--local-only", action="store_true", help="only this host's side (TARGET is gone)")
+    sub.add_parser("status", help="check recorded links")
     args = ap.parse_args(argv)
-
-    me, peers = tailnet()
-    if args.cmd is None:
-        wizard(me, peers)
-    elif args.cmd == "link":
-        peer = find_peer(peers, args.target)
-        user = args.user or fleet_user(peer.name) or getpass.getuser()
-        link(me, peer, args.direction, user, args.alias, args.local_alias, args.yes)
+    if args.cmd == "status":
+        status()
     elif args.cmd == "unlink":
-        unlink(me, peers, args.target, args.user, args.local_only)
-    elif args.cmd == "status":
-        status(me)
+        unlink(args.target, args.local_only)
+    else:
+        me, peers = tailnet()
+        if args.cmd is None:
+            wizard(me, peers)
+        else:
+            peer = find_peer(peers, args.target)
+            link(me, peer, args.direction, args.user or fleet_user(peer) or local_user(), args.yes)
 
 
 def _terminate(signum, frame):
-    # SIGTERM/SIGHUP unwind like Ctrl-C, so the SSH master is closed and temp files removed.
-    raise SystemExit(128 + signum)
+    raise SystemExit(128 + signum)   # unwind like Ctrl-C: close the master, release the lock
 
 
 if __name__ == "__main__":
@@ -677,3 +580,5 @@ if __name__ == "__main__":
         main(sys.argv[1:])
     except KeyboardInterrupt:
         die("interrupted", 130)
+    except subprocess.TimeoutExpired:
+        die("a step took too long and was stopped")

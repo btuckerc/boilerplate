@@ -5,7 +5,8 @@ Usage:
   fleet-ssh                      interactive wizard
   fleet-ssh link TARGET [--direction both|to|from] [--user USER]
                  [--alias ALIAS] [--as LOCAL_ALIAS] [--yes]
-  fleet-ssh unlink TARGET        remove the managed link on both ends
+  fleet-ssh unlink TARGET [--user USER] [--local-only]
+                                 remove the managed link on both ends
   fleet-ssh status               list managed links and test each alias
 
 Directions, from the host you run it on:
@@ -42,6 +43,8 @@ ALIAS_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 USER_RE = re.compile(r"[a-z_][a-z0-9_.-]*\Z", re.I)
 FQDN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9.-]*\Z")
 IP_RE = re.compile(r"[0-9A-Fa-f:.]+\Z")
+KTYPE_RE = re.compile(r"(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)|sk-[a-z0-9-]+@openssh\.com)\Z")
+BLOB_RE = re.compile(r"[A-Za-z0-9+/]+={0,3}\Z")
 
 # Runs under sh on both ends. Machine-readable results are "@@" lines on stdout;
 # messages for the person go to stderr.
@@ -60,13 +63,20 @@ nolink() { [ ! -L "$1" ] || fail "$1 is a symlink; edit it by hand"; }
 prep() { mkdir -p "$D/config.d"; chmod 700 "$D" "$D/config.d"; }
 
 ensure_key() {
-  prep
-  if [ ! -f "$KEY" ]; then
+  prep; nolink "$KEY"; nolink "$KEY.pub"
+  if [ ! -e "$KEY" ]; then
     ssh-keygen -q -t ed25519 -N '' -C "$1" -f "$KEY" </dev/null >/dev/null
     echo "  created $KEY on $(uname -n)" >&2
   fi
-  [ -f "$KEY.pub" ] || ssh-keygen -y -f "$KEY" >"$KEY.pub"
-  echo "@@PUB $(cat "$KEY.pub")"
+  [ -f "$KEY" ] || fail "$KEY is not a regular file"
+  [ -e "$KEY.pub" ] || ssh-keygen -y -f "$KEY" >"$KEY.pub"
+  [ -f "$KEY.pub" ] || fail "$KEY.pub is not a regular file"
+  pub=$(head -n 1 "$KEY.pub")
+  case "$pub" in
+    "ssh-ed25519 "*|"ssh-rsa "*|"ecdsa-sha2-"*|"sk-"*) ;;
+    *) fail "$KEY.pub does not hold a public key" ;;
+  esac
+  echo "@@PUB $pub"
 }
 
 authorize() {  # tag line blob
@@ -96,17 +106,34 @@ without_block() {  # name file
     '$0==b{s=1;next} s&&$0==e{s=0;next} !s' "$2"
 }
 
-ensure_include() {
+ensure_include() {  # the Include must be the first directive, or earlier lines win
   nolink "$CFG"; [ -f "$CFG" ] || : >"$CFG"; chmod 600 "$CFG"
-  grep -qxF "$INC" "$CFG" && return 0
+  first=$(awk '!/^[ \t]*(#|$)/{print; exit}' "$CFG")
+  [ "$first" = "$INC" ] && return 0
   t=$(mktemp "$D/.cfg.XXXXXX")
-  { printf '%s\n\n' "$INC"; cat "$CFG"; } >"$t"
+  { printf '%s\n\n' "$INC"; grep -vxF "$INC" "$CFG" || :; } >"$t"
   chmod 600 "$t"; mv "$t" "$CFG"
+}
+
+claimed() {  # alias: does the unmanaged config already treat it differently from any other name?
+  [ -f "$CFG" ] || return 1
+  nolink "$CFG"
+  t=$(mktemp "$D/.probe.XXXXXX")
+  grep -vxF "$INC" "$CFG" >"$t" || :
+  d=fleet-ssh-probe-q7z
+  if a=$(ssh -G -F "$t" "$1" 2>/dev/null) && b=$(ssh -G -F "$t" "$d" 2>/dev/null); then
+    rm -f "$t"
+    a=$(printf '%s\n' "$a" | tr 'A-Z' 'a-z')
+    b=$(printf '%s\n' "$b" | sed "s/$d/$1/g" | tr 'A-Z' 'a-z')
+    [ "$a" != "$b" ]
+  else
+    rm -f "$t"; return 0
+  fi
 }
 
 set_host() {  # name alias block
   prep; nolink "$MF"; [ -f "$MF" ] || : >"$MF"; chmod 600 "$MF"
-  if [ -f "$CFG" ] && awk -v a="$2" 'tolower($1)=="host"{for(i=2;i<=NF;i++) if($i==a) f=1} END{exit !f}' "$CFG"; then
+  if claimed "$2"; then
     echo "@@COLLISION config"; return 0
   fi
   t=$(mktemp "$D/.mf.XXXXXX")
@@ -246,7 +273,7 @@ class Remote(object):
         self.dir = tempfile.mkdtemp(prefix="fleet-ssh-", dir="/tmp" if os.path.isdir("/tmp") else None)
         self.sock = os.path.join(self.dir, "m")
 
-    def open(self):
+    def open(self, hint=None):
         say("Connecting to %s (enter its password if asked)..." % self.dest)
         key = Path.home() / ".ssh/id_ed25519_fleet"
         rc = subprocess.call(["ssh", "-o", "ControlMaster=yes", "-o", "ControlPath=" + self.sock,
@@ -255,7 +282,7 @@ class Remote(object):
                              + (["-i", str(key)] if key.is_file() else []) + ["-fN", self.dest])
         if rc != 0:
             self.cleanup()
-            die("could not connect to %s" % self.dest)
+            die("could not connect to %s%s" % (self.dest, "; " + hint if hint else ""))
 
     def run(self, *calls):
         p = subprocess.run(["ssh", "-o", "ControlMaster=no", "-o", "ControlPath=" + self.sock,
@@ -278,8 +305,9 @@ def pub_from(results):
     for r in results:
         if r.startswith("PUB "):
             parts = r[4:].split()
-            if len(parts) >= 2:
+            if len(parts) >= 2 and KTYPE_RE.match(parts[0]) and BLOB_RE.match(parts[1]):
                 return parts[0], parts[1]
+            die("returned public key is malformed")
     die("no public key returned")
 
 
@@ -311,7 +339,7 @@ def report_auth(results, where, src):
 
 def report_host(results, where, alias):
     if "COLLISION config" in results:
-        say("  %s: ~/.ssh/config already defines Host %s by hand; not adding a managed alias (pick another with --alias/--as)" % (where, alias))
+        say("  %s: ~/.ssh/config already configures %s by hand; not adding a managed alias (pick another with --alias/--as)" % (where, alias))
     elif "COLLISION managed" in results:
         say("  %s: another managed link already uses alias %s; pick a different --alias/--as" % (where, alias))
     else:
@@ -408,31 +436,31 @@ def managed(results):
     return hosts, tags
 
 
-def unlink(me, peers, target):
-    t = target.lower()
-    match = [p for p in peers if t in (p.name, p.host, p.fqdn.lower())]
-    name = match[0].name if len(match) == 1 else t
-    if not NAME_RE.match(name):
-        die("bad host name %r" % name)
-    hosts, tags = managed(run_local(("list",)))
-    if name not in hosts and name not in tags:
-        die("no managed link with %s here" % name)
-    alias = hosts.get(name)
-    if alias:
-        say("Removing this host's entries on %s (key login via %s)..." % (name, alias))
-        p = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ControlMaster=no", "-o", "ControlPath=none",
-                            alias, "sh -s"], input=script(("deauthorize", "%s:%s" % (TAG, me.name)),
-                                                          ("unset_host", me.name)),
-                           stdout=subprocess.PIPE, universal_newlines=True)
-        if p.returncode == 0:
-            parse(p.stdout)
-            say("  done on %s" % name)
-        else:
-            say("  could not reach %s; run there: fleet-ssh unlink %s" % (name, me.name))
-    else:
-        say("No alias for %s here; to finish, run there: fleet-ssh unlink %s" % (name, me.name))
-    run_local(("deauthorize", "%s:%s" % (TAG, name)), ("unset_host", name))
-    say("  removed %s's key and alias on %s" % (name, me.name))
+def unlink(me, peers, target, user, local_only):
+    if local_only:
+        t = target.lower()
+        match = [p for p in peers if t in (p.name, p.host, p.fqdn.lower())]
+        name = match[0].name if len(match) == 1 else t
+        if not NAME_RE.match(name):
+            die("bad host name %r" % name)
+        removed = run_local(("deauthorize", "%s:%s" % (TAG, name)), ("unset_host", name))
+        say("%s: removed %d managed entr%s for %s (its side is untouched)"
+            % (me.name, len(removed), "y" if len(removed) == 1 else "ies", name))
+        return
+    peer = find_peer(peers, target)
+    user = user or fleet_user(peer.name) or getpass.getuser()
+    check_names(None, None, (user,))
+    check_node(me)
+    check_node(peer)
+    rem = Remote(user, peer)
+    rem.open(hint="nothing was changed; if %s is gone for good, run: fleet-ssh unlink %s --local-only"
+             % (peer.name, peer.name))
+    try:
+        there = rem.run(("deauthorize", "%s:%s" % (TAG, me.name)), ("unset_host", me.name))
+    finally:
+        rem.close()
+    here = run_local(("deauthorize", "%s:%s" % (TAG, peer.name)), ("unset_host", peer.name))
+    say("  %s: removed %d managed entries; %s: removed %d" % (peer.name, len(there), me.name, len(here)))
 
 
 def status(me):
@@ -488,6 +516,8 @@ def main(argv):
     lk.add_argument("--yes", action="store_true", help="skip the confirmation")
     ul = sub.add_parser("unlink", help="remove the managed link with TARGET")
     ul.add_argument("target")
+    ul.add_argument("--user", help="your user on TARGET (default: fleet.json, else this user)")
+    ul.add_argument("--local-only", action="store_true", help="only remove this host's side (TARGET is gone)")
     sub.add_parser("status", help="list managed links and test them")
     args = ap.parse_args(argv)
 
@@ -499,7 +529,7 @@ def main(argv):
         user = args.user or fleet_user(peer.name) or getpass.getuser()
         link(me, peer, args.direction, user, args.alias, args.local_alias, args.yes)
     elif args.cmd == "unlink":
-        unlink(me, peers, args.target)
+        unlink(me, peers, args.target, args.user, args.local_only)
     elif args.cmd == "status":
         status(me)
 

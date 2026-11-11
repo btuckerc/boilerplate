@@ -15,12 +15,13 @@ Directions, from the host you run it on:
 Design (each choice removes a class of failure):
 - Names are tailnet names (MagicDNS resolves them), so fleet-ssh never decides
   which machine a name reaches. It writes only `Match originalhost NAME` /
-  `User USER` / `HostKeyAlias FQDN` blocks (so `ssh NAME` must meet the host
-  key recorded for the tailnet name) into ~/.ssh/decent-angl-fleet.conf,
+  `User USER` / `HostKeyAlias FQDN` blocks (so `ssh NAME` checks the host key
+  known for the tailnet name) into ~/.ssh/decent-angl-fleet.conf,
   generated from its list in ~/.local/state/decent-angl/fleet-ssh.users and
   included at the end of ~/.ssh/config after "Match all": anything you wrote
-  yourself still wins. A name your config sends elsewhere, or whose route
-  would change when User is added, gets no block.
+  yourself still wins. Before and after writing, and on every rerun, `ssh -G
+  NAME` must be exactly the tailnet host on port 22 as USER, with no proxy
+  and no agent forwarding; otherwise there is no block for NAME.
 - Keys are each account's default ~/.ssh/id_ed25519 (created if missing), so a
   plain `ssh NAME` offers it. The public half is derived from the private key;
   a passphrase-protected key is used only when ssh-agent holds it.
@@ -104,14 +105,14 @@ ensure_key() {  # comment
     [ ! -e "$KEY.pub" ] || fail "$KEY.pub exists without $KEY; move it away first"
     t=$(mktemp -d "$D/.fleet-ssh-key.XXXXXX")
     ssh-keygen -q -t ed25519 -N '' -C "$1" -f "$t/k" </dev/null >/dev/null || { rm -rf "$t"; fail "ssh-keygen failed"; }
-    mv -f "$t/k.pub" "$KEY.pub"; mv -f "$t/k" "$KEY"; rmdir "$t"
+    mv -f "$t/k" "$KEY"; mv -f "$t/k.pub" "$KEY.pub"; rmdir "$t"   # key first: a lone key is repairable
     printf '  created %s on %s\n' "$KEY" "$(uname -n)" >&2
   fi
   if pub=$(ssh-keygen -y -P '' -f "$KEY" </dev/null 2>/dev/null); then
     set -- $pub
   else  # passphrase-protected: usable only when the agent holds exactly this .pub's key
     [ -f "$KEY.pub" ] || fail "$KEY is passphrase-protected and has no $KEY.pub"
-    set -- $(awk '!/^[ \t]*(#|$)/ { print $1, $2; exit }' "$KEY.pub")
+    set -- $(awk '{ sub(/\r$/, "") } !/^[ \t]*(#|$)/ { print $1, $2; exit }' "$KEY.pub")
     [ $# -ge 2 ] || fail "$KEY.pub holds no key"
     ssh-add -L 2>/dev/null | awk -v t="$1" -v b="$2" '$1 == t && $2 == b { f=1 } END { exit !f }' \
       || fail "$KEY is passphrase-protected; load it into ssh-agent (ssh-add) and retry"
@@ -169,11 +170,18 @@ render() {  # regenerate the managed config from the users list (only valid line
   commit "$t" "$MF"
 }
 
-ensure_include() {  # "Match all" + Include at the end: hand-written settings are read first
+include_state() {  # ok | missing | misplaced: our Include must be the final "Match all" + Include pair
+  [ -f "$CFG" ] || { echo missing; return 0; }
+  awk -v inc="$INC" '{ l=$0; sub(/^[ \t]+/, "", l); sub(/[ \t\r]+$/, "", l) }
+    l == "" || l ~ /^#/ { next }
+    { d[++n] = l; if (l == inc) at[n] = 1 }
+    END { last = 0; for (i = 1; i <= n; i++) if (d[i] != inc && d[i] != "Match all") last = i
+          for (i in at) if (i + 0 < last) { print "misplaced"; exit }
+          if (n >= 2 && d[n] == inc && d[n-1] == "Match all") print "ok"; else print "missing" }' "$CFG"
+}
+
+append_include() {
   regular "$CFG"
-  if [ -f "$CFG" ] && awk -v inc="$INC" '$0 == inc && prev == "Match all" { f=1 } NF { prev=$0 } END { exit !f }' "$CFG"; then
-    return 0
-  fi
   t=$(newtmp "$CFG")
   if [ -f "$CFG" ]; then
     cat "$CFG" >"$t" || { rm -f "$t"; fail "could not read $CFG"; }
@@ -183,38 +191,46 @@ ensure_include() {  # "Match all" + Include at the end: hand-written settings ar
   commit "$t" "$CFG"
 }
 
-route() {  # name: where `ssh name` goes (hostname, proxy settings), as one comparable string
-  ssh -G "$1" </dev/null 2>/dev/null | awk '$1 == "hostname" { h=tolower($2) } $1 == "proxycommand" { c=$0 }
-    $1 == "proxyjump" { j=$0 } END { printf "%s|%s|%s", h, c, j }'
+unsafe() {  # name fqdn user: why `ssh name` is not exactly the tailnet host as user (empty = fine)
+  ssh -G "$1" </dev/null 2>/dev/null | awk -v n="$1" -v f="$2" -v u="$3" '
+    $1 == "hostname" { h = tolower($2) } $1 == "port" { p = $2 } $1 == "user" { us = $2 } $1 == "forwardagent" { fa = $2 }
+    ($1 == "proxycommand" || $1 == "proxyjump") && $2 != "none" { px = px " " $1 }
+    END { if (h != n && h != f) printf " HostName %s", h; if (p != "22") printf " Port %s", p
+          if (px != "") printf "%s", px; if (fa != "no") printf " ForwardAgent %s", fa
+          if (u != "" && us != u) printf " User %s", us }'
 }
 
-set_user() {  # name fqdn user: `ssh name` logs in as user, unless that would change where it goes
-  dirs; regular "$US"; regular "$MF"; regular "$CFG"
-  before=$(route "$1") || before=""
-  h=${before%%|*}
-  if [ "$h" != "$1" ] && [ "$h" != "$2" ]; then printf '@@SKIP alias %s\n' "${h:-unknown}"; return 0; fi
-  old=$(newtmp "$US"); if [ -f "$US" ]; then cat "$US" >"$old" || fail "could not read $US"; fi
+users_without() {  # name user fqdn -> tmp file: the users list without that exact line
   t=$(newtmp "$US")
-  if [ -f "$US" ]; then awk -v n="$1" '$1 != n' "$US" >"$t" || { rm -f "$t" "$old"; fail "could not read $US"; }; fi
-  printf '%s %s %s\n' "$1" "$3" "$2" >>"$t"
-  commit "$t" "$US"; render; ensure_include
-  after=$(route "$1") || after=""
-  if [ "$after" != "$before" ]; then   # some hand rule reacts to the new User: put everything back
-    if [ -s "$old" ]; then commit "$old" "$US"; else rm -f "$old" "$US"; fi
-    render; printf '@@SKIP alias %s\n' "changed-by-your-config"; return 0
+  if [ -f "$US" ]; then
+    awk -v n="$1" -v u="$2" -v f="$3" '!($1 == n && $2 == u && $3 == f)' "$US" >"$t" || { rm -f "$t"; fail "could not read $US"; }
   fi
-  rm -f "$old"
+  printf '%s' "$t"
+}
+
+drop_user() {  # name user fqdn: remove our line (if any) and re-render
+  t=$(users_without "$1" "$2" "$3"); commit "$t" "$US"; render
+}
+
+set_user() {  # name fqdn user: `ssh name` logs in as user on exactly the tailnet host, or no block
+  dirs; regular "$US"; regular "$MF"; regular "$CFG"
+  st=$(include_state) || st=""
+  if [ "$st" = misplaced ]; then
+    drop_user "$1" "$3" "$2"; printf '@@SKIP alias the fleet Include in ~/.ssh/config is not at its end\n'; return 0
+  fi
+  why=$(unsafe "$1" "$2" "") || why=" (ssh -G failed)"
+  if [ -n "$why" ]; then drop_user "$1" "$3" "$2"; printf '@@SKIP alias%s\n' "$why"; return 0; fi
+  t=$(users_without "$1" "$3" "$2"); awk -v n="$1" '$1 != n' "$t" >"$t.n" || fail "could not filter $US"
+  printf '%s %s %s\n' "$1" "$3" "$2" >>"$t.n"; rm -f "$t"; commit "$t.n" "$US"; render
+  [ "$st" = ok ] || append_include
+  why=$(unsafe "$1" "$2" "$3") || why=" (ssh -G failed)"
+  if [ -n "$why" ]; then drop_user "$1" "$3" "$2"; printf '@@SKIP alias%s\n' "$why"; return 0; fi
   printf '@@DONE alias\n'
 }
 
-unset_user() {  # name user: drop the line only if it is still this user's
+unset_user() {  # name user fqdn: drop the line only if it is still exactly this link's
   dirs; regular "$US"; regular "$MF"
-  if [ -f "$US" ]; then
-    t=$(newtmp "$US")
-    awk -v n="$1" -v u="$2" '!($1 == n && $2 == u)' "$US" >"$t" || { rm -f "$t"; fail "could not read $US"; }
-    commit "$t" "$US"
-  fi
-  render
+  drop_user "$1" "$2" "$3"
   printf '@@DONE unalias\n'
 }
 
@@ -252,9 +268,9 @@ class Node(object):
 
 
 def is_ip(text):
+    """A plain, canonical IPv4/IPv6 address (no scope IDs or other text)."""
     try:
-        ipaddress.ip_address(text)
-        return True
+        return "%" not in text and str(ipaddress.ip_address(text)) == text
     except ValueError:
         return False
 
@@ -439,7 +455,13 @@ def key_blob_ok(ktype, blob):
     except ValueError:
         return False
     n = int.from_bytes(raw[:4], "big") if len(raw) >= 4 else -1
-    return n == len(ktype) and raw[4:4 + n] == ktype.encode() and len(raw) > 4 + n + 4
+    if not (n == len(ktype) and raw[4:4 + n] == ktype.encode()):
+        return False
+    with tempfile.NamedTemporaryFile("w", suffix=".pub") as fh:   # OpenSSH's own parser decides
+        fh.write("%s %s\n" % (ktype, blob))
+        fh.flush()
+        return subprocess.call(["ssh-keygen", "-l", "-f", fh.name], stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL) == 0
 
 
 def pub_line(results, src_ips, tag):
@@ -454,8 +476,8 @@ def pub_line(results, src_ips, tag):
 def alias_report(results, where, name, user):
     skip = [r for r in results if r.startswith("SKIP alias ")]
     if skip:
-        say("  %s: your ssh config sends '%s' to %s, so fleet-ssh left it alone (use ssh %s@<full name>)"
-            % (where, name, skip[0].split(" ", 2)[2], user))
+        say("  %s: 'ssh %s' would not be plain %s@%s here (%s), so fleet-ssh left it alone; use ssh %s@<full name>"
+            % (where, name, user, name, skip[0].split(" ", 2)[2].strip(), user))
         return False
     say("  %s: ssh %s -> %s@%s" % (where, name, user, name))
     return True
@@ -499,6 +521,7 @@ def link(me, peer, direction, user, yes):
             die("cancelled", 0)
 
     key = "%s@%s" % (user, peer.fqdn)
+    mine_there = {"tag": my_tag, "name": me.name, "fqdn": me.fqdn}
     with host_lock():
         mine = run_local(("ensure_key", "%s@%s" % (lu, me.name))) if to else []
         rem = Remote(user, peer.fqdn)
@@ -506,12 +529,15 @@ def link(me, peer, direction, user, yes):
         try:
             rem.open()
             # Record first: whatever happens next, `fleet-ssh unlink` can clean up both ends.
+            # Every identity ever installed on the peer stays listed until unlink removes it.
             records = load_records()
-            prev = records["links"].get(key) or {}
-            rec = dict(prev)
-            rec.update({"fqdn": peer.fqdn, "name": peer.name, "user": user, "to": to or prev.get("to", False),
-                        "from": frm or prev.get("from", False), "tag_there": my_tag,
-                        "name_there": me.name, "tag_here": peer_tag})
+            prev = records["links"].get(key)
+            if prev is not None and not record_ok(key, prev, lu):
+                die("the record for %s is damaged; fix or remove it in %s" % (key, RECORDS))
+            prev = prev or {}
+            there = [e for e in prev.get("there", []) if e != mine_there] + [mine_there]
+            rec = dict(prev, fqdn=peer.fqdn, name=peer.name, user=user, tag_here=peer_tag, there=there,
+                       to=to or prev.get("to", False), **{"from": frm or prev.get("from", False)})
             records["links"][key] = rec
             save_records(records)
             calls = []
@@ -521,18 +547,13 @@ def link(me, peer, direction, user, yes):
                 calls += [("authorize", my_tag, pub_line(mine, me.ips, my_tag))]
             if frm:
                 calls += [("set_user", me.name, me.fqdn, lu)]
-            # This host was renamed since the last link: retire what the old names installed there.
-            if prev.get("to") and prev.get("tag_there") not in (None, my_tag) and TAG_RE.match(prev["tag_there"]):
-                calls += [("deauthorize", prev["tag_there"])]
-            if prev.get("from") and prev.get("name_there") not in (None, me.name) and NAME_RE.match(prev["name_there"]):
-                calls += [("unset_user", prev["name_there"], lu)]
-            there = rem.run(calls)
-            need(there, *(["DONE authorize"] if to else []))
+            out = rem.run(calls)
+            need(out, *(["DONE authorize"] if to else []))
             if frm:
-                need(run_local(("authorize", peer_tag, pub_line(there, peer.ips, peer_tag))), "DONE authorize")
-                rec["alias_there"] = alias_report(there, peer.name, me.name, lu)
+                need(run_local(("authorize", peer_tag, pub_line(out, peer.ips, peer_tag))), "DONE authorize")
+                rec["alias_there"] = alias_report(out, peer.name, me.name, lu)
                 if rec["alias_there"]:
-                    need(there, "DONE alias")
+                    need(out, "DONE alias")
             if to:
                 here = run_local(("set_user", peer.name, peer.fqdn, user))
                 rec["alias_here"] = alias_report(here, me.name, peer.name, user)
@@ -541,15 +562,24 @@ def link(me, peer, direction, user, yes):
             save_records(records)
             say("Checking with the real ssh command...")
             if to:
-                ok &= check("", dest(rec, "here", peer.name, user, peer.fqdn), user,
-                            lambda d, u: run_local(("verify", d, u, secrets.token_hex(16))))
+                good = check("", dest(rec, "here", peer.name, user, peer.fqdn), user,
+                             lambda d, u: run_local(("verify", d, u, secrets.token_hex(16))))
+                if not good and rec.get("alias_here"):   # a name that does not work is worse than none
+                    need(run_local(("unset_user", peer.name, user, peer.fqdn)), "DONE unalias")
+                    rec["alias_here"] = False
+                    say("  removed the 'ssh %s' setting again; ssh %s@%s still has the key" % (peer.name, user, peer.fqdn))
+                ok &= good
             if frm:
                 good = check("on %s: " % peer.name, dest(rec, "there", me.name, lu, me.fqdn), lu,
                              lambda d, u: rem.run([("verify", d, u, secrets.token_hex(16))], lock=False))
+                if not good and rec.get("alias_there"):
+                    need(rem.run([("unset_user", me.name, lu, me.fqdn)]), "DONE unalias")
+                    rec["alias_there"] = False
                 ok &= good
                 if not good:
                     say("  (is sshd running here? Linux: sudo systemctl enable --now sshd; "
                         "macOS: System Settings > General > Sharing > Remote Login)")
+            save_records(records)
         finally:
             rem.close()
     if not ok:
@@ -559,8 +589,8 @@ def link(me, peer, direction, user, yes):
 def find_record(records, target):
     t = target.lower().rstrip(".")
     user, _, host = t.rpartition("@")
-    hits = [(k, r) for k, r in records["links"].items()
-            if host in (r.get("fqdn"), r.get("name")) and (not user or user == r.get("user"))]
+    hits = [(k, r) for k, r in records["links"].items() if isinstance(r, dict)
+            and host in (r.get("fqdn"), r.get("name")) and (not user or user == r.get("user"))]
     if len(hits) != 1:
         die("%s recorded link matches %r (recorded: %s); use user@host"
             % ("more than one" if hits else "no", target, ", ".join(sorted(records["links"])) or "none"))
@@ -568,12 +598,22 @@ def find_record(records, target):
 
 
 def record_ok(key, r, lu):
-    fqdn, user = str(r.get("fqdn", "")), str(r.get("user", ""))
-    return (FQDN_RE.match(fqdn) and USER_RE.match(user) and key == "%s@%s" % (user, fqdn)
-            and NAME_RE.match(str(r.get("name", ""))) and NAME_RE.match(str(r.get("name_there", "")))
-            and r.get("tag_here") == "%s:%s@%s" % (TAG, user, fqdn)
-            and TAG_RE.match(str(r.get("tag_there", "")))
-            and str(r.get("tag_there", "")).startswith("%s:%s@" % (TAG, lu)))
+    """A record is used only when every value is well-formed and bound to its key and owner."""
+    if not isinstance(r, dict):
+        return False
+    fqdn, user, name = str(r.get("fqdn", "")), str(r.get("user", "")), str(r.get("name", ""))
+    if not (FQDN_RE.match(fqdn) and USER_RE.match(user) and key == "%s@%s" % (user, fqdn)
+            and name == fqdn.split(".")[0] and r.get("tag_here") == "%s:%s@%s" % (TAG, user, fqdn)):
+        return False
+    there = r.get("there")
+    if not isinstance(there, list) or not there:
+        return False
+    for e in there:
+        if not (isinstance(e, dict) and FQDN_RE.match(str(e.get("fqdn", "")))
+                and e.get("name") == str(e.get("fqdn")).split(".")[0]
+                and e.get("tag") == "%s:%s@%s" % (TAG, lu, e.get("fqdn"))):
+            return False
+    return True
 
 
 def unlink(target, local_only):
@@ -584,29 +624,29 @@ def unlink(target, local_only):
         if not record_ok(key, r, lu):
             die("the record for %s is damaged; fix or remove it in %s" % (key, RECORDS))
         if not local_only:
-            calls = []
+            calls, acks = [], []
             if r.get("from"):
-                calls += [("unset_user", r["name_there"], lu)]
-            if r.get("to"):
-                calls += [("deauthorize", r["tag_there"])]   # last: it may be what lets us back in
+                calls += [("unset_user", e["name"], lu, e["fqdn"]) for e in r["there"]]
+                acks += ["DONE unalias"]
+            if r.get("to"):   # last: our key may be what lets this connection back in
+                calls += [("deauthorize", e["tag"]) for e in r["there"]]
+                acks += ["DONE deauthorize"]
             if calls:
                 rem = Remote(r["user"], r["fqdn"])
                 try:
                     rem.open(hint="; nothing was changed. If %s is gone for good: fleet-ssh unlink %s --local-only"
                              % (r["name"], key))
-                    need(rem.run(calls), *(["DONE unalias"] if r.get("from") else []) +
-                         (["DONE deauthorize"] if r.get("to") else []))
+                    need(rem.run(calls), *acks)
                 finally:
                     rem.close()
             say("  %s: removed what this link installed there" % r["name"])
-        calls = []
+        calls, acks = [], []
         if r.get("from"):
-            calls += [("deauthorize", r["tag_here"])]
+            calls, acks = calls + [("deauthorize", r["tag_here"])], acks + ["DONE deauthorize"]
         if r.get("to"):
-            calls += [("unset_user", r["name"], r["user"])]
+            calls, acks = calls + [("unset_user", r["name"], r["user"], r["fqdn"])], acks + ["DONE unalias"]
         if calls:
-            need(run_local(*calls), *(["DONE deauthorize"] if r.get("from") else []) +
-                 (["DONE unalias"] if r.get("to") else []))
+            need(run_local(*calls), *acks)
         del records["links"][key]
         save_records(records)
         say("  this host: removed what this link installed here")
@@ -618,7 +658,12 @@ def status():
         say("No recorded links.")
         return
     bad = False
+    lu = local_user()
     for key, r in sorted(records["links"].items()):
+        if not record_ok(key, r, lu):
+            say("  %-36s DAMAGED record; fix or remove it in %s" % (key, RECORDS))
+            bad = True
+            continue
         parts = []
         if r.get("to"):
             target = dest(r, "here", r.get("name"), r.get("user"), r.get("fqdn"))
@@ -628,7 +673,7 @@ def status():
         if r.get("from"):
             present = "TAG yes" in run_local(("has_tag", r["tag_here"]))
             bad |= not present
-            parts.append("its key %s here" % ("accepted" if present else "MISSING"))
+            parts.append("its key %s here" % ("installed" if present else "MISSING"))
         say("  %-36s %s" % (key, "; ".join(parts)))
     if bad:
         raise SystemExit(1)

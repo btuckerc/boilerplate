@@ -4,7 +4,8 @@
 # omarchy:hidden=true
 """Self-hosted inference servers as one agents-panel record.
 
-Endpoints are the `inference_endpoints` of every `role: inference` host in
+Endpoints are the `inference_endpoints` (and optional GPU `metrics_endpoint`) of
+every `role: inference` host in
 ~/.config/decent-angl/fleet.json. Each answers /metrics (vLLM, or llama-server
 started with --metrics). The servers count tokens per process, so the deltas
 between polls are kept in $XDG_STATE_HOME/decent-angl/inference-usage.json;
@@ -40,16 +41,46 @@ COUNTERS = {
 }
 
 
-def endpoints() -> list[tuple[str, str]]:
+def inference_hosts() -> list[dict]:
   try:
     hosts = json.loads(FLEET.read_text()).get("hosts", [])
   except (OSError, ValueError):
     return []
+  return [host for host in hosts if isinstance(host, dict) and host.get("role") == "inference"]
+
+
+def endpoints(hosts: list[dict]) -> list[tuple[str, str]]:
   return [
     (str(host.get("id") or url), str(url).rstrip("/"))
-    for host in hosts if isinstance(host, dict) and host.get("role") == "inference"
-    for url in (host.get("inference_endpoints") or {}).values()
+    for host in hosts for url in (host.get("inference_endpoints") or {}).values()
   ]
+
+
+def power_label(host: dict) -> str:
+  """GPU watts and lifetime GPU energy from the host's optional `metrics_endpoint`
+  (Pace Bar's pace-bar-metrics /snapshot: `GPU util, vram used, vram total, watts`
+  and `ENERGY` (hardware counter) or `ENERGY_ESTIMATE` (sampled) in mJ)."""
+  url = str(host.get("metrics_endpoint") or "").rstrip("/")
+  if not url:
+    return ""
+  try:
+    lines = get(url + "/snapshot").splitlines()
+  except OSError:
+    return ""
+  parts = []
+  gpu = next((line[4:].split(",") for line in lines if line.startswith("GPU ")), [])
+  try:
+    parts.append(f"{float(gpu[3]):.0f} W")
+  except (IndexError, ValueError):
+    pass
+  for prefix, mark in (("ENERGY ", ""), ("ENERGY_ESTIMATE ", "≈")):
+    fields = next((line.split() for line in lines if line.startswith(prefix)), [])
+    try:
+      parts.append(f"{mark}{float(fields[1]) / 3.6e9:.1f} kWh")
+      break
+    except (IndexError, ValueError):
+      continue
+  return " · ".join(parts)
 
 
 def get(url: str) -> str:
@@ -78,7 +109,8 @@ def models_served(text: str) -> dict[str, list[float]]:
 
 
 def main() -> int:
-  hosts = endpoints()
+  fleet_hosts = inference_hosts()
+  hosts = endpoints(fleet_hosts)
   now = dt.datetime.now()
   today = now.date()
   record = {
@@ -129,7 +161,8 @@ def main() -> int:
   record.update(stats(days, today))
   record["ready"] = True
   record["hasLocalStats"] = bool(days)
-  record["tierLabel"] = " · ".join(dict.fromkeys(host for host, _ in hosts))
+  record["tierLabel"] = " · ".join(
+    " · ".join(filter(None, (str(host.get("id") or ""), power_label(host)))) for host in fleet_hosts)
   if down:
     record["usageStatusText"] = "Server down"
     record["authHelpText"] = f"{', '.join(down)} did not answer /metrics; totals resume when it does."

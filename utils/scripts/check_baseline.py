@@ -50,6 +50,8 @@ def check(root):
                 assert endpoints, "Inference host needs at least one service endpoint"
                 assert all(re.fullmatch(r"[A-Za-z0-9@_.-]+\.service", name) for name in endpoints), "Invalid inference service name"
                 assert all(re.fullmatch(r"https?://[a-z0-9.-]+(?::[0-9]+)?", url) for url in endpoints.values()), "Invalid inference URL"
+                if "metrics_endpoint" in host:
+                    assert re.fullmatch(r"https?://[a-z0-9.-]+(?::[0-9]+)?", host["metrics_endpoint"]), "Invalid metrics URL"
     print(f"BASELINE pins and {count} executable syntax checks passed")
 
 

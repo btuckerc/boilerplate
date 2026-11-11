@@ -4,6 +4,7 @@
     {"id": "macmini", "ssh": "admin@macmini"},
     {"id": "omarchy", "ssh": "t14"},
     {"id": "nous", "ssh": "tux@nous", "role": "inference",
-     "inference_endpoints": {"llama.service": "http://100.83.125.83:8080"}}
+     "inference_endpoints": {"llama.service": "http://100.83.125.83:8080"},
+     "metrics_endpoint": "http://100.83.125.83:8082"}
   ]
 }

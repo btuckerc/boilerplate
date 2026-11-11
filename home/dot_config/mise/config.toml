@@ -70,6 +70,10 @@ stylua = "2.6.0"
 "gem:rails" = "8.1.4"
 
 [settings]
+# Omarchy's /etc/mise/conf.d/omarchy-tools.toml declares these as `latest` with
+# 4-hourly auto-update under different keys than the pins above, so they would
+# install beside the pins (and stall `mise exec omp` on a download).
+disable_tools = ["oh-my-pi", "claude"]
 experimental = true
 legacy_version_file = true
 jobs = 2

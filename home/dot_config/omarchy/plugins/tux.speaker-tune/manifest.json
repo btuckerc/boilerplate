@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "tux.speaker-tune",
+  "name": "Speaker tune",
+  "version": "0.1.0",
+  "author": "tux",
+  "description": "Turn speaker filters on or off.",
+  "kinds": [
+    "service",
+    "bar-widget"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "service": "ui/Service.qml",
+    "barWidget": "ui/BarWidget.qml"
+  },
+  "barWidget": {
+    "defaultSection": "right",
+    "allowMultiple": false,
+    "category": "Audio"
+  }
+}

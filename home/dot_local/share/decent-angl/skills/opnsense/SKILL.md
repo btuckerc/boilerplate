@@ -118,6 +118,16 @@ from Unbound/dnsmasq (`dig @10.77.77.1 host.home.arpa`,
 randomized MAC. Manufacturer is the MAC OUI, not a model. OPNsense
 does not know "Pixel 9" or "Galaxy S26" unless the device said so.
 
+Static entries (dnsmasq hosts): be9700 .111, gs305e .112, nous .157, and
+wincube .100 for its real Wi-Fi MAC `a4:b1:c1:05:85:11` (Windows MAC
+randomization is off for this SSID on wincube). wincube also has a static ARP
+neighbor (Interfaces > Neighbors, `interfaces/neighbor_settings`) for the same
+pair. That is for Wake-on-LAN: Moonlight off-LAN sends a directed magic packet
+to `10.77.77.100` through the `clt` subnet route, and the sleeping host must
+still resolve. Verified 2026-11-12 with real sleep cycles: directed and broadcast
+magic packets wake wincube over Wi-Fi (WoWLAN), and Apollo answers 4.5 s later.
+Manual wake from nous: `wakeonlan -i 10.77.77.100 a4:b1:c1:05:85:11`.
+
 Default-deny packet logging is Firewall > Settings > Advanced
 (`syslog.nologdefaultblock`). No REST API in 26.7. Do not add a WAN
 catch-all block to fake it; that can steal last-match from WAN DHCP.

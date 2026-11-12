@@ -11,8 +11,19 @@ The host side lives on wincube in `C:\Tools\stream\README.md`.
 - Wake-on-LAN over Wi-Fi works with directed and broadcast magic packets. Apollo answers about
   4.5 s after the packet (measured 2026-11-12). MAC `a4:b1:c1:05:85:11`.
   Manual wake: `ssh nous wakeonlan -i 10.77.77.100 a4:b1:c1:05:85:11`.
-- Apollo creates a virtual display for every stream, at the client's resolution and frame rate. The
-  game renders at 2x the stream FPS (max 240). Each game keeps separate stream and local settings.
+- Apollo creates a virtual display for every stream, at the client's resolution and frame rate, and
+  makes it the **only** active screen (`dd_configuration_option = ensure_only_display`). wincube's
+  own monitor turns off during a stream and comes back when it ends. A watchdog guard re-enables it
+  if Windows doesn't; by hand it's Win+P, then "PC screen only". Without this, the virtual display
+  was a second screen: Desktop and Steam opened on the physical monitor and the client saw a blank
+  screen (2026-11-12).
+- The game renders at 2x the stream FPS (max 240). Each game keeps separate stream and local settings.
+- Apps in Apollo:
+  - Desktop and Steam Big Picture (Steam games such as Valheim follow the virtual display)
+  - Fortnite
+  - League of Legends: profile separation only. Set display and graphics in-game during the first
+    stream; the stream profile keeps them.
+  - Modern Warfare 4
 - Apollo caps every stream at 30 Mbit/s.
 
 ## Why these numbers
@@ -41,7 +52,9 @@ The host side lives on wincube in `C:\Tools\stream\README.md`.
    - HDR off
    - Hardware decoding
    - Stereo audio, no audio on the host
-5. Check with the performance overlay (Ctrl+Alt+Shift+S on PC; the stats option on mobile). Look
+5. The resolution and FPS come from the client. Apollo builds the virtual display from what Moonlight
+   asks for. On 2026-11-12 the Deck was still asking for 1280x800@90, so set 1080p in Moonlight itself.
+6. Check with the performance overlay (Ctrl+Alt+Shift+S on PC; the stats option on mobile). Look
    for network latency of a few ms at home, decode time under 5 ms, and 0 dropped frames. If frames
    drop, lower the bitrate before anything else.
 

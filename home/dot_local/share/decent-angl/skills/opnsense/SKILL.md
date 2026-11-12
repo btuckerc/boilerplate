@@ -42,7 +42,9 @@ Live WAN share recipe and the Steam multi-flow failure are in
 and a host mask on its queue. That does not isolate LAN IPs. Current share
 recipe is WFQ pipes at 85/21 Mbit, queue mask `dst-ip` down and `src-ip` up,
 CoDel on the queues. Two bulk WAN hosts split the pipe. They cannot each
-get 85 Mbit on this circuit.
+get 85 Mbit on this circuit. Since 2026-11-11 a per-host Interactive queue
+on each pipe takes ICMP and non-443 UDP ahead of the catch-all rules, so a
+host's games and DNS do not queue behind its own downloads.
 
 ## Safety
 

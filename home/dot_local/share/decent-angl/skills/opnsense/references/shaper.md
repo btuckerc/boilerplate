@@ -7,7 +7,10 @@ behavior.
 
 - Firewall: OPNsense `clt` at `10.77.77.1`. No Wi-Fi on this box.
 - AP: TP-Link Archer BE9700 `be9700` at `10.77.77.111`.
-- Steam hog: `wincube` at `10.77.77.100`, wired.
+- Steam hog: `wincube` at `10.77.77.129`, Wi-Fi only since 2026-11 (its
+  Ethernet is disabled on purpose; no cable there). Tailscale on wincube
+  runs `accept-routes=false`: with it on, this site's `10.77.77.0/24`
+  subnet route sent wincube's LAN traffic through `clt` over WireGuard.
 - Steam Deck: `btcsd` at `10.77.77.185`, Wi-Fi via BE9700, Tailscale
   `100.76.38.59`. LAN SSH to the Deck is closed. Tailscale SSH works after
   `tailscale ssh` auth.
@@ -32,8 +35,9 @@ UUIDs:
 - Upload pipe `10b63316-606f-46b5-bd4e-4af2f0913cb5`
 - Download-Queue `a3093f61-b19c-4bd1-b9c5-05fc178976d9` mask `dst-ip`
 - Upload-Queue `2bf2dbfd-1365-4f46-b0ed-a20f426fe2bd` mask `src-ip`
-- Rules: WAN `in` -> Download-Queue, WAN `out` -> Upload-Queue, proto `ip`,
-  any/any.
+- Rules: WAN `in` -> Download-Queue (sequence 20), WAN `out` -> Upload-Queue
+  (sequence 21), proto `ip`, any/any. They are the catch-alls below the
+  interactive rules.
 
 GUI pipe names still say `Download-FQCoDel` / `Upload-FQCoDel`. Live scheduler
 is `wf2q+`. Ignore the names.
@@ -47,6 +51,43 @@ was IPv4 `*.valve.net`.
 Proof file after reconfigure: `opnsense-ssh 'cat /usr/local/etc/dnctl.conf'`.
 API `saved` is not active. `opnsense-api post trafficshaper/service/reconfigure '{}'`
 needs a JSON body. Empty POST returns HTTP 400.
+
+## Interactive queues, 2026-11-11
+
+Per-host WFQ alone put a host's game, DNS and ping packets behind that same
+host's bulk download in one CoDel queue. Measured on wincube while it pulled
+League at about 80 Mbit/s: 8 to 14 percent loss and 33 ms median to 1.1.1.1 and
+8.8.8.8 (ICMP and raw UDP DNS), against about 18 ms idle.
+
+Fix: a second queue per direction on the same pipes, same weight, same host
+mask, no CoDel. Small real-time traffic from a host is then scheduled as its
+own WFQ sub-queue instead of waiting behind its bulk.
+
+```
+queue 10002 config pipe 10000 mask dst-ip /32 weight 100   # Interactive-Down
+queue 10003 config pipe 10001 mask src-ip /32 weight 100   # Interactive-Up
+```
+
+- Interactive-Down `846cf4c5-eb8a-4562-8916-5aaa943551b1`
+- Interactive-Up `d220a9ca-c73b-4790-b1b0-58ac94ec4ee2`
+- Rules, WAN, sequence 10-15: `in` udp src port 1-442 and 444-65535, `in`
+  icmp -> Interactive-Down; `out` udp dst port 1-442 and 444-65535, `out`
+  icmp -> Interactive-Up. UUIDs `022c4ecb`, `59e624b6`, `ac33bde2`,
+  `660a20ab`, `95c52dc0`, `cfc8edec` (prefixes).
+
+UDP 443 is QUIC bulk and stays in the bulk queues. Everything else UDP counts
+as interactive: games, DNS, voice, and Moonlight or Tailscale streams leaving
+the house.
+
+Same test after the change: 0 percent loss, 29-30 ms median, p95 49-62 ms,
+download unchanged at 78 to 80 Mbit/s. p99 rose to 90-115 ms, from 60-84 ms. Those
+tail samples (under 1 percent) did not coincide with Wi-Fi spikes to the
+gateway, so they are upstream of the LAN. Before, about 10 percent of packets
+were lost outright, which is worse. Host fairness held: nous pulled 40.5 Mbit/s
+while wincube was filling the pipe.
+
+Rollback: delete the six rules and two queues above, set the bulk rules back
+to sequence 1 and 2, then `reconfigure`.
 
 ## Why FQ-CoDel starved the Deck
 

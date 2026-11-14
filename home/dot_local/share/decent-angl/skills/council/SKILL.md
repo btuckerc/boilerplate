@@ -35,7 +35,8 @@ session where it is unavailable or refuses (`AGENT_LOCAL_ONLY`), say so and stop
   prompt-snapshot tool evidence; local workers use session changes plus
   runner-attested bwrap. Missing evidence is unverified, not assumed.
 - Run `agent-quota` before each round and skip a seat whose pool is under 10%
-  (Fable and Opus share the Claude pool with you). Also skip a seat whose run
+  (Fable and Opus share the Claude 7-day pool with you; Claude has no 5-hour
+  limit). Also skip a seat whose run
   ends other than `ok`, times out, or reports a verification issue (another
   model served). Report each skip, never substitute, and continue as an
   incomplete council. `claude no-snapshot` means the Claude pool is unknown:

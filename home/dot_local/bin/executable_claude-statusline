@@ -63,10 +63,9 @@ def main():
                         os.unlink(tmp)
                     except OSError:
                         pass
-            for period, label in (("five_hour", "5h"), ("seven_day", "7d")):
-                value = (limits.get(period) or {}).get("used_percentage")
-                if isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value <= 100:
-                    parts.append(f"{label} {value:g}% used")
+            value = (limits.get("seven_day") or {}).get("used_percentage")
+            if isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value <= 100:
+                parts.append(f"7d {value:g}% used")
         warning = fleet()
         if warning:
             parts.append(warning)

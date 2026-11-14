@@ -32,16 +32,14 @@ def stale(captured_at, resets_at=None, now=None):
 
 
 def claude_snapshot(home, now):
-    out = {"five_hour": None, "seven_day": None, "stale": False, "captured_at": None}
+    out = {"seven_day": None, "stale": False, "captured_at": None}
     try:
         data = json.loads((Path(home) / "claude.json").read_text())
         out["captured_at"] = data.get("captured_at")
-        limits = data.get("rate_limits") or {}
-        for period in ("five_hour", "seven_day"):
-            window = limits.get(period) or {}
-            out[period] = remaining(window.get("used_percentage"))
-            if out[period] is not None:
-                out["stale"] |= stale(out["captured_at"], window.get("resets_at"), now)
+        window = (data.get("rate_limits") or {}).get("seven_day") or {}
+        out["seven_day"] = remaining(window.get("used_percentage"))
+        if out["seven_day"] is not None:
+            out["stale"] = stale(out["captured_at"], window.get("resets_at"), now)
     except (OSError, ValueError, TypeError, AttributeError):
         pass
     return out
@@ -103,8 +101,8 @@ def main(argv=None):
         print(json.dumps(data, separators=(",", ":")))
     else:
         c, x = data["claude"], data["codex"]
-        claude = ("claude no-snapshot" if c["five_hour"] is None and c["seven_day"] is None else
-                  f"claude 5h {display(c['five_hour'])} 7d {display(c['seven_day'])}"
+        claude = ("claude no-snapshot" if c["seven_day"] is None else
+                  f"claude 7d {display(c['seven_day'])}"
                   f"{' stale' if c['stale'] else ''}")
         print(f"{claude} | codex 7d {display(x['seven_day'])}"
               f"{' stale' if x['stale'] else ''} remaining")

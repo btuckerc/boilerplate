@@ -525,7 +525,7 @@ def test_sandbox_and_network_checked_in_later_turn(tmp_path):
 
 def test_quota_missing_stale_and_reset(tmp_path):
     now = 2_000_000_000
-    assert quota.claude_snapshot(tmp_path, now)["five_hour"] is None
+    assert quota.claude_snapshot(tmp_path, now)["seven_day"] is None
     assert quota.codex_snapshot(tmp_path, now)["seven_day"] is None
     assert quota.stale(now - 6 * 3600 - 1, now + 10, now)
     assert quota.stale(now - 10, now - 1, now)
@@ -534,7 +534,7 @@ def test_quota_missing_stale_and_reset(tmp_path):
         "five_hour": {"used_percentage": 25, "resets_at": now + 1},
         "seven_day": {"used_percentage": 40, "resets_at": now + 1}}}))
     snapshot = quota.claude_snapshot(tmp_path, now)
-    assert snapshot["five_hour"] == 75 and snapshot["seven_day"] == 60
+    assert "five_hour" not in snapshot and snapshot["seven_day"] == 60
     assert snapshot["stale"] is False
     sessions = tmp_path / "sessions/2026/11/07"
     sessions.mkdir(parents=True)
@@ -572,7 +572,7 @@ def test_statusline_snapshot_omission_and_bad_input(environment):
         assert path.read_bytes() == previous
     p = subprocess.run([sys.executable, str(QUOTA)], env=env, capture_output=True, text=True)
     assert p.returncode == 0
-    assert p.stdout.strip() == "claude 5h 75% 7d 60% | codex 7d unknown remaining"
+    assert p.stdout.strip() == "claude 7d 60% | codex 7d unknown remaining"
 
 
 def test_statusline_shows_fleet_markers(environment, tmp_path, monkeypatch):

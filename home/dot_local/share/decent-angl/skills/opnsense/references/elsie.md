@@ -25,9 +25,12 @@ re0 LAN (left port, HDMI side) -> Zyxel XMG1915-10EP -> BE9700 AP + wired hosts
   `private-domain home.arpa`, DNSSEC, prefetch and aggressive NSEC on, serve-expired
   (TTL 86400, client timeout 1800 ms), msg/rrset cache 64m/128m.
 - Netflow as on clt: LAN+WAN capture, WAN egress-only, v9, local collector only.
-- Gateway monitoring is still off. The DHCP gateway is dynamic and the API cannot edit it
-  in place, so set it in the GUI (System > Gateways): monitor 1.1.1.1 with the
-  monitoring action disabled.
+- WAN_DHCP gateway monitoring is on (set in the GUI on 2026-11-15; the API cannot edit
+  the dynamic gateway): monitor 1.1.1.1, host route, failover/failback states off,
+  default thresholds. 26.7 has no "monitoring action" checkbox; a down status cannot
+  move routes because default gateway switching is off and no rule sets a gateway.
+  Read it with `routes/gateway/status` (first reading 18.8 ms, 0% loss). WAN_DHCP6
+  is unmonitored.
 
 ## Access
 

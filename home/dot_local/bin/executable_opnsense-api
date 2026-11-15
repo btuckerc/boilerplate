@@ -10,9 +10,15 @@ normalize_fp() {
 
 load_config() {
     CONFIG_FILE="${OPNSENSE_CONFIG_FILE:-$HOME/.config/decent-angl/opnsense.env}"
+    # An OPNSENSE_HOST from the caller (e.g. an SSH tunnel endpoint) wins over the
+    # config file; the TLS pin from the config still applies.
+    env_host="${OPNSENSE_HOST:-}"
     if [ -f "$CONFIG_FILE" ]; then
         # shellcheck disable=SC1090
         . "$CONFIG_FILE"
+    fi
+    if [ -n "$env_host" ]; then
+        OPNSENSE_HOST="$env_host"
     fi
 
     OPNSENSE_HOST="${OPNSENSE_HOST:-https://10.77.77.1}"

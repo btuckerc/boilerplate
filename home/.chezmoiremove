@@ -31,3 +31,4 @@
 .local/bin/omarchy-agent-usage-omp
 # Renamed 2026-11-15: the Rhode Island OPNsense site is elsie, not lcri.
 .config/decent-angl/opnsense-lcri.env
+.local/share/decent-angl/skills/opnsense/references/lcri.md

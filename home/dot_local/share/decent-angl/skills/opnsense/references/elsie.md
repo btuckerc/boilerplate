@@ -1,4 +1,4 @@
-# LCRI node (Rhode Island)
+# Elsie node (Rhode Island)
 
 Second site, online since 2026-11-15. Same hardware as `clt` (GMKtec NucBox M8,
 Ryzen 5 PRO 6650H, 2x RTL8125 on `os-realtek-re`), OPNsense 26.7.
@@ -12,7 +12,8 @@ re0 LAN (left port, HDMI side) -> Zyxel XMG1915-10EP -> BE9700 AP + wired hosts
 
 - WAN: Cox public DHCP (70.175.222.0/23 at cut-over), plus a DHCPv6 /128 on WAN.
   LAN has no IPv6 yet on purpose.
-- LAN `10.77.78.0/24`, router `10.77.78.1` = `lcri.home.arpa`. dnsmasq DHCP
+- LAN `10.77.78.0/24`, router `10.77.78.1` = `elsie.home.arpa`
+  (the device hostname is still `lcri` until the GUI rename, Phase B of 2026-11-15). dnsmasq DHCP
   pool .41-.245 (wizard default, kept to avoid renumbering).
 - Static dnsmasq hosts: be9700 .111 (`68:7f:f0:75:f4:5b`, reports "ArcherBE600",
   AP mode), xmg1915 .112, winbox .120 (`10:ff:e0:b9:a8:21`), macmini .121
@@ -26,14 +27,14 @@ re0 LAN (left port, HDMI side) -> Zyxel XMG1915-10EP -> BE9700 AP + wired hosts
 
 ## Access
 
-- Targeting: `OPNSENSE_CONFIG_FILE=~/.config/decent-angl/opnsense-lcri.env opnsense-api ...`.
-  Secret item `opnsense-api-lcri` (user `agent-api`, page-all). The local secret file is
-  `~/.local/share/decent-angl/secrets/opnsense-api-lcri.env`.
-- Until lcri joins Tailscale, nous reaches it through the wired Mac mini:
+- Targeting: `OPNSENSE_CONFIG_FILE=~/.config/decent-angl/opnsense-elsie.env opnsense-api ...`.
+  Secret item `opnsense-api-elsie` (user `agent-api`, page-all). The local secret file is
+  `~/.local/share/decent-angl/secrets/opnsense-api-elsie.env`.
+- Until elsie joins Tailscale, nous reaches it through the wired Mac mini:
   `ssh -f -N -L 127.0.0.1:18443:10.77.78.1:443 mini`, then add
   `OPNSENSE_HOST=https://127.0.0.1:18443`. The TLS pin still applies.
 - `os-tailscale` is installed but not enrolled (needs an auth key). Plan: Tailscale
-  name `lcri`, advertise `10.77.78.0/24`, acceptDNS off, same as clt. Before
+  name `elsie`, advertise `10.77.78.0/24`, acceptDNS off, same as clt. Before
   approving the route, set `accept-routes=false` on RI LAN hosts (winbox, macmini).
   Otherwise their own LAN traffic rides WireGuard (the wincube lesson).
 - No `agent` SSH user yet. root has two GUI-made API keys that the API cannot

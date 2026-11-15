@@ -7,7 +7,9 @@ Client settings follow `wincube-streaming.md` except the bitrates below.
 
 ## Host facts
 
-- LAN `192.168.1.30` (wired, 2.5 Gbps), MAC `10:FF:E0:B9:A8:21`. Tailscale
+- LAN `10.77.78.120` (wired, 2.5 Gbps, dnsmasq reservation on the lcri OPNsense since
+  2026-11-15; was `192.168.1.30` behind the Orbi), MAC `10:FF:E0:B9:A8:21`. Network facts:
+  `opnsense` skill, `references/lcri.md`. Tailscale
   `winbox.tail4d5aec.ts.net`, `100.99.42.94`, unattended.
 - `ssh winbox` from nous (user `brigg`, PowerShell). Keys from nous only, tailnet only. While a
   session is open, the Apollo watchdog holds the system awake.
@@ -26,5 +28,8 @@ Client settings follow `wincube-streaming.md` except the bitrates below.
 - At RI, Wi-Fi (Orbi, good 5 GHz signal): clean to 150 Mbit/s. Use up to 100.
 - In Charlotte (RI upload to Charlotte download over Tailscale): clean to 40 Mbit/s, +3-7 ms.
   Use about 30. Base RTT is about 52 ms.
-- RI's Orbi has bufferbloat on upload and no SQM. Avoid other uploads at RI while streaming from
-  away.
+- Since 2026-11-15 RI runs OPNsense (lcri) with FQ-CoDel SQM at 860/90 Mbit. Ping stays within
+  +3 ms under full upload, so the old warning about other uploads during a stream no longer
+  applies. Outbound NAT has static port 41641 for winbox and endpoint-independent UDP
+  mapping, so Tailscale paths from away should be direct (verified for the RI Macs, not yet
+  winbox). The bitrates above were measured on the old Orbi network. Re-measure.

@@ -1,12 +1,14 @@
 ---
 name: opnsense
-description: Home OPNsense router via REST API, SSH to clt, and opnsense-lan-clients - firewall, DHCP, DNS, firmware, router Tailscale, visitor names, WAN shaper, LAN traffic. Not workstation networking.
+description: Home OPNsense routers (clt Charlotte, lcri Rhode Island) via REST API, SSH to clt, and opnsense-lan-clients - firewall, DHCP, DNS, firmware, router Tailscale, visitor names, WAN shaper, LAN traffic. Not workstation networking.
 ---
 
 # OPNsense
 
-Use `opnsense-api` for appliance state at `10.77.77.1`. Workstation network
-settings stay in `platform-ops`.
+Use `opnsense-api` for appliance state. Default target is clt at `10.77.77.1`;
+for lcri (`10.77.78.1`) set
+`OPNSENSE_CONFIG_FILE=~/.config/decent-angl/opnsense-lcri.env`. Workstation
+network settings stay in `platform-ops`.
 
 ## Boundary
 
@@ -36,6 +38,9 @@ documentation uses snake_case.
 - Endpoint index: https://docs.opnsense.org/development/api.html
 
 ## Traffic shaper
+
+This section is clt. lcri uses FQ-CoDel pipes, see
+[references/lcri.md](references/lcri.md).
 
 Live WAN share recipe and the Steam multi-flow failure are in
 [references/shaper.md](references/shaper.md). Do not put FQ-CoDel on a pipe
@@ -76,6 +81,13 @@ Do not `auth/user/set` on `root`. That API reassigns uid 0.
 
 Tailscale plugin: `acceptDNS` stays off so Unbound remains LAN DNS. Do not
 open 22/443 on WAN.
+
+## LCRI node
+
+Rhode Island site, online 2026-11-15, same M8 hardware. Facts, access path,
+tuning and gotchas: [references/lcri.md](references/lcri.md). Read it before
+any lcri change. Not on Tailscale yet; reach it through the Mac mini tunnel
+described there. Any Orbi (modem) Apply drops the whole site for minutes.
 
 ## Fleet shell
 

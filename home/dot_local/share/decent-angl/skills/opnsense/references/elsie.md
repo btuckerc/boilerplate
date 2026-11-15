@@ -12,8 +12,7 @@ re0 LAN (left port, HDMI side) -> Zyxel XMG1915-10EP -> BE9700 AP + wired hosts
 
 - WAN: Cox public DHCP (70.175.222.0/23 at cut-over), plus a DHCPv6 /128 on WAN.
   LAN has no IPv6 yet on purpose.
-- LAN `10.77.78.0/24`, router `10.77.78.1` = `elsie.home.arpa`
-  (the device hostname is still `lcri` until the GUI rename, Phase B of 2026-11-15). dnsmasq DHCP
+- LAN `10.77.78.0/24`, router `10.77.78.1` = `elsie.home.arpa` (renamed from lcri 2026-11-15). dnsmasq DHCP
   pool .41-.245 (wizard default, kept to avoid renumbering).
 - Static dnsmasq hosts: be9700 .111 (`68:7f:f0:75:f4:5b`, reports "ArcherBE600",
   AP mode), xmg1915 .112, winbox .120 (`10:ff:e0:b9:a8:21`), macmini .121
@@ -23,7 +22,12 @@ re0 LAN (left port, HDMI side) -> Zyxel XMG1915-10EP -> BE9700 AP + wired hosts
 - Cox phone is on a separate Arris TM3402. Leave it alone.
 - DNS is the clt design via the wizard's "Automatic DHCP/DNS registration": dnsmasq
   on 53053, Unbound forwards `home.arpa` and `78.77.10.in-addr.arpa` to it,
-  `private-domain home.arpa`, DNSSEC, prefetch on.
+  `private-domain home.arpa`, DNSSEC, prefetch and aggressive NSEC on, serve-expired
+  (TTL 86400, client timeout 1800 ms), msg/rrset cache 64m/128m.
+- Netflow as on clt: LAN+WAN capture, WAN egress-only, v9, local collector only.
+- Gateway monitoring is still off. The DHCP gateway is dynamic and the API cannot edit it
+  in place, so set it in the GUI (System > Gateways): monitor 1.1.1.1 with the
+  monitoring action disabled.
 
 ## Access
 
@@ -54,8 +58,17 @@ re0 LAN (left port, HDMI side) -> Zyxel XMG1915-10EP -> BE9700 AP + wired hosts
   `/boot/loader.conf`). Before it, re1 logged `TX watchdog: stalled` for 19 minutes
   while the Orbi restarted, and WAN was dead until a reboot. Verify by
   checking that the WAN media string has no `rxpause,txpause`.
-- WAN "Block private networks" stays off until someone ticks it in the GUI. It was
-  needed off while WAN was behind the Orbi.
+- WAN "Block private networks" and bogons on (since bridge mode).
+
+## Wi-Fi
+
+- One BE9700 in the house. The barn is out of reach: 2.4 GHz at -67 dBm gave
+  9 Mbit down and 3.4 s loaded latency (2026-11-15). That queue is in the AP, and
+  the M8 shaper cannot reach it. The barn needs its own AP (it used to be covered
+  by the Orbi satellite).
+- BE9700 targets: Smart Connect, 2.4 GHz 20 MHz, 5 GHz 80 MHz on non-DFS 36 or 149,
+  6 GHz on, power High, MLO off, WMM on, AP isolation off, airtime fairness on,
+  DTIM 1.
 
 ## Gotchas
 

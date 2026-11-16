@@ -1,6 +1,6 @@
 ---
 name: opnsense
-description: Home OPNsense routers (clt Charlotte, elsie Rhode Island) via REST API, SSH to clt, and opnsense-lan-clients - firewall, DHCP, DNS, firmware, router Tailscale, visitor names, WAN shaper, LAN traffic. Not workstation networking.
+description: Home network sites (clt Charlotte, elsie Rhode Island) - OPNsense routers via REST API and SSH, Wi-Fi APs (TP-Link, OpenWrt barn-ap), Zyxel switch, channel plans, firewall, DHCP, DNS, firmware, router Tailscale, visitor names, WAN shaper, LAN traffic. Not workstation networking.
 ---
 
 # OPNsense
@@ -9,6 +9,23 @@ Use `opnsense-api` for appliance state. Default target is clt at `10.77.77.1`;
 for elsie (`10.77.78.1`) set
 `OPNSENSE_CONFIG_FILE=~/.config/decent-angl/opnsense-elsie.env`. Workstation
 network settings stay in `platform-ops`.
+
+## Sites and devices
+
+Read the site page before touching anything at a site; it has the inventory (every
+device, its IP, how to reach it, its secret item) and the open items.
+
+- [references/sites.md](references/sites.md): conventions, the site page template,
+  change rules, new-site and new-AP checklists. Follow it when adding anything.
+- Sites: [references/clt.md](references/clt.md), [references/elsie.md](references/elsie.md).
+- Wi-Fi standard and per-site channel plans: [references/wifi.md](references/wifi.md).
+- Devices: [references/openwrt-ap.md](references/openwrt-ap.md) (barn-ap),
+  [references/tplink-archer.md](references/tplink-archer.md) (BE9700s),
+  [references/zyxel-xmg1915.md](references/zyxel-xmg1915.md) (elsie switch).
+- Build and recovery files: `~/hearth/src/homenet` (OpenWrt AP images, R7800 TFTP kit).
+
+Every change updates the site page in the same session: the fact in its section and a
+dated change-log line with the before/after measurement.
 
 ## Boundary
 
@@ -40,7 +57,8 @@ documentation uses snake_case.
 ## Traffic shaper
 
 This section is clt. elsie uses FQ-CoDel pipes, see
-[references/elsie.md](references/elsie.md).
+[references/elsie.md](references/elsie.md); the loaded-ping test method is in
+[references/wifi.md](references/wifi.md).
 
 Live WAN share recipe and the Steam multi-flow failure are in
 [references/shaper.md](references/shaper.md). Do not put FQ-CoDel on a pipe
@@ -61,33 +79,9 @@ host's games and DNS do not queue behind its own downloads.
 - API filter endpoints may omit legacy GUI-only rules. Inspect before assuming
   the API sees every rule.
 - Do not expose management, API, or SSH on WAN unless explicitly requested.
-
-## CLT node
-
-This site's firewall is Tailscale name `clt` (`clt.tail4d5aec.ts.net`,
-`100.109.139.83`). LAN is still `10.77.77.1` / `router.home.arpa`. Future
-sites get their own Tailscale name. Do not reuse `clt`.
-
-`opnsense-api` stays on `https://10.77.77.1` with the TLS pin. The GUI/API
-does not listen on the Tailscale address. Off-LAN API access needs the
-advertised `10.77.77.0/24` subnet route approved in the Tailscale admin
-console.
-
-Shell user is `agent` (wheel, uid 2001), keys only. sshd listens on LAN
-only, no password, no root. `ssh clt` is Tailscale SSH and may prompt.
-Unattended shell is `opnsense-ssh` after the fleet key steps below.
-
-Do not `auth/user/set` on `root`. That API reassigns uid 0.
-
-Tailscale plugin: `acceptDNS` stays off so Unbound remains LAN DNS. Do not
-open 22/443 on WAN.
-
-## Elsie node
-
-Rhode Island site, online 2026-11-15, same M8 hardware. Facts, access path,
-tuning and gotchas: [references/elsie.md](references/elsie.md). Read it before
-any elsie change. Not on Tailscale yet; reach it through the Mac mini tunnel
-described there. Any Orbi (modem) Apply drops the whole site for minutes.
+- Do not `auth/user/set` on `root`. That API reassigns uid 0.
+- Anything that drops a site's internet or Wi-Fi (modem Apply, AP radio reload or
+  reboot, switch reboot, firmware) needs the user's go-ahead first; see `sites.md`.
 
 ## Fleet shell
 
@@ -119,26 +113,21 @@ Do not run step 3 before step 2. Do not run step 4 if step 3 failed.
 That is the agent view. Do not scrape the GUI. DHCP is dnsmasq, not Kea.
 
 Unbound `regdhcp` is ISC-only and stays off. DHCP names live in dnsmasq
-on port 53053. Unbound forwards `home.arpa` and `77.77.10.in-addr.arpa`
+on port 53053. Unbound forwards `home.arpa` and the site's reverse zone
+(`77.77.10.in-addr.arpa`, `78.77.10.in-addr.arpa`)
 to `127.0.0.1:53053`, with `private-domain: home.arpa` so RFC1918
 answers are not stripped. `dnsmasq.no_resolv=1`. LAN DHCP range domain
 is `home.arpa`. Do not enable Unbound global forwarding.
 
 Kernel ARP has no hostname column. Names come from DHCP option 12 and
-from Unbound/dnsmasq (`dig @10.77.77.1 host.home.arpa`,
+from Unbound/dnsmasq (`dig @<router> host.home.arpa`,
 `diagnostics/dns/reverse_lookup`). `*` is no name, usually a
 randomized MAC. Manufacturer is the MAC OUI, not a model. OPNsense
 does not know "Pixel 9" or "Galaxy S26" unless the device said so.
 
-Static entries (dnsmasq hosts): be9700 .111, gs305e .112, nous .157, and
-wincube .100 for its real Wi-Fi MAC `a4:b1:c1:05:85:11` (Windows MAC
-randomization is off for this SSID on wincube). wincube also has a static ARP
-neighbor (Interfaces > Neighbors, `interfaces/neighbor_settings`) for the same
-pair. That is for Wake-on-LAN: Moonlight off-LAN sends a directed magic packet
-to `10.77.77.100` through the `clt` subnet route, and the sleeping host must
-still resolve. Verified 2026-11-12 with real sleep cycles: directed and broadcast
-magic packets wake wincube over Wi-Fi (WoWLAN), and Apollo answers 4.5 s later.
-Manual wake from nous: `wakeonlan -i 10.77.77.100 a4:b1:c1:05:85:11`.
+Static entries (dnsmasq hosts) per site are in the site page's inventory. A
+host that must wake over Wi-Fi also needs a static ARP neighbor
+(`interfaces/neighbor_settings`); see wincube in `clt.md`.
 
 Default-deny packet logging is Firewall > Settings > Advanced
 (`syslog.nologdefaultblock`). No REST API in 26.7. Do not add a WAN

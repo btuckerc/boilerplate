@@ -7,7 +7,7 @@ behavior.
 
 - Firewall: OPNsense `clt` at `10.77.77.1`. No Wi-Fi on this box.
 - AP: TP-Link Archer BE9700 `be9700` at `10.77.77.111`.
-- Steam hog: `wincube` at `10.77.77.129`, Wi-Fi only since 2026-11 (its
+- Steam hog: `wincube` at `10.77.77.100`, Wi-Fi only since 2026-11 (its
   Ethernet is disabled on purpose; no cable there). Tailscale on wincube
   runs `accept-routes=false`: with it on, this site's `10.77.77.0/24`
   subnet route sent wincube's LAN traffic through `clt` over WireGuard.

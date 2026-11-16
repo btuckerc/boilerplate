@@ -5,7 +5,7 @@ set -euo pipefail
 
 name="${1:-}"
 case "$name" in
-  "" | */* | .* | "~"* | *[[:space:]]*) echo "usage: new-project <name> (no slashes, spaces or leading dot)" >&2; exit 64 ;;
+  "" | -* | */* | .* | "~"* | *[[:space:]]*) echo "usage: new-project <name> (no slashes, spaces, leading dot or dash)" >&2; exit 64 ;;
 esac
 repos=/srv/workspaces/repos
 dir="$repos/$name"

@@ -205,7 +205,8 @@ request() {
         exit 1
     fi
 
-    if command -v jq >/dev/null 2>&1 && [ -s "$tmp_body" ]; then
+    # Pretty-print JSON; pass anything else (config.xml backups, CSV) through raw.
+    if command -v jq >/dev/null 2>&1 && [ -s "$tmp_body" ] && jq empty "$tmp_body" >/dev/null 2>&1; then
         jq . "$tmp_body"
     else
         cat "$tmp_body"

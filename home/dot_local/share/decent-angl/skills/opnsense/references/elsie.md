@@ -98,6 +98,37 @@ re0 LAN (left port, HDMI side) -> Zyxel XMG1915-10EP -> BE9700 AP + wired hosts
   6 GHz on, power High, MLO off, WMM on, AP isolation off, airtime fairness on,
   DTIM 1.
 
+## Switch (Zyxel XMG1915-10EP, 10.77.78.112)
+
+- Ports: 1 M8 re0 (2.5G), 5 barn cable to barn-ap (1G; winbox behind it), 7 BE9700
+  (2.5G), 8 Mac mini (1G). Others empty. Firmware V4.80(ACGP.0) 07/2023; ACGP.3
+  (2024-12) exists, not installed (upgrade reboots the switch = site outage).
+- Audited 2026-11-16: 0 CRC/collision/pause on all ports, flow control off, EEE off,
+  auto power down off, IGMP snooping off, RSTP off. Changed and saved to config 1:
+  telnet, FTP and HTTP service-control off (SSH 22 and HTTPS 443 stay), loop guard
+  on globally and on ports 1-10.
+- Password: `op-secret field zyxel-elsie password` (user `admin`). The SSH CLI
+  (`ssh -J mini admin@10.77.78.112`, password auth, feed commands with pauses) is
+  show/diagnostics only: no `configure`. Changes go through the HTTPS forms:
+  POST `Forms/login_1` (rpAuthForm_Ipt_UserName/Password), then `Forms/rp<Page>_1`
+  with the page's own fields (session is bound to the client IP), then save with
+  `Forms/rpSaveCfg_1` `rpSaveCfg_HidBtn_SaveConfig=1`. Changing service-control
+  ends the web session. Avoid `rpPort` writes: that form re-posts every port's
+  speed and active flag.
+
+## BE9700 (TP-Link, reports Archer BE600 v1.0, 10.77.78.111, AP mode)
+
+- Firmware 1.0.5 Build 20250519; `admin/cloud_account?form=check_upgrade` reports
+  `update_number: 1` (not installed). Password: `op-secret field be9700-elsie password`.
+- Read access: python `tplinkrouterc6u` (`TplinkRouterProvider.get_client`, class
+  `TplinkRouter`) through a tunnel to 10.77.78.111:80; `request("admin/wireless?form=
+  wireless_5g", "operation=read")` etc. Writes are untested: the UI re-posts whole
+  forms including the PSK, so do not partial-write wireless forms blind.
+- State 2026-11-16: 2.4 GHz auto (ch 10) 20 MHz, 5 GHz auto (ch 149) 80 MHz, both
+  `Craig WiFi` psk_sae (WPA2/WPA3 mixed, matches barn-ap); 6 GHz separate SSID
+  `Craig Wifi 6G`, 320 MHz, PSC. Smart Connect on, airtime fairness on, txpower high,
+  MU-MIMO/OFDMA off, TWT off.
+
 ## Gotchas
 
 - Any Apply on the Orbi restarts it, and the whole site loses internet for 2-5 min.

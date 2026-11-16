@@ -51,9 +51,11 @@ re0 LAN (left port, HDMI side) -> Zyxel XMG1915-10EP -> BE9700 AP + wired hosts
 
 ## Tuning (all verified 2026-11-15)
 
-- Shaper: FQ-CoDel pipes 860 down / 90 up Mbit, quantum 300, ECN, one maskless
-  queue each, rules WAN in/out. Measured 800/85 with ping +0-3 ms under full
-  bidirectional load. The clt per-host WFQ recipe made upload latency worse here
+- Shaper: FQ-CoDel pipes 800 down / 90 up Mbit, quantum 300, ECN, one maskless
+  queue each, rules WAN in/out. Download was 860 until 2026-11-16: download-only load
+  then gave winbox ping med 22 / max 58 ms (131 ms at the start of a full test);
+  at 800 it was med 24 / p95 29 / max 34 ms for 765 vs 816 Mbit (one run each).
+  Upload-only reaches 88 Mbit with winbox ping med 20 ms. Idle to 1.1.1.1 is ~16 ms. The clt per-host WFQ recipe made upload latency worse here
   (376 ms), so it is not used. The Interactive queues and rules 10-15 exist but
   are disabled.
 - Outbound NAT hybrid, with clt's pair: UDP static port 41641 for winbox, and LAN UDP
@@ -79,6 +81,15 @@ re0 LAN (left port, HDMI side) -> Zyxel XMG1915-10EP -> BE9700 AP + wired hosts
   - SSH: `ssh barn-ap` on nous (host-local `~/.ssh/config`: root@10.77.78.110,
     ProxyJump mini, key `id_ed25519_fleet`; `id_ed25519` also authorized). Key-only. The root
     password (LuCI) is in `~/.local/share/decent-angl/secrets/barn-ap-root.txt` on nous.
+  - Tuned 2026-11-16: 802.11k + 802.11v (bss_transition) on both bands, 2.4 GHz
+    txpower 20 dBm (was 30), packet_steering 1, ULA prefix removed. Ports at 1G full,
+    EEE and pause off, 0 CRC errors. winbox (lan1) to wan is switched in the QCA8337,
+    not by the CPU. AQL and airtime fairness are on (mac80211 default).
+  - A `wifi reload` sends barn clients to the BE9700 (heard at -72 dBm on 5 GHz ch 149
+    in the barn), and stationary ones stay there. Reload radios only when needed.
+  - An unknown NETGEAR radio (34:98:b5:ea:60:c0/c2, hidden SSID, 2.4 GHz ch 5 and
+    5 GHz ch 157, -30/-37 dBm) sits next to barn-ap with no lease on elsie. It looks
+    like the Orbi satellite searching for its router. Unconfirmed.
   - Recovery: power on holding Reset until the Power LED flashes white, then TFTP
     a factory image to 192.168.1.1 from 192.168.1.x (kit on winbox Desktop
     `R7800-Recovery`). Upgrades: `sysupgrade` image, keep settings.

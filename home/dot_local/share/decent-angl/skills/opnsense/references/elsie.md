@@ -76,7 +76,8 @@ re0 LAN (left port, HDMI side) -> Zyxel XMG1915-10EP -> BE9700 AP + wired hosts
     into br-lan. dnsmasq, odhcpd and firewall disabled; dhcp.lan ignore, RA and DHCPv6 off.
   - Wi-Fi `Craig WiFi`, sae-mixed (WPA2/WPA3), 5 GHz ch 36 VHT80, 2.4 GHz ch 1 HT20,
     country US. wpad-mbedtls (full), LuCI on http://10.77.78.110.
-  - SSH: `ssh -J mini root@10.77.78.110`, key-only (nous `id_ed25519`). The root
+  - SSH: `ssh barn-ap` on nous (host-local `~/.ssh/config`: root@10.77.78.110,
+    ProxyJump mini, key `id_ed25519_fleet`; `id_ed25519` also authorized). Key-only. The root
     password (LuCI) is in `~/.local/share/decent-angl/secrets/barn-ap-root.txt` on nous.
   - Recovery: power on holding Reset until the Power LED flashes white, then TFTP
     a factory image to 192.168.1.1 from 192.168.1.x (kit on winbox Desktop

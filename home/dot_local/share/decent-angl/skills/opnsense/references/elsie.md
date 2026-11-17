@@ -22,7 +22,9 @@ the user's go-ahead first. Router hardware matches clt (GMKtec NucBox M8, Ryzen 
 
 ## Access
 
-- Until elsie joins Tailscale, every LAN device is reached through the Mac mini. Router API:
+- elsie is on Tailscale as `elsie` (`100.114.139.94`). The GUI/API does not listen there and nous
+  does not accept routes (clt's route covers its own LAN), so nous still reaches the LAN through
+  the Mac mini. Router API:
   `ssh -o ExitOnForwardFailure=yes -f -N -L 127.0.0.1:18443:10.77.78.1:443 mini`, then
   `OPNSENSE_CONFIG_FILE=~/.config/decent-angl/opnsense-elsie.env OPNSENSE_HOST=https://127.0.0.1:18443 opnsense-api ...`.
   The TLS pin still applies. An empty fingerprint in `opnsense-api status` means the tunnel
@@ -70,10 +72,10 @@ winbox <-> uplink is switched in the R7800's switch chip and never touches the A
   concern is checked. Macs also hold a ULA from another source on the LAN (probably an Apple
   home hub; not identified).
 - Plugins: `os-realtek-re`, `os-tailscale`.
-- Tailscale (2026-11-17): enabled, listen port **41642** (WAN 41641 belongs to winbox's static
-  NAT), acceptDNS off, accept routes off, SSH on, SNAT on, advertises `10.77.78.0/24`, like clt.
-  State `NeedsLogin`: the 2026-11-15 auth key was rejected (cleared from config). Login and route
-  approval are open items.
+- Tailscale `elsie` (`elsie.tail4d5aec.ts.net`, `100.114.139.94`), key expiry off: listen port
+  set to 41642 (WAN 41641 belongs to winbox's static NAT), acceptDNS off, accept routes off, SSH
+  on, SNAT on, route `10.77.78.0/24` approved. Peers see it on port 31642 (why not 41642: not
+  checked; no shell on elsie yet). winbox keeps its direct path on 41641.
 - Static neighbor (Interfaces > Neighbors): winbox `10.77.78.120` = `10:ff:e0:b9:a8:21`, so a
   routed magic packet reaches it asleep (its NIC does not answer ARP in S3).
 
@@ -93,9 +95,7 @@ off; telnet/FTP/HTTP/SNMP off. All counters clean on 2026-11-16 (0 CRC, pause, c
 
 | Item | Who | Notes |
 |---|---|---|
-| Log elsie in to Tailscale | user | Configured and running, `NeedsLogin`. Fresh login URL: `tailscale/status/status` field `AuthURL`, or a new auth key into `tailscale/authentication/set` then `tailscale/settings/reload` (clear the key after). Then disable key expiry for `elsie` in the admin console. |
-| Approve elsie's `10.77.78.0/24` route | user, after the check below | Hold until Tailscale clients that sit on this LAN (MacBook, phones) are known not to route LAN traffic through the tunnel when they accept routes. winbox and macmini already have `accept-routes=false`. |
-| Verify off-site Moonlight wake end to end | agent | Needs the route approved and an off-site client that accepts routes. elsie side is ready (static neighbor). |
+| Phones with Tailscale on this LAN | agent | Not checked whether iOS keeps LAN traffic local once the route is approved (macOS does). |
 | Delete root's two GUI-made API keys on elsie | user (GUI: System > Access > Users > root) | The API cannot delete them. Also delete `lcri.home.arpa_root_apikey.txt` from the MacBook's Downloads. |
 | Store barn-ap secrets in 1Password | user | `! op-secret add barn-ap-r7800 password=@/home/tux/.local/share/decent-angl/secrets/barn-ap-root.txt` and `! op-secret add wifi-elsie password`. Then the AP can be rebuilt without the live AP. |
 | BE9700: pin 5 GHz 149 and 2.4 GHz 11 | agent after a tested write, or user in the GUI | Writes untested (`tplink-archer.md`). |
@@ -115,10 +115,13 @@ off; telnet/FTP/HTTP/SNMP off. All counters clean on 2026-11-16 (0 CRC, pause, c
 - Asleep, winbox's Realtek NIC does not answer ARP (ARP offload on, still nothing). Same-LAN
   wake must be broadcast (Moonlight and `wake winbox` send broadcasts); routed wake needs the
   static neighbor on elsie.
-- A Tailscale host on this LAN with `accept-routes=true` sends its LAN traffic through the tunnel
-  once `10.77.78.0/24` is approved (Windows: Tailscale route metric 0 beats Ethernet 256).
+- A Windows host on this LAN with `accept-routes=true` would send its LAN traffic through the
+  tunnel (Tailscale route metric 0 beats Ethernet 256); winbox and macmini have it off. macOS is
+  fine: the tunnel route is interface-scoped (`UCSI`), and the MacBook stays on en0 (checked).
 
 ## Change log
+
+- 2026-11-17 elsie joined Tailscale (user login, key expiry off, route approved). MacBook on barn Wi-Fi still reaches winbox over en0 (connect median 4.3 ms before and after). Routed wake verified: unicast-only magic from the MacBook bound to utun4 woke winbox in 6 s via elsie.
 
 - 2026-11-17 Tailscale on elsie configured (port 41642, route 10.77.78.0/24, SSH on), waiting for login; old auth key rejected. `accept-routes=false` on winbox and macmini first. Static neighbor for winbox. LAN ping during the Tailscale start: 40/40, max 0.47 ms.
 - 2026-11-17 Wake verified with real sleeps: broadcast from barn-ap's bridge (Wi-Fi side) wakes winbox in 8 s; unicast-only fails (no ARP reply while asleep). Moonlight sends broadcasts and has the right MAC.

@@ -22,6 +22,8 @@ Client settings follow `wincube-streaming.md` except the bitrates below.
   Same-LAN wake must be broadcast: asleep, the NIC does not answer ARP (2026-11-17, ARP offload
   on). Moonlight broadcasts (255.255.255.255, subnet broadcast, ff02::1) and has the right MAC;
   a broadcast from barn-ap's bridge woke it in 8 s. Never sleeps on its own (AC standby 0).
+  Off-site: Moonlight's unicast to `10.77.78.120` goes through elsie's Tailscale route and its
+  static neighbor entry (verified 6 s); the client must accept subnet routes.
 - Pairing: `apollo-pair winbox pin PIN NAME` (Moonlight shows the PIN), or
   `apollo-pair winbox otp NAME` for Artemis. It grants launch, input and clipboard.
   wincube needs SSH first (`winbox/setup/wincube-ssh-setup.cmd`).

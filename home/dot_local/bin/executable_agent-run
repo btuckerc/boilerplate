@@ -77,7 +77,7 @@ missing_evidence. Severity: blocker breaks the contract; major is a likely defec
 minor changes nothing in the verdict. PASS has no blocker/major findings or
 missing evidence. Make no edits and spawn nothing. Return only the schema JSON.
 """
-CODEX_MODELS = {"sol": ("gpt-6.1-sol", "xhigh"), "astra": ("gpt-6-astra", "high"),
+CODEX_MODELS = {"sol": ("gpt-6.2-sol", "xhigh"), "astra": ("gpt-6.2-astra", "high"),
                 "luna": ("gpt-6-luna", "low")}
 DISABLE_FLAGS = ["--disable", "hooks", "--disable", "multi_agent", "--disable", "plugins",
                  "--disable", "apps", "--disable", "goals", "-c", "skills.include_instructions=false"]

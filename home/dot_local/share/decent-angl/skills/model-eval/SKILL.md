@@ -15,9 +15,9 @@ skill produces the decision and its evidence.
 | Lane | Entry point | Pool | Current |
 | --- | --- | --- | --- |
 | Director | `claude` (settings `model`) | Claude Max | Opus 5.5 high |
-| Implementation | `agent-run sol` | Codex | GPT-6.1 Sol high |
-| Escalation consult | `agent-run ask --model sol` | Codex | GPT-6.1 Sol xhigh |
-| Release audit | `agent-run audit` | Codex | GPT-6.1 Sol xhigh |
+| Implementation | `agent-run sol` | Codex | GPT-6.2 Sol high |
+| Escalation consult | `agent-run ask --model sol` | Codex | GPT-6.2 Sol xhigh |
+| Release audit | `agent-run audit` | Codex | GPT-6.2 Sol xhigh |
 | Extraction | `agent-run ask --model luna` | Codex | Luna low |
 | Council seats | `agent-run ask --model sol/fable/astra/opus` | per seat | Sol xhigh, Fable high, Astra high, Opus high |
 | Local worker | `agent-run local`, `omp-local` | nous GPU, no quota | Qwen3.8 27B |
@@ -29,8 +29,13 @@ escalation, because it spreads load.
 
 ## Steps
 
-1. **Discover.** Run `omp models` after `omp-baseline check-upstream`. A model
-   absent from discovery needs an OMP pin, auth, or `enabledModels` change first.
+1. **Discover.** `agent-run` Codex lanes and council seats use the pinned Codex
+   CLI's catalog (`~/.codex/models_cache.json`, refreshed by any `codex exec`).
+   OMP roles use `omp models` after `omp-baseline check-upstream`. The Codex
+   backend hides new models from older `client_version`s, and OMP sends a
+   hardcoded one, so OMP can lag the Codex CLI by a release or more; an OMP
+   gap holds only the OMP roles. A model absent from discovery needs a pin,
+   auth, or `enabledModels` change first.
 2. **Price and shape.** Run
    `python3 ~/.local/share/decent-angl/skills/model-eval/scripts/compare.py CANDIDATE [INCUMBENT]`.
    The script blends catalog prices by the real 14-day OMP token mix.

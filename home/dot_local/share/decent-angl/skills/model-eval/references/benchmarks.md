@@ -66,3 +66,50 @@ positions Astra for the hardest work.
 Sources: [Introducing GPT-6.1 Sol](https://openai.com/index/introducing-gpt-6-1-sol/),
 [BenchLM GPT-6.1 Sol](https://benchlm.ai/models/gpt-6-1-sol),
 [BenchLM GPT-6 Astra](https://benchlm.ai/models/gpt-6-astra)
+## 2026-11-17: GPT-6.2 Sol and GPT-6.2 Astra
+
+Codex CLI 0.166.0 discovers `gpt-6.2-sol` (500K) and `gpt-6.2-astra` (272K),
+low..ultra; live `codex exec` rollouts served both exactly. The backend lists
+them only for `client_version` >= 0.166.0, and OMP 18.16.0 through 18.22.0
+sends 0.159.0, so OMP roles stay on 6.1 Sol / 6 Astra until OMP catches up.
+Prices: Sol $2/$10, cache read $0.10 (unchanged from 6.1); Astra $8/$40/$0.40,
+down from $10/$50/$1. On the 14-day mix (97.3% cache reads; cache writes at
+input price) Astra blends about $0.77 vs $1.44 per M, Sol $0.16.
+
+| Benchmark (OpenAI charts, highest plotted effort) | 6.2 Astra | 6.2 Sol | 6 Astra | 6.1 Sol | Opus 5.5 | Fable 5.2 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Terminal-Bench Science 0.1 | ~77 ($7) | ~68 ($2) | ~68 ($24) | ~57 | ~63 | ~73* |
+| Agents' Last Exam v1.1 | ~78 | ~73 | ~73 | - | ~72 | ~73 |
+| BenchCAD 2.1 Core | ~83 | ~73 | ~63 | - | ~65 | ~84 |
+| FrontierCode 2.0 (max) | Sol within 0.5 of Astra at ~1/5 cost | | | | | |
+| GDPval v2 | +6.2 over 6 Astra | +5.3 over 6.1 Sol | | | | |
+
+*mini-swe-agent harness. Independent (search summary of the AA post; post not read):
+Artificial Analysis Intelligence Index
+Astra 79, Sol 78 (Fable 5.2 75), but its Coding Agent Index has 6.2 Astra
+flat with 6 Astra and 6.2 Sol 3 points below 6.1 Sol. No Terminal-Bench 4.0,
+DeepSWE or SWE-bench Pro numbers from OpenAI yet.
+
+Admission controls (scratch `agent-run`, `~/.local/state/model-eval/2026-11-17-gpt62/`):
+Packets were the real `council-yield` (whole file, base..candidate) against a
+contract that re-adding a (date, slug, seat) fails; the seeded copy dropped
+that duplicate check. All five receipts had model, effort and sandbox OK.
+- 6.2 Sol audit (xhigh), seeded: BLOCK, first finding the dropped check at
+  `council-yield:212-228` (184 s).
+- 6.2 Sol audit, clean: BLOCK, but it saw the check and flagged only its
+  race; the other blockers are real latent defects (dry-run settles receipts,
+  `-ask-` suffix match, no-trailing-newline append). Incumbent 6.1 Sol on the
+  same clean packet: BLOCK with the same four (466 s vs 208 s). The clean
+  control was not defect-free, so it shows parity, not a false positive.
+- 6.2 Astra seat (high), seeded: blocker C-01 at `council-yield:212-228` with
+  a repro, score 5.6. Clean: no missing-check claim, same real defects as
+  the auditors plus cost rounding and backfill ordering, score 5.7. Every
+  finding I checked held.
+
+Verdict: adopt 6.2 Sol for the `agent-run` implementation, consult, audit and
+council Sol lanes (same price, broad gains, one independent coding-agent
+regression to watch in `council-yield`), and 6.2 Astra for the Astra seat and
+the Codex interactive default (cheaper and stronger than 6 Astra).
+Sources: [Introducing GPT-6.2 Astra and Sol](https://openai.com/index/introducing-gpt-6-2-astra-sol/),
+[OfficeChai chart reads](https://officechai.com/ai/gpt-6-2-sol-gpt-6-2-astra-benchmarks/),
+[Artificial Analysis](https://x.com/ArtificialAnlys/status/2122750634210529569)

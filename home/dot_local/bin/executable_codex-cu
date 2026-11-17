@@ -23,7 +23,7 @@ log=$(mktemp -t codex-cu-log)
 trap 'rm -f "$out"' EXIT
 prompt="Do this with your Computer Use tools directly; do not run shell commands or read local files. $*"
 if ! codex-baseline exec --skip-git-repo-check --ephemeral --json -C "${TMPDIR:-/tmp}" \
-  -m "${CODEX_CU_MODEL:-gpt-6.1-sol}" -c model_reasoning_effort="$effort" \
+  -m "${CODEX_CU_MODEL:-gpt-6.2-sol}" -c model_reasoning_effort="$effort" \
   -o "$out" "$prompt" </dev/null >"$log" 2>&1; then
   echo "codex-cu: codex exec failed; log: $log" >&2
   exit 1

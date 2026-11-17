@@ -20,9 +20,9 @@ session where it is unavailable or refuses (`AGENT_LOCAL_ONLY`), say so and stop
 
 | Seat | `agent-run ask --model` | Emphasis (goes in the brief) | Sits |
 | --- | --- | --- | --- |
-| Sol | `sol` (GPT-6.1 Sol xhigh) | Breaker: make it fail | default |
+| Sol | `sol` (GPT-6.2 Sol xhigh) | Breaker: make it fail | default |
 | Fable | `fable` | Simplifier: what to cut | default |
-| Astra | `astra` (GPT-6 Astra high) | Scenario: walk the real use end to end | `full council` or named |
+| Astra | `astra` (GPT-6.2 Astra high) | Scenario: walk the real use end to end | `full council` or named |
 | Opus | `opus` (fresh Opus 5.5 high) | Skeptic: attack the packet's assumptions | default |
 
 - "Sol high council" seats Sol alone. Named seats replace the default set.

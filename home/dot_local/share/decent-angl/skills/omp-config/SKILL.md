@@ -39,7 +39,11 @@ description: Change the shared OMP baseline in chezmoi - upgrades, omp-baseline,
 - Escalation lanes: GPT-6.1 Sol (`architect` read-only at xhigh, `sol`
   implementation at high; both `@plan`, with no reserve model) is the default.
   Astra (role and read-only agent `astra`) remains a manual reserve in
-  `enabledModels`. Seat lifecycle: the `council` skill.
+  `enabledModels`. Seat lifecycle: the `council` skill. OMP stays on 6.1
+  Sol and 6 Astra while `agent-run` uses 6.2: OMP through 18.22.0 discovers
+  Codex models with a hardcoded `client_version=0.159.0`, and the backend
+  serves 6.2 only from 0.166.0 (checked 2026-11-17). Move the OMP pins when
+  an upgrade's `omp models openai-codex` lists them.
   Escalation is scoped child delegation, not a parent-model switch. When to
   escalate, consult or audit is the RULES.md policy; this section covers only
   the mechanics.

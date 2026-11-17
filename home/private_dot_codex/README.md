@@ -15,7 +15,7 @@ workflow).
 ## Astra policy across accounts
 
 The shared model policy is `home/.chezmoitemplates/codex/model-policy.toml.tmpl`.
-It selects `gpt-6-astra` at medium reasoning, Luna subagents at low effort with
+It selects `gpt-6.2-astra` at medium reasoning, Luna subagents at low effort with
 four concurrent spawned threads, pins `service_tier = "default"` (Fast off),
 uses stable context management, and leaves context and compaction limits
 to the model. Local workers handle bounded tasks through the `local-workers`
@@ -73,7 +73,7 @@ measurements, sources, rejected tuning ideas, and verification.
 ### Parent and subagent defaults
 
 ```toml
-model = "gpt-6-astra"
+model = "gpt-6.2-astra"
 model_reasoning_effort = "medium"
 service_tier = "default"
 

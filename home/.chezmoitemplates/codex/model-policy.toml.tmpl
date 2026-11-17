@@ -1,5 +1,5 @@
 {{- /* Shared model policy. Input is this runtime's parsed local config. */ -}}
-{{- $config := . | setValueAtPath "model" "gpt-6-astra" -}}
+{{- $config := . | setValueAtPath "model" "gpt-6.2-astra" -}}
 {{- $config = setValueAtPath "model_reasoning_effort" "medium" $config -}}
 {{- $config = setValueAtPath "service_tier" "default" $config -}}
 {{- $config = setValueAtPath "features.context_management.experimental_mode" false $config -}}

@@ -19,6 +19,9 @@ Client settings follow `wincube-streaming.md` except the bitrates below.
   session is open, the Apollo watchdog holds the system awake.
 - Wake: `wake winbox` (in `~/hearth/bin`, from the game-streaming repo). It sends the magic
   packet from the Mac mini and winbox is up in 6-8 s (verified). Wake from shutdown: untested.
+  Same-LAN wake must be broadcast: asleep, the NIC does not answer ARP (2026-11-17, ARP offload
+  on). Moonlight broadcasts (255.255.255.255, subnet broadcast, ff02::1) and has the right MAC;
+  a broadcast from barn-ap's bridge woke it in 8 s. Never sleeps on its own (AC standby 0).
 - Pairing: `apollo-pair winbox pin PIN NAME` (Moonlight shows the PIN), or
   `apollo-pair winbox otp NAME` for Artemis. It grants launch, input and clipboard.
   wincube needs SSH first (`winbox/setup/wincube-ssh-setup.cmd`).

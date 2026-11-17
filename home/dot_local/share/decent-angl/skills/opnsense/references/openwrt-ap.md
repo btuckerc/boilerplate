@@ -18,7 +18,8 @@ gets security updates, and supports WPA2/WPA3 mixed and 802.11k/v.
 - Secrets in order: env `AP_PSK`/`AP_ROOT_HASH`, 1Password (`AP_PSK_ITEM`, `AP_ROOT_ITEM`),
   then the live AP over SSH (`AP_LIVE_SSH`). Output `out/<host>/` (700): factory `.img`
   and `sysupgrade.bin`. Both contain the Wi-Fi key and root hash.
-- The image boots configured: static IP, all ports in `br-lan`, DHCP/RA/firewall off
+- The image boots configured: static IP, all ports in `br-lan` on one DSA conduit
+  (`AP_CONDUIT`, `AP_CONDUIT_PORTS`), DHCP/RA/firewall off
   (done first in `/etc/uci-defaults/99-dumb-ap`), SSH key-only, packet steering on.
   Wi-Fi is set by `/etc/rc.local` on first boot, because radios appear only after ath10k loads.
 - To change a setting permanently, change the site `.env` and rebuild, then also apply it
@@ -58,6 +59,14 @@ stick to the house AP afterwards (`wifi.md`).
 
 - `wifi reload` and radio changes kick every client for about 10 s; see sticky clients in `wifi.md`.
 - ath10k `scan` from the AP often returns 0 results on the first try.
-- `stat` is missing (BusyBox); use `ls -ld`.
+- `stat` is missing (BusyBox); use `ls -ld`. BusyBox `nc` has no `-z`/UDP: test a port with
+  `wget -qO- http://host:port/`.
+- R7800 board default: lan1-4 on CPU conduit eth1, wan on eth0. Bridged together, unicast from
+  lan ports to the AP and Wi-Fi clients is dropped (broadcast passes; eth1 `rx_unicast` stays
+  near 0), so Wi-Fi clients cannot reach wired hosts. Keep every bridged port on one conduit
+  (`ip -d link show lan1 | grep conduit`). netifd applies `config device` `option conduit`
+  live without dropping traffic.
+- Radio interrupts (PCIe MSI) cannot be moved off CPU0 (`smp_affinity` write is refused); the
+  default packet steering (`packet_steering=1`) is left as is.
 - Do not run `wifi config` on a configured AP: it only adds radios, but `wifi` without
   arguments restarts them.

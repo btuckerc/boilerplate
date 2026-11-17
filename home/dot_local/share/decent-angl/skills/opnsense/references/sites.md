@@ -52,7 +52,9 @@ in the change log, not in the facts.
    file `~/.config/decent-angl/opnsense-<site>.env` with the TLS pins.
 4. Shaper: measure the line with `networkQuality`, start FQ-CoDel pipes near 90% and tune with the
    loaded-ping method in `wifi.md`.
-5. Tailscale enrollment (`os-tailscale`), approve the route, `accept-routes=false` on same-LAN hosts.
+5. Tailscale enrollment (`os-tailscale`): `accept-routes=false` on same-LAN hosts first, listen
+   port not used by a static-port NAT rule for a LAN host, then approve the route. For routed
+   Wake-on-LAN add a static neighbor for the host on the router.
 6. APs per `wifi.md`, switch per its device page, every secret in 1Password.
 
 ## New AP checklist

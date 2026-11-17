@@ -16,8 +16,8 @@ the user's go-ahead first. Router hardware matches clt (GMKtec NucBox M8, Ryzen 
 | xmg1915 | Zyxel XMG1915-10EP switch | `10.77.78.112` | `70:49:a2:21:1e:f5` | - | - | SSH CLI (read), HTTPS forms (write) via mini | `zyxel-elsie` (`admin`) | `zyxel-xmg1915.md` |
 | be9700 | house AP, TP-Link (reports Archer BE600 v1.0) | `10.77.78.111` | `68:7f:f0:75:f4:5b` | house | 7 (2.5G) | `tplinkrouterc6u` via mini tunnel | `be9700-elsie` | untested, `tplink-archer.md` |
 | barn-ap | barn AP, NETGEAR R7800 on OpenWrt 25.12.6 | `10.77.78.110` (static) | `b0:b9:8a:73:7a:5c` | barn | 5 (1G, barn cable) | `ssh barn-ap` | root password file on nous (see Open items) | `uci`, `openwrt-ap.md` |
-| winbox | gaming PC, Apollo host | `10.77.78.120` | `10:ff:e0:b9:a8:21` | barn, barn-ap `lan1` (1G) | 5 via barn-ap | `ssh winbox`, MCP `winbox` (Tailscale) | - | `platform-ops` `winbox-streaming.md` |
-| macmini | Mac mini M4, jump host, wake sender | `10.77.78.121` | `d0:11:e5:81:01:6b` | - | 8 (1G) | `ssh mini` (Tailscale) | - | - |
+| winbox | gaming PC, Apollo host; Tailscale `accept-routes=false` | `10.77.78.120` | `10:ff:e0:b9:a8:21` | barn, barn-ap `lan1` (1G) | 5 via barn-ap | `ssh winbox`, MCP `winbox` (Tailscale) | - | `platform-ops` `winbox-streaming.md` |
+| macmini | Mac mini M4, jump host, wake sender; Tailscale exit node, `accept-routes=false` | `10.77.78.121` | `d0:11:e5:81:01:6b` | - | 8 (1G) | `ssh mini` (Tailscale) | - | - |
 | Arris TM3402 | Cox phone modem | - | - | - | - | - | - | leave alone |
 
 ## Access
@@ -39,8 +39,11 @@ Cox coax -> Orbi CBR750 (bridge) -> M8 re1 WAN (right port, power side), public 
 M8 re0 LAN (left port, HDMI side) -> xmg1915 port 1
   port 7 -> be9700 (house)
   port 8 -> macmini
-  port 5 -> barn cable -> barn-ap wan; barn-ap lan1 -> winbox
+  port 5 -> barn cable -> barn-ap wan (yellow); barn-ap lan1 -> winbox
 ```
+
+barn-ap bridges wan, lan1-4 and both radios, all on DSA conduit eth0 (`openwrt-ap.md`).
+winbox <-> uplink is switched in the R7800's switch chip and never touches the AP CPU.
 
 ## Router
 
@@ -66,7 +69,13 @@ M8 re0 LAN (left port, HDMI side) -> xmg1915 port 1
   clients have no global IPv6 or IPv6 default route. On purpose until the Realtek IPv6
   concern is checked. Macs also hold a ULA from another source on the LAN (probably an Apple
   home hub; not identified).
-- Plugins: `os-realtek-re`, `os-tailscale` (installed, not enrolled).
+- Plugins: `os-realtek-re`, `os-tailscale`.
+- Tailscale (2026-11-17): enabled, listen port **41642** (WAN 41641 belongs to winbox's static
+  NAT), acceptDNS off, accept routes off, SSH on, SNAT on, advertises `10.77.78.0/24`, like clt.
+  State `NeedsLogin`: the 2026-11-15 auth key was rejected (cleared from config). Login and route
+  approval are open items.
+- Static neighbor (Interfaces > Neighbors): winbox `10.77.78.120` = `10:ff:e0:b9:a8:21`, so a
+  routed magic packet reaches it asleep (its NIC does not answer ARP in S3).
 
 ## Wi-Fi
 
@@ -84,13 +93,14 @@ off; telnet/FTP/HTTP/SNMP off. All counters clean on 2026-11-16 (0 CRC, pause, c
 
 | Item | Who | Notes |
 |---|---|---|
-| Enroll elsie in Tailscale (name `elsie`, advertise `10.77.78.0/24`, acceptDNS off) | agent + user approves route | Removes the Mac mini as the only path in. Auth key file on winbox `Desktop\M8-OPNsense\tailscale-authkey.txt` (may have expired). First set `accept-routes=false` on winbox and macmini, or their LAN traffic rides WireGuard. |
+| Log elsie in to Tailscale | user | Configured and running, `NeedsLogin`. Fresh login URL: `tailscale/status/status` field `AuthURL`, or a new auth key into `tailscale/authentication/set` then `tailscale/settings/reload` (clear the key after). Then disable key expiry for `elsie` in the admin console. |
+| Approve elsie's `10.77.78.0/24` route | user, after the check below | Hold until Tailscale clients that sit on this LAN (MacBook, phones) are known not to route LAN traffic through the tunnel when they accept routes. winbox and macmini already have `accept-routes=false`. |
+| Verify off-site Moonlight wake end to end | agent | Needs the route approved and an off-site client that accepts routes. elsie side is ready (static neighbor). |
 | Delete root's two GUI-made API keys on elsie | user (GUI: System > Access > Users > root) | The API cannot delete them. Also delete `lcri.home.arpa_root_apikey.txt` from the MacBook's Downloads. |
 | Store barn-ap secrets in 1Password | user | `! op-secret add barn-ap-r7800 password=@/home/tux/.local/share/decent-angl/secrets/barn-ap-root.txt` and `! op-secret add wifi-elsie password`. Then the AP can be rebuilt without the live AP. |
 | BE9700: pin 5 GHz 149 and 2.4 GHz 11 | agent after a tested write, or user in the GUI | Writes untested (`tplink-archer.md`). |
 | Firmware: BE9700 update offered; switch ACGP.0 -> ACGP.3 | user decides when | Each drops Wi-Fi or the whole site for minutes. |
 | `agent` SSH user on elsie; automatic recovery from a re1 TX stall | agent | Not built. |
-| Re-test `wake winbox` through barn-ap | agent | Should work (bridged), not re-tested since the move. |
 
 ## Gotchas
 
@@ -100,9 +110,19 @@ off; telnet/FTP/HTTP/SNMP off. All counters clean on 2026-11-16 (0 CRC, pause, c
 - The Orbi satellite left powered on beacons a hidden network on 2.4 GHz ch 5 and 5 GHz
   ch 157 next to barn-ap. Keep it unplugged.
 - The R7800's stock web server died after a firmware update; it runs OpenWrt now (`openwrt-ap.md`).
-- winbox ignores ping (Windows firewall, Public profile). Measure from winbox outwards.
+- winbox ignores ping (Windows firewall, Public profile). Measure from winbox outwards, or
+  `wget -qO- http://10.77.78.120:47989/serverinfo` (Apollo). BusyBox `nc` on barn-ap cannot test ports.
+- Asleep, winbox's Realtek NIC does not answer ARP (ARP offload on, still nothing). Same-LAN
+  wake must be broadcast (Moonlight and `wake winbox` send broadcasts); routed wake needs the
+  static neighbor on elsie.
+- A Tailscale host on this LAN with `accept-routes=true` sends its LAN traffic through the tunnel
+  once `10.77.78.0/24` is approved (Windows: Tailscale route metric 0 beats Ethernet 256).
 
 ## Change log
+
+- 2026-11-17 Tailscale on elsie configured (port 41642, route 10.77.78.0/24, SSH on), waiting for login; old auth key rejected. `accept-routes=false` on winbox and macmini first. Static neighbor for winbox. LAN ping during the Tailscale start: 40/40, max 0.47 ms.
+- 2026-11-17 Wake verified with real sleeps: broadcast from barn-ap's bridge (Wi-Fi side) wakes winbox in 8 s; unicast-only fails (no ARP reply while asleep). Moonlight sends broadcasts and has the right MAC.
+- 2026-11-17 barn-ap: Wi-Fi clients and the AP could not reach winbox (lan1 -> CPU unicast dropped: lan ports on conduit eth1, wan on eth0, one bridge). All lan ports moved to conduit eth0 (`network.lanN_dev`), reload with 0/45 pings lost. Moving the uplink to lan2 first had taken barn Wi-Fi offline; moved back to the yellow port.
 
 - 2026-11-16 Switch: telnet/FTP/HTTP off, loop guard on all ports, saved to config 1. Latency across it unchanged (elsie 0.4 ms, barn-ap 0.5 ms from macmini).
 - 2026-11-16 barn-ap: 802.11k/v on, 2.4 GHz 20 dBm (was 30), packet steering on, ULA removed. Reloading the radios moved 3 of 4 barn clients to the house AP; 2 came back on their own.

@@ -34,8 +34,11 @@ convention for hosts.
   dnsmasq on 53053 (design in `SKILL.md`).
 - Shaper: WFQ pipes 85/21 Mbit with per-host queues and Interactive queues; recipe and the
   Steam multi-flow failure in `shaper.md`.
-- Netflow local only (`SKILL.md`). `netwatch` (`~/hearth/src/netwatch`, timer on nous) logs
-  WAN, per-host rates, shaper drops and AP client RSSI every minute.
+- Netflow local only (`SKILL.md`). `netwatch` (`~/hearth/src/netwatch`) sampled WAN, per-host
+  rates, shaper drops and AP client RSSI every minute; its timer is off since 2026-11-17 (each
+  run logged in to the BE9700 and sent ping bursts). Re-enable: `systemctl --user link
+  ~/hearth/src/netwatch/systemd/netwatch.service && systemctl --user enable --now
+  ~/hearth/src/netwatch/systemd/netwatch.timer`.
 
 ## Wi-Fi
 
@@ -61,6 +64,8 @@ GS305E, unmanaged in practice (no agent access recorded).
 | `netwatch` repo has no commits | owner of netwatch | Code exists only in the working tree. |
 
 ## Change log
+
+- 2026-11-17 `netwatch` timer stopped and disabled on nous (no per-minute AP logins or ping bursts); code kept.
 
 - 2026-11-16 Read-only Wi-Fi audit: AP firmware 1.1.1 Build 20260113; 2.4 GHz ch 1 fixed, 5 GHz auto (149), 6 GHz auto (37) 160 MHz; Smart Connect off; OFDMA/MU-MIMO on; TWT off.
 - 2026-11-12 wincube Wake-on-LAN over Wi-Fi verified with real sleep cycles.

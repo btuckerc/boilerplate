@@ -6,4 +6,4 @@
 - Preserve unrelated user changes in dirty worktrees.
 - Resolve destructive targets precisely; never use broad home, workspace-root, or unresolved-variable targets.
 - There is no release auditor here. Work that needs one under the default profile's RULES (high-consequence control-plane, security or data-loss changes, or an explicit audit request) waits for it there; its absence is not an exemption.
-- Run the code you change and report only checks you actually ran; flag anything unverified in plain words.
+- Run the code you change, and the user's own path end to end on the real target as they will (same host, launch method and privileges); report only checks you actually ran; flag anything unverified in plain words.

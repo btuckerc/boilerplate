@@ -168,13 +168,13 @@ round unless it changes behavior outside that item.
 **Confirmation and stop.** When no seat holds an open item, or two scored
 rounds in a row each add at most one verified should, no blocker and no
 accepted raise, fix what is open and seat everyone once on the final tree
-(skip this when every seat already approved that exact tree). If confirmation
-finds a verified blocker or should, fix it and confirm once more with every
-seat; anything still open after that is reported as incomplete. Declined and
-ruled items add nothing. Stop early when a behavior comes back a second time
-after a fix meant to keep both items: the fixes are oscillating, so report
-both sides. If review grew the diff, cut first. Never agree just to end the
-loop.
+(skip this when every seat already approved that exact tree and meets any
+target). If confirmation finds a verified blocker or should, or a below-target
+seat raises a change you accept, fix it and confirm once more with every seat;
+anything still open after that is reported as incomplete. Declined and ruled
+items add nothing. Stop early when a behavior comes back a second time after a
+fix meant to keep both items: the fixes are oscillating, so report both sides.
+If review grew the diff, cut first. Never agree just to end the loop.
 
 ## Stop and report
 

@@ -1334,7 +1334,6 @@ def print_result(run, meta, result, as_json=False):
 
 def prepare(args, root):
     repo = Path(args.repo or os.getcwd()).expanduser().resolve()
-    args.run_id = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S") + f"-{args.lane}-{args.name}"
     args.worktree_root = Path(os.environ.get("AGENT_RUN_WORKTREE_ROOT", "~/src/worktrees/agent")).expanduser().resolve()
     refuse_writable_state(root, args.worktree_root, args.run_id)
     if args.lane in {"sol", "local"}:
@@ -1347,6 +1346,7 @@ def launch(args):
     args.name = getattr(args, "name", None) or secrets.token_hex(2)
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", args.name):
         raise ValueError("name must be 1-128 letters, digits, underscores or hyphens")
+    args.run_id = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S") + f"-{args.lane}-{args.name}"
     prepare(args, root)
     slot = acquire_slot(root, args.lane == "local")
     waited = slot is None
@@ -1354,14 +1354,13 @@ def launch(args):
         print(f"agent-run: all worker slots busy; waiting up to {args.wait:g}s", file=sys.stderr, flush=True)
         give_up = time.monotonic() + args.wait
         while slot is None and (left := give_up - time.monotonic()) > 0:
-            time.sleep(min(5, left))
-            if time.monotonic() < give_up:
-                slot = acquire_slot(root, args.lane == "local")
+            time.sleep(min(1, left))  # the last scan lands at the deadline
+            slot = acquire_slot(root, args.lane == "local")
     if slot is None:
         print("agent-run: all worker slots busy", file=sys.stderr)
         return 75
     with slot:
-        if waited:  # fresh run id, and checks against the repository as it is now
+        if waited:  # recheck the repository as it is now
             prepare(args, root)
         with pin_directory(root) as root, contextlib.ExitStack() as runs:
             return launch_locked(args, root, slot, runs)

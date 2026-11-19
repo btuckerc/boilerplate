@@ -1355,7 +1355,6 @@ def launch(args):
         give_up = time.monotonic() + args.wait
         while slot is None and (left := give_up - time.monotonic()) > 0:
             time.sleep(min(1, left))  # the last scan lands at the deadline
-            refuse_writable_state(root, args.worktree_root, args.run_id)
             slot = acquire_slot(root, args.lane == "local")
     if slot is None:
         print("agent-run: all worker slots busy", file=sys.stderr)

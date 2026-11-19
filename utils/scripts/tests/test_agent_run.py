@@ -1248,11 +1248,13 @@ def test_busy_pool_queues_until_a_slot_frees(environment):
         assert [x.name for x in root.iterdir()] == [".slots"]
         proc = subprocess.Popen([sys.executable, str(RUN), "ask", "--model", "luna", "--wait", "30", "--brief", str(brief)],
                                 env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        assert proc.stderr.readline().startswith("agent-run: all worker slots busy; waiting up to 30s")
+        first = proc.stderr.readline()
+        assert first.startswith("agent-run: queued for a worker slot, up to 30s")
         assert not Path(env["FAKE_CALLED"]).exists()
         locks.pop().close()
         _, err = proc.communicate(timeout=20)
         assert proc.returncode == 0, err
+        assert "slots busy" not in first + err  # older retry wrappers grep this to relaunch
         assert Path(env["FAKE_CALLED"]).exists()
     finally:
         if proc and proc.poll() is None:

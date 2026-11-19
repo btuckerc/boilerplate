@@ -1351,7 +1351,7 @@ def launch(args):
     slot = acquire_slot(root, args.lane == "local")
     waited = slot is None
     if slot is None and args.wait:
-        print(f"agent-run: all worker slots busy; waiting up to {args.wait:g}s", file=sys.stderr, flush=True)
+        print(f"agent-run: queued for a worker slot, up to {args.wait:g}s", file=sys.stderr, flush=True)
         give_up = time.monotonic() + args.wait
         while slot is None and (left := give_up - time.monotonic()) > 0:
             time.sleep(min(1, left))  # the last scan lands at the deadline

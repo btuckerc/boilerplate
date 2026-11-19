@@ -1,6 +1,6 @@
 ---
 name: council
-description: Multi-model review or design council that loops until the seats are satisfied. Use only when the user says "council", "full council" or "Sol high council"; seat names or a target ("push a 9.5", "+0.2") in that request shape it. Never self-convene.
+description: Multi-model review or design council that loops until the seats are satisfied or progress plateaus. Use only when the user says "council", "full council" or "Sol high council"; seat names or a target ("push a 9.5", "+0.2") in that request shape it. Never self-convene.
 argument-hint: "[full | seat names] [to N | +D] [what to review or decide]"
 ---
 
@@ -8,9 +8,9 @@ argument-hint: "[full | seat names] [to N | +D] [what to review or decide]"
 
 Models from different families review the same evidence independently. You,
 the director, verify each finding, fix, and reconvene until every seat is
-satisfied or another round adds nothing. Adapted from Theo Browne's tstack
-`council` and `sol-loop`. Independent first opinions carry most of the value
-and reviewer precision is low, so verification is your job.
+satisfied or progress plateaus (see Confirmation and stop). Adapted from Theo
+Browne's tstack `council` and `sol-loop`. Independent first opinions carry
+most of the value and reviewer precision is low, so verification is your job.
 
 First check the trigger. If the user did not say "council", stop: your own
 consult is one `agent-run ask --model sol`. Seats run through `agent-run`; in a
@@ -74,9 +74,9 @@ tree cannot leak into a round.
 
 Write `<run>/schema.json` (below) and one brief per seat,
 `<run>/brief-<seat>-rN.md`; in run names `<run>` is the full directory name
-`<YYYY-MM-DD>-<slug>`. Start every seat in one message, each as its own Bash call with
-`run_in_background` and a `timeout` of at least 3600 s; `agent-run` queues a
-seat until a slot frees.
+`<YYYY-MM-DD>-<slug>`. Start every seat in one message, each as its own Bash
+call with `run_in_background` and a `timeout` of at least 3600 s. `agent-run`
+queues a seat for a slot; relaunch one that still exits 75, never skip it.
 
 ```
 agent-run ask --model <seat> --name <run>-<seat>-rN --repo <run>/tree-rN \
@@ -124,15 +124,16 @@ Keep one ledger in `<run>/ledger.md`: id, seat, severity, disposition, evidence.
 
 **Next round.** Hold one while a seat has an open blocker or should or a fix
 to confirm, or while it is below a target and its raise names a change you
-accept. A seat that approved, and meets any target, sits out until the
-confirmation round. Nit fixes, and wording fixes that keep the meaning, need
-no round. Run only those seats, each with a brief carrying only:
+accept. Seat those, plus any seat below a target; a seat that approved and
+meets any target sits out until the confirmation round. Nit fixes, and
+wording fixes that keep the meaning, need no round. Each brief carries only:
 
 ```
 Council seat, round N. Review only. Packet: ~/.local/state/council/<run>/packet.md.
-Tree <id> in <run>/tree-rN; delta: <run>/delta-rN.patch.
+Tree <id> in <run>/tree-rN; delta: <run>/delta-rN.patch (a seat returning
+from sitting out gets `git diff <tree it last reviewed> <tree>` instead).
 Checks: <raw output or path>.
-Your round N-1 result: <run>/<that seat's previous result.json, copied>.
+Your last result: <run>/<that seat's previous result.json, copied>.
 Your rows: <id, disposition, evidence>.
 Mark each of your ids resolved or open, raise new findings on changed code or
 any blocker or should you missed in scope, and re-score, listing in basis
@@ -164,13 +165,15 @@ on your own decline. A ruling closes its item; new evidence makes a new
 finding. Pass the ruling to the seat in its next brief. Applying it needs no
 round unless it changes behavior outside that item.
 
-**Confirmation and stop.** When no seat holds an open item, or two rounds in
-a row each add at most one verified should and no blocker, fix what is open
-and seat everyone once on the final tree. A seat returning from sitting out gets
-the delta from the tree it last reviewed. That round ends the council unless
-it finds a verified blocker, which earns one more. Declined and ruled items
-add nothing. Stop early when a behavior comes back a second time after a fix
-meant to keep both items: the fixes are oscillating, so report both sides. If review grew the diff, cut first. Never agree just to end the
+**Confirmation and stop.** When no seat holds an open item, or two scored
+rounds in a row each add at most one verified should, no blocker and no
+accepted raise, fix what is open and seat everyone once on the final tree
+(skip this when every seat already approved that exact tree). If confirmation
+finds a verified blocker or should, fix it and confirm once more with every
+seat; anything still open after that is reported as incomplete. Declined and
+ruled items add nothing. Stop early when a behavior comes back a second time
+after a fix meant to keep both items: the fixes are oscillating, so report
+both sides. If review grew the diff, cut first. Never agree just to end the
 loop.
 
 ## Stop and report
@@ -180,8 +183,8 @@ nits or ruled items (record that dissent); with a target it must also meet
 it. The council is **done** when every seated member is satisfied
 and no blocker or should is open, and **incomplete** when it stops before
 then: show each open item with 2-3 lines per side and never imply approval.
-Council approval is advice: a high-consequence change still needs the release
-audit, and nothing here overrides an auditor BLOCK or UNVERIFIED.
+Council approval is advice: a change under the release gate still needs the
+release audit, and nothing here overrides an auditor BLOCK or UNVERIFIED.
 
 Report rounds, seat availability, fixed and declined findings with reasons,
 dissent, open items, the diff size before and after, and the fixes made

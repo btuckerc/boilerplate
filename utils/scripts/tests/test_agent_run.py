@@ -1240,22 +1240,24 @@ def test_busy_pool_queues_until_a_slot_frees(environment):
     env, brief = environment
     root = Path(env["AGENT_RUN_HOME"])
     locks = [runner.acquire_slot(root) for _ in range(3)]
-    start = time.monotonic()
-    p = invoke(environment, "ask", "--model", "luna", "--wait", "1", "--brief", brief)
-    assert p.returncode == 75 and time.monotonic() - start >= 1
-    assert not list(root.glob("*/meta.json"))
-    proc = subprocess.Popen([sys.executable, str(RUN), "ask", "--model", "luna", "--wait", "30", "--brief", str(brief)],
-                            env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    proc = None
     try:
-        time.sleep(0.5)
-        assert proc.poll() is None and not Path(env["FAKE_CALLED"]).exists()
+        start = time.monotonic()
+        p = invoke(environment, "ask", "--model", "luna", "--wait", "1", "--brief", brief)
+        assert p.returncode == 75 and 1 <= time.monotonic() - start < 8
+        assert [x.name for x in root.iterdir()] == [".slots"]
+        proc = subprocess.Popen([sys.executable, str(RUN), "ask", "--model", "luna", "--brief", str(brief)],
+                                env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        assert proc.stderr.readline().startswith("agent-run: all worker slots busy; waiting up to 1200s")
+        assert not Path(env["FAKE_CALLED"]).exists()
         locks.pop().close()
         _, err = proc.communicate(timeout=20)
         assert proc.returncode == 0, err
-        assert "waiting up to 30s" in err
         assert Path(env["FAKE_CALLED"]).exists()
     finally:
-        proc.kill()
+        if proc and proc.poll() is None:
+            proc.kill()
+            proc.wait()
         for lock in locks:
             lock.close()
 

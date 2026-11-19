@@ -142,7 +142,7 @@ const REVIEWED_EXTENSIONS: Record<string, string> = {
  * config.ts:11-16,84-156, config/claude-paths.ts, sdk.ts:1876-1879. Re-review on change/version bump.
  */
 const REVIEWED_COMMANDS: Record<string, string> = {
-	"1c044909c7819ad0f090ba3e2ee31b00a534548cbda646f636614a055ed221c9": "review/index.ts",
+	"45f2588992206554daf7de72427825f5e203ae1cea28f979c7407fe51fa69d69": "review/index.ts",
 };
 
 const errors: string[] = [];

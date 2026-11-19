@@ -74,10 +74,9 @@ tree cannot leak into a round.
 
 Write `<run>/schema.json` (below) and one brief per seat,
 `<run>/brief-<seat>-rN.md`; in run names `<run>` is the full directory name
-`<YYYY-MM-DD>-<slug>`. Start up to three seats, each as its own Bash call with
-`run_in_background` and a `timeout` of at least 1800 s, and start a fourth
-when one finishes: `agent-run` allows three cloud runs, and exit 75 means
-every slot is busy, so retry that seat later; it is never a skip.
+`<YYYY-MM-DD>-<slug>`. Start every seat in one message, each as its own Bash call with
+`run_in_background` and a `timeout` of at least 3600 s; `agent-run` queues a
+seat until a slot frees.
 
 ```
 agent-run ask --model <seat> --name <run>-<seat>-rN --repo <run>/tree-rN \
@@ -124,10 +123,10 @@ seats is not proof.
 Keep one ledger in `<run>/ledger.md`: id, seat, severity, disposition, evidence.
 
 **Next round.** Hold one while a seat has an open blocker or should or a fix
-to confirm, while behavior changed after it approved, or while it is below a
-target and its raise names a change you accept. Nit fixes, and wording fixes
-that keep the meaning, need no round. Run only those seats (all seats when
-there is a target), each with a brief carrying only:
+to confirm, or while it is below a target and its raise names a change you
+accept. A seat that approved, and meets any target, sits out until the
+confirmation round. Nit fixes, and wording fixes that keep the meaning, need
+no round. Run only those seats, each with a brief carrying only:
 
 ```
 Council seat, round N. Review only. Packet: ~/.local/state/council/<run>/packet.md.
@@ -165,11 +164,13 @@ on your own decline. A ruling closes its item; new evidence makes a new
 finding. Pass the ruling to the seat in its next brief. Applying it needs no
 round unless it changes behavior outside that item.
 
-**No round cap.** Keep going while a round is warranted. Stop when none is,
-when a round brings no verified blocker or should and no accepted raise
-(declined and ruled items add nothing), or when a behavior comes back a second
-time after a fix meant to keep both items: the fixes are oscillating, so
-report both sides. If review grew the diff, cut first. Never agree just to end the
+**Confirmation and stop.** When no seat holds an open item, or two rounds in
+a row each add at most one verified should and no blocker, fix what is open
+and seat everyone once on the final tree. A seat returning from sitting out gets
+the delta from the tree it last reviewed. That round ends the council unless
+it finds a verified blocker, which earns one more. Declined and ruled items
+add nothing. Stop early when a behavior comes back a second time after a fix
+meant to keep both items: the fixes are oscillating, so report both sides. If review grew the diff, cut first. Never agree just to end the
 loop.
 
 ## Stop and report

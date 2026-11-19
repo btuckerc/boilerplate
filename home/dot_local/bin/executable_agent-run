@@ -1345,6 +1345,12 @@ def launch(args):
         refuse_temporary_repo(repo)
         args.worker_path = refuse_overlapping_layout(repo, root, args.worktree_root, args.run_id)
     slot = acquire_slot(root, args.lane == "local")
+    if slot is None and args.wait:
+        print(f"agent-run: all worker slots busy; waiting up to {args.wait:g}s", file=sys.stderr, flush=True)
+        give_up = time.monotonic() + args.wait
+        while slot is None and time.monotonic() < give_up:
+            time.sleep(min(5, max(0.05, give_up - time.monotonic())))
+            slot = acquire_slot(root, args.lane == "local")
     if slot is None:
         print("agent-run: all worker slots busy", file=sys.stderr)
         return 75
@@ -1892,6 +1898,8 @@ def main(argv=None):
         sub.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
         sub.add_argument("--repo", required=lane in {"sol", "audit", "local"})
         sub.add_argument("--timeout", type=positive, default=3600 if lane == "audit" else 1800)
+        sub.add_argument("--wait", type=nonnegative, default=1800,
+                         help="seconds to queue for a free slot before exit 75 (0: fail at once)")
         if lane == "audit":
             sub.add_argument("--packet", required=True)
             sub.add_argument("--candidate", required=True)

@@ -271,7 +271,7 @@ def test_slot_exhaustion_returns_75_without_starting_child(environment):
     locks = [runner.acquire_slot(root) for _ in range(3)]
     try:
         start = time.monotonic()
-        p = invoke(environment, "ask", "--model", "luna", "--brief", brief)
+        p = invoke(environment, "ask", "--model", "luna", "--wait", "0", "--brief", brief)
         assert p.returncode == 75
         assert time.monotonic() - start < 2
         assert not Path(env["FAKE_CALLED"]).exists()
@@ -1236,6 +1236,30 @@ def test_audit_mcp_end_event_is_counted_once(tmp_path, events):
     assert "worker called MCP tools" in verification["issues"]
 
 
+def test_busy_pool_queues_until_a_slot_frees(environment):
+    env, brief = environment
+    root = Path(env["AGENT_RUN_HOME"])
+    locks = [runner.acquire_slot(root) for _ in range(3)]
+    start = time.monotonic()
+    p = invoke(environment, "ask", "--model", "luna", "--wait", "1", "--brief", brief)
+    assert p.returncode == 75 and time.monotonic() - start >= 1
+    assert not list(root.glob("*/meta.json"))
+    proc = subprocess.Popen([sys.executable, str(RUN), "ask", "--model", "luna", "--wait", "30", "--brief", str(brief)],
+                            env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        time.sleep(0.5)
+        assert proc.poll() is None and not Path(env["FAKE_CALLED"]).exists()
+        locks.pop().close()
+        _, err = proc.communicate(timeout=20)
+        assert proc.returncode == 0, err
+        assert "waiting up to 30s" in err
+        assert Path(env["FAKE_CALLED"]).exists()
+    finally:
+        proc.kill()
+        for lock in locks:
+            lock.close()
+
+
 def test_audit_cloud_slot_survives_runner_sigkill(repo, environment):
     env, brief = environment
     env["FAKE_MODE"] = "sleep"
@@ -1254,7 +1278,7 @@ def test_audit_cloud_slot_survives_runner_sigkill(repo, environment):
         proc.kill()
         proc.wait(timeout=5)
         env["FAKE_MODE"] = "ok"
-        assert invoke(environment, "ask", "--model", "luna", "--brief", brief).returncode == 75
+        assert invoke(environment, "ask", "--model", "luna", "--wait", "0", "--brief", brief).returncode == 75
         runner.kill_group(child, signal.SIGKILL, meta["child_start"])
         deadline = time.monotonic() + 5
         free = None

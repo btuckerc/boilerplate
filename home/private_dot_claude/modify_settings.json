@@ -33,7 +33,12 @@
 {{- $hooks := get $config "hooks" | default dict -}}
 {{- $pre := get $hooks "PreToolUse" | default list -}}
 {{- $guarded := false -}}
-{{- range $pre -}}{{- $m := get . "matcher" | default "" -}}{{- if or (eq $m "" "*") (regexMatch (printf "^(?:%s)$" $m) "Bash") -}}{{- range (get . "hooks" | default list) -}}{{- if eq (get . "command") $guard -}}{{- $guarded = true -}}{{- end -}}{{- end -}}{{- end -}}{{- end -}}
+{{- /* A matcher of "", "*" or a |-list naming Bash covers it; regex forms are not compiled here (Go and
+     JavaScript regexes differ), so they at worst add a second, harmless registration. */ -}}
+{{- range $pre -}}{{- if kindIs "map" . -}}{{- $m := get . "matcher" | default "" -}}
+{{- if and (kindIs "string" $m) (or (eq $m "" "*") (has "Bash" (splitList "|" (nospace $m)))) -}}
+{{- range (get . "hooks" | default list) -}}{{- if and (kindIs "map" .) (eq (get . "command") $guard) -}}{{- $guarded = true -}}{{- end -}}{{- end -}}
+{{- end -}}{{- end -}}{{- end -}}
 {{- if not $guarded -}}
 {{- $_ := set $hooks "PreToolUse" (append $pre (dict "matcher" "Bash" "hooks" (list (dict "type" "command" "command" $guard "timeout" 5)))) -}}
 {{- $config = setValueAtPath "hooks" $hooks $config -}}

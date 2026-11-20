@@ -20,7 +20,8 @@ def run(command, background=True, tool="Bash"):
     "R=x; agent-run audit --repo . --packet p.md --candidate HEAD &>log",
     "timeout 3700 ~/.local/bin/agent-run --json ask --model sol --brief b.md",
     "for f in a b\ndo\n  test -f $f\ndone\nagent-run sol --repo . --brief b.md",
-    "agent-run audit --name audit-nohup --repo . --packet p.md --candidate abc1234",
+    "agent-run ask --name audit-nohup --model sol --brief b.md",
+    "MODE=x timeout 30 agent-run ask --model sol --brief b.md",
     "agent-run ask --model sol --brief ~/nohup/b.md",
     "agent-run ask --name nohup --model sol --brief review/setsid/b.md",
     "agent-run ask --model sol --name x \\\n  --brief b.md",
@@ -45,6 +46,7 @@ def test_one_background_launch_passes(command):
     ("# agent-run ask --model sol\nagent-run list", False),
     ("echo \"run agent-run ask later\"", False),
     ("setsid --fork sleep 1", False),
+    ("cat <<'END-OF-TEXT'\nagent-run ask --model sol &\nEND-OF-TEXT", False),
     ("echo see if agent-run ask works", False),
     ("echo check if agent-run ask is installed; command -v agent-run ask", False),
     ("agent-run ask --model $seat --help", False),
@@ -75,7 +77,10 @@ def test_non_launches_pass(command, background):
     ("\"$HOME/.local/bin/agent-run\" ask --model sol --brief b.md", False, "run_in_background"),
     ("setsid --fork agent-run ask --model sol --brief b.md", True, "detach"),
     ("setsid -f agent-run ask --model sol --brief b.md", True, "detach"),
-    ("/usr/bin/nohup agent-run ask --model sol --brief b.md &", True, "detach"),
+    ("/usr/bin/nohup agent-run ask --model sol --brief b.md", True, "detach"),
+    ("env MODE=x nohup agent-run ask --model sol --brief b.md", True, "detach"),
+    ("cat <<EOF\nEOF\nagent-run ask --model sol --brief b.md", False, "run_in_background"),
+    ("cat <<<EOF\nagent-run ask --model sol --brief b.md\ncat <<EOF\nbody\nEOF", False, "run_in_background"),
     ("result=\"$(agent-run ask --model sol --brief \"$brief\")\"", False, "run_in_background"),
     ("a=\"$(agent-run ask --brief \"$x\")\"; agent-run ask --brief b.md", True, "one agent-run"),
     ("for s in sol opus; do out=\"$(agent-run ask --model \"$s\" --brief \"brief-$s.md\")\"; done", True, "one agent-run"),
@@ -89,7 +94,23 @@ def test_launches_that_cannot_notify_are_rejected(command, background, reason):
     assert code == 2 and reason in err
 
 
+def test_background_must_be_the_boolean_true():
+    for value in (1, "true", "false"):
+        event = {"tool_name": "Bash", "tool_input": {"command": "agent-run ask --brief b.md", "run_in_background": value}}
+        p = subprocess.run([sys.executable, str(GUARD)], input=json.dumps(event), capture_output=True, text=True)
+        assert p.returncode == 2
+
+
+def test_slow_inputs_finish_quickly():
+    import time
+    for command in ("echo '" + '"$(' * 9000 + "'", "timeout --help -- -1 " * 16 + "true", "x" * 200000):
+        start = time.monotonic()
+        run(command)
+        assert time.monotonic() - start < 2
+
+
 def test_other_tools_and_bad_input_pass():
     assert run("agent-run ask --model sol", False, tool="Read") == (0, "")
-    p = subprocess.run([sys.executable, str(GUARD)], input="not json", capture_output=True, text=True)
-    assert p.returncode == 0
+    for bad in ("not json", "null", '{"tool_name": "Bash", "tool_input": {"command": 1}}'):
+        p = subprocess.run([sys.executable, str(GUARD)], input=bad, capture_output=True, text=True)
+        assert p.returncode == 0, bad

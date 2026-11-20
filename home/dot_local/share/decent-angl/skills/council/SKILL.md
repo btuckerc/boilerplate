@@ -24,10 +24,14 @@ session where it is unavailable or refuses (`AGENT_LOCAL_ONLY`), say so and stop
 | Fable | `fable` | Simplifier: what to cut | default |
 | Astra | `astra` (GPT-6.2 Astra high) | Scenario: walk the real use end to end | `full council` or named |
 | Opus | `opus` (fresh Opus 5.5 high) | Skeptic: attack the packet's assumptions | default |
+| Neon | `neon` (Gemini 4 Neon high, Antigravity) | Writer: voice, clarity, the fresher angle | default for creative or written work; otherwise named |
 
 - "Sol high council" seats Sol alone. Named seats replace the default set.
 - Seats are read-only: Codex seats run in a read-only sandbox, Claude seats
-  with Read/Grep/Glob/WebSearch/WebFetch only and no MCP. `agent-run` fixes
+  with Read/Grep/Glob/WebSearch/WebFetch only and no MCP. Neon has no tools:
+  launch it with `--attach` for the packet, diff and any file it must read
+  (UTF-8, 1 MiB total) in place of `--repo`/`--add-dir`; only one Neon run
+  goes at a time. `agent-run` fixes
   model and effort; no seat takes a temperature: diversity is model family,
   effort and emphasis.
   A usable receipt has `model_ok`, `effort_ok` and `sandbox_ok` all true:

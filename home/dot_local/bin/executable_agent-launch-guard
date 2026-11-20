@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Claude Code PreToolUse hook: agent-run launches must notify the session, and agy is Tucker's.
 
-Antigravity's agy runs on Tucker's personal Google sign-in, which Google's terms reserve for his
-own interactive use; another AI agent launching it risks suspending his account. Any command that
-starts agy or antigravity is rejected unless it only asks for --version, --help or the changelog.
+Antigravity's agy runs on Tucker's personal Google sign-in; Google bans wrapping its headless
+mode in another vendor's agent. Any command that starts agy or antigravity is rejected unless it
+only asks for --version, --help or the changelog: agents reach Neon only through agent-run's
+single ACP lane (agent-run-acp).
 
 A launch only wakes the director when it is its own Bash call with
 run_in_background. Detached launches (`&`, nohup, setsid, disown) and
@@ -104,8 +105,8 @@ def problem(tool_input):
         rest = re.split(r"[;&|\n`]", SUBSTITUTION.sub(" ", text[m.end():]), maxsplit=1)[0]
         return HELP.search(" ".join((m.group(2), m.group(3), rest)))
     if any(not AGY_HARMLESS.fullmatch(re.sub(r"\s[0-9]*[<>]+&?[ \t]*\S*", " ", m.group(1))) for m in AGY.finditer(text)):
-        return ("agy runs on Tucker's personal Google sign-in, which Google's terms reserve for his own "
-                "interactive use; do not launch it from an agent (ask Tucker to run it himself)")
+        return ("agy runs on Tucker's personal Google sign-in, and Google bans wrapping it in agents: "
+                "do not launch it yourself; Neon goes through agent-run ask --model neon")
     launches = [m for m in LAUNCH.finditer(text) if not asks_for_help(m)]
     if not launches:
         return None

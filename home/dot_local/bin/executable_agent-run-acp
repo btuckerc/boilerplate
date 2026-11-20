@@ -1,0 +1,315 @@
+#!/usr/bin/env python3
+"""One text-only Antigravity turn over ACP for agent-run's Neon lane.
+
+Mirrors T3 Code's Antigravity text generation (apps/server/src/textGeneration/
+AntigravityTextGeneration.ts): the official, unmodified `agy acp` binary signs
+in with its own oauth-personal flow; this client never reads its credentials.
+It starts one session in an empty directory, selects the model and thinking
+level, sends one prompt with every tool, file, terminal and question request
+refused, and fails the turn if the agent starts tool work or writes files.
+
+stdin: the prompt. stdout: the JSON-RPC traffic as JSONL ({"dir", "msg"}).
+--result receives the agent's reply text. Standard library only.
+"""
+import argparse
+import json
+import os
+from pathlib import Path
+import queue
+import re
+import shutil
+import subprocess
+import sys
+import threading
+import time
+
+AUTH_PREFIX = "Open the following link to authenticate the ACP server: "
+MAX_OUTPUT_CHARS = 128_000
+# agentInfo.name: the ACP Registry build and T3's fixture say antigravity-acp; agy 1.5.13 says this.
+AGENT_NAMES = {"antigravity-acp", "Antigravity ACP Server"}
+PREAMBLE = ("Use only the input below. Do not use tools, read or write files, run commands, "
+            "or ask questions.\nReturn only the requested JSON object.\n\n")
+CONFIG_SIZE_LIMIT = 64_000
+
+
+class Refused(RuntimeError):
+    pass
+
+
+def global_config_problem(profile):
+    """T3 refuses helper turns when global hooks or MCP servers could run before a denial."""
+    for name, key in (("hooks.json", "hooks"), ("mcp_config.json", "mcpServers")):
+        path = profile / "config" / name
+        if not path.exists():
+            continue
+        if not path.is_file() or path.stat().st_size > CONFIG_SIZE_LIMIT:
+            return f"{path} is not a small regular file"
+        text = path.read_text(errors="replace").strip()
+        if not text:
+            continue
+        try:
+            value = json.loads(text)
+            value = value.get(key, value) if isinstance(value, dict) else value
+        except ValueError:
+            return f"{path} is not JSON"
+        if not isinstance(value, dict) or value:
+            return f"{path} configures global {key}; the Neon lane runs only without them"
+    return None
+
+
+def select_values(option):
+    values = []
+    for entry in option.get("options") or []:
+        if isinstance(entry, dict) and "value" in entry:
+            values.append(entry["value"])
+        elif isinstance(entry, dict):
+            values.extend(item.get("value") for item in entry.get("options") or [] if isinstance(item, dict))
+    return values
+
+
+class Client:
+    def __init__(self, command, cwd, log):
+        self.log = log
+        self.proc = subprocess.Popen(command, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                     stderr=None, bufsize=0)
+        self.next_id = 0
+        self.replies = {}
+        self.incoming = queue.Queue()
+        self.text = []
+        self.text_chars = 0
+        self.config = []
+        self.problem = None
+        self.permission_requests = 0
+        self.session_id = None
+        threading.Thread(target=self.read, daemon=True).start()
+
+    def record(self, direction, msg):
+        self.log.write(json.dumps({"dir": direction, "at": time.time(), "msg": msg}) + "\n")
+        self.log.flush()
+
+    def send(self, msg):
+        self.record("out", msg)
+        self.proc.stdin.write((json.dumps(msg) + "\n").encode())
+        self.proc.stdin.flush()
+
+    def read(self):
+        for raw in self.proc.stdout:
+            line = raw.decode("utf-8", "replace").rstrip("\r\n")
+            if not line.strip():
+                continue
+            if line.startswith(AUTH_PREFIX):
+                self.record("in", {"auth_required": True})
+                self.incoming.put(("fatal", "Antigravity is not signed in on this host: Tucker runs agy once himself"))
+                return
+            try:
+                msg = json.loads(line)
+            except ValueError:
+                self.record("in", {"non_json": line[:2000]})
+                continue
+            self.record("in", msg)
+            self.incoming.put(("msg", msg))
+        self.incoming.put(("eof", None))
+
+    def fail(self, problem):
+        self.problem = self.problem or problem
+
+    def handle(self, msg, deadline):
+        method = msg.get("method")
+        if method is None:
+            self.replies[msg.get("id")] = msg
+            return
+        params = msg.get("params") or {}
+        if "id" in msg:  # a request from the agent: refuse every one, as T3's helper does
+            if method == "session/request_permission":
+                self.permission_requests += 1
+                self.fail("Antigravity requested a tool permission")
+                self.send({"jsonrpc": "2.0", "id": msg["id"], "result": {"outcome": {"outcome": "cancelled"}}})
+            elif method == "elicitation/create":
+                self.fail("Antigravity asked a question")
+                self.send({"jsonrpc": "2.0", "id": msg["id"], "result": {"action": "decline"}})
+            else:
+                self.fail(f"Antigravity requested {method}")
+                self.send({"jsonrpc": "2.0", "id": msg["id"],
+                           "error": {"code": -32601, "message": "Tools and user input are disabled for this client."}})
+            return
+        if method != "session/update":
+            return
+        update = params.get("update") or {}
+        kind = update.get("sessionUpdate")
+        if kind in {"tool_call", "tool_call_update"}:
+            self.fail("Antigravity started tool work")
+        elif kind == "config_option_update" and isinstance(update.get("configOptions"), list):
+            self.config = update["configOptions"]
+        elif kind == "agent_message_chunk" and params.get("sessionId") == self.session_id:
+            content = update.get("content") or {}
+            if content.get("type") == "text":
+                self.text_chars += len(content.get("text", ""))
+                if self.text_chars > MAX_OUTPUT_CHARS:
+                    self.fail("Antigravity exceeded the output limit")
+                else:
+                    self.text.append(content.get("text", ""))
+
+    def pump(self, deadline, until):
+        while not until():
+            left = deadline - time.monotonic()
+            if left <= 0:
+                raise Refused("timed out waiting for Antigravity")
+            try:
+                kind, value = self.incoming.get(timeout=min(left, 1))
+            except queue.Empty:
+                continue
+            if kind == "fatal":
+                raise Refused(value)
+            if kind == "eof":
+                raise Refused(f"agy acp exited ({self.proc.poll()})")
+            self.handle(value, deadline)
+
+    def request(self, method, params, deadline):
+        self.next_id += 1
+        rid = self.next_id
+        self.send({"jsonrpc": "2.0", "id": rid, "method": method, "params": params})
+        self.pump(deadline, lambda: rid in self.replies)
+        reply = self.replies.pop(rid)
+        if "error" in reply:
+            raise Refused(f"{method} failed: {json.dumps(reply['error'])[:500]}")
+        return reply.get("result") or {}
+
+    def close(self):
+        try:
+            self.proc.stdin.close()
+        except OSError:
+            pass
+        try:
+            self.proc.wait(5)
+        except subprocess.TimeoutExpired:
+            self.proc.terminate()
+            try:
+                self.proc.wait(5)
+            except subprocess.TimeoutExpired:
+                self.proc.kill()
+                self.proc.wait()
+
+
+def remove_session_files(profile, session):
+    """As T3 does for helper turns: keep this session out of Tucker's agy history.
+    Only the exact per-session entries, never through a link."""
+    if not isinstance(session, str) or not re.fullmatch(r"[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}", session):
+        return
+    base = profile / "antigravity-cli"
+    if base.is_symlink() or not base.is_dir():
+        return
+    for path in (base / "conversations" / f"{session}.db", base / "annotations" / f"{session}.pbtxt",
+                 base / "brain" / session):
+        if path.parent.is_symlink() or path.is_symlink():
+            continue
+        if path.is_dir():
+            shutil.rmtree(path)
+        elif path.is_file():
+            path.unlink()
+
+
+def choose(client, session, config_id, value, deadline):
+    result = client.request("session/set_config_option",
+                            {"sessionId": session, "configId": config_id, "value": value}, deadline)
+    if isinstance(result.get("configOptions"), list):
+        client.config = result["configOptions"]
+
+
+def run(args, prompt, log):
+    cwd = Path.cwd()
+    if any(cwd.iterdir()):
+        raise Refused(f"working directory {cwd} is not empty")
+    profile = Path(os.environ.get("GEMINI_HOME", Path.home() / ".gemini"))
+    problem = global_config_problem(profile)
+    if problem:
+        raise Refused(problem)
+    agy = shutil.which("agy") or str(Path.home() / ".local/bin/agy")
+    deadline = time.monotonic() + args.timeout
+    client = Client([agy, "acp"], cwd, log)
+    try:
+        init = client.request("initialize", {
+            "protocolVersion": 2,
+            "clientCapabilities": {"fs": {"readTextFile": False, "writeTextFile": False}, "terminal": False},
+            "clientInfo": {"name": "agent-run", "title": "agent-run (Tucker's council)", "version": "1"},
+        }, deadline)
+        agent = (init.get("agentInfo") or {}).get("name")
+        if agent not in AGENT_NAMES:
+            raise Refused(f"unexpected ACP agent {agent!r}")
+        client.request("authenticate", {"methodId": "oauth-personal"}, deadline)
+        created = client.request("session/new", {"cwd": str(cwd), "mcpServers": []}, deadline)
+        client.session_id = session = created.get("sessionId")
+        if not isinstance(session, str) or not session:
+            raise Refused("session/new returned no session id")
+        client.config = created.get("configOptions") or client.config
+        modes = (created.get("modes") or {}).get("availableModes") or []
+        if any(mode.get("id") == "default" for mode in modes if isinstance(mode, dict)):
+            client.request("session/set_mode", {"sessionId": session, "modeId": "default"}, deadline)
+        model = next((o for o in client.config if o.get("id") == "model"), None)
+        if model is None or args.model not in select_values(model):
+            offered = select_values(model) if model else []
+            raise Refused(f"model {args.model} is not offered to this account (offered: {offered})")
+        if model.get("currentValue") != args.model:
+            choose(client, session, "model", args.model, deadline)
+        thinking = next((o for o in client.config if o.get("category") == "thought_level"), None)
+        if thinking is None or args.thinking not in select_values(thinking):
+            offered = select_values(thinking) if thinking else []
+            raise Refused(f"thinking level {args.thinking} is not offered for {args.model} (offered: {offered})")
+        if thinking.get("currentValue") != args.thinking:
+            choose(client, session, thinking["id"], args.thinking, deadline)
+        thinking_id = thinking["id"]
+        selected = {"model": next((o.get("currentValue") for o in client.config if o.get("id") == "model"), None),
+                    "thinking": next((o.get("currentValue") for o in client.config if o.get("id") == thinking_id), None),
+                    "options": {o.get("id"): o.get("currentValue") for o in client.config}}
+        log.write(json.dumps({"dir": "client", "selected": selected}) + "\n")
+        reply = client.request("session/prompt", {
+            "sessionId": session, "prompt": [{"type": "text", "text": PREAMBLE + prompt}]}, deadline)
+        # Drain updates that arrived with the reply.
+        time.sleep(0.2)
+        while not client.incoming.empty():
+            kind, value = client.incoming.get()
+            if kind == "msg":
+                client.handle(value, deadline)
+        stop = reply.get("stopReason")
+        if stop != "end_turn":
+            client.fail(f"turn stopped with {stop!r}")
+        try:
+            client.request("session/close", {"sessionId": session}, min(deadline, time.monotonic() + 10))
+        except Refused:
+            pass
+    finally:
+        client.close()
+        remove_session_files(profile, client.session_id)
+    if any(path.name not in {".agents", ".gemini", "skills"} for path in cwd.rglob("*")) or any(
+            path.is_file() or path.is_symlink() for path in cwd.rglob("*")):
+        client.fail("Antigravity wrote files in the empty working directory")
+    text = "".join(client.text).strip()
+    if not text:
+        client.fail("Antigravity returned no text")
+    return text, client.problem, stop
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--model", required=True)
+    parser.add_argument("--thinking", required=True)
+    parser.add_argument("--result", required=True)
+    parser.add_argument("--timeout", type=float, default=1800)
+    args = parser.parse_args(argv)
+    prompt = sys.stdin.read()
+    log = sys.stdout
+    try:
+        text, problem, stop = run(args, prompt, log)
+    except (Refused, OSError) as exc:
+        log.write(json.dumps({"dir": "client", "error": str(exc)}) + "\n")
+        print(f"agent-run-acp: {exc}", file=sys.stderr)
+        return 1
+    Path(args.result).write_text(text)
+    log.write(json.dumps({"dir": "client", "stop": stop, "problem": problem, "chars": len(text)}) + "\n")
+    if problem:
+        print(f"agent-run-acp: {problem}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

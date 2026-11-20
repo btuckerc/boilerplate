@@ -142,6 +142,7 @@ def test_other_tools_and_bad_input_pass():
     "agy", "agy -p 'summarize this' --model gemini-4-neon-high", "~/.local/bin/agy acp",
     "cd repo && antigravity models", "timeout 60 agy -p hi", "out=$(agy -p hi)",
     "~/.local/share/antigravity-cli/current/antigravity --print hi",
+    "agent-run-acp --model gemini-4-neon --thinking high --result r.txt",
 ])
 def test_agy_is_never_launched_by_an_agent(command):
     for background in (False, True):

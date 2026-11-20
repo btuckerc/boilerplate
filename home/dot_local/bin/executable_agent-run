@@ -1010,6 +1010,9 @@ def verify_acp(run, meta):
                   and isinstance(r.get("msg"), dict) and r["msg"].get("id") == 1
                   and isinstance(r["msg"].get("result"), dict)), None)
     finish = next((r for r in records if r.get("dir") == "client" and "stop" in r), None)
+    refusal = next((r["error"] for r in records if r.get("dir") == "client" and "error" in r), None)
+    if refusal:
+        issues.append("Neon refused before or during the turn: " + str(refusal)[:500])
     meta["child"]["session_id"] = next((r["msg"]["result"].get("sessionId") for r in records
                                         if r.get("dir") == "in" and isinstance(r.get("msg"), dict)
                                         and isinstance(r["msg"].get("result"), dict)
@@ -1024,17 +1027,20 @@ def verify_acp(run, meta):
                and "method" not in r["msg"]]
     granted = [m for m in replies if "error" not in m and m.get("result") not in (
         {"outcome": {"outcome": "cancelled"}}, {"action": "decline"})]
-    verification["sandbox_ok"] = not granted and isinstance(finish, dict) and finish.get("problem") is None
+    verification["sandbox_ok"] = (not granted and isinstance(finish, dict) and finish.get("problem") is None
+                                  and finish.get("stop") == "end_turn")
     if isinstance(finish, dict) and finish.get("problem"):
         issues.append("ACP turn: " + str(finish["problem"]))
     for field in ("model_ok", "effort_ok", "sandbox_ok"):
         if verification[field] is not True:
             issues.append(f"ACP {field}: missing or mismatched client log attestation")
     reply = run / "child" / "reply.txt"
-    if reply.is_file() and not issues:
+    if not issues:
         try:
-            atomic_json(run / "result.json", reply_json(read_bytes(reply, root=run / "child").decode()))
-        except ValueError as exc:
+            value = reply_json(read_bytes(reply, root=run / "child").decode())
+            validate(value, json.loads(read_bytes(run / "schema.json")))
+            atomic_json(run / "result.json", value)  # published only once it matches the schema
+        except (OSError, ValueError) as exc:
             issues.append("ACP reply is not the schema JSON: " + str(exc)[:200])
     return verification
 
@@ -1477,6 +1483,22 @@ def launch_locked(args, root, slot, runs):
         sandbox = "bwrap"
     if harness == "codex":
         strict_schema(schema)
+    attachments = b""
+    if harness == "agy-acp":  # read before the run exists, so a bad file leaves nothing behind
+        if args.add_dir:
+            raise ValueError("neon has no file access: pass files with --attach, not --add-dir")
+        files = [Path(name).expanduser().resolve() for name in args.attach]
+        for path in files:
+            if not path.is_file():
+                raise ValueError(f"attachment is not a regular file: {path}")
+        if sum(path.stat().st_size for path in files) > MAX_ATTACH_BYTES:
+            raise ValueError(f"attachments exceed {MAX_ATTACH_BYTES} bytes")
+        for path in files:
+            data = path.read_bytes()[:MAX_ATTACH_BYTES + 1]
+            data.decode("utf-8")  # text only
+            attachments += f"\n--- attached file {path} ---\n".encode() + data
+    elif getattr(args, "attach", None):
+        raise ValueError("--attach is for the neon seat; other seats read files with --add-dir")
     run_id = args.run_id
     (root / run_id).mkdir(mode=0o700)
     run = runs.enter_context(root.open_dir(run_id))
@@ -1486,18 +1508,8 @@ def launch_locked(args, root, slot, runs):
     child.mkdir()
     if lane == "sol":
         (child / "tmp").mkdir()
-    attachments = b""
     if harness == "agy-acp":
         (child / "cwd").mkdir()
-        for name in args.attach:
-            path = Path(name).expanduser().resolve()
-            data = path.read_bytes()
-            data.decode("utf-8")  # text only
-            attachments += f"\n--- attached file {path} ---\n".encode() + data
-            if len(attachments) > MAX_ATTACH_BYTES:
-                raise ValueError(f"attachments exceed {MAX_ATTACH_BYTES} bytes")
-    elif getattr(args, "attach", None):
-        raise ValueError("--attach is for the neon seat; other seats read files with --add-dir")
     atomic_bytes(run / "brief.md", brief)
     atomic_bytes(run / "events.jsonl", b"")
     atomic_bytes(run / "stderr.log", b"")

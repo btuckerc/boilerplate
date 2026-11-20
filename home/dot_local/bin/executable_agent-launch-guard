@@ -31,7 +31,7 @@ VALUE = r"(?:[^\s;&|()`$]|\$\([^()\n]*\)|\$(?!\())*"  # an assignment value, $(.
 START = (r"(?:^|[;&|({`\n]|\$\()\s*(?:(?:do|then|else|elif|if|while|until|!)\s+)*"
          r"(?:(?:(?:" + W + r"/)?(?:exec|time|nice|nohup|setsid|env)(?:[ \t]+-[^\s\d;&|()`]" + W + r")*"
          r"|(?:" + W + r"/)?timeout(?:[ \t]+-" + W + r")*[ \t]+\d" + W + r"|[A-Za-z_]\w*=" + VALUE + r")[ \t]+)*")
-AGY = re.compile(START + r"(?:" + W + r"/)?(?:agy|antigravity)(?=[ \t;&|)\n]|$)([^;&|\n`]*)")
+AGY = re.compile(START + r"(?:" + W + r"/)?(?:agy|antigravity|agent-run-acp)(?=[ \t;&|)\n]|$)([^;&|\n`]*)")
 AGY_HARMLESS = re.compile(r"\s*(?:--version|-v|--help|-h|help|changelog)\s*")
 LAUNCH = re.compile(START + r"(?P<exe>(?:" + W + r"/)?agent-run)((?:[ \t]+-[\w-]+)*)[ \t]+(?:sol|ask|audit|local)\b"
                     r"((?:[^;&|\n)`$]|\$(?!\())*)")

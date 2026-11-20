@@ -87,6 +87,13 @@ agent-run ask --model <seat> --name <run>-<seat>-rN --repo <run>/tree-rN \
   --add-dir <run> --schema <run>/schema.json --brief <run>/brief-<seat>-rN.md --timeout 1800
 ```
 
+Neon instead attaches what its brief names (the tree is not readable to it):
+
+```
+agent-run ask --model neon --name <run>-neon-rN --schema <run>/schema.json \
+  --attach <run>/packet.md --attach <run>/diff-rN.patch --brief <run>/brief-neon-rN.md --timeout 1800
+```
+
 Each run is fresh and keeps nothing between rounds, so a seat's later brief
 carries its own previous result. The run prints its id and result path; read
 the result JSON from there. Round-1 brief, with a distinct id letter per seat:

@@ -2555,28 +2555,31 @@ def test_r9_gc_tmp_error_includes_macos_manual_recovery(tmp_path, monkeypatch):
     assert "chmod -RN" in saved and "chflags -R nouchg" in saved
 
 
-FAKE_AGY = r'''#!/usr/bin/env python3
+
+FAKE_AGY = r"""#!/usr/bin/env python3
 import json, os, pathlib, sys
 mode = os.environ.get("FAKE_AGY_MODE", "ok")
 record = pathlib.Path(os.environ["FAKE_AGY_RECORD"])
+profile = pathlib.Path(os.environ["HOME"]) / ".gemini" / "antigravity-cli"
 seen = []
 assert sys.argv[1:] == ["acp"], sys.argv
 if mode == "auth":
     print("Open the following link to authenticate the ACP server: https://accounts.example.invalid/x", flush=True)
     sys.stdin.read()
     sys.exit(0)
+session = os.environ.get("FAKE_AGY_SESSION", "4c2f6a2e-1111-4222-8333-944455556666")
 config = [
     {"id": "model", "type": "select", "currentValue": "gemini-3.8-flash",
      "options": [{"value": "gemini-3.8-flash"}, {"group": "g", "name": "Gemini 4",
                  "options": [{"value": "gemini-4-neon"}]}]},
-    {"id": "thinking", "category": "thought_level", "type": "select", "currentValue": "medium",
+    {"id": "thought_level", "category": "thought_level", "type": "select", "currentValue": "medium",
      "options": [{"value": "low"}, {"value": "medium"}, {"value": "high"}]},
 ]
 if mode == "no-neon":
     config[0]["options"] = [{"value": "gemini-3.8-flash"}]
 def send(msg):
     sys.stdout.write(json.dumps(msg) + "\n"); sys.stdout.flush()
-def update(session, body):
+def update(body):
     send({"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": session, "update": body}})
 reply = {"paths": [], "checks_run": [], "summary": "neon reviewed the prose", "blockers": []}
 for line in sys.stdin:
@@ -2584,22 +2587,33 @@ for line in sys.stdin:
     seen.append(msg)
     record.write_text(json.dumps({"seen": seen, "cwd": os.getcwd()}))
     method, rid, params = msg.get("method"), msg.get("id"), msg.get("params") or {}
-    if method is None:
+    if method is None or rid is None:
         continue
     if method == "initialize":
-        send({"jsonrpc": "2.0", "id": rid, "result": {"protocolVersion": 2,
+        send({"jsonrpc": "2.0", "id": rid, "result": {"protocolVersion": 3 if mode == "proto3" else 1,
               "agentInfo": {"name": "Antigravity ACP Server", "version": "1.5.13"}}})
     elif method == "session/new":
-        send({"jsonrpc": "2.0", "id": rid, "result": {"sessionId": "4c2f6a2e-1111-4222-8333-944455556666",
-              "modes": {"currentModeId": "default", "availableModes": [{"id": "default"}, {"id": "plan"}]},
+        for sub, name in (("conversations", session + ".db"), ("annotations", session + ".pbtxt")):
+            (profile / sub).mkdir(parents=True, exist_ok=True)
+            (profile / sub / name).write_text("this session")
+        (profile / "brain" / session).mkdir(parents=True, exist_ok=True)
+        (profile / "brain" / session / "note").write_text("b")
+        send({"jsonrpc": "2.0", "id": rid, "result": {"sessionId": session,
+              "modes": {"currentModeId": "plan", "availableModes": [{"id": "default"}, {"id": "plan"}]},
               "configOptions": config}})
+    elif method == "session/set_mode":
+        if mode == "setup-tool":
+            update({"sessionUpdate": "tool_call", "toolCallId": "t0", "kind": "read"})
+        if mode == "setup-text":
+            update({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": json.dumps(reply)}})
+        send({"jsonrpc": "2.0", "id": rid, "result": {}})
     elif method == "session/set_config_option":
-        for option in config:
-            if option["id"] == params["configId"]:
-                option["currentValue"] = params["value"]
+        if mode != "unapplied":
+            for option in config:
+                if option["id"] == params["configId"]:
+                    option["currentValue"] = params["value"]
         send({"jsonrpc": "2.0", "id": rid, "result": {"configOptions": config}})
     elif method == "session/prompt":
-        session = params["sessionId"]
         if mode == "permission":
             send({"jsonrpc": "2.0", "id": "perm-1", "method": "session/request_permission",
                   "params": {"sessionId": session, "toolCall": {"toolCallId": "t1", "kind": "edit"},
@@ -2607,38 +2621,45 @@ for line in sys.stdin:
             seen.append(json.loads(sys.stdin.readline()))
             record.write_text(json.dumps({"seen": seen, "cwd": os.getcwd()}))
         if mode == "tool":
-            update(session, {"sessionUpdate": "tool_call", "toolCallId": "t1", "kind": "read", "title": "read"})
+            update({"sessionUpdate": "tool_call", "toolCallId": "t1", "kind": "read", "title": "read"})
+        if mode == "sleep":
+            import time; time.sleep(60)
         if mode == "write":
             pathlib.Path("notes.txt").write_text("x")
-        profile = pathlib.Path(os.environ["GEMINI_HOME"]) / "antigravity-cli"
-        for sub in ("conversations", "annotations", "brain"):
-            (profile / sub).mkdir(parents=True, exist_ok=True)
-        (profile / "conversations" / (session + ".db")).write_text("db")
-        (profile / "conversations" / "other.db").write_text("keep")
-        (profile / "annotations" / (session + ".pbtxt")).write_text("a")
-        (profile / "brain" / session).mkdir(exist_ok=True)
-        (profile / "brain" / session / "note").write_text("b")
-        text = json.dumps(reply)
+        if mode == "image":
+            update({"sessionUpdate": "agent_message_chunk", "content": {"type": "image", "data": "", "mimeType": "image/png"}})
+        if mode == "drift":
+            config[1]["currentValue"] = "low"
+            update({"sessionUpdate": "config_option_update", "configOptions": config})
+        text = json.dumps(reply if mode != "invalid" else {"summary": "only"})
         if mode == "fenced":
             text = "```json\n" + text + "\n```"
         if mode == "prose":
             text = "Here is my review: it reads well."
-        for i in range(0, len(text), 7):
-            update(session, {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": text[i:i + 7]}})
+        if mode != "setup-text":
+            for i in range(0, len(text), 7):
+                update({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": text[i:i + 7]}})
         send({"jsonrpc": "2.0", "id": rid, "result": {"stopReason": "end_turn"}})
+    elif method == "session/close":
+        send({"jsonrpc": "2.0", "id": rid, "result": {}})
+        if mode == "late":
+            send({"jsonrpc": "2.0", "id": "perm-2", "method": "session/request_permission",
+                  "params": {"sessionId": session, "toolCall": {"toolCallId": "t2", "kind": "execute"}, "options": []}})
     else:
         send({"jsonrpc": "2.0", "id": rid, "result": {}})
-'''
+"""
 
 
 @pytest.fixture
 def neon(environment, tmp_path):
     env, brief = environment
-    path = tmp_path / "bin" / "agy"
+    home = tmp_path / "home"
+    (home / ".local/bin").mkdir(parents=True)
+    (home / ".gemini/config").mkdir(parents=True)
+    path = home / ".local/bin/agy"
     path.write_text(FAKE_AGY)
     path.chmod(0o755)
-    env.update(FAKE_AGY_RECORD=str(tmp_path / "agy.json"), GEMINI_HOME=str(tmp_path / "gemini"))
-    (tmp_path / "gemini" / "config").mkdir(parents=True)
+    env.update(FAKE_AGY_RECORD=str(tmp_path / "agy.json"), HOME=str(home))
     return environment
 
 
@@ -2647,10 +2668,19 @@ def agy_seen(environment):
     return json.loads(Path(env["FAKE_AGY_RECORD"]).read_text())
 
 
+def profile_entries(environment):
+    env, _ = environment
+    root = Path(env["HOME"]) / ".gemini/antigravity-cli"
+    return sorted(p.relative_to(root).as_posix() for p in root.rglob("*"))
+
+
 @pytest.mark.parametrize("mode", ["ok", "fenced"])
 def test_neon_runs_one_text_only_acp_turn(neon, tmp_path, mode):
     env, brief = neon
     env["FAKE_AGY_MODE"] = mode
+    keep = Path(env["HOME"]) / ".gemini/antigravity-cli/conversations"
+    keep.mkdir(parents=True)
+    (keep / "11111111-2222-4333-8444-555555555555.db").write_text("Tucker's own session")
     attached = tmp_path / "chapter.md"
     attached.write_text("The lighthouse keeper counted ships.\n")
     p = invoke(neon, "ask", "--model", "neon", "--brief", brief, "--attach", attached)
@@ -2662,20 +2692,24 @@ def test_neon_runs_one_text_only_acp_turn(neon, tmp_path, mode):
     assert json.loads((run / "result.json").read_text())["summary"] == "neon reviewed the prose"
     record = agy_seen(neon)
     methods = [m.get("method") for m in record["seen"]]
-    assert methods[:3] == ["initialize", "authenticate", "session/new"]
+    assert methods == ["initialize", "authenticate", "session/new", "session/set_mode",
+                       "session/set_config_option", "session/set_config_option", "session/prompt", "session/close"]
     init = record["seen"][0]["params"]
     assert init["clientInfo"]["name"] == "agent-run"
     assert init["clientCapabilities"] == {"fs": {"readTextFile": False, "writeTextFile": False}, "terminal": False}
     assert record["seen"][1]["params"] == {"methodId": "oauth-personal"}
     assert record["seen"][2]["params"]["mcpServers"] == []
+    assert record["seen"][3]["params"]["modeId"] == "default"
     assert Path(record["cwd"]) == run / "child" / "cwd"
-    sets = [m["params"] for m in record["seen"] if m.get("method") == "session/set_config_option"]
-    assert [(s["configId"], s["value"]) for s in sets] == [("model", "gemini-4-neon"), ("thinking", "high")]
-    profile = Path(env["GEMINI_HOME"]) / "antigravity-cli"
-    assert sorted(p.name for p in profile.rglob("*")) == ["annotations", "brain", "conversations", "other.db"]
-    prompt = next(m for m in record["seen"] if m.get("method") == "session/prompt")["params"]["prompt"][0]["text"]
+    sets = [(m["params"]["configId"], m["params"]["value"]) for m in record["seen"] if m.get("method") == "session/set_config_option"]
+    assert sets == [("model", "gemini-4-neon"), ("thought_level", "high")]
+    prompt = record["seen"][6]["params"]["prompt"][0]["text"]
     assert prompt.startswith("Use only the input below. Do not use tools")
     assert "The lighthouse keeper counted ships." in prompt and "Stay in scope." in prompt
+    assert "You have no tools" in prompt
+    # Only this run's session files are removed; Tucker's own history stays.
+    assert profile_entries(neon) == ["annotations", "brain", "conversations",
+                                     "conversations/11111111-2222-4333-8444-555555555555.db"]
 
 
 @pytest.mark.parametrize("mode,issue", [
@@ -2683,6 +2717,10 @@ def test_neon_runs_one_text_only_acp_turn(neon, tmp_path, mode):
     ("tool", "started tool work"),
     ("write", "wrote files"),
     ("prose", "not the schema JSON"),
+    ("invalid", "not the schema JSON"),
+    ("image", "'image' content"),
+    ("drift", "selection changed during the turn"),
+    ("late", "after the turn"),
 ])
 def test_neon_refuses_tool_work_and_bad_replies(neon, mode, issue):
     env, brief = neon
@@ -2693,30 +2731,46 @@ def test_neon_refuses_tool_work_and_bad_replies(neon, mode, issue):
     assert meta["state"] in {"failed", "unverified"}
     assert issue in json.dumps(meta) + (run / "stderr.log").read_text()
     assert not (run / "result.json").exists()
+    seen = agy_seen(neon)["seen"]
+    assert [m.get("method") for m in seen].count("session/close") == 1
+    assert profile_entries(neon) == ["annotations", "brain", "conversations"]
     if mode == "permission":
-        answer = [m for m in agy_seen(neon)["seen"] if m.get("id") == "perm-1"]
-        assert answer == [{"jsonrpc": "2.0", "id": "perm-1", "result": {"outcome": {"outcome": "cancelled"}}}]
+        assert [m for m in seen if m.get("id") == "perm-1"] == [
+            {"jsonrpc": "2.0", "id": "perm-1", "result": {"outcome": {"outcome": "cancelled"}}}]
+    if mode == "tool":
+        assert any(m.get("method") == "session/cancel" for m in seen)
 
 
 @pytest.mark.parametrize("mode,setup,issue", [
     ("auth", None, "not signed in"),
+    ("proto3", None, "unsupported ACP protocol 3"),
     ("no-neon", None, "model gemini-4-neon is not offered"),
+    ("unapplied", None, "did not apply gemini-4-neon/high"),
+    ("setup-tool", None, "started tool work during setup"),
+    ("setup-text", None, "reply text outside the prompt"),
     ("ok", '{"mcpServers": {"x": {"command": "x"}}}', "configures global mcpServers"),
+    ("ok", "plugins", "holds global plugins"),
 ])
-def test_neon_stops_before_prompting_when_unready(neon, tmp_path, mode, setup, issue):
+def test_neon_stops_before_prompting_when_unready(neon, mode, setup, issue):
     env, brief = neon
     env["FAKE_AGY_MODE"] = mode
-    if setup:
-        (tmp_path / "gemini" / "config" / "mcp_config.json").write_text(setup)
+    config = Path(env["HOME"]) / ".gemini/config"
+    if setup == "plugins":
+        (config / "plugins/swarm").mkdir(parents=True)
+    elif setup:
+        (config / "mcp_config.json").write_text(setup)
     p = invoke(neon, "ask", "--model", "neon", "--brief", brief)
     assert p.returncode == 1
     run, meta = last_run(neon)
     assert issue in (run / "stderr.log").read_text()
+    assert any(issue in item for item in meta["verification"]["issues"]), meta["verification"]["issues"]
     seen = agy_seen(neon)["seen"] if Path(env["FAKE_AGY_RECORD"]).exists() else []
     assert not any(m.get("method") == "session/prompt" for m in seen)
+    if any(m.get("method") == "session/new" for m in seen):
+        assert seen[-1].get("method") == "session/close"
 
 
-def test_neon_has_one_slot_and_attach_is_neon_only(neon, tmp_path):
+def test_neon_lane_boundaries(neon, tmp_path):
     env, brief = neon
     root = tmp_path / "slots"
     first = runner.acquire_slot(root, kind="acp")
@@ -2725,3 +2779,40 @@ def test_neon_has_one_slot_and_attach_is_neon_only(neon, tmp_path):
     first.close()
     p = invoke(neon, "ask", "--model", "luna", "--brief", brief, "--attach", brief)
     assert p.returncode == 1 and "--attach is for the neon seat" in p.stderr
+    p = invoke(neon, "ask", "--model", "neon", "--brief", brief, "--add-dir", tmp_path)
+    assert p.returncode == 1 and "not --add-dir" in p.stderr
+    p = invoke(neon, "ask", "--model", "neon", "--brief", brief, "--attach", tmp_path / "missing.md")
+    assert p.returncode == 1 and "not a regular file" in p.stderr
+    assert not list(Path(env["AGENT_RUN_HOME"]).glob("*-ask-*"))
+    # The helper only runs under agent-run, and holds a host-wide lock while it does.
+    helper = BIN / "executable_agent-run-acp"
+    direct = subprocess.run([sys.executable, str(helper), "--model", "gemini-4-neon", "--thinking", "high",
+                             "--result", str(tmp_path / "r.txt")], env={**env, "AGENT_RUN_CHILD": ""},
+                            capture_output=True, text=True, input="")
+    assert direct.returncode == 3 and "agent-run ask --model neon" in direct.stderr
+    lock_path = Path(env["HOME"]) / ".local/state/agent-run-acp.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    import fcntl
+    with open(lock_path, "a") as held:
+        fcntl.flock(held, fcntl.LOCK_EX)
+        p = invoke(neon, "ask", "--model", "neon", "--brief", brief)
+    assert p.returncode == 1 and "another Neon turn is running" in json.dumps(last_run(neon)[1])
+
+
+def test_neon_cancel_still_removes_the_session(neon):
+    env, brief = neon
+    env["FAKE_AGY_MODE"] = "sleep"
+    proc = subprocess.Popen([sys.executable, str(RUN), "ask", "--model", "neon", "--name", "slow", "--brief", str(brief)],
+                            env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        record = Path(env["FAKE_AGY_RECORD"])
+        if record.exists() and '"session/prompt"' in record.read_text():
+            break
+        time.sleep(0.1)
+    run, _ = last_run(neon)
+    assert invoke(neon, "cancel", run.name).returncode == 0
+    proc.wait(30)
+    _, meta = last_run(neon)
+    assert meta["state"] == "cancelled"
+    assert profile_entries(neon) == ["annotations", "brain", "conversations"]

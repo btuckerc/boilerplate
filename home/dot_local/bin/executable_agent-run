@@ -71,22 +71,22 @@ Evidence is the packet's diffs, hashes and raw command output, and the files it
 names. Author plans, summaries and pointers are claims to check, never evidence.
 Try to break every acceptance item: changed paths, callers, consumers, rollback,
 and what the recorded checks did not exercise. PASS only when every acceptance
-item is evidenced. BLOCK when you can state a counterexample at file:line.
-UNVERIFIED when mandatory evidence cannot be obtained read-only; name it in
-missing_evidence. Severity: blocker breaks the contract; major is a likely defect;
-minor changes nothing in the verdict. PASS has no blocker/major findings or
-missing evidence. Make no edits and spawn nothing. Return only the schema JSON.
+item is evidenced. BLOCK when you can state a blocker or major counterexample at
+file:line. UNVERIFIED when mandatory evidence is absent from both the packet and
+read-only inspection; name it in missing_evidence (raw test output already
+recorded in the packet satisfies fixture-dependent checks that cannot run in a
+read-only sandbox). Severity matches agent-discover's impact scale: blocker =
+breaks the contract in normal use, or puts security, data, money or live output
+at risk (in normal use or from an attacker); major = plausible in normal use
+with visible harm; minor = needs rare outside conditions the contract does not
+name (narrow races, files locked by other programs, hand-edited input,
+pathological sizes, or documented limits of an advisory heuristic when a
+separate hard boundary enforces the invariant) or is cosmetic. Minor changes
+nothing in the verdict. PASS has no blocker/major findings or missing evidence.
+Make no edits and spawn nothing. Return only the schema JSON.
 """
 CODEX_MODELS = {"sol": ("gpt-6.2-sol", "xhigh"), "astra": ("gpt-6.2-astra", "high"),
                 "luna": ("gpt-6-luna", "low")}
-# Gemini through Tucker's own Antigravity sign-in, over ACP as T3 Code does: one
-# text-only turn at a time (its own single slot), every tool request refused.
-# Retired by default: Google's Nov 2026 forum guidance (threads 199021, 201688, 202874)
-# rules out another vendor's agent calling into agy on a personal plan. Neon is a
-# director Tucker starts instead; only Tucker re-enables this lane, per run.
-ACP_MODELS = {"neon": ("gemini-4-neon", "high")}
-ACP_AGENT_NAMES = {"antigravity-acp", "Antigravity ACP Server"}
-MAX_ATTACH_BYTES = 1024 * 1024
 DISABLE_FLAGS = ["--disable", "hooks", "--disable", "multi_agent", "--disable", "plugins",
                  "--disable", "apps", "--disable", "goals", "-c", "skills.include_instructions=false"]
 CLAUDE_TOOLS = {"Read", "Grep", "Glob", "WebSearch", "WebFetch", "StructuredOutput"}
@@ -651,11 +651,11 @@ def capture_patch(worktree, base, run):
     return [p.decode(errors="replace") for p in paths.split(b"\0") if p], diffstat
 
 
-def acquire_slot(root, local=False, kind=None):
-    kind = kind or ("local" if local else "cloud")
+def acquire_slot(root, local=False):
+    kind = "local" if local else "cloud"
     slots = Path(root) / ".slots"
     slots.mkdir(parents=True, exist_ok=True)
-    for i in range({"local": 4, "cloud": 3, "acp": 1}[kind]):
+    for i in range(4 if local else 3):
         f = open_lock(slots / f"{kind}-{i}.lock")
         try:
             fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -994,60 +994,6 @@ def verify_claude(run, meta, cwd):
     for field in ("model_ok", "effort_ok", "sandbox_ok"):
         if verification[field] is not True:
             verification["issues"].append(f"Claude {field}: missing or mismatched transcript attestation")
-    return verification
-
-
-def reply_json(text):
-    """The JSON object in an ACP reply, allowing one Markdown fence around it."""
-    text = text.strip()
-    fenced = re.fullmatch(r"```(?:json)?\s*\n(.*)\n```", text, re.S)
-    return json.loads(fenced.group(1) if fenced else text)
-
-
-def verify_acp(run, meta):
-    """Attest from the client's own JSON-RPC log: the agent, the selected model and
-    thinking level as Antigravity reported them, and that no request was granted."""
-    verification = blank_verification()
-    verification.update(sandbox_evidence="acp-client-log", attestation_evidence="acp-agent-config")
-    issues = verification["issues"]
-    records = list(jsonl(run / "events.jsonl", issues))
-    selected = next((r["selected"] for r in records if r.get("dir") == "client" and "selected" in r), None)
-    agent = next((r["msg"]["result"].get("agentInfo") for r in records if r.get("dir") == "in"
-                  and isinstance(r.get("msg"), dict) and r["msg"].get("id") == 1
-                  and isinstance(r["msg"].get("result"), dict)), None)
-    finish = next((r for r in records if r.get("dir") == "client" and "stop" in r), None)
-    refusal = next((r["error"] for r in records if r.get("dir") == "client" and "error" in r), None)
-    if refusal:
-        issues.append("Neon refused before or during the turn: " + str(refusal)[:500])
-    meta["child"]["session_id"] = next((r["msg"]["result"].get("sessionId") for r in records
-                                        if r.get("dir") == "in" and isinstance(r.get("msg"), dict)
-                                        and isinstance(r["msg"].get("result"), dict)
-                                        and "sessionId" in r["msg"]["result"]), None)
-    meta["agent_info"] = agent
-    if not isinstance(agent, dict) or agent.get("name") not in ACP_AGENT_NAMES:
-        issues.append("ACP agent is not Antigravity's")
-    verification["model_ok"] = isinstance(selected, dict) and selected.get("model") == meta["model"]
-    verification["effort_ok"] = isinstance(selected, dict) and selected.get("thinking") == meta["effort"]
-    # Replies the client sent to the agent's own requests: only refusals pass.
-    replies = [r["msg"] for r in records if r.get("dir") == "out" and isinstance(r.get("msg"), dict)
-               and "method" not in r["msg"]]
-    granted = [m for m in replies if "error" not in m and m.get("result") not in (
-        {"outcome": {"outcome": "cancelled"}}, {"action": "decline"})]
-    verification["sandbox_ok"] = (not granted and isinstance(finish, dict) and finish.get("problem") is None
-                                  and finish.get("stop") == "end_turn")
-    if isinstance(finish, dict) and finish.get("problem"):
-        issues.append("ACP turn: " + str(finish["problem"]))
-    for field in ("model_ok", "effort_ok", "sandbox_ok"):
-        if verification[field] is not True:
-            issues.append(f"ACP {field}: missing or mismatched client log attestation")
-    reply = run / "child" / "reply.txt"
-    if not issues:
-        try:
-            value = reply_json(read_bytes(reply, root=run / "child").decode())
-            validate(value, json.loads(read_bytes(run / "schema.json")))
-            atomic_json(run / "result.json", value)  # published only once it matches the schema
-        except (OSError, ValueError) as exc:
-            issues.append("ACP reply is not the schema JSON: " + str(exc)[:200])
     return verification
 
 
@@ -1423,13 +1369,6 @@ def audit_candidate(repo, given, packet):
 
 
 def prepare(args, root):
-    if getattr(args, "model", None) in ACP_MODELS:
-        if parent_identity(os.environ)["harness"] == "agy":
-            raise ValueError("neon is the director here: nothing may call back into agy")
-        if os.environ.get("AGENT_RUN_ALLOW_NEON_SEAT") != "1":
-            raise ValueError("the Neon seat is retired (Google forbids another vendor's agent calling into "
-                             "agy on a personal plan); start Neon as a director with agy instead. Only Tucker "
-                             "re-enables it, by setting AGENT_RUN_ALLOW_NEON_SEAT=1 himself")
     repo = Path(args.repo or os.getcwd()).expanduser().resolve()
     if args.lane == "audit":  # fail before queueing for a slot
         args.candidate = audit_candidate(repo, args.candidate, Path(args.packet).expanduser().read_bytes())
@@ -1447,16 +1386,14 @@ def launch(args):
         raise ValueError("name must be 1-128 letters, digits, underscores or hyphens")
     args.run_id = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S") + f"-{args.lane}-{args.name}"
     prepare(args, root)
-    kind = ("local" if args.lane == "local" else
-            "acp" if getattr(args, "model", None) in ACP_MODELS else "cloud")
-    slot = acquire_slot(root, kind=kind)
+    slot = acquire_slot(root, args.lane == "local")
     waited = slot is None
     if slot is None and args.wait:
         print(f"agent-run: queued for a worker slot, up to {args.wait:g}s", file=sys.stderr, flush=True)
         give_up = time.monotonic() + args.wait
         while slot is None and (left := give_up - time.monotonic()) > 0:
             time.sleep(min(1, left))  # the last scan lands at the deadline
-            slot = acquire_slot(root, kind=kind)
+            slot = acquire_slot(root, args.lane == "local")
     if slot is None:
         print("agent-run: all worker slots busy", file=sys.stderr)
         return 75
@@ -1487,8 +1424,6 @@ def launch_locked(args, root, slot, runs):
     if lane == "ask":
         if args.model in CODEX_MODELS:
             model, effort = CODEX_MODELS[args.model]
-        elif args.model in ACP_MODELS:
-            (model, effort), harness, sandbox = ACP_MODELS[args.model], "agy-acp", "acp-refuse-all"
         else:
             model = "claude-opus-5-5" if args.model == "opus" else "fable"
             effort, harness, sandbox = "high", "claude", "tool-allowlist"
@@ -1496,24 +1431,6 @@ def launch_locked(args, root, slot, runs):
         sandbox = "bwrap"
     if harness == "codex":
         strict_schema(schema)
-    attachments = b""
-    if harness == "agy-acp":  # read before the run exists, so a bad file leaves nothing behind
-        if args.add_dir:
-            raise ValueError("neon has no file access: pass files with --attach, not --add-dir")
-        files = [Path(name).expanduser().resolve() for name in args.attach]
-        for path in files:
-            if not path.is_file():
-                raise ValueError(f"attachment is not a regular file: {path}")
-        if sum(path.stat().st_size for path in files) > MAX_ATTACH_BYTES:
-            raise ValueError(f"attachments exceed {MAX_ATTACH_BYTES} bytes")
-        for path in files:
-            data = path.read_bytes()
-            data.decode("utf-8")  # text only
-            attachments += f"\n--- attached file {path} ---\n".encode() + data
-        if len(attachments) > MAX_ATTACH_BYTES + 4096 * len(files):  # grew since the size check
-            raise ValueError(f"attachments exceed {MAX_ATTACH_BYTES} bytes")
-    elif getattr(args, "attach", None):
-        raise ValueError("--attach is for the neon seat; other seats read files with --add-dir")
     run_id = args.run_id
     (root / run_id).mkdir(mode=0o700)
     run = runs.enter_context(root.open_dir(run_id))
@@ -1523,8 +1440,6 @@ def launch_locked(args, root, slot, runs):
     child.mkdir()
     if lane == "sol":
         (child / "tmp").mkdir()
-    if harness == "agy-acp":
-        (child / "cwd").mkdir()
     atomic_bytes(run / "brief.md", brief)
     atomic_bytes(run / "events.jsonl", b"")
     atomic_bytes(run / "stderr.log", b"")
@@ -1540,10 +1455,7 @@ def launch_locked(args, root, slot, runs):
             "state": "running", "exit_code": None, "tokens": None, "verification": blank_verification()}
     meta["worker_bytes_read"] = 0
     meta["verification"]["attestation_evidence"] = (
-        "omp-session-worker-writable" if lane == "local" else "transcript" if harness == "claude" else
-        "acp-agent-config" if harness == "agy-acp" else "rollout")
-    if attachments:
-        meta["attachments_sha256"] = hashlib.sha256(attachments).hexdigest()
+        "omp-session-worker-writable" if lane == "local" else "transcript" if harness == "claude" else "rollout")
     atomic_json(run / "meta.json", meta)
     append_index(root, meta)
     interrupted = [False]
@@ -1558,14 +1470,11 @@ def launch_locked(args, root, slot, runs):
     read_token = None
     try:
         network_note = ("WebSearch and WebFetch granted" if harness == "claude" else
-                        "none; every tool, file and command request is refused" if harness == "agy-acp" else
                         "granted to local vLLM" if lane == "local" else
                         "granted" if network else "not granted; Codex sandbox policy applies")
         acceptance = ("The director runs the acceptance check; you cannot execute processes. "
                       "In checks_run list the checks you could not run."
-                      if lane == "local" else
-                      "You have no tools: judge only from the brief and its attachments."
-                      if harness == "agy-acp" else "Run the brief's acceptance check yourself.")
+                      if lane == "local" else "Run the brief's acceptance check yourself.")
         prompt = WORKER_CONTRACT.format(acceptance=acceptance) + f"\nTime limit: {args.timeout:g} seconds. Network: {network_note}.\n"
         cwd = repo
         if lane in {"sol", "local"}:
@@ -1599,8 +1508,6 @@ def launch_locked(args, root, slot, runs):
             prompt += AUDIT_CONTRACT + f"\nCandidate: {candidate}\nPacket: {packet}\nCandidate files: {cwd}\n"
         else:
             prompt += "\nBrief:\n" + brief.decode()
-            if attachments:
-                prompt += "\nAttached files (all you can see):\n" + attachments.decode() + "\n--- end of attachments ---\n"
             if lane == "ask":
                 prompt += "\nThis is a read-only consult/extraction. Make no changes.\n"
         prompt += "\nOutput schema:\n" + json.dumps(schema) + "\n"
@@ -1622,12 +1529,6 @@ def launch_locked(args, root, slot, runs):
             command = local_sandbox(cwd, run, repo) + command
             meta["sandbox_probe_ok"] = True
             meta["profile_snapshot_before"] = profile_snapshot()
-        elif harness == "agy-acp":
-            helper = Path(__file__).resolve().with_name(
-                "executable_agent-run-acp" if Path(__file__).name.startswith("executable_") else "agent-run-acp")
-            command = [sys.executable, "-I", str(helper), "--model", model, "--thinking", effort,
-                       "--result", str(child / "reply.txt"), "--timeout", str(args.timeout)]
-            cwd = child / "cwd"
         elif harness == "claude":
             command = ["claude", "-p", "--safe-mode", "--model", model, "--effort", effort,
                        "--tools", "Read,Grep,Glob,WebSearch,WebFetch", "--disallowedTools", "mcp__*",
@@ -1679,8 +1580,6 @@ def launch_locked(args, root, slot, runs):
                         meta["verification"]["issues"].append("unreadable worker result: " + str(exc))
             elif harness == "claude":
                 meta["verification"] = verify_claude(run, meta, cwd)
-            elif harness == "agy-acp":
-                meta["verification"] = verify_acp(run, meta)
             else:
                 meta["verification"] = verify_local(run, meta)
             for field in ("model_ok", "effort_ok", "sandbox_ok"):
@@ -2028,7 +1927,7 @@ def main(argv=None):
                    if key in os.environ), None)
     if nested:
         print(f"agent-run: {nested} is set; worker environments cannot launch agent-run "
-              "(run it from Claude Code or a plain shell)", file=sys.stderr)
+              "(run it from a director session or a plain shell)", file=sys.stderr)
         return 3
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--json", action="store_true", help="machine-readable output")
@@ -2053,11 +1952,9 @@ def main(argv=None):
         if lane in {"sol", "local", "ask"}:
             sub.add_argument("--name")
         if lane == "ask":
-            sub.add_argument("--model", required=True, choices=[*CODEX_MODELS, "opus", "fable", *ACP_MODELS])
+            sub.add_argument("--model", required=True, choices=[*CODEX_MODELS, "opus", "fable"])
             sub.add_argument("--schema")
             sub.add_argument("--add-dir", action="append", default=[], metavar="DIR")
-            sub.add_argument("--attach", action="append", default=[], metavar="FILE",
-                             help="neon only: inline a UTF-8 text file into the prompt (it has no file access)")
     for lane in ("list", "show", "cancel", "gc"):
         sub = subs.add_parser(lane)
         sub.add_argument("--json", action="store_true", default=argparse.SUPPRESS)

@@ -81,9 +81,12 @@ regression tests for sync changes. Record offline hosts as unverified.
 Publishing scans outgoing
 history for credential paths (raw names, any encoding) and signatures, refuses
 if a scan errors or ripgrep does not work, and checks the committed source
-skills. Runtime paths are whatever `private_agent/.chezmoiignore` and
-`private_dot_codex/.chezmoiignore` declare (union with the published base, by
-chezmoi target name); keep new runtime files listed there.
+skills. Runtime paths are whatever `private_agent/.chezmoiignore`,
+`private_dot_codex/.chezmoiignore` and `private_dot_claude/.chezmoiignore`
+declare (union with the published base, by chezmoi target name), plus
+`GLOBAL_DENY` (which also covers Antigravity auth/DB/history/conversation
+files; `private_dot_gemini/.chezmoiignore` excludes the rest of `~/.gemini/`
+runtime state from chezmoi); keep new runtime files listed there.
 
 Omarchy changes must pass `omarchy-roaming-sync validate --strict`; OMP changes
 must pass `omp-baseline validate --strict`.

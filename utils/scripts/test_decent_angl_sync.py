@@ -638,6 +638,15 @@ echo apply >>"$HOME/live-apply.log"
     def test_publish_refuses_codex_runtime_path(self):
         self.publish_added_then_deleted("home/private_dot_codex/history.jsonl")
 
+    def test_publish_refuses_antigravity_runtime_paths_globally(self):
+        for path in ("home/private_dot_gemini/private_antigravity-cli/antigravity-oauth-token",
+                     "home/private_dot_gemini/private_antigravity-cli/conversation_summaries.db-journal",
+                     "home/private_dot_gemini/private_antigravity-cli/history.jsonl",
+                     "home/private_dot_gemini/private_antigravity-cli/conversations/c1.json"):
+            with self.subTest(path=path):
+                self.publish_added_then_deleted(path)
+                self.git("reset", "-q", "--hard", self.initial)
+
     def test_outgoing_commit_cannot_narrow_the_declaration(self):
         decl = "home/private_dot_omp/private_agent/.chezmoiignore"
         self.write(decl, "agent.db\n")

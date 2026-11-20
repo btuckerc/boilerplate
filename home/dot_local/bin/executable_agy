@@ -1,11 +1,21 @@
 #!/bin/sh
 # Antigravity CLI on Tucker's personal Google sign-in: he starts it himself (a Neon director in a
-# herdr pane); Google's terms bar another AI agent from launching or driving it, and
-# agent-launch-guard refuses that in Claude Code. AGENT_RUN_PARENT marks agy's process tree so
-# agent-run records the Neon director on its receipts and refuses to call back into agy.
-# As T3 Code runs it: the sign-in is stored under ~/.gemini rather than the desktop keyring (the
-# CLI does that when it sees SSH_CONNECTION), and ambient Google API keys or cloud credentials
-# never replace the personal login. The binary is the mise pin http:antigravity.
+# herdr pane); Google's terms bar any AI agent from launching or driving it. Both agent-launch-guard
+# (PreToolUse in Claude Code and Antigravity) and the session-marker check below refuse agent
+# launches. AGENT_RUN_PARENT marks agy's process tree so agent-run records the Neon director on its
+# receipts. The sign-in is stored under ~/.gemini rather than the desktop keyring (the CLI does that
+# when it sees SSH_CONNECTION), and ambient Google API keys or cloud credentials never replace the
+# personal login. The binary is the mise pin http:antigravity.
+# Verified against agy 1.5.13 --help: only --version, --help/-h, help and changelog are info-only (-v is absent).
+case "$#:${1:-}" in
+    1:--version|1:--help|1:-h|1:help|1:changelog) ;;
+    *)
+        if [ -n "${AGENT_RUN_PARENT+x}${AGENT_RUN_CHILD+x}${ANTIGRAVITY_CONVERSATION_ID+x}${CLAUDE_CODE_SESSION_ID+x}${CLAUDECODE+x}${PI_SESSION_FILE+x}${OMPCODE+x}${CODEX_THREAD_ID+x}${CODEX_SANDBOX+x}${CODEX_SANDBOX_NETWORK_DISABLED+x}" ]; then
+            echo "agy: refusing to run inside an agent session (Google's terms forbid agents launching agy)" >&2
+            exit 126
+        fi
+        ;;
+esac
 bin=$(mise which antigravity 2>/dev/null) || {  # the sha512-pinned build only
     echo "agy: the antigravity CLI is not installed; run: mise install http:antigravity" >&2
     exit 127

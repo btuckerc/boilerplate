@@ -1,0 +1,7 @@
+{{- /* Antigravity does not expand ~ in skills.json: emit an absolute path to the
+     canonical shared skills directory, excluding OMP-only (.no-claude) skills. */ -}}
+{{- $excludes := list -}}
+{{- range glob (joinPath .chezmoi.sourceDir "dot_local/share/decent-angl/skills/*/.no-claude") -}}
+{{- $excludes = append $excludes (base (dir .)) -}}
+{{- end -}}
+{{- dict "entries" (list (dict "path" (joinPath .chezmoi.homeDir ".local/share/decent-angl/skills") "exclude" (sortAlpha $excludes))) | toPrettyJson | trimSuffix "\n" }}

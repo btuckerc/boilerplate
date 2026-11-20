@@ -32,3 +32,5 @@
 # Renamed 2026-11-15: the Rhode Island OPNsense site is elsie, not lcri.
 .config/decent-angl/opnsense-lcri.env
 .local/share/decent-angl/skills/opnsense/references/lcri.md
+# Retired 2026-11-20: Neon is a director Tucker starts with agy; the ACP seat violated Google's terms.
+.local/bin/agent-run-acp

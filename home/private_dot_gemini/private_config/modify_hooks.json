@@ -1,0 +1,17 @@
+{{- /* chezmoi:modify-template */ -}}
+{{- /* herdr and local customizations also live in ~/.gemini/config/hooks.json, so
+     merge only our owned top-level hook entry. Emit byte-for-byte when unchanged. */ -}}
+{{- $stdin := .chezmoi.stdin | trimPrefix "\ufeff" -}}
+{{- $config := dict -}}
+{{- if $stdin | trim -}}
+{{- $config = $stdin | fromJson -}}
+{{- end -}}
+{{- $before := $config | toJson -}}
+{{- $guard := joinPath .chezmoi.homeDir ".local/bin/agent-launch-guard" -}}
+{{- $entry := dict "PreToolUse" (list (dict "matcher" "run_command" "hooks" (list (dict "type" "command" "command" $guard "timeout" 5)))) -}}
+{{- $_ := set $config "agent-launch-guard" $entry -}}
+{{- if and .chezmoi.stdin (eq $before ($config | toJson)) -}}
+{{ .chezmoi.stdin }}
+{{- else -}}
+{{ $config | toPrettyJson | trimSuffix "\n" }}
+{{- end -}}

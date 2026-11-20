@@ -1,0 +1,29 @@
+{{- /* chezmoi:modify-template */ -}}
+{{- /* Antigravity CLI (/config, /model, /permissions, trustedWorkspaces) also writes
+     and normalizes this file on startup, stripping keys set to their defaults. Own only
+     non-default keys and required allow entries; emit byte-for-byte when unchanged. */ -}}
+{{- $stdin := .chezmoi.stdin | trimPrefix "\ufeff" -}}
+{{- $config := dict -}}
+{{- if $stdin | trim -}}
+{{- $config = $stdin | fromJson -}}
+{{- end -}}
+{{- $before := $config | toJson -}}
+{{- $_ := set $config "agentMode" "accept-edits" -}}
+{{- $_ := set $config "toolPermission" "always-proceed" -}}
+{{- $_ := set $config "allowNonWorkspaceAccess" true -}}
+{{- $perms := dict -}}{{- if hasKey $config "permissions" -}}{{- $perms = get $config "permissions" -}}{{- end -}}
+{{- if kindIs "map" $perms -}}
+{{- $allow := list -}}{{- if hasKey $perms "allow" -}}{{- $allow = get $perms "allow" -}}{{- end -}}
+{{- if kindIs "slice" $allow -}}
+{{- range (list "read_file(*)" "write_file(*)") -}}
+{{- if not (has . $allow) -}}{{- $allow = append $allow . -}}{{- end -}}
+{{- end -}}
+{{- $_ := set $perms "allow" $allow -}}
+{{- $_ := set $config "permissions" $perms -}}
+{{- end -}}
+{{- end -}}
+{{- if and .chezmoi.stdin (eq $before ($config | toJson)) -}}
+{{ .chezmoi.stdin }}
+{{- else -}}
+{{ $config | toPrettyJson | trimSuffix "\n" }}
+{{- end -}}

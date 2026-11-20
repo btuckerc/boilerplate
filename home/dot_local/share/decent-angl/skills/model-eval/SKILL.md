@@ -14,7 +14,7 @@ skill produces the decision and its evidence.
 
 | Lane | Entry point | Pool | Current |
 | --- | --- | --- | --- |
-| Director | `claude` (settings `model`) | Claude Max | Opus 5.5 high |
+| Director | `claude` / `agy` | Claude Max / Google AI | Opus 5.5 high / Gemini 4 Neon |
 | Implementation | `agent-run sol` | Codex | GPT-6.2 Sol high |
 | Escalation consult | `agent-run ask --model sol` | Codex | GPT-6.2 Sol xhigh |
 | Release audit | `agent-run audit` | Codex | GPT-6.2 Sol xhigh |
@@ -76,9 +76,10 @@ escalation, because it spreads load.
 6. **Decide.** Write a one-line verdict per lane (adopt / trial / reject) with
    the deciding number. Then adopt: an `agent-run` lane is its model map
    (`CODEX_MODELS` and the Claude ids in `executable_agent-run`) plus the
-   lane text in `~/.claude/CLAUDE.md` and the council seat table; confirm with
+   lane text in `director-rules.md` (rendered to `~/.claude/CLAUDE.md` and
+   `~/.gemini/GEMINI.md`) and the council seat table; confirm with
    one `agent-run ask` whose receipt shows no verification issue. The
-   director is `model` and `modelSettings` in the Claude `modify_settings.json`.
+   Claude director is `model` and `modelSettings` in the Claude `modify_settings.json`.
    Legacy OMP roles go through `omp-config`: change the IDs in `config.yml`
    roles/`enabledModels` and run `omp-baseline validate`.
    Update (references/benchmarks.md) with the new snapshot and date.

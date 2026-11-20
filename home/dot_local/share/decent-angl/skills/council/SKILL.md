@@ -37,7 +37,7 @@ session where it is unavailable or refuses (`AGENT_LOCAL_ONLY`), say so and stop
   prompt-snapshot tool evidence; local workers use session changes plus
   runner-attested bwrap. Missing evidence is unverified, not assumed.
 - Run `agent-quota` before each round and skip a seat whose pool is under 10%
-  (Fable and Opus share the Claude 7-day pool with you; Claude has no 5-hour
+  (Fable and Opus share the Claude 7-day pool with Claude Code; Claude has no 5-hour
   limit). Also skip a seat whose run
   ends other than `ok`, times out, or reports a verification issue (another
   model served). Report each skip, never substitute, and continue as an
@@ -76,8 +76,9 @@ tree cannot leak into a round.
 
 Write `<run>/schema.json` (below) and one brief per seat,
 `<run>/brief-<seat>-rN.md`; in run names `<run>` is the full directory name
-`<YYYY-MM-DD>-<slug>`. Start every seat in one message, each as its own Bash
-call with `run_in_background` and a `timeout` of at least 3600 s. `agent-run`
+`<YYYY-MM-DD>-<slug>`. Start every seat in one message, each as its own shell
+call (in Claude Code, Bash with `run_in_background` and `timeout` >= 3600 s; in
+`agy`, separate `run_command` calls that continue in the background). `agent-run`
 queues a seat for a slot; relaunch one that still exits 75, never skip it.
 
 ```

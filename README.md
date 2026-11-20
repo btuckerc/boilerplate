@@ -46,11 +46,18 @@ pins install through `decent-angl-sync reconcile` and each host's guard.
 
 ## Agents and Herdr
 
-Claude Code (`claude`, Opus 5.5 high on Tucker's own Claude login) is the
-director. Its user settings and rules come from
-[`home/private_dot_claude/`](home/private_dot_claude): `modify_settings.json`
-owns only its listed keys and keeps Herdr hooks and local choices, and
-`CLAUDE.md` holds the routing rules. The director delegates through
+Claude Code (`claude`, Opus 5.5 high on Tucker's Claude login) and Antigravity
+CLI (`agy`, Gemini 4 Neon on Tucker's personal Google login, pinned via
+`http:antigravity` and launched through the `agy` wrapper) are the peer
+directors. One shared template
+([`home/.chezmoitemplates/director-rules.md`](home/.chezmoitemplates/director-rules.md))
+renders `~/.claude/CLAUDE.md` and `~/.gemini/GEMINI.md`. User settings and
+hooks are merged non-destructively from
+[`home/private_dot_claude/`](home/private_dot_claude) and
+[`home/private_dot_gemini/`](home/private_dot_gemini), preserving Herdr hooks
+and local choices while installing `agent-launch-guard` (`PreToolUse` in both
+harnesses, backed by a session-marker check in `agy`) to refuse agent launches
+of `agy` and detached or grouped `agent-run` calls. Both directors delegate through
 `agent-run` (Codex Sol workers in their own worktrees, read-only consults,
 release audits, local Qwen runs), with receipts under
 `~/.local/state/agent-runs/`. A receipt is `ok` only when the child's own
@@ -108,9 +115,9 @@ session as a board lock owner. OMP remains for the zero-cloud `omp-local`
 session and legacy Codex-only roles.
 
 Herdr is pinned through mise and configured at `~/.config/herdr/config.toml`.
-Run `herdr` once, start each `claude` (or `omp`) session in its own workspace
+Run `herdr` once, start each `claude`, `agy` (or `omp`) session in its own workspace
 or tab, and detach with `Ctrl-b q`; running sessions stay attached to the local
-Herdr server. `herdr integration install claude|codex` supplies
+Herdr server. `herdr integration install claude|codex|antigravity-cli` supplies
 working/blocked/idle state and native session restore. `agent-run` strips
 `HERDR_*` from its children, so workers never report into the director's pane.
 Runtime sessions and saved SSH-machine profiles remain machine-local.
@@ -156,6 +163,7 @@ unmasked window, run `open -na Ghostty --args --font-feature=-ss01`.
 | `home/.chezmoidata/` | Fleet roles, package managers, and UI data |
 | `home/private_dot_claude/` | Claude Code director settings and rules |
 | `home/private_dot_codex/` | Codex configuration and baseline README |
+| `home/private_dot_gemini/` | Antigravity CLI (`agy`) director settings, hooks, skills manifest, and rules |
 | `home/private_dot_omp/` | OMP configuration |
 | [`utils/`](utils) | Baseline checks and maintenance scripts |
 | [`docs/`](docs) | Reference and operational notes |

@@ -30,7 +30,7 @@ class ChezmoiContract(unittest.TestCase):
 
     def apply(self):
         return subprocess.run([*self.base, "apply", "--exclude", "scripts", "--no-tty"],
-                              capture_output=True, text=True)
+                              stdin=subprocess.DEVNULL, capture_output=True, text=True)
 
     def test_claude_settings_merge_keeps_other_hooks_and_adds_the_guard_once(self):
         import json
@@ -68,6 +68,110 @@ class ChezmoiContract(unittest.TestCase):
             self.assertEqual(json.loads(render(json.dumps(kept)))["hooks"], kept["hooks"])
         seeded["hooks"]["PreToolUse"][1]["matcher"] = "^mcp__(Read|Bash|Write)$"  # a regex naming mcp__Bash only
         self.assertEqual(len(json.loads(render(json.dumps(seeded)))["hooks"]["PreToolUse"]), 3)
+
+    def test_gemini_settings_and_hooks_merge_idempotently(self):
+        import json
+        home_src = Path(__file__).resolve().parents[2] / "home"
+        def render(rel, text):
+            result = subprocess.run([*self.base, "execute-template", "--with-stdin", "--file", str(home_src / rel)],
+                                    input=text, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return result.stdout
+
+        seeded_settings = {"model": "Gemini 4 Neon", "trustedWorkspaces": ["/home/tux/hearth"],
+                           "showTips": True, "showFeedbackSurvey": True,
+                           "permissions": {"allow": ["command(git)"], "deny": ["command(rm -rf /)"]}}
+        once = render("private_dot_gemini/private_antigravity-cli/modify_private_settings.json", json.dumps(seeded_settings))
+        self.assertEqual(render("private_dot_gemini/private_antigravity-cli/modify_private_settings.json", once), once)
+        parsed = json.loads(once)
+        self.assertEqual(parsed["model"], "Gemini 4 Neon")
+        self.assertEqual(parsed["trustedWorkspaces"], ["/home/tux/hearth"])
+        self.assertEqual(parsed["agentMode"], "accept-edits")
+        self.assertEqual(parsed["toolPermission"], "always-proceed")
+        self.assertTrue(parsed["allowNonWorkspaceAccess"])
+        self.assertTrue(parsed["showTips"])
+        self.assertTrue(parsed["showFeedbackSurvey"])
+        self.assertEqual(parsed["permissions"]["deny"], ["command(rm -rf /)"])
+        self.assertIn("command(git)", parsed["permissions"]["allow"])
+        self.assertIn("read_file(*)", parsed["permissions"]["allow"])
+        self.assertIn("write_file(*)", parsed["permissions"]["allow"])
+        # Empty / fresh file and malformed permissions shapes never abort.
+        fresh = json.loads(render("private_dot_gemini/private_antigravity-cli/modify_private_settings.json", ""))
+        self.assertEqual(fresh["permissions"]["allow"], ["read_file(*)", "write_file(*)"])
+        self.assertNotIn("showTips", fresh)
+        self.assertNotIn("showFeedbackSurvey", fresh)
+        for broken in ({"permissions": "bad"}, {"permissions": {"allow": "bad"}}):
+            self.assertEqual(json.loads(render("private_dot_gemini/private_antigravity-cli/modify_private_settings.json",
+                                               json.dumps(broken)))["permissions"], broken["permissions"])
+        # UTF-8 BOM-prefixed JSON files (accepted by Antigravity 1.5.13) converge cleanly and stay idempotent.
+        bom_settings = "\ufeff" + once
+        self.assertEqual(render("private_dot_gemini/private_antigravity-cli/modify_private_settings.json", bom_settings), bom_settings)
+        bom_fresh = json.loads(render("private_dot_gemini/private_antigravity-cli/modify_private_settings.json",
+                                      "\ufeff" + json.dumps({"model": "custom"})))
+        self.assertEqual(bom_fresh["model"], "custom")
+        self.assertEqual(bom_fresh["toolPermission"], "always-proceed")
+
+        seeded_hooks = {"herdr": {"PreInvocation": [{"type": "command", "command": "herdr-state", "timeout": 10}]}}
+        hooks_once = render("private_dot_gemini/private_config/modify_hooks.json", json.dumps(seeded_hooks))
+        self.assertEqual(render("private_dot_gemini/private_config/modify_hooks.json", hooks_once), hooks_once)
+        bom_hooks = "\ufeff" + hooks_once
+        self.assertEqual(render("private_dot_gemini/private_config/modify_hooks.json", bom_hooks), bom_hooks)
+        parsed_hooks = json.loads(hooks_once)
+        self.assertEqual(parsed_hooks["herdr"], seeded_hooks["herdr"])
+        guard_hooks = parsed_hooks["agent-launch-guard"]["PreToolUse"]
+        self.assertEqual(guard_hooks[0]["matcher"], "run_command")
+        self.assertTrue(guard_hooks[0]["hooks"][0]["command"].endswith("/.local/bin/agent-launch-guard"))
+
+        # skills.json.tmpl uses an absolute path (no ~) and excludes .no-claude skills.
+        skills_cmd = [self.base[0], "--source", str(home_src), "--destination", str(self.dest),
+                      "--config", str(self.root / "config.toml"), "--persistent-state", str(self.root / "state.db"),
+                      "execute-template", "--file", str(home_src / "private_dot_gemini/private_config/skills.json.tmpl")]
+        skills_res = subprocess.run(skills_cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True)
+        self.assertEqual(skills_res.returncode, 0, skills_res.stderr)
+        skills_cfg = json.loads(skills_res.stdout)
+        entry = skills_cfg["entries"][0]
+        self.assertTrue(entry["path"].startswith("/") and "~" not in entry["path"])
+        self.assertTrue(entry["path"].endswith("/.local/share/decent-angl/skills"))
+        self.assertIn("local-workers", entry["exclude"])
+        self.assertIn("omp-drive", entry["exclude"])
+
+    def test_agent_host_removes_retired_acp_helper_and_ignores_gemini_runtime_state(self):
+        repo_root = Path(__file__).resolve().parents[2]
+        agent_cfg = self.root / "nous.toml"
+        agent_cfg.write_text('[data.decentangl]\nmachine_id = "nous"\n')
+        cmd = [self.base[0], "--source", str(repo_root), "--destination", str(self.dest),
+               "--config", str(agent_cfg), "--persistent-state", str(self.root / "nous-state.db")]
+        # Seed retired helper and sensitive Antigravity runtime files.
+        retired = self.dest / ".local/bin/agent-run-acp"
+        retired.parent.mkdir(parents=True, exist_ok=True)
+        retired.write_text("#!/usr/bin/env python3\n")
+        retired.chmod(0o755)
+        token = self.dest / ".gemini/antigravity-cli/antigravity-oauth-token"
+        token.parent.mkdir(parents=True, exist_ok=True)
+        token.write_text("secret-token\n")
+        install_id = self.dest / ".gemini/antigravity-cli/installation_id"
+        install_id.write_text("id-123\n")
+        # 1) Prove the agent-host allowlist actually ran (hearth included, workstation rc excluded)
+        #    and that all four managed .gemini files are managed while runtime/auth files are ignored.
+        managed = set(subprocess.run([*cmd, "managed", "--include=files"], stdin=subprocess.DEVNULL,
+                                     capture_output=True, text=True, check=True).stdout.splitlines())
+        self.assertIn("hearth/AGENTS.md", managed)
+        self.assertNotIn(".bashrc", managed)
+        for expected in (".gemini/GEMINI.md", ".gemini/antigravity-cli/settings.json",
+                         ".gemini/config/hooks.json", ".gemini/config/skills.json"):
+            self.assertIn(expected, managed)
+        unmanaged = set(subprocess.run([*cmd, "unmanaged", str(self.dest / ".gemini")], stdin=subprocess.DEVNULL,
+                                       capture_output=True, text=True, check=True).stdout.splitlines())
+        self.assertNotIn(".gemini/antigravity-cli/antigravity-oauth-token", unmanaged)
+        self.assertNotIn(".gemini/antigravity-cli/installation_id", unmanaged)
+        # 2) Retired agent-run-acp is scheduled for removal under agent-host role and removed on apply.
+        removable = set(subprocess.run([*cmd, "managed", "--include=remove"], stdin=subprocess.DEVNULL,
+                                       capture_output=True, text=True, check=True).stdout.splitlines())
+        self.assertIn(".local/bin/agent-run-acp", removable)
+        applied = subprocess.run([*cmd, "apply", "--no-tty", "--exclude", "scripts,dirs",
+                                  str(retired)], stdin=subprocess.DEVNULL, capture_output=True, text=True)
+        self.assertEqual(applied.returncode, 0, applied.stderr)
+        self.assertFalse(retired.exists())
 
     def test_excluding_scripts_still_installs_executable_files(self):
         (self.source / "executable_helper").write_text("#!/bin/sh\necho helper\n")

@@ -134,10 +134,13 @@ def local_report():
     pins = {}
     mise = shutil.which("mise")
     for name, key in (("codex", "codex"), ("claude", "npm:@anthropic-ai/claude-code"),
-                      ("omp", "github:can1357/oh-my-pi"), ("chezmoi", "chezmoi"), ("restic", "restic")):
+                      ("antigravity", "http:antigravity"), ("omp", "github:can1357/oh-my-pi"),
+                      ("chezmoi", "chezmoi"), ("restic", "restic")):
         if agent_host and name == "restic":
             continue
-        source, live = source_tools.get(key), live_tools.get(key)
+        source_entry, live_entry = source_tools.get(key), live_tools.get(key)
+        source = source_entry.get("version") if isinstance(source_entry, dict) else source_entry
+        live = live_entry.get("version") if isinstance(live_entry, dict) else live_entry
         version_arg = "version" if name == "restic" else "--version"
         code, output = run([mise, "-C", str(user), "exec", "--", name, version_arg]) if mise else (127, "")
         match = re.search(r"(?<!\d)\d+\.\d+\.\d+(?!\d)", output)

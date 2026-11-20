@@ -749,7 +749,7 @@ def test_audit_resolves_a_short_candidate_bound_by_the_packet(repo, environment)
     _, brief = environment
     full = git(repo, "rev-parse", "HEAD").decode().strip()
     brief.write_text(f"Audited-Range: {full}..{full}\n")
-    p = invoke(environment, "audit", "--packet", brief, "--repo", repo, "--candidate", full[:9])
+    p = invoke(environment, "audit", "--packet", brief, "--repo", repo, "--candidate", full[:9].upper())
     assert p.returncode == 0, p.stdout + p.stderr
     assert last_run(environment)[1]["base"] == full
     runs = len(list(Path(environment[0]["AGENT_RUN_HOME"]).glob("*-audit-*")))

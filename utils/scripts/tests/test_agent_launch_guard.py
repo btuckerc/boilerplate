@@ -47,8 +47,10 @@ def test_one_background_launch_passes(command):
     ("echo \"run agent-run ask later\"", False),
     ("setsid --fork sleep 1", False),
     ("cat <<'END-OF-TEXT'\nagent-run ask --model sol &\nEND-OF-TEXT", False),
+    ("echo ready;# note; agent-run ask --model sol --brief b.md", False),
     ("echo see if agent-run ask works", False),
     ("echo check if agent-run ask is installed; command -v agent-run ask", False),
+    ("\"/opt/backup-agent-run\" ask --model sol --brief b.md", False),
     ("agent-run ask --model $seat --help", False),
     ("agent-run ask --brief $brief --help", False),
 ])
@@ -80,6 +82,10 @@ def test_non_launches_pass(command, background):
     ("/usr/bin/nohup agent-run ask --model sol --brief b.md", True, "detach"),
     ("env MODE=x nohup agent-run ask --model sol --brief b.md", True, "detach"),
     ("cat <<EOF\nEOF\nagent-run ask --model sol --brief b.md", False, "run_in_background"),
+    ("printf '%s' \"result: $(agent-run ask --model sol --brief \"$brief\")\"", False, "run_in_background"),
+    ("\"/opt/agent tools/agent-run\" ask --model sol --brief b.md", False, "run_in_background"),
+    ("if true; then disown; fi; agent-run ask --model sol --brief b.md", True, "detach"),
+    ("agent-\\\nrun ask --model sol --brief b.md", False, "run_in_background"),
     ("cat <<<EOF\nagent-run ask --model sol --brief b.md\ncat <<EOF\nbody\nEOF", False, "run_in_background"),
     ("result=\"$(agent-run ask --model sol --brief \"$brief\")\"", False, "run_in_background"),
     ("a=\"$(agent-run ask --brief \"$x\")\"; agent-run ask --brief b.md", True, "one agent-run"),
@@ -103,7 +109,8 @@ def test_background_must_be_the_boolean_true():
 
 def test_slow_inputs_finish_quickly():
     import time
-    for command in ("echo '" + '"$(' * 9000 + "'", "timeout --help -- -1 " * 16 + "true", "x" * 200000):
+    for command in ("echo '" + '"$(' * 9000 + "'", "timeout --help -- -1 " * 16 + "true", "x" * 200000,
+                    "true;" * 20000 + "agent-run ask --brief b.md", "a=" + "b/" * 50000 + "c agent-run ask"):
         start = time.monotonic()
         run(command)
         assert time.monotonic() - start < 2

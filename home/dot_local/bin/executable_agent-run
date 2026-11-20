@@ -1334,8 +1334,9 @@ def print_result(run, meta, result, as_json=False):
 
 def audit_candidate(repo, given, packet):
     """The full commit id for a hex candidate, bound by the packet's one Audited-Range line."""
-    if not re.fullmatch(r"[0-9a-f]{7,40}", given):
+    if not re.fullmatch(r"[0-9a-fA-F]{7,40}", given):
         raise ValueError("audit candidate must be a commit id (7-40 hex), not a ref that can move")
+    given = given.lower()
     # Object ids only: rev-parse on a short id would prefer a branch or tag of that name.
     try:
         ids = [given] if len(given) == 40 else git(repo, "rev-parse", f"--disambiguate={given}").decode().split()

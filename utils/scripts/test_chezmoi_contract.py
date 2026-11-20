@@ -57,8 +57,10 @@ class ChezmoiContract(unittest.TestCase):
             self.assertEqual(json.loads(render(json.dumps(seeded)))["hooks"], seeded["hooks"])
         seeded["hooks"]["PreToolUse"][1]["matcher"] = "^mcp__.*(Read|Bash)$"  # does not match Bash
         self.assertEqual(len(json.loads(render(json.dumps(seeded)))["hooks"]["PreToolUse"]), 3)
-        odd = {"hooks": {"PreToolUse": [{"matcher": 7, "hooks": []}, None, {"matcher": "(?!Ask).*", "hooks": [None]}]}}
-        self.assertEqual(len(json.loads(render(json.dumps(odd)))["hooks"]["PreToolUse"]), 4)  # renders, adds one
+        odd = {"hooks": {"PreToolUse": [{"matcher": 7, "hooks": []}, None, {"matcher": "(?!Ask).*", "hooks": [None]},
+                                        {"matcher": "Bash", "hooks": [{"command": 123}]},
+                                        {"matcher": False, "hooks": [{"command": str(Path.home() / ".local/bin/agent-launch-guard")}]}]}}
+        self.assertEqual(len(json.loads(render(json.dumps(odd)))["hooks"]["PreToolUse"]), 6)  # renders, adds one
 
     def test_excluding_scripts_still_installs_executable_files(self):
         (self.source / "executable_helper").write_text("#!/bin/sh\necho helper\n")

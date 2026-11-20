@@ -8,7 +8,7 @@ Follow the release-audit rule in RULES.md. Do not review it yourself and do not 
 2. Write a packet outside Git: the contract and acceptance items, the candidate id, the diff, file hashes and the raw output of the checks you ran. Leave out your own reasoning; label any pointers "pointers only, not evidence". Include no secrets.
 3. Run \`omp-quota < /dev/null\`; hold if the Codex pool is below 10% or unknown.
 4. Run \`omp-audit NAME PACKET CANDIDATE\` (blocking, up to an hour; NAME new each run). It dispatches one \`auditor\` child in a hardened project with the strict verdict schema and checks the serving model, effort and tools.
-5. Report \`result.json\`: accepted, problems, verdict and findings. Only accepted PASS clears the boundary. A BLOCK means discovery missed defects: fix them, take the repair through delta review (one reviewer on the repair and its callers and callees) until it finds no verified blocker or major, then audit the new candidate. Hold and report only when a finding needs the user's decision, the remedy would drop requested scope, or a focused repair and any available escalation did not move it. A PASS grants no commit or publish authority.`;
+5. Report \`result.json\`: accepted, problems, verdict and findings. Only accepted PASS clears the boundary. A BLOCK means discovery missed defects: fix them with the smallest change, run one delta review (one reviewer on the repair and its callers and callees), fix what it verifies, then audit the new candidate once; a second BLOCK goes to the user with its counterexamples. Hold and report early when a finding needs the user's decision or the remedy would drop requested scope. A PASS grants no commit or publish authority.`;
 
 export default () => ({
 	name: "review",

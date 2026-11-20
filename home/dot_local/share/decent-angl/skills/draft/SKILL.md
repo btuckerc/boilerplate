@@ -127,7 +127,8 @@ When campaigns share devices, mutable outputs, or files, verify current ownershi
 and keep independent work moving while a resource is occupied.
 
 Before returning, compare the handoff with the request: no omitted side requests,
-lost constraints, invented authorization, stale campaign assumptions, unspecified
+lost constraints, invented authorization, gates or review steps the user did not ask
+for (the receiving agent's own rules already apply), stale campaign assumptions, unspecified
 implementation-worker effort, or generic “improve everything” without a first
 decision and observable outcome. For delegated work, check that workers can
 actually close their outcomes and that the lead's remaining work has a purpose.

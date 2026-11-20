@@ -745,6 +745,22 @@ def test_gc_prunes_audit_copy(repo, environment):
     assert (run / "result.json").exists()
 
 
+def test_audit_resolves_a_short_candidate_bound_by_the_packet(repo, environment):
+    _, brief = environment
+    full = git(repo, "rev-parse", "HEAD").decode().strip()
+    brief.write_text(f"Audited-Range: {full}..{full}\n")
+    p = invoke(environment, "audit", "--packet", brief, "--repo", repo, "--candidate", full[:9])
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert last_run(environment)[1]["base"] == full
+    runs = len(list(Path(environment[0]["AGENT_RUN_HOME"]).glob("*-audit-*")))
+    brief.write_text(f"Audited-Range: {full}..{full[:9]}\n")
+    p = invoke(environment, "audit", "--packet", brief, "--repo", repo, "--candidate", full[:9])
+    assert p.returncode == 1 and f"Audited-Range: <full base id>..{full}" in p.stderr
+    p = invoke(environment, "audit", "--packet", brief, "--repo", repo, "--candidate", "HEAD")
+    assert p.returncode == 1 and "not a ref that can move" in p.stderr
+    assert len(list(Path(environment[0]["AGENT_RUN_HOME"]).glob("*-audit-*"))) == runs  # refused before any receipt
+
+
 def test_setup_baseline_and_new_ignored_files(repo, environment):
     env, brief = environment
     (repo / ".gitignore").write_text("*.ignored\n")

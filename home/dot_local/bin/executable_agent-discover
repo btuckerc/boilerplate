@@ -27,9 +27,13 @@ discovery, not a verdict: find EVERY defect you can, not just enough to reject
 it. Do not stop after the first few; keep going until you have worked through
 every contract item below against every function and changed path. Read-only:
 make no edits and spawn nothing. Prefer concrete, reproducible counterexamples;
-read-only probes are encouraged. List each distinct root cause separately.
-Severity: blocker breaks the contract; major is a likely defect; minor is
-cosmetic or improbable.
+read-only probes are encouraged. List each distinct root cause separately,
+with its trigger, the concrete harm and a counterexample. Severity by impact:
+blocker = hit in normal use, or security, data, money or a live output at risk
+(in normal use or from an attacker); major = plausible in normal use with
+visible harm; minor = needs rare outside conditions the contract does not name
+(narrow races, files locked by other programs, hand-edited input, pathological
+sizes), or is cosmetic. List minors too, one line each.
 """
 
 SCHEMA = {

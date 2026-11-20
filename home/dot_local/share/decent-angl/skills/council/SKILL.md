@@ -97,7 +97,8 @@ user.
 Each finding (ids <letter>-01, -02, ...): exact location, the concrete
 failure, and the evidence that would change your mind. blocker = the intended
 case is wrong or the contract is broken. should = a real defect within the
-intent, on any supported path. nit = anything else, including extra scope.
+intent, plausible in normal use or reachable by an attacker. nit = anything
+else, including states that need rare outside conditions and extra scope.
 Score with one decimal, e.g. 8.6. The integer is the band: 10 nothing to fix
 or cut; 9 ship, nits only; 7-8 shoulds open; 5-6 a blocker; below 5 wrong
 approach. The tenth ranks the work within its band. APPROVE means no blocker
@@ -165,17 +166,17 @@ on your own decline. A ruling closes its item; new evidence makes a new
 finding. Pass the ruling to the seat in its next brief. Applying it needs no
 round unless it changes behavior outside that item.
 
-**Confirmation and stop.** When no seat holds an open item, or two scored
-rounds in a row each add at most one verified should, no blocker and no
-accepted raise, fix what is open and seat every seat that sat a scored round
-once on the final tree (skip this when those seats already approved that exact
-tree and meet any target). If confirmation finds a verified blocker or should,
-or a below-target seat raises a change you accept, fix it and confirm once
-more with those seats; anything still open after that is reported as
-incomplete. Declined and ruled items add nothing. Stop early when a behavior
-comes back a second time after a fix meant to keep both items: the fixes are
-oscillating, so report both sides. If review grew the diff, cut first. Never
-agree just to end the loop.
+**Confirmation and stop.** Confirm when no seat holds an open item, when two
+scored rounds in a row each add at most one verified should, no blocker and no
+accepted raise, or, without a target, after round 2: fix what is open and seat
+every seat that sat a scored round once on the final tree (skip this when those
+seats already approved that exact tree and meet any target). If confirmation
+finds a verified blocker or should, fix it; with a target, or when a
+below-target seat raises a change you accept, confirm once more with those seats.
+Anything still open after that is reported as incomplete. Declined and ruled
+items add nothing. Stop early when a behavior comes back a second time after a
+fix meant to keep both items: the fixes are oscillating, so report both sides.
+If review grew the diff, cut first. Never agree just to end the loop.
 
 ## Stop and report
 

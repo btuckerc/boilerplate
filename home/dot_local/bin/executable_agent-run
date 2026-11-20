@@ -1332,8 +1332,24 @@ def print_result(run, meta, result, as_json=False):
     print(text.encode()[:4000].decode(errors="ignore"))
 
 
+def audit_candidate(repo, given, packet):
+    """The full commit id for a hex candidate, bound by the packet's one Audited-Range line."""
+    if not re.fullmatch(r"[0-9a-f]{7,40}", given):
+        raise ValueError("audit candidate must be a commit id (7-40 hex), not a ref that can move")
+    try:
+        candidate = git(repo, "rev-parse", "--verify", "--end-of-options", given + "^{commit}").decode().strip()
+    except RuntimeError as exc:
+        raise ValueError(f"audit candidate {given}: {exc}") from None
+    ranges = [line for line in packet.decode(errors="replace").splitlines() if line.startswith("Audited-Range: ")]
+    if len(ranges) != 1 or not re.fullmatch(r"Audited-Range: [0-9a-f]{40}\.\." + candidate, ranges[0]):
+        raise ValueError(f"packet must contain exactly one line Audited-Range: <full base id>..{candidate}")
+    return candidate
+
+
 def prepare(args, root):
     repo = Path(args.repo or os.getcwd()).expanduser().resolve()
+    if args.lane == "audit":  # fail before queueing for a slot
+        args.candidate = audit_candidate(repo, args.candidate, Path(args.packet).expanduser().read_bytes())
     args.worktree_root = Path(os.environ.get("AGENT_RUN_WORKTREE_ROOT", "~/src/worktrees/agent")).expanduser().resolve()
     refuse_writable_state(root, args.worktree_root, args.run_id)
     if args.lane in {"sol", "local"}:
@@ -1450,19 +1466,12 @@ def launch_locked(args, root, slot, runs):
             git(repo, "worktree", "add", "--detach", str(cwd), base)
             meta["ignored_base"] = sorted(ignored_files(cwd))
         if lane == "audit":
-            if not re.fullmatch(r"[0-9a-f]{40}", args.candidate):
-                raise ValueError("audit candidate must be a full 40-hex commit id")
-            candidate = git(repo, "rev-parse", "--verify", args.candidate + "^{commit}").decode().strip()
-            if candidate != args.candidate:
-                raise ValueError("candidate is not the exact commit id")
+            candidate = args.candidate = audit_candidate(repo, args.candidate, brief)
             meta["base"] = candidate
             packet = run / "packet.md"
             atomic_bytes(packet, brief)
             packet.chmod(0o444)
             meta["packet_sha256"] = hashlib.sha256(brief).hexdigest()
-            ranges = [line for line in brief.decode().splitlines() if line.startswith("Audited-Range: ")]
-            if len(ranges) != 1 or not re.fullmatch(r"Audited-Range: [0-9a-f]{40}\.\." + candidate, ranges[0]):
-                raise ValueError("packet must contain exactly one Audited-Range: BASE..CANDIDATE line")
             cwd = run / "tree"
             cwd.mkdir()
             archive = run / "candidate.tar"

@@ -1,0 +1,54 @@
+#!/usr/bin/env python3
+"""Claude Code PreToolUse hook: agent-run launches must notify the session.
+
+A launch only wakes the director when it is its own Bash call with
+run_in_background. Detached launches (`&`, nohup, setsid, disown) and
+foreground calls finish without a notification, and several launches in one
+call run one after another. Exit 2 rejects the call and shows the reason to
+the model.
+"""
+import json
+import re
+import sys
+
+LAUNCH = re.compile(r"(?<![\w./-])agent-run\s+(sol|ask|audit|local)\b")
+DETACH = re.compile(r"\b(nohup|setsid|disown)\b")
+LOOP = re.compile(r"\b(for|while|until)\b[^\n]*?\bdo\b", re.S)
+# `&` that does not background: &&, >&, &>, |&, <& (fd duplication and redirection).
+NOT_BACKGROUND = re.compile(r"&&|[0-9]*[<>]&[0-9-]*|&>>?|\|&")
+# Text that is data, not commands: heredoc bodies and quoted strings.
+HEREDOC = re.compile(r"<<-?[ \t]*(['\"]?)(\w+)\1[^\n]*\n.*?\n[ \t]*\2[ \t]*(?=\n|$)", re.S)
+QUOTED = re.compile(r"'[^']*'|\"(?:\\.|[^\"\\])*\"")
+
+
+def problem(tool_input):
+    command = QUOTED.sub("''", HEREDOC.sub("<<H", tool_input.get("command") or ""))
+    launches = [m for m in LAUNCH.finditer(command)
+                if not re.search(r"(^|\s)(--help|-h)(\s|$)", command[m.end():].split("\n")[0])]
+    if not launches:
+        return None
+    if len(launches) > 1 or LOOP.search(command):
+        return "one agent-run launch per Bash call; send several calls in one message so they run in parallel"
+    if DETACH.search(command) or "&" in NOT_BACKGROUND.sub("", command):
+        return "do not detach agent-run (&, nohup, setsid, disown): a detached run never notifies the session"
+    if not tool_input.get("run_in_background"):
+        return "launch agent-run with run_in_background: true so its completion wakes the session"
+    return None
+
+
+def main():
+    try:
+        event = json.load(sys.stdin)
+    except ValueError:
+        return 0
+    if event.get("tool_name") != "Bash":
+        return 0
+    reason = problem(event.get("tool_input") or {})
+    if reason:
+        print(f"agent-launch-guard: {reason}.", file=sys.stderr)
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

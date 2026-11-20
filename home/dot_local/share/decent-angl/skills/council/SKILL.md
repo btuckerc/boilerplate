@@ -1,6 +1,6 @@
 ---
 name: council
-description: Multi-model review or design council that loops until the seats are satisfied or progress plateaus. Use only when the user says "council", "full council" or "Sol high council"; seat names or a target ("push a 9.5", "+0.2") in that request shape it. Never self-convene.
+description: Multi-model review or design council that loops until the seats are satisfied or progress plateaus. Use only when the user says "council", "full council" or "Sol high council" (a request quoted verbatim as theirs in a handoff counts); seat names or a target ("push a 9.5", "+0.2") in that request shape it. Never self-convene.
 argument-hint: "[full | seat names] [to N | +D] [what to review or decide]"
 ---
 

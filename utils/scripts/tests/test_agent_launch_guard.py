@@ -21,6 +21,8 @@ def run(command, background=True, tool="Bash"):
     "timeout 3700 ~/.local/bin/agent-run --json ask --model sol --brief b.md",
     "for f in a b\ndo\n  test -f $f\ndone\nagent-run sol --repo . --brief b.md",
     "agent-run audit --name audit-nohup --repo . --packet p.md --candidate abc1234",
+    "until [ $(agent-run list | wc -l) -lt 3 ]; do sleep 30; done; agent-run ask --model sol --brief b.md",
+    "if ! agent-run ask --model sol --brief b.md; then echo failed; fi",
 ])
 def test_one_background_launch_passes(command):
     assert run(command) == (0, "")
@@ -38,6 +40,7 @@ def test_one_background_launch_passes(command):
     ("agent-run ask --help; true", False),
     ("# agent-run ask --model sol\nagent-run list", False),
     ("echo \"run agent-run ask later\"", False),
+    ("setsid --fork sleep 1", False),
 ])
 def test_non_launches_pass(command, background):
     assert run(command, background) == (0, "")
@@ -57,6 +60,16 @@ def test_non_launches_pass(command, background):
     ("agent-run ask --model sol --brief b.md; agent-run ask --help", False, "run_in_background"),
     ("result=\"$(agent-run ask --model sol --brief b.md)\"", False, "run_in_background"),
     ("~/.local/bin/agent-run ask --model sol --brief b.md &", True, "detach"),
+    ("until agent-run ask --model sol --brief b.md; do sleep 60; done", True, "one agent-run"),
+    ("while ! agent-run ask --model sol --brief b.md\ndo sleep 60\ndone", True, "one agent-run"),
+    ("if ! agent-run ask --model sol --brief b.md; then echo x; fi", False, "run_in_background"),
+    ("# don't wait here\nagent-run ask --model sol --brief 'b.md' &", True, "detach"),
+    ("\"$HOME/.local/bin/agent-run\" ask --model sol --brief b.md", False, "run_in_background"),
+    ("setsid --fork agent-run ask --model sol --brief b.md", True, "detach"),
+    ("setsid -f agent-run ask --model sol --brief b.md", True, "detach"),
+    ("timeout 3700 nohup agent-run ask --model sol --brief b.md", True, "detach"),
+    ("agent-run ask --model sol --brief $(agent-run ask --model luna --brief a.md)", True, "one agent-run"),
+    ("cat <<'EOF' >/dev/null && agent-run ask --model sol --brief b.md\nbody\nEOF", False, "run_in_background"),
 ])
 def test_launches_that_cannot_notify_are_rejected(command, background, reason):
     code, err = run(command, background)

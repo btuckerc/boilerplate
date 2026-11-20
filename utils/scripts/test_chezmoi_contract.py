@@ -61,6 +61,9 @@ class ChezmoiContract(unittest.TestCase):
                                         {"matcher": "Bash", "hooks": [{"command": 123}]},
                                         {"matcher": False, "hooks": [{"command": str(Path.home() / ".local/bin/agent-launch-guard")}]}]}}
         self.assertEqual(len(json.loads(render(json.dumps(odd)))["hooks"]["PreToolUse"]), 6)  # renders, adds one
+        for broken in ("oops", {"0": {"matcher": "Read", "hooks": []}}, [{"matcher": "Bash", "hooks": "oops"}],
+                       [{"matcher": "Bash", "hooks": [{"type": 5, "command": "x"}]}]):
+            render(json.dumps({"hooks": {"PreToolUse": broken}}))  # never aborts
 
     def test_excluding_scripts_still_installs_executable_files(self):
         (self.source / "executable_helper").write_text("#!/bin/sh\necho helper\n")

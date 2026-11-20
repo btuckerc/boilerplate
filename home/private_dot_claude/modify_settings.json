@@ -35,11 +35,11 @@
 {{- $guarded := false -}}
 {{- /* A matcher of "", "*" or a |-list naming Bash covers it; regex forms are not compiled here (Go and
      JavaScript regexes differ), so they at worst add a second, harmless registration. */ -}}
-{{- range $pre -}}{{- if kindIs "map" . -}}{{- $m := get . "matcher" -}}
+{{- if kindIs "slice" $pre -}}{{- range $pre -}}{{- if and (kindIs "map" .) (kindIs "slice" (get . "hooks")) -}}{{- $m := get . "matcher" -}}
 {{- if or (not (hasKey . "matcher")) (and (kindIs "string" $m) (or (eq $m "" "*") (has "Bash" (splitList "|" (nospace $m))))) -}}
-{{- range (get . "hooks" | default list) -}}{{- if and (kindIs "map" .) (kindIs "string" (get . "command")) -}}{{- if eq (get . "command") $guard -}}{{- $guarded = true -}}{{- end -}}{{- end -}}{{- end -}}
-{{- end -}}{{- end -}}{{- end -}}
-{{- if not $guarded -}}
+{{- range (get . "hooks") -}}{{- if and (kindIs "map" .) (eq (toString (get . "type")) "command") (kindIs "string" (get . "command")) -}}{{- if eq (get . "command") $guard -}}{{- $guarded = true -}}{{- end -}}{{- end -}}{{- end -}}
+{{- end -}}{{- end -}}{{- end -}}{{- end -}}
+{{- if and (not $guarded) (kindIs "slice" $pre) -}}
 {{- $_ := set $hooks "PreToolUse" (append $pre (dict "matcher" "Bash" "hooks" (list (dict "type" "command" "command" $guard "timeout" 5)))) -}}
 {{- $config = setValueAtPath "hooks" $hooks $config -}}
 {{- end -}}

@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Claude Code PreToolUse hook: agent-run launches must notify the session.
+"""Claude Code PreToolUse hook: agent-run launches must notify the session, and agy is Tucker's.
+
+Antigravity's agy runs on Tucker's personal Google sign-in, which Google's terms reserve for his
+own interactive use; another AI agent launching it risks suspending his account. Any command that
+starts agy or antigravity is rejected unless it only asks for --version, --help or the changelog.
 
 A launch only wakes the director when it is its own Bash call with
 run_in_background. Detached launches (`&`, nohup, setsid, disown) and
@@ -26,6 +30,8 @@ VALUE = r"(?:[^\s;&|()`$]|\$\([^()\n]*\)|\$(?!\())*"  # an assignment value, $(.
 START = (r"(?:^|[;&|({`\n]|\$\()\s*(?:(?:do|then|else|elif|if|while|until|!)\s+)*"
          r"(?:(?:(?:" + W + r"/)?(?:exec|time|nice|nohup|setsid|env)(?:[ \t]+-[^\s\d;&|()`]" + W + r")*"
          r"|(?:" + W + r"/)?timeout(?:[ \t]+-" + W + r")*[ \t]+\d" + W + r"|[A-Za-z_]\w*=" + VALUE + r")[ \t]+)*")
+AGY = re.compile(START + r"(?:" + W + r"/)?(?:agy|antigravity)(?=[ \t;&|)\n]|$)([^;&|\n`]*)")
+AGY_HARMLESS = re.compile(r"\s*(?:--version|-v|--help|-h|help|changelog)\s*")
 LAUNCH = re.compile(START + r"(?P<exe>(?:" + W + r"/)?agent-run)((?:[ \t]+-[\w-]+)*)[ \t]+(?:sol|ask|audit|local)\b"
                     r"((?:[^;&|\n)`$]|\$(?!\())*)")
 LOOP_WORD = re.compile(START + r"(for|while|until|select|done)\b")
@@ -97,6 +103,9 @@ def problem(tool_input):
     def asks_for_help(m):  # -h/--help anywhere in that launch's own arguments, past any $(...)
         rest = re.split(r"[;&|\n`]", SUBSTITUTION.sub(" ", text[m.end():]), maxsplit=1)[0]
         return HELP.search(" ".join((m.group(2), m.group(3), rest)))
+    if any(not AGY_HARMLESS.fullmatch(re.sub(r"\s[0-9]*[<>]+&?[ \t]*\S*", " ", m.group(1))) for m in AGY.finditer(text)):
+        return ("agy runs on Tucker's personal Google sign-in, which Google's terms reserve for his own "
+                "interactive use; do not launch it from an agent (ask Tucker to run it himself)")
     launches = [m for m in LAUNCH.finditer(text) if not asks_for_help(m)]
     if not launches:
         return None

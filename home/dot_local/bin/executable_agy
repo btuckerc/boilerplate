@@ -1,0 +1,13 @@
+#!/bin/sh
+# Antigravity CLI on Tucker's personal Google sign-in: his own interactive use only. Google's
+# terms bar another AI agent from launching it, and agent-launch-guard refuses that in Claude Code.
+# As T3 Code runs it: the sign-in is stored under ~/.gemini rather than the desktop keyring (the
+# CLI does that when it sees SSH_CONNECTION), and ambient Google API keys or cloud credentials
+# never replace the personal login. The binary is the mise pin http:antigravity.
+bin=$(command -v antigravity || mise which antigravity 2>/dev/null) || {
+    echo "agy: the antigravity CLI is not installed; run: mise install http:antigravity" >&2
+    exit 127
+}
+exec env -u GEMINI_API_KEY -u GOOGLE_API_KEY -u GOOGLE_APPLICATION_CREDENTIALS \
+    -u GOOGLE_CLOUD_PROJECT -u GOOGLE_CLOUD_LOCATION -u GOOGLE_GENAI_USE_VERTEXAI \
+    SSH_CONNECTION="${SSH_CONNECTION:-127.0.0.1 0 127.0.0.1 0}" "$bin" "$@"

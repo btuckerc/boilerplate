@@ -19,6 +19,11 @@ def check(root):
     tools = tomllib.loads((home / "dot_config/mise/config.toml").read_text())["tools"]
     for tool in ("codex", "github:can1357/oh-my-pi", "npm:@anthropic-ai/claude-code"):
         assert re.fullmatch(r"\d+\.\d+\.\d+", tools[tool]), f"{tool}: exact release required"
+    assert re.fullmatch(r"\d+\.\d+\.\d+", tools["http:antigravity"]["version"]), "antigravity: exact release required"
+    platforms = tools["http:antigravity"]["platforms"]
+    assert set(platforms) == {"linux-x64", "linux-arm64", "macos-arm64", "macos-x64"}, "antigravity: every fleet platform"
+    for pin in platforms.values():
+        assert f"/{tools['http:antigravity']['version']}-" in pin["url"] and re.fullmatch(r"sha512:[0-9a-f]{128}", pin["checksum"])
     omp = tools["github:can1357/oh-my-pi"]
     manifest = (home / "dot_config/decent-angl/omp-baseline-manifest.tsv").read_text()
     assert re.search(r"^# omp-version\s+" + re.escape(omp) + r"$", manifest, re.M), "OMP manifest pin differs"

@@ -136,3 +136,23 @@ def test_other_tools_and_bad_input_pass():
                 '{"tool_name": "Bash", "tool_input": ' + "[" * 10000 + "0" + "]" * 10000 + "}"):
         p = subprocess.run([sys.executable, str(GUARD)], input=bad, capture_output=True, text=True)
         assert p.returncode == 0, bad
+
+
+@pytest.mark.parametrize("command", [
+    "agy", "agy -p 'summarize this' --model gemini-4-neon-high", "~/.local/bin/agy acp",
+    "cd repo && antigravity models", "timeout 60 agy -p hi", "out=$(agy -p hi)",
+    "~/.local/share/antigravity-cli/current/antigravity --print hi",
+])
+def test_agy_is_never_launched_by_an_agent(command):
+    for background in (False, True):
+        code, err = run(command, background)
+        assert code == 2 and "personal Google sign-in" in err
+
+
+@pytest.mark.parametrize("command", [
+    "agy --version", "~/.local/bin/agy --help", "agy changelog", "ls ~/.local/share/antigravity-cli/current/antigravity",
+    "grep -n agy notes.md", "echo 'run agy yourself'", "cat ~/.gemini/antigravity/settings.json",
+    "agy --version; agent-run list", "x/antigravity --version 2>&1 | head -5", "agy help > /tmp/h.txt",
+])
+def test_agy_mentions_and_harmless_flags_pass(command):
+    assert run(command, False) == (0, "")

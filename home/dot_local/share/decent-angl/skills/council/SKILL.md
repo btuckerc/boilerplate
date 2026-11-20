@@ -24,14 +24,12 @@ session where it is unavailable or refuses (`AGENT_LOCAL_ONLY`), say so and stop
 | Fable | `fable` | Simplifier: what to cut | default |
 | Astra | `astra` (GPT-6.2 Astra high) | Scenario: walk the real use end to end | `full council` or named |
 | Opus | `opus` (fresh Opus 5.5 high) | Skeptic: attack the packet's assumptions | default |
-| Neon | `neon` (Gemini 4 Neon high, Antigravity) | Writer: voice, clarity, the fresher angle | default for creative or written work; otherwise named |
 
 - "Sol high council" seats Sol alone. Named seats replace the default set.
 - Seats are read-only: Codex seats run in a read-only sandbox, Claude seats
-  with Read/Grep/Glob/WebSearch/WebFetch only and no MCP. Neon has no tools:
-  launch it with `--attach` for the packet, diff and any file it must read
-  (UTF-8, 1 MiB total) in place of `--repo`/`--add-dir`; only one Neon run
-  goes at a time. `agent-run` fixes
+  with Read/Grep/Glob/WebSearch/WebFetch only and no MCP. Neon is never a seat: Google's
+  terms bar another agent calling into agy. When Neon directs the council it
+  seats the others through `agent-run` and its own view counts as the director's. `agent-run` fixes
   model and effort; no seat takes a temperature: diversity is model family,
   effort and emphasis.
   A usable receipt has `model_ok`, `effort_ok` and `sandbox_ok` all true:
@@ -86,15 +84,6 @@ queues a seat for a slot; relaunch one that still exits 75, never skip it.
 agent-run ask --model <seat> --name <run>-<seat>-rN --repo <run>/tree-rN \
   --add-dir <run> --schema <run>/schema.json --brief <run>/brief-<seat>-rN.md --timeout 1800
 ```
-
-Neon instead attaches what its brief names (the tree is not readable to it):
-
-```
-agent-run ask --model neon --name <run>-neon-rN --schema <run>/schema.json \
-  --attach <run>/packet.md --attach <run>/diff-r1.patch --brief <run>/brief-neon-rN.md --timeout 1800
-```
-
-From round 2, attach `delta-rN.patch` and Neon's previous result in place of `diff-r1.patch`.
 
 Each run is fresh and keeps nothing between rounds, so a seat's later brief
 carries its own previous result. The run prints its id and result path; read

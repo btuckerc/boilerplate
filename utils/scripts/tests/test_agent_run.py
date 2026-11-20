@@ -2664,7 +2664,7 @@ def neon(environment, tmp_path):
     path = home / ".local/bin/agy"
     path.write_text(FAKE_AGY)
     path.chmod(0o755)
-    env.update(FAKE_AGY_RECORD=str(tmp_path / "agy.json"), HOME=str(home))
+    env.update(FAKE_AGY_RECORD=str(tmp_path / "agy.json"), HOME=str(home), AGENT_RUN_ALLOW_NEON_SEAT="1")
     return environment
 
 
@@ -2823,3 +2823,33 @@ def test_neon_cancel_still_removes_the_session(neon):
     _, meta = last_run(neon)
     assert meta["state"] == "cancelled"
     assert profile_entries(neon) == ["annotations", "brain", "conversations"]
+
+
+def test_neon_seat_is_retired_unless_tucker_enables_it_and_never_under_agy(neon):
+    env, brief = neon
+    env.pop("AGENT_RUN_ALLOW_NEON_SEAT")
+    p = invoke(neon, "ask", "--model", "neon", "--brief", brief)
+    assert p.returncode == 1 and "the Neon seat is retired" in p.stderr
+    env["AGENT_RUN_ALLOW_NEON_SEAT"] = "1"
+    for key in ("CLAUDE_CODE_SESSION_ID", "PI_SESSION_FILE"):
+        env.pop(key)
+    for marker in ({"AGENT_RUN_PARENT": "agy"}, {"ANTIGRAVITY_CONVERSATION_ID": "c0ffee"}):
+        p = invoke((dict(env, **marker), brief), "ask", "--model", "neon", "--brief", brief)
+        assert p.returncode == 1 and "nothing may call back into agy" in p.stderr
+    assert not Path(env["FAKE_AGY_RECORD"]).exists()
+    assert not list(Path(env["AGENT_RUN_HOME"]).glob("*-ask-*"))
+
+
+def test_agy_director_is_recorded_and_its_markers_stay_out_of_workers(environment):
+    env, brief = environment
+    for key in ("CLAUDE_CODE_SESSION_ID", "PI_SESSION_FILE"):
+        env.pop(key)
+    env.update(AGENT_RUN_PARENT="agy", ANTIGRAVITY_CONVERSATION_ID="c0ffee", AGY_CLI_THEME="dark")
+    p = invoke(environment, "ask", "--model", "luna", "--brief", brief)
+    assert p.returncode == 0, p.stdout + p.stderr
+    _, meta = last_run(environment)
+    assert meta["parent"] == {"harness": "agy", "session_id": "c0ffee"}
+    child = runner.child_env(env)
+    assert not {"AGENT_RUN_PARENT", "ANTIGRAVITY_CONVERSATION_ID", "AGY_CLI_THEME"} & set(child)
+    assert runner.parent_identity({"AGENT_RUN_PARENT": "agy"}) == {"harness": "agy", "session_id": None}
+    assert runner.parent_identity({"CLAUDE_CODE_SESSION_ID": "s", "AGENT_RUN_PARENT": "agy"})["harness"] == "claude"

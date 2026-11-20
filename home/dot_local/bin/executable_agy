@@ -1,6 +1,8 @@
 #!/bin/sh
-# Antigravity CLI on Tucker's personal Google sign-in: his own interactive use only. Google's
-# terms bar another AI agent from launching it, and agent-launch-guard refuses that in Claude Code.
+# Antigravity CLI on Tucker's personal Google sign-in: he starts it himself (a Neon director in a
+# herdr pane); Google's terms bar another AI agent from launching or driving it, and
+# agent-launch-guard refuses that in Claude Code. AGENT_RUN_PARENT marks agy's process tree so
+# agent-run records the Neon director on its receipts and refuses to call back into agy.
 # As T3 Code runs it: the sign-in is stored under ~/.gemini rather than the desktop keyring (the
 # CLI does that when it sees SSH_CONNECTION), and ambient Google API keys or cloud credentials
 # never replace the personal login. The binary is the mise pin http:antigravity.
@@ -10,4 +12,4 @@ bin=$(mise which antigravity 2>/dev/null) || {  # the sha512-pinned build only
 }
 exec env -u GEMINI_API_KEY -u GOOGLE_API_KEY -u GOOGLE_APPLICATION_CREDENTIALS \
     -u GOOGLE_CLOUD_PROJECT -u GOOGLE_CLOUD_LOCATION -u GOOGLE_GENAI_USE_VERTEXAI \
-    SSH_CONNECTION="${SSH_CONNECTION:-127.0.0.1 0 127.0.0.1 0}" "$bin" "$@"
+    SSH_CONNECTION="${SSH_CONNECTION:-127.0.0.1 0 127.0.0.1 0}" AGENT_RUN_PARENT=agy "$bin" "$@"

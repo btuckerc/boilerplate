@@ -81,6 +81,9 @@ CODEX_MODELS = {"sol": ("gpt-6.2-sol", "xhigh"), "astra": ("gpt-6.2-astra", "hig
                 "luna": ("gpt-6-luna", "low")}
 # Gemini through Tucker's own Antigravity sign-in, over ACP as T3 Code does: one
 # text-only turn at a time (its own single slot), every tool request refused.
+# Retired by default: Google's Nov 2026 forum guidance (threads 199021, 201688, 202874)
+# rules out another vendor's agent calling into agy on a personal plan. Neon is a
+# director Tucker starts instead; only Tucker re-enables this lane, per run.
 ACP_MODELS = {"neon": ("gemini-4-neon", "high")}
 ACP_AGENT_NAMES = {"antigravity-acp", "Antigravity ACP Server"}
 MAX_ATTACH_BYTES = 1024 * 1024
@@ -528,14 +531,17 @@ def parent_identity(environ):
         return {"harness": "claude", "session_id": environ["CLAUDE_CODE_SESSION_ID"]}
     if environ.get("PI_SESSION_FILE"):
         return {"harness": "omp", "session_id": environ["PI_SESSION_FILE"]}
+    # The agy wrapper marks its process tree; agy may also name the conversation.
+    if environ.get("AGENT_RUN_PARENT") == "agy" or environ.get("ANTIGRAVITY_CONVERSATION_ID"):
+        return {"harness": "agy", "session_id": environ.get("ANTIGRAVITY_CONVERSATION_ID") or None}
     return {"harness": "none", "session_id": None}
 
 
 def child_env(environ=None, *, tmpdir=None, setup=False):
     env = dict(os.environ if environ is None else environ)
     for key in list(env):
-        if (key.startswith(("HERDR_", "CLAUDE_CODE_", "ANTHROPIC_", "PI_"))
-                or key in {"CLAUDECODE", "OMPCODE", "CODEX_THREAD_ID", "OPENAI_API_KEY",
+        if (key.startswith(("HERDR_", "CLAUDE_CODE_", "ANTHROPIC_", "PI_", "ANTIGRAVITY_", "AGY_"))
+                or key in {"CLAUDECODE", "OMPCODE", "CODEX_THREAD_ID", "OPENAI_API_KEY", "AGENT_RUN_PARENT",
                            "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"}
                 or (not setup and (key.startswith("DBUS_") or key in {
                     "XDG_RUNTIME_DIR", "SSH_AUTH_SOCK", "SSH_AGENT_PID", "GPG_AGENT_INFO",
@@ -1417,6 +1423,13 @@ def audit_candidate(repo, given, packet):
 
 
 def prepare(args, root):
+    if getattr(args, "model", None) in ACP_MODELS:
+        if parent_identity(os.environ)["harness"] == "agy":
+            raise ValueError("neon is the director here: nothing may call back into agy")
+        if os.environ.get("AGENT_RUN_ALLOW_NEON_SEAT") != "1":
+            raise ValueError("the Neon seat is retired (Google forbids another vendor's agent calling into "
+                             "agy on a personal plan); start Neon as a director with agy instead. Only Tucker "
+                             "re-enables it, by setting AGENT_RUN_ALLOW_NEON_SEAT=1 himself")
     repo = Path(args.repo or os.getcwd()).expanduser().resolve()
     if args.lane == "audit":  # fail before queueing for a slot
         args.candidate = audit_candidate(repo, args.candidate, Path(args.packet).expanduser().read_bytes())

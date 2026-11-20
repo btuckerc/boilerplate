@@ -30,16 +30,16 @@
 {{- /* agent-run launches must notify the session; herdr owns other hooks, so append ours only
      when absent. */ -}}
 {{- $guard := joinPath .chezmoi.homeDir ".local/bin/agent-launch-guard" -}}
-{{- $hooks := get $config "hooks" | default dict -}}
-{{- $pre := get $hooks "PreToolUse" | default list -}}
+{{- $hooks := dict -}}{{- if hasKey $config "hooks" -}}{{- $hooks = get $config "hooks" -}}{{- end -}}
+{{- $pre := list -}}{{- if and (kindIs "map" $hooks) (hasKey $hooks "PreToolUse") -}}{{- $pre = get $hooks "PreToolUse" -}}{{- end -}}
 {{- $guarded := false -}}
 {{- /* A matcher of "", "*" or a |-list naming Bash covers it; regex forms are not compiled here (Go and
      JavaScript regexes differ), so they at worst add a second, harmless registration. */ -}}
 {{- if kindIs "slice" $pre -}}{{- range $pre -}}{{- if and (kindIs "map" .) (kindIs "slice" (get . "hooks")) -}}{{- $m := get . "matcher" -}}
-{{- if or (not (hasKey . "matcher")) (and (kindIs "string" $m) (or (eq $m "" "*") (has "Bash" (splitList "|" (nospace $m))))) -}}
+{{- if or (not (hasKey . "matcher")) (and (kindIs "string" $m) (or (eq $m "" "*") (and (regexMatch "^[A-Za-z0-9_ |]*$" $m) (has "Bash" (splitList "|" (nospace $m)))))) -}}
 {{- range (get . "hooks") -}}{{- if and (kindIs "map" .) (eq (toString (get . "type")) "command") (kindIs "string" (get . "command")) -}}{{- if eq (get . "command") $guard -}}{{- $guarded = true -}}{{- end -}}{{- end -}}{{- end -}}
 {{- end -}}{{- end -}}{{- end -}}{{- end -}}
-{{- if and (not $guarded) (kindIs "slice" $pre) -}}
+{{- if and (not $guarded) (kindIs "map" $hooks) (kindIs "slice" $pre) -}}
 {{- $_ := set $hooks "PreToolUse" (append $pre (dict "matcher" "Bash" "hooks" (list (dict "type" "command" "command" $guard "timeout" 5)))) -}}
 {{- $config = setValueAtPath "hooks" $hooks $config -}}
 {{- end -}}

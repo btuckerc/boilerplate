@@ -1346,7 +1346,11 @@ def audit_candidate(repo, given, packet):
     if len(commits) != 1:
         raise ValueError(f"audit candidate {given} must name exactly one commit object")
     candidate = commits[0]
-    ranges = [line for line in packet.decode(errors="replace").splitlines() if line.startswith("Audited-Range: ")]
+    try:
+        lines = packet.decode().splitlines()
+    except UnicodeDecodeError:
+        raise ValueError("audit packet is not valid UTF-8") from None
+    ranges = [line for line in lines if line.startswith("Audited-Range: ")]
     if len(ranges) != 1 or not re.fullmatch(r"Audited-Range: [0-9a-f]{40}\.\." + candidate, ranges[0]):
         raise ValueError(f"packet must contain exactly one line Audited-Range: <full base id>..{candidate}")
     return candidate

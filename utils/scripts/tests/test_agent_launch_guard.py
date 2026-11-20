@@ -29,6 +29,7 @@ def run(command, background=True, tool="Bash"):
     "out=$(agent-run ask --model sol --brief \"R&D.md\")",
     "/opt/nohup/agent-run ask --model sol --brief b.md",
     "nohup true\nagent-run ask --model sol --brief b.md",
+    "AGENT_RUN_HOME=$HOME/.local/state/nohup/agent-runs agent-run ask --model sol --brief b.md",
     "until [ $(agent-run list | wc -l) -lt 3 ]; do sleep 30; done; agent-run ask --model sol --brief b.md",
     "if ! agent-run ask --model sol --brief b.md; then echo failed; fi",
 ])
@@ -56,6 +57,8 @@ def test_one_background_launch_passes(command):
     ("\"/opt/backup-agent-run\" ask --model sol --brief b.md", False),
     ("echo $(date +%s) agent-run ask", False),
     ("echo Note! agent-run ask", False),
+    ("echo \"Example: \\$(agent-run ask --brief b.md)\"", False),
+    ("agent-run ask --brief \"$(printf %s b.md)\" --help", False),
     ("agent-run ask --model $seat --help", False),
     ("agent-run ask --brief $brief --help", False),
 ])
@@ -94,6 +97,7 @@ def test_non_launches_pass(command, background):
     ("printf '%s' \"$(agent-run ask --brief 'draft (rev 2).md' --model sol)\"", False, "run_in_background"),
     ("nohup env LABEL=$(date +%s) agent-run ask --model sol --brief b.md", True, "detach"),
     ("TAG=agent-run.log nohup agent-run ask --model sol --brief b.md", True, "detach"),
+    ("result=\"$(agent-run ask --model sol --brief 'design (draft.md')\"", False, "run_in_background"),
     ("agent-\\\nrun ask --model sol --brief b.md", False, "run_in_background"),
     ("cat <<<EOF\nagent-run ask --model sol --brief b.md\ncat <<EOF\nbody\nEOF", False, "run_in_background"),
     ("result=\"$(agent-run ask --model sol --brief \"$brief\")\"", False, "run_in_background"),

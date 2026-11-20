@@ -754,6 +754,9 @@ def test_audit_resolves_a_short_candidate_bound_by_the_packet(repo, environment)
     assert p.returncode == 0, p.stdout + p.stderr
     assert last_run(environment)[1]["base"] == full
     runs = len(list(Path(environment[0]["AGENT_RUN_HOME"]).glob("*-audit-*")))
+    brief.write_bytes(f"Audited-Range: {full}..{full}\n\xff\n".encode("latin-1"))
+    p = invoke(environment, "audit", "--packet", brief, "--repo", repo, "--candidate", full)
+    assert p.returncode == 1 and "not valid UTF-8" in p.stderr
     brief.write_text(f"Audited-Range: {full}..{full[:9]}\n")
     p = invoke(environment, "audit", "--packet", brief, "--repo", repo, "--candidate", full[:9])
     assert p.returncode == 1 and f"Audited-Range: <full base id>..{full}" in p.stderr

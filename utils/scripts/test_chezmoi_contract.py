@@ -64,6 +64,10 @@ class ChezmoiContract(unittest.TestCase):
         for broken in ("oops", {"0": {"matcher": "Read", "hooks": []}}, [{"matcher": "Bash", "hooks": "oops"}],
                        [{"matcher": "Bash", "hooks": [{"type": 5, "command": "x"}]}]):
             render(json.dumps({"hooks": {"PreToolUse": broken}}))  # never aborts
+        for kept in ({"hooks": {"PreToolUse": False}}, {"hooks": False}):  # non-list values are left as they are
+            self.assertEqual(json.loads(render(json.dumps(kept)))["hooks"], kept["hooks"])
+        seeded["hooks"]["PreToolUse"][1]["matcher"] = "^mcp__(Read|Bash|Write)$"  # a regex naming mcp__Bash only
+        self.assertEqual(len(json.loads(render(json.dumps(seeded)))["hooks"]["PreToolUse"]), 3)
 
     def test_excluding_scripts_still_installs_executable_files(self):
         (self.source / "executable_helper").write_text("#!/bin/sh\necho helper\n")

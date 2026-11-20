@@ -7,8 +7,9 @@ foreground calls finish without a notification, and launches in a loop or
 several per call run one after another. Exit 2 rejects the call and shows the
 reason to the model. A heuristic over shell text, not a parser: it aims at the
 shapes directors write, and ignores quoted text (except $(...) in double quotes),
-heredoc bodies and comments, so launches wrapped in `sh -c '...'` or eval, or behind
-prefixes with option values (`nice -n 5`), go unseen.
+heredoc bodies and comments, so launches wrapped in `sh -c '...'`, eval, xargs,
+`find -exec` or parallel, or behind prefixes with option values (`nice -n 5`),
+go unseen.
 """
 import json
 import re
@@ -19,15 +20,31 @@ HEREDOC = re.compile(r"<<-?[ \t]*(['\"]?)(\w+)\1([^\n]*)\n.*?\n[ \t]*\2[ \t]*(?=
 QUOTED_OR_COMMENT = re.compile(r"'[^']*'|\"(?:\\.|[^\"\\])*\"|(?:^|(?<=\s))#[^\n]*", re.M)
 SUBSTITUTION = re.compile(r"\$\([^()]*\)|`[^`]*`")  # still runs inside double quotes
 # Where a command starts: after a separator or keyword, optional prefixes and VAR=value assignments.
-START = (r"(?:^|[;&|(){}`\n!]|\$\(|\b(?:do|then|else|elif|if|while|until)\b)\s*"
-         r"(?:(?:exec|time|nice|nohup|setsid|command|env|timeout(?:\s+-\S+)*\s+\S+)(?:\s+-\S+)*\s+)*"
+START = (r"(?:^|[;&|(){}`\n!]|\$\()\s*(?:(?:do|then|else|elif|if|while|until|!)\s+)*"
+         r"(?:(?:\S*/)?(?:exec|time|nice|nohup|setsid|env|timeout(?:\s+-\S+)*\s+\S+)(?:\s+-\S+)*\s+)*"
          r"(?:[A-Za-z_]\w*=\S*\s+)*")
-LAUNCH = re.compile(START + r"(?:\S*/)?agent-run((?:\s+--?[\w-]+)*)\s+(?:sol|ask|audit|local)\b([^;&|\n)`$]*)")
+LAUNCH = re.compile(START + r"(?:\S*/)?agent-run((?:\s+--?[\w-]+)*)\s+(?:sol|ask|audit|local)\b((?:[^;&|\n)`$]|\$(?!\())*)")
 LOOP_WORD = re.compile(START + r"(for|while|until|select|done)\b")
 HELP = re.compile(r"(?:^|\s)(?:-h|--help)(?=\s|$)")
-DETACH = re.compile(r"(?<![\w.-])(?:nohup|setsid|disown)(?![\w.-])")
+WRAPPER = re.compile(r"(?<![\w.=-])(?:nohup|setsid)(?![\w.=-])")  # in a launch's own prefix
+DISOWN = re.compile(r"(?:^|[;&|\n])\s*disown\b")
 # `&` that does not background: &&, >&, &>, |&, <& (fd duplication and redirection).
 NOT_BACKGROUND = re.compile(r"&&|[0-9]*[<>]&[0-9-]*|&>>?|\|&")
+
+
+def unwrap_substitutions(text):
+    """Drop the quotes around "$(...)": it runs, and its own quoted arguments must stay balanced."""
+    out, i = list(text), 0
+    while (i := text.find('"$(', i)) >= 0:
+        depth, j = 0, i + 2
+        for j in range(i + 2, len(text)):
+            depth += {"(": 1, ")": -1}.get(text[j], 0)
+            if depth == 0:
+                break
+        if depth == 0 and text[j + 1:j + 2] == '"':
+            out[i] = out[j + 1] = " "
+        i += 3
+    return "".join(out)
 
 
 def problem(tool_input):
@@ -39,7 +56,9 @@ def problem(tool_input):
         if m.group().startswith("'"):
             return "''"
         return " ".join(SUBSTITUTION.findall(m.group())) or "''"  # $(...) still runs in double quotes
-    text = QUOTED_OR_COMMENT.sub(unquote, HEREDOC.sub(r"<<H\3", tool_input.get("command") or ""))
+    text = HEREDOC.sub(r"<<H\3", (tool_input.get("command") or "").replace("\\\n", " "))
+    text = unwrap_substitutions(text)
+    text = QUOTED_OR_COMMENT.sub(unquote, text)
     launches = [m for m in LAUNCH.finditer(text) if not HELP.search(m.group(1) + " " + m.group(2))]
     if not launches:
         return None
@@ -54,7 +73,8 @@ def problem(tool_input):
             looped = True
     if len(launches) > 1 or looped:
         return "one agent-run launch per Bash call; send several calls in one message so they run in parallel"
-    if DETACH.search(text) or "&" in NOT_BACKGROUND.sub("", text):
+    prefix = text[launches[0].start():text.index("agent-run", launches[0].start())]
+    if WRAPPER.search(prefix) or DISOWN.search(text) or "&" in NOT_BACKGROUND.sub("", text):
         return "do not detach agent-run (&, nohup, setsid, disown): a detached run never notifies the session"
     if not tool_input.get("run_in_background"):
         return "launch agent-run with run_in_background: true so its completion wakes the session"

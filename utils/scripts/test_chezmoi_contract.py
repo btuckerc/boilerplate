@@ -52,8 +52,11 @@ class ChezmoiContract(unittest.TestCase):
         self.assertEqual(commands.count("other"), 1)
         bash = [h["command"] for entry in hooks["PreToolUse"] if entry["matcher"] == "Bash" for h in entry["hooks"]]
         self.assertEqual([c.endswith("/.local/bin/agent-launch-guard") for c in bash], [True])
-        seeded["hooks"]["PreToolUse"][1]["matcher"] = "Bash|Write"  # already covers Bash: left alone
-        self.assertEqual(json.loads(render(json.dumps(seeded)))["hooks"], seeded["hooks"])
+        for covering in ("Bash|Write", "^Bash$", "*"):  # already covers Bash: left alone
+            seeded["hooks"]["PreToolUse"][1]["matcher"] = covering
+            self.assertEqual(json.loads(render(json.dumps(seeded)))["hooks"], seeded["hooks"])
+        seeded["hooks"]["PreToolUse"][1]["matcher"] = "^mcp__.*(Read|Bash)$"  # does not match Bash
+        self.assertEqual(len(json.loads(render(json.dumps(seeded)))["hooks"]["PreToolUse"]), 3)
 
     def test_excluding_scripts_still_installs_executable_files(self):
         (self.source / "executable_helper").write_text("#!/bin/sh\necho helper\n")

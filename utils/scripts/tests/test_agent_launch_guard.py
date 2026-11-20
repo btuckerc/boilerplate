@@ -21,6 +21,10 @@ def run(command, background=True, tool="Bash"):
     "timeout 3700 ~/.local/bin/agent-run --json ask --model sol --brief b.md",
     "for f in a b\ndo\n  test -f $f\ndone\nagent-run sol --repo . --brief b.md",
     "agent-run audit --name audit-nohup --repo . --packet p.md --candidate abc1234",
+    "agent-run ask --model sol --brief ~/nohup/b.md",
+    "agent-run ask --name nohup --model sol --brief review/setsid/b.md",
+    "agent-run ask --model sol --name x \\\n  --brief b.md",
+    "command -v setsid >/dev/null && agent-run ask --model sol --brief b.md",
     "until [ $(agent-run list | wc -l) -lt 3 ]; do sleep 30; done; agent-run ask --model sol --brief b.md",
     "if ! agent-run ask --model sol --brief b.md; then echo failed; fi",
 ])
@@ -41,6 +45,10 @@ def test_one_background_launch_passes(command):
     ("# agent-run ask --model sol\nagent-run list", False),
     ("echo \"run agent-run ask later\"", False),
     ("setsid --fork sleep 1", False),
+    ("echo see if agent-run ask works", False),
+    ("echo check if agent-run ask is installed; command -v agent-run ask", False),
+    ("agent-run ask --model $seat --help", False),
+    ("agent-run ask --brief $brief --help", False),
 ])
 def test_non_launches_pass(command, background):
     assert run(command, background) == (0, "")
@@ -67,6 +75,11 @@ def test_non_launches_pass(command, background):
     ("\"$HOME/.local/bin/agent-run\" ask --model sol --brief b.md", False, "run_in_background"),
     ("setsid --fork agent-run ask --model sol --brief b.md", True, "detach"),
     ("setsid -f agent-run ask --model sol --brief b.md", True, "detach"),
+    ("/usr/bin/nohup agent-run ask --model sol --brief b.md &", True, "detach"),
+    ("result=\"$(agent-run ask --model sol --brief \"$brief\")\"", False, "run_in_background"),
+    ("a=\"$(agent-run ask --brief \"$x\")\"; agent-run ask --brief b.md", True, "one agent-run"),
+    ("for s in sol opus; do out=\"$(agent-run ask --model \"$s\" --brief \"brief-$s.md\")\"; done", True, "one agent-run"),
+    ("agent-run \\\nask --model sol --brief b.md", False, "run_in_background"),
     ("timeout 3700 nohup agent-run ask --model sol --brief b.md", True, "detach"),
     ("agent-run ask --model sol --brief $(agent-run ask --model luna --brief a.md)", True, "one agent-run"),
     ("cat <<'EOF' >/dev/null && agent-run ask --model sol --brief b.md\nbody\nEOF", False, "run_in_background"),

@@ -4,7 +4,7 @@
 # As T3 Code runs it: the sign-in is stored under ~/.gemini rather than the desktop keyring (the
 # CLI does that when it sees SSH_CONNECTION), and ambient Google API keys or cloud credentials
 # never replace the personal login. The binary is the mise pin http:antigravity.
-bin=$(mise which antigravity 2>/dev/null || command -v antigravity) || {
+bin=$(mise which antigravity 2>/dev/null) || {  # the sha512-pinned build only
     echo "agy: the antigravity CLI is not installed; run: mise install http:antigravity" >&2
     exit 127
 }

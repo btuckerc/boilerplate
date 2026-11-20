@@ -96,6 +96,7 @@ class Client:
         self.problem = None
         self.session_id = None
         self.prompting = False
+        self.expected = None  # (model, thinking id, thinking) once setup confirms them
         self.reader = threading.Thread(target=self.read, daemon=True)
         self.reader.start()
 
@@ -163,8 +164,15 @@ class Client:
             return
         elif kind == "config_option_update" and isinstance(update.get("configOptions"), list):
             self.config = update["configOptions"]
+            if self.expected:
+                model, thinking_id, thinking = self.expected
+                now = selection(self, thinking_id)
+                if (now["model"], now["thinking"]) != (model, thinking):
+                    self.fail(f"selection changed during the turn: {now}")
         elif kind == "current_mode_update":
             self.mode = update.get("currentModeId")
+            if self.expected and self.mode != "default":
+                self.fail(f"mode changed during the turn: {self.mode!r}")
         elif kind == "agent_message_chunk":
             content = update.get("content") if isinstance(update.get("content"), dict) else {}
             if not self.prompting:
@@ -264,12 +272,11 @@ def setup(client, args, cwd, deadline):
     client.config = created.get("configOptions") or client.config
     modes = created.get("modes") or {}
     client.mode = modes.get("currentModeId")
-    if modes:
-        if not any(isinstance(m, dict) and m.get("id") == "default" for m in modes.get("availableModes") or []):
-            raise Refused("Antigravity offers no default (ask-first) mode")
-        if client.mode != "default":
-            client.request("session/set_mode", {"sessionId": session, "modeId": "default"}, deadline)
-            client.mode = "default"
+    if not any(isinstance(m, dict) and m.get("id") == "default" for m in modes.get("availableModes") or []):
+        raise Refused("Antigravity offers no default (ask-first) mode")
+    if client.mode != "default":
+        client.request("session/set_mode", {"sessionId": session, "modeId": "default"}, deadline)
+        client.mode = "default"
     model = next((o for o in client.config if o.get("id") == "model"), None)
     if model is None or args.model not in select_values(model):
         raise Refused(f"model {args.model} is not offered to this account "
@@ -282,9 +289,21 @@ def setup(client, args, cwd, deadline):
                       f"(offered: {select_values(thinking) if thinking else []})")
     if thinking.get("currentValue") != args.thinking:
         choose(client, session, thinking["id"], args.thinking, deadline)
+    # Handle whatever setup traffic is already queued before anything counts as the reply.
+    while True:
+        try:
+            kind, value = client.incoming.get_nowait()
+        except queue.Empty:
+            break
+        if kind == "fatal":
+            raise Refused(value)
+        if kind == "eof":
+            raise Refused(f"agy acp exited ({client.proc.poll()})")
+        client.handle(value)
     selected = selection(client, thinking["id"])
-    if (selected["model"], selected["thinking"]) != (args.model, args.thinking):
-        raise Refused(f"Antigravity did not apply {args.model}/{args.thinking}: {selected}")
+    if (selected["model"], selected["thinking"], selected["mode"]) != (args.model, args.thinking, "default"):
+        raise Refused(f"Antigravity did not apply {args.model}/{args.thinking}/default: {selected}")
+    client.expected = (args.model, thinking["id"], args.thinking)
     if client.problem:
         raise Refused(client.problem + " during setup")
     return thinking["id"]
@@ -362,6 +381,7 @@ def run(args, prompt, log):
         if (selected["model"], selected["thinking"], selected["mode"]) != (args.model, args.thinking, "default"):
             client.fail(f"selection changed during the turn: {selected}")
     finally:
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a cancel arriving now must not cut cleanup short
         if client.session_id:
             try:
                 client.request("session/close", {"sessionId": client.session_id},

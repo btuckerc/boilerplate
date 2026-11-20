@@ -91,8 +91,10 @@ Neon instead attaches what its brief names (the tree is not readable to it):
 
 ```
 agent-run ask --model neon --name <run>-neon-rN --schema <run>/schema.json \
-  --attach <run>/packet.md --attach <run>/diff-rN.patch --brief <run>/brief-neon-rN.md --timeout 1800
+  --attach <run>/packet.md --attach <run>/diff-r1.patch --brief <run>/brief-neon-rN.md --timeout 1800
 ```
+
+From round 2, attach `delta-rN.patch` and Neon's previous result in place of `diff-r1.patch`.
 
 Each run is fresh and keeps nothing between rounds, so a seat's later brief
 carries its own previous result. The run prints its id and result path; read

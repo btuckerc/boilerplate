@@ -1494,9 +1494,11 @@ def launch_locked(args, root, slot, runs):
         if sum(path.stat().st_size for path in files) > MAX_ATTACH_BYTES:
             raise ValueError(f"attachments exceed {MAX_ATTACH_BYTES} bytes")
         for path in files:
-            data = path.read_bytes()[:MAX_ATTACH_BYTES + 1]
+            data = path.read_bytes()
             data.decode("utf-8")  # text only
             attachments += f"\n--- attached file {path} ---\n".encode() + data
+        if len(attachments) > MAX_ATTACH_BYTES + 4096 * len(files):  # grew since the size check
+            raise ValueError(f"attachments exceed {MAX_ATTACH_BYTES} bytes")
     elif getattr(args, "attach", None):
         raise ValueError("--attach is for the neon seat; other seats read files with --add-dir")
     run_id = args.run_id

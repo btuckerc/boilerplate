@@ -2598,9 +2598,9 @@ for line in sys.stdin:
             (profile / sub / name).write_text("this session")
         (profile / "brain" / session).mkdir(parents=True, exist_ok=True)
         (profile / "brain" / session / "note").write_text("b")
+        modes = {"currentModeId": "plan", "availableModes": [{"id": "default"}, {"id": "plan"}]}
         send({"jsonrpc": "2.0", "id": rid, "result": {"sessionId": session,
-              "modes": {"currentModeId": "plan", "availableModes": [{"id": "default"}, {"id": "plan"}]},
-              "configOptions": config}})
+              **({} if mode == "no-modes" else {"modes": modes}), "configOptions": config}})
     elif method == "session/set_mode":
         if mode == "setup-tool":
             update({"sessionUpdate": "tool_call", "toolCallId": "t0", "kind": "read"})
@@ -2630,6 +2630,11 @@ for line in sys.stdin:
             update({"sessionUpdate": "agent_message_chunk", "content": {"type": "image", "data": "", "mimeType": "image/png"}})
         if mode == "drift":
             config[1]["currentValue"] = "low"
+            update({"sessionUpdate": "config_option_update", "configOptions": config})
+        if mode == "blip":
+            config[0]["currentValue"] = "gemini-3.8-flash"
+            update({"sessionUpdate": "config_option_update", "configOptions": config})
+            config[0]["currentValue"] = "gemini-4-neon"
             update({"sessionUpdate": "config_option_update", "configOptions": config})
         text = json.dumps(reply if mode != "invalid" else {"summary": "only"})
         if mode == "fenced":
@@ -2720,6 +2725,7 @@ def test_neon_runs_one_text_only_acp_turn(neon, tmp_path, mode):
     ("invalid", "not the schema JSON"),
     ("image", "'image' content"),
     ("drift", "selection changed during the turn"),
+    ("blip", "selection changed during the turn"),
     ("late", "after the turn"),
 ])
 def test_neon_refuses_tool_work_and_bad_replies(neon, mode, issue):
@@ -2744,6 +2750,7 @@ def test_neon_refuses_tool_work_and_bad_replies(neon, mode, issue):
 @pytest.mark.parametrize("mode,setup,issue", [
     ("auth", None, "not signed in"),
     ("proto3", None, "unsupported ACP protocol 3"),
+    ("no-modes", None, "no default (ask-first) mode"),
     ("no-neon", None, "model gemini-4-neon is not offered"),
     ("unapplied", None, "did not apply gemini-4-neon/high"),
     ("setup-tool", None, "started tool work during setup"),

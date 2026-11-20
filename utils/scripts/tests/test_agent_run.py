@@ -758,6 +758,15 @@ def test_audit_resolves_a_short_candidate_bound_by_the_packet(repo, environment)
     assert p.returncode == 1 and f"Audited-Range: <full base id>..{full}" in p.stderr
     p = invoke(environment, "audit", "--packet", brief, "--repo", repo, "--candidate", "HEAD")
     assert p.returncode == 1 and "not a ref that can move" in p.stderr
+    git(repo, "commit", "-q", "--allow-empty", "-m", "second")
+    git(repo, "branch", "deadbee", full)  # a hex-named branch is a ref, not an object id
+    brief.write_text(f"Audited-Range: {full}..{full}\n")
+    p = invoke(environment, "audit", "--packet", brief, "--repo", repo, "--candidate", "deadbee")
+    assert p.returncode == 1 and "exactly one commit object" in p.stderr
+    git(repo, "tag", "-a", "-m", "t", "v1", full)
+    tag = git(repo, "rev-parse", "v1").decode().strip()
+    p = invoke(environment, "audit", "--packet", brief, "--repo", repo, "--candidate", tag)
+    assert p.returncode == 1 and "exactly one commit object" in p.stderr
     assert len(list(Path(environment[0]["AGENT_RUN_HOME"]).glob("*-audit-*"))) == runs  # refused before any receipt
 
 

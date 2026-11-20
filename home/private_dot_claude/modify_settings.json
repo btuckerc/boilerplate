@@ -33,7 +33,7 @@
 {{- $hooks := get $config "hooks" | default dict -}}
 {{- $pre := get $hooks "PreToolUse" | default list -}}
 {{- $guarded := false -}}
-{{- range $pre -}}{{- range (get . "hooks" | default list) -}}{{- if eq (get . "command") $guard -}}{{- $guarded = true -}}{{- end -}}{{- end -}}{{- end -}}
+{{- range $pre -}}{{- if eq (get . "matcher") "Bash" -}}{{- range (get . "hooks" | default list) -}}{{- if eq (get . "command") $guard -}}{{- $guarded = true -}}{{- end -}}{{- end -}}{{- end -}}{{- end -}}
 {{- if not $guarded -}}
 {{- $_ := set $hooks "PreToolUse" (append $pre (dict "matcher" "Bash" "hooks" (list (dict "type" "command" "command" $guard "timeout" 5)))) -}}
 {{- $config = setValueAtPath "hooks" $hooks $config -}}

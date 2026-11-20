@@ -1336,10 +1336,15 @@ def audit_candidate(repo, given, packet):
     """The full commit id for a hex candidate, bound by the packet's one Audited-Range line."""
     if not re.fullmatch(r"[0-9a-f]{7,40}", given):
         raise ValueError("audit candidate must be a commit id (7-40 hex), not a ref that can move")
+    # Object ids only: rev-parse on a short id would prefer a branch or tag of that name.
     try:
-        candidate = git(repo, "rev-parse", "--verify", "--end-of-options", given + "^{commit}").decode().strip()
+        ids = [given] if len(given) == 40 else git(repo, "rev-parse", f"--disambiguate={given}").decode().split()
+        commits = [oid for oid in ids if git(repo, "cat-file", "-t", oid).decode().strip() == "commit"]
     except RuntimeError as exc:
         raise ValueError(f"audit candidate {given}: {exc}") from None
+    if len(commits) != 1:
+        raise ValueError(f"audit candidate {given} must name exactly one commit object")
+    candidate = commits[0]
     ranges = [line for line in packet.decode(errors="replace").splitlines() if line.startswith("Audited-Range: ")]
     if len(ranges) != 1 or not re.fullmatch(r"Audited-Range: [0-9a-f]{40}\.\." + candidate, ranges[0]):
         raise ValueError(f"packet must contain exactly one line Audited-Range: <full base id>..{candidate}")

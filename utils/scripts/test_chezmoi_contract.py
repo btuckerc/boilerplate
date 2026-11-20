@@ -32,6 +32,27 @@ class ChezmoiContract(unittest.TestCase):
         return subprocess.run([*self.base, "apply", "--exclude", "scripts", "--no-tty"],
                               capture_output=True, text=True)
 
+    def test_claude_settings_merge_keeps_other_hooks_and_adds_the_guard_once(self):
+        import json
+        template = Path(__file__).resolve().parents[2] / "home/private_dot_claude/modify_settings.json"
+        def render(text):
+            result = subprocess.run([*self.base, "execute-template", "--with-stdin", "--file", str(template)],
+                                    input=text, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return result.stdout
+        seeded = {"hooks": {"SessionStart": [{"hooks": [{"command": "herdr session", "type": "command"}]}],
+                            "PreToolUse": [{"matcher": "Edit", "hooks": [{"command": "other", "type": "command"}]},
+                                           {"matcher": "Write", "hooks": [{"command": str(Path.home() / ".local/bin/agent-launch-guard"),
+                                                                            "type": "command"}]}]}}
+        once = render(json.dumps(seeded))
+        self.assertEqual(render(once), once)
+        hooks = json.loads(once)["hooks"]
+        self.assertEqual(hooks["SessionStart"], seeded["hooks"]["SessionStart"])
+        commands = [h["command"] for entry in hooks["PreToolUse"] for h in entry["hooks"]]
+        self.assertEqual(commands.count("other"), 1)
+        bash = [h["command"] for entry in hooks["PreToolUse"] if entry["matcher"] == "Bash" for h in entry["hooks"]]
+        self.assertEqual([c.endswith("/.local/bin/agent-launch-guard") for c in bash], [True])
+
     def test_excluding_scripts_still_installs_executable_files(self):
         (self.source / "executable_helper").write_text("#!/bin/sh\necho helper\n")
         (self.source / "run_once_hook").write_text("#!/bin/sh\nexit 43\n")

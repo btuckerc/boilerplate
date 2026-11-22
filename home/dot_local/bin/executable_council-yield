@@ -2,8 +2,9 @@
 """Council accounting from agent-run receipts.
 
 add RUN LINES SEAT=ALONE/SHARED/DECLINED ... [NAME ...] [--dry-run]
-    RUN is <YYYY-MM-DD>-<slug>. Counted seats are sol, fable, astra or opus;
-    named ask runs <run>-<seat>-rN (and -bounce) supply rounds and scores.
+    RUN is <YYYY-MM-DD>-<slug>. Counted seats are sol, fable, astra, opus or neon;
+    named ask runs <run>-<seat>-rN (and -bounce) supply rounds and scores (neon
+    falls back to ~/.local/state/council/<run>/neon-rN.json when run via agy).
     Bare NAMEs identify unscored ask runs. Append one yield.tsv row per seat.
 summary [--last N]
     Per seat on its current model: scored runs, verified findings alone in the
@@ -24,9 +25,10 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-YIELD = Path.home() / ".local/state/council/yield.tsv"
+COUNCIL_DIR = Path.home() / ".local/state/council"
+YIELD = COUNCIL_DIR / "yield.tsv"
 HEADER = ["date", "slug", "seat", "model", "lines", "rounds", "alone", "shared", "declined", "cost_usd", "active_s"]
-SEATS = {"sol", "fable", "astra", "opus"}
+SEATS = {"sol", "fable", "astra", "opus", "neon"}
 COUNTS = re.compile(r"^(?P<seat>[^=]+)=(?P<alone>\d+)/(?P<shared>\d+)/(?P<declined>\d+)$")
 RUN = re.compile(r"^(?P<date>\d{4}-\d{2}-\d{2})-(?P<slug>[A-Za-z0-9][A-Za-z0-9_-]*)$")
 NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
@@ -108,6 +110,34 @@ def _receipt(path: Path) -> dict:
         raise ReceiptError(f"{path.name}: invalid agent-run receipt: {exc}") from exc
 
 
+def _read_local_neon(council_dir: Path, slug: str, home: Path) -> dict:
+    run_dir = council_dir / slug
+    pattern = re.compile(r"^neon-r(?P<round>[1-9]\d*)(?P<bounce>-bounce)?\.json$")
+    grouped = defaultdict(list)
+    for path in sorted(run_dir.iterdir()) if run_dir.is_dir() else []:
+        match = pattern.fullmatch(path.name)
+        if match and path.is_file():
+            try:
+                result = json.loads(path.read_text())
+                if not isinstance(result, dict):
+                    raise ValueError("result must be a JSON object")
+                score = result.get("score")
+                if score is not None and (not _number(score) or not 0 <= score <= 10):
+                    raise ValueError("score must be a number from 0 to 10")
+            except (OSError, ValueError, TypeError, UnicodeError) as exc:
+                raise ReceiptError(f"{path.name}: invalid neon result: {exc}") from exc
+            grouped[int(match["round"])].append(({"score": score, "run": path.name}, bool(match["bounce"])))
+    if not grouped:
+        raise ReceiptError(f"neon: no agent-run runs named {slug}-neon-r<N> under {home} "
+                           f"or neon-r<N>.json under {run_dir}")
+    rounds = {}
+    for number, runs in sorted(grouped.items()):
+        final, _ = max(runs, key=lambda item: (item[1], item[0]["run"]))
+        rounds[number] = {"score": final["score"], "seconds": None, "cost": None}
+    return {"seat": "neon", "model": "gemini-4-neon:inherit", "rounds": rounds,
+            "seconds": None, "cost": None}
+
+
 def read_seat(home: Path, slug: str, seat: str) -> dict:
     pattern = re.compile(r"-ask-" + re.escape(f"{slug}-{seat}") + r"-r(?P<round>\d+)(?P<bounce>-bounce)?$")
     grouped = defaultdict(list)
@@ -116,6 +146,8 @@ def read_seat(home: Path, slug: str, seat: str) -> dict:
         if match and path.is_dir():
             grouped[int(match["round"])].append((_receipt(path), bool(match["bounce"])))
     if not grouped:
+        if seat == "neon":
+            return _read_local_neon(COUNCIL_DIR, slug, home)
         raise ReceiptError(f"{seat}: no agent-run runs named {slug}-{seat}-r<N> under {home}")
     models = {r["model"] for runs in grouped.values() for r, _ in runs}
     if len(models) != 1:
@@ -142,7 +174,9 @@ def read_unscored(home: Path, name: str) -> dict:
             "seconds": sum(r["seconds"] for r in runs), "cost": _sum_cost(r["cost"] for r in runs)}
 
 
-def _duration(seconds: float) -> str:
+def _duration(seconds: float | None) -> str:
+    if seconds is None:
+        return "?"
     minutes, rest = divmod(round(seconds), 60)
     return f"{minutes}m{rest:02d}s"
 
@@ -204,7 +238,7 @@ def add(args: argparse.Namespace) -> int:
                 raise ReceiptError(f"{name}: duplicate entry")
             if match:
                 if name not in SEATS:
-                    raise ReceiptError(f"{name}: counted seat must be sol, fable, astra or opus")
+                    raise ReceiptError(f"{name}: counted seat must be sol, fable, astra, opus or neon")
                 counted[name] = match
                 named[name] = read_seat(home, args.run, name)
             else:
@@ -219,7 +253,7 @@ def add(args: argparse.Namespace) -> int:
                         "lines": str(args.lines), "rounds": str(len(data["rounds"])),
                         "alone": counts["alone"], "shared": counts["shared"], "declined": counts["declined"],
                         "cost_usd": "" if data["cost"] is None else f"{data['cost']:.2f}",
-                        "active_s": str(round(data["seconds"]))})
+                        "active_s": "" if data["seconds"] is None else str(round(data["seconds"]))})
         if new and not args.dry_run:
             YIELD.parent.mkdir(parents=True, exist_ok=True)
             fresh = not YIELD.exists() or YIELD.stat().st_size == 0

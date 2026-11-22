@@ -20,7 +20,10 @@ spec.loader.exec_module(module)
 def receipts(tmp_path, monkeypatch):
     home = tmp_path / "runs"
     home.mkdir()
+    council = tmp_path / "council"
+    council.mkdir()
     monkeypatch.setenv("AGENT_RUN_HOME", str(home))
+    monkeypatch.setattr(module, "COUNCIL_DIR", council)
     monkeypatch.setattr(module, "YIELD", tmp_path / "yield.tsv")
     created = []
 
@@ -195,3 +198,45 @@ def test_yield_settles_orphaned_run(receipts):
     (path / "meta.json").write_text(json.dumps(meta))
     assert module.main(["add", "2026-11-08-demo", "0", "fable=0/0/0"]) == 0
     assert json.loads((path / "meta.json").read_text())["state"] == "abandoned"
+
+
+def test_neon_reads_council_dir_json_and_bounces(receipts, capsys):
+    run_dir = module.COUNCIL_DIR / "2026-11-22-demo"
+    run_dir.mkdir()
+    (run_dir / "neon-r0.json").write_text(json.dumps({"approach": "x", "objection": "y", "cut": "z"}))
+    (run_dir / "neon-r1.json").write_text(json.dumps({"score": 7.4}))
+    (run_dir / "neon-r1-bounce.json").write_text(json.dumps({"score": 8.2}))
+    (run_dir / "neon-r2.json").write_text(json.dumps({"score": 9.3}))
+    assert module.main(["add", "2026-11-22-demo", "42", "neon=2/1/0"]) == 0
+    out = capsys.readouterr().out
+    assert "round 1 | round 2" in out and "round 0" not in out
+    assert "8.2 · ? · $?" in out and "9.3 · ? · $?" in out
+    assert "gemini-4-neon:inherit" in out
+    assert rows()[0] == {"date": "2026-11-22", "slug": "demo", "seat": "neon", "model": "gemini-4-neon:inherit",
+                         "lines": "42", "rounds": "2", "alone": "2", "shared": "1", "declined": "0",
+                         "cost_usd": "", "active_s": ""}
+    assert module.main(["summary"]) == 0
+    assert "| neon | gemini-4-neon | 1 | 2 | 3 | 0 | 0.00 | 1 | - |" in capsys.readouterr().out
+
+
+def test_neon_prefers_agent_run_receipts_when_present(receipts, capsys):
+    _, create = receipts
+    create("2026-11-22-demo-neon-r1", score=9.1, seconds=45, model="gemini-4-neon", effort="high")
+    run_dir = module.COUNCIL_DIR / "2026-11-22-demo"
+    run_dir.mkdir()
+    (run_dir / "neon-r1.json").write_text(json.dumps({"score": 1.0}))
+    assert module.main(["add", "2026-11-22-demo", "10", "neon=1/0/0"]) == 0
+    out = capsys.readouterr().out
+    assert "9.1 · 0m45s · $?" in out
+    assert rows()[0]["model"] == "gemini-4-neon:high"
+    assert rows()[0]["active_s"] == "45"
+
+
+@pytest.mark.parametrize("payload", ["not-json", "[]", json.dumps({"score": 11}), json.dumps({"score": True})])
+def test_neon_rejects_invalid_local_result(receipts, capsys, payload):
+    run_dir = module.COUNCIL_DIR / "2026-11-22-demo"
+    run_dir.mkdir()
+    (run_dir / "neon-r1.json").write_text(payload)
+    assert module.main(["add", "2026-11-22-demo", "10", "neon=0/0/0"]) == 1
+    assert "invalid neon result" in capsys.readouterr().err
+    assert not module.YIELD.exists()

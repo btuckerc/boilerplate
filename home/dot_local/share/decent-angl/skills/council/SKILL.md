@@ -24,18 +24,27 @@ session where it is unavailable or refuses (`AGENT_LOCAL_ONLY`), say so and stop
 | Fable | `fable` | Simplifier: what to cut | default |
 | Astra | `astra` (GPT-6.2 Astra high) | Scenario: walk the real use end to end | `full council` or named |
 | Opus | `opus` (fresh Opus 5.5 high) | Skeptic: attack the packet's assumptions | default |
+| Neon | `agy` built-in `research` subagent (`Model: "inherit"`) | Fresh lens: blind spots, clarity, simpler design | `full council` or named, `agy` director only |
 
 - "Sol high council" seats Sol alone. Named seats replace the default set.
 - Seats are read-only: Codex seats run in a read-only sandbox, Claude seats
-  with Read/Grep/Glob/WebSearch/WebFetch only and no MCP. Neon is never a seat: Google's
-  terms bar another agent calling into agy. When Neon directs the council it
-  seats the others through `agent-run` and its own view counts as the director's. `agent-run` fixes
+  with Read/Grep/Glob/WebSearch/WebFetch only and no MCP. Neon sits only when
+  `agy` is the director, via Antigravity's built-in `research` subagent
+  (`Model: "inherit"`, read-only sandbox, no network, fresh conversation per
+  round; never invoke `agy` from the shell). From Claude Code or any other
+  director, Neon stays pending and unseated until an approved external or API
+  lane exists—never launch or drive `agy` from Claude; if a non-`agy` session
+  names Neon, report it unavailable, never substitute, and continue as an
+  incomplete council. `agent-run` fixes
   model and effort; no seat takes a temperature: diversity is model family,
   effort and emphasis.
-  A usable receipt has `model_ok`, `effort_ok` and `sandbox_ok` all true:
+  A usable `agent-run` receipt has `model_ok`, `effort_ok` and `sandbox_ok` all true:
   Codex uses rollout evidence; Claude uses API-request effort/model and
   prompt-snapshot tool evidence; local workers use session changes plus
-  runner-attested bwrap. Missing evidence is unverified, not assumed.
+  runner-attested bwrap. Missing evidence is unverified, not assumed. Neon's
+  `research` subagent has no `agent-run` receipt (model and effort are
+  inherited, not independently attested); validate its JSON against the round
+  schema before accepting it.
 - Run `agent-quota` before each round and skip a seat whose pool is under 10%
   (Fable and Opus share the Claude 7-day pool with Claude Code; Claude has no 5-hour
   limit). Also skip a seat whose run
@@ -85,6 +94,14 @@ queues a seat for a slot; relaunch one that still exits 75, never skip it.
 agent-run ask --model <seat> --name <run>-<seat>-rN --repo <run>/tree-rN \
   --add-dir <run> --schema <run>/schema.json --brief <run>/brief-<seat>-rN.md --timeout 1800
 ```
+
+When `agy` directs and Neon sits, invoke
+`invoke_subagent(TypeName="research", Model="inherit", Role="Council Neon rN")`
+in the same turn with the same brief (passing absolute paths to `<run>/packet.md`
+and any tree/diff/prior-result files) plus:
+`Return ONLY a single JSON object matching the round schema (no markdown fences, no prose).`
+Validate the reply against the schema and save it to `<run>/neon-rN.json` (or
+`<run>/neon-rN-bounce.json` on a bounce, using a fresh subagent).
 
 Each run is fresh and keeps nothing between rounds, so a seat's later brief
 carries its own previous result. The run prints its id and result path; read
@@ -205,11 +222,11 @@ where `<run>` is the run directory name, with one counted entry per seat that
 sat a scored round and bare run names (`<run>-tiebreak-1`, `<run>-<seat>-r0`) for
 the rest. lines is insertions plus deletions from
 `git diff --shortstat <base> <tree>` for round 1; alone and shared count the
-seat's verified blockers and shoulds; declined counts its findings you
-rejected or downgraded. It reads model, rounds, time and cost from the
-`agent-run` receipts, appends to the machine-local
-`~/.local/state/council/yield.tsv`, and prints the per-round table (score,
-duration, cost). Put that table under `## Council review` with a `Rounds: N`
+seat's verified blockers and shoulds; declined counts its findings you rejected or downgraded. It reads model,
+rounds, time and cost from the `agent-run` receipts (falling back to
+`<run>/neon-rN.json` for `agy`'s `research` subagent), appends to the
+machine-local `~/.local/state/council/yield.tsv`, and prints the per-round
+table (score, duration, cost). Put that table under `## Council review` with a `Rounds: N`
 line: in the PR description (never a comment) only when the user asked to
 ship or update the PR, otherwise in the final reply.
 

@@ -52,8 +52,11 @@ winbox <-> uplink is switched in the R7800's switch chip and never touches the A
 - LAN `10.77.78.1/24`, dnsmasq DHCP pool `.41-.245`, domain `home.arpa`. Host entries:
   barn-ap .110, be9700 .111, xmg1915 .112, winbox .120, macmini .121.
 - DNS as clt: dnsmasq on 53053, Unbound forwards `home.arpa` and `78.77.10.in-addr.arpa`
-  to it, `private-domain home.arpa`, DNSSEC, prefetch, aggressive NSEC, serve-expired
-  (TTL 86400, client timeout 1800 ms), msg/rrset cache 64m/128m.
+  to it, `private-domain home.arpa,plex.direct` (exempts `*.plex.direct` from DNS rebind
+  protection so LAN Plex clients resolve `10.77.78.121`), DNSSEC, prefetch, aggressive NSEC,
+  serve-expired (TTL 86400, client timeout 1800 ms), msg/rrset cache 64m/128m.
+- Inbound DNAT: WAN TCP `18721` -> `10.77.78.121:32400` (`Plex Remote Access (macmini)`,
+  UUID `7039bc76-d5c9-43e0-a53a-458be5164954`, `pass=pass`, NAT reflection disabled, log on).
 - Shaper: FQ-CoDel pipes 800 down / 90 up Mbit, quantum 300, ECN, one maskless queue
   each, rules WAN in/out. Pipe UUIDs: down `596234c5-83d3-46b4-b2b4-646109c2d361`, up
   `42d53d14-a647-4f92-9029-c0c3685a2d2c`. Interactive queues and rules 10-15 exist,
@@ -120,6 +123,8 @@ off; telnet/FTP/HTTP/SNMP off. All counters clean on 2026-11-16 (0 CRC, pause, c
   fine: the tunnel route is interface-scoped (`UCSI`), and the MacBook stays on en0 (checked).
 
 ## Change log
+
+- 2026-11-22 Plex direct delivery: added `plex.direct` to Unbound `privatedomain` (`dig @10.77.78.1 10-77-78-121.<cert>.plex.direct` went from empty to `10.77.78.121`) and added WAN TCP `18721` -> `10.77.78.121:32400` DNAT rule (`7039bc76-d5c9-43e0-a53a-458be5164954`, `pass=pass`, reflection disabled). Verified from `nous` (`https://70.175.223.206:18721/identity` went from timeout to HTTP 200 XML; MyPlex `mappingState` went from `unknown` to `mapped`).
 
 - 2026-11-17 elsie joined Tailscale (user login, key expiry off, route approved). MacBook on barn Wi-Fi still reaches winbox over en0 (connect median 4.3 ms before and after). Routed wake verified: unicast-only magic from the MacBook bound to utun4 woke winbox in 6 s via elsie.
 

@@ -361,7 +361,8 @@ def _toml_value(v) -> str:
 
 def _toml_spec(spec: dict) -> str:
     value = _toml_value
-    rows = [f"{key} = {value(spec[key])}" for key in ("rootfs", "served_model_name", "home", "args")]
+    keys = [k for k in ("rootfs", "served_model_name", "home", "command", "args") if k in spec]
+    rows = [f"{key} = {value(spec[key])}" for key in keys]
     for section in ("env", "mounts"):
         rows.extend(["", f"[{section}]"])
         rows.extend(f"{value(k)} = {value(v)}" for k, v in sorted(spec[section].items()))
@@ -375,7 +376,8 @@ def _annotated_spec(text: str, spec: dict) -> str | None:
     above it. None when `text` has a value it cannot read or the result would not load back
     as `spec`."""
     value = _toml_value
-    want = {"": {k: spec[k] for k in ("rootfs", "served_model_name", "home", "args")},
+    keys = [k for k in ("rootfs", "served_model_name", "home", "command", "args") if k in spec]
+    want = {"": {k: spec[k] for k in keys},
             "env": spec["env"], "mounts": spec["mounts"]}
     written = {name: set() for name in want}
     out: list[str] = []

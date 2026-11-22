@@ -1,0 +1,9 @@
+# Production weights (Swift-1.5-Qwen3.8-27B-heretic-MXFP4-GPTQ + DFlash2) on vllm-sly-radiance 1.13.4.
+kind = "serve"
+label = "vllm-radiance-1.13.4"
+spec = "/etc/nous-inference/serve.toml"
+ready_timeout_s = 1800
+
+[overrides]
+rootfs = "/srv/models/engines/vllm-sly-radiance-1.13.4-rocm10.1"
+home = "/srv/workspaces/vllm-cache/home-radiance-1.13.4"

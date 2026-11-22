@@ -1,0 +1,13 @@
+# Thinking Machines Inkling-2-Mini (native NVFP4+MXFP8 + DSpark) on vllm-redshift:inkling2-mini.
+# Native recommended sampling: T=1.0, top_p=1.0, top_k=0 (disabled), min_p=0.0, reasoning_effort=medium.
+kind = "serve"
+label = "vllm-inkling2-mini"
+spec = "candidates/specs/vllm-inkling2-mini.toml"
+ready_timeout_s = 1800
+
+[request]
+temperature = 1.0
+top_p = 1.0
+top_k = 0
+min_p = 0.0
+reasoning_effort = "medium"

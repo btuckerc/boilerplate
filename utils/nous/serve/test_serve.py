@@ -90,6 +90,19 @@ def test_spec_args_replace_the_image_cmd_as_docker_run_does():
     assert serve.command({"Entrypoint": None, "Cmd": ["vllm", "serve"]}) == ["vllm", "serve"]
 
 
+def test_spec_command_overrides_the_image_entrypoint_and_rejects_bad_values(tmp_path, rootfs):
+    spec = serve.load(write_spec(tmp_path, rootfs, 'command = ["vllm", "serve"]\n'))
+    argv = serve.argv(spec, port=18737)
+    assert argv[argv.index("--") + 1:] == ["vllm", "serve", "--model", "/models/w", "--served-model-name", "m",
+                                           "--host", "127.0.0.1", "--port", "18737"]
+    as_json = tmp_path / "spec.json"
+    as_json.write_text(json.dumps({**spec, "rootfs": str(spec["rootfs"]), "home": str(spec["home"])}))
+    assert serve.argv(serve.load(as_json), port=18737) == argv
+    for bad in ('command = []\n', 'command = "vllm"\n', 'command = [""]\n'):
+        with pytest.raises(serve.SpecError, match="command"):
+            serve.load(write_spec(tmp_path, rootfs, bad))
+
+
 def test_identity_changes_with_any_knob_but_not_with_the_port(tmp_path, rootfs):
     spec = serve.load(write_spec(tmp_path, rootfs))
     tuned = {**spec, "env": {**spec["env"], "KNOB": "other"}}

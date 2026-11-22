@@ -1,0 +1,12 @@
+# Stock Qwen3.8-27B, AMD Quark AWQ MXFP4 + DFlash2 on vllm-sly-radiance 1.13.4 (abliteration control).
+kind = "serve"
+label = "vllm-quark-stock-1.13.4"
+spec = "/etc/nous-inference/serve.toml"
+ready_timeout_s = 1800
+
+[overrides]
+rootfs = "/srv/models/engines/vllm-sly-radiance-1.13.4-rocm10.1"
+home = "/srv/workspaces/vllm-cache/home-radiance-1.13.4"
+model = "/models/Qwen3.8-27B-Quark-AWQ-MXFP4"
+quantization = "quark"
+served_model_name = "Qwen3.8-27B-Quark-MXFP4"

@@ -1,0 +1,33 @@
+# nous-serve spec: Thinking Machines Inkling-2-Mini (26.4B / 3.4B active, 3x looped MoE,
+# native NVFP4+MXFP8 weights, 20.16 GB) on vllm-redshift:inkling2-mini (v0.3.1, gfx1201).
+# 196K context, 2 concurrent requests (416K FP8 KV pool), probabilistic DSpark (k=7), vision on.
+rootfs = "/srv/models/engines/vllm-redshift-inkling2-mini"
+served_model_name = "Inkling-2-Mini"
+home = "/srv/workspaces/vllm-cache/home-inkling2-mini"
+command = ["vllm", "serve"]
+args = [
+  "/models/Inkling-2-Mini",
+  "--max-model-len", "196608",
+  "--max-num-seqs", "2",
+  "--kv-cache-dtype", "fp8",
+  "--kv-cache-memory-bytes", "9126805504",
+  "--speculative-config", '{"method":"dspark","num_speculative_tokens":7,"kv_cache_dtype":"fp8","enable_adaptive_verification":true,"draft_sample_method":"probabilistic"}',
+  "--enable-prefix-caching",
+  "--enable-prompt-tokens-details",
+  "--reasoning-parser", "inkling",
+  "--tool-call-parser", "inkling",
+  "--enable-auto-tool-choice",
+  "--limit-mm-per-prompt", '{"image":64}',
+  "--shutdown-timeout", "120",
+]
+
+[mounts]
+"/models" = "/srv/models/vllm"
+
+[env]
+HIP_VISIBLE_DEVICES = "0"
+ROCR_VISIBLE_DEVICES = "0"
+ROCPROFILER_REGISTER_ENABLED = "0"
+HF_HUB_OFFLINE = "1"
+VLLM_NO_USAGE_STATS = "1"
+DO_NOT_TRACK = "1"

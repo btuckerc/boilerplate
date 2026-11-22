@@ -401,6 +401,7 @@ def test_written_promote_toml_round_trips_through_nous_serve(tmp_path):
     rootfs.mkdir()
     (rootfs / ".nous-serve-image.json").write_text("{}")
     spec = {"rootfs": str(rootfs), "served_model_name": "qwen-😀 \"q\"", "home": str(tmp_path),
+            "command": ["vllm", "serve"],
             "args": ["--model", "qwen", "tab\there"], "env": {"A": "B", "DEL": "\x7f"}, "mounts": {}}  # surrogates, DEL broke it
     path = tmp_path / "candidate.toml"
     path.write_text(build._toml_spec(spec))

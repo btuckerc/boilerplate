@@ -18,28 +18,32 @@ session where it is unavailable or refuses (`AGENT_LOCAL_ONLY`), say so and stop
 
 ## Seats
 
-| Seat | `agent-run ask --model` | Emphasis (goes in the brief) | Sits |
+| Seat | `agent-run ask --model` / runner | Emphasis (goes in the brief) | Sits |
 | --- | --- | --- | --- |
-| Sol | `sol` (GPT-6.2 Sol xhigh) | Breaker: make it fail | default |
-| Fable | `fable` | Simplifier: what to cut | default |
-| Astra | `astra` (GPT-6.2 Astra high) | Scenario: walk the real use end to end | `full council` or named |
-| Opus | `opus` (fresh Opus 5.5 high) | Skeptic: attack the packet's assumptions | default |
-| Neon | `agy` built-in `research` subagent (`Model: "inherit"`) | Fresh lens: blind spots, clarity, simpler design | `full council` or named, `agy` director only |
+| Sol | `sol` (GPT-6.2 Sol xhigh) | Breaker: local invariants, boundary inputs and races, each with a concrete repro | default |
+| Fable | `fable` | Design & craft: visual, layout, interaction ergonomics and structural quality against existing patterns; improve intended capabilities rather than cutting them | default |
+| Astra | `astra` (GPT-6.2 Astra high) | Lifecycle: walk real use end to end across modules and over time—handoffs, saved state, upgrades, relaunch and failure recovery | `full council` or named |
+| Opus | `opus` (fresh Opus 5.5 high) | Skeptic: packet assumptions, evidence gaps, scope drift and complexity the change adds without need | default |
+| Neon | `agy` built-in `research` subagent (`Model: "inherit"`) | Prose & clarity: first-time reader or user view—copy, typography and visual/information hierarchy, docs/CLI clarity and blind spots | default (`agy` director only) |
 
 - "Sol high council" seats Sol alone. Named seats replace the default set.
+- `full council` seats every seat available to the current director (see Neon
+  below).
 - Seats are read-only: Codex seats run in a read-only sandbox, Claude seats
-  with Read/Grep/Glob/WebSearch/WebFetch only and no MCP. Neon sits only when
-  `agy` is the director, via Antigravity's built-in `research` subagent
-  (`Model: "inherit"`, read-only sandbox, no network, fresh conversation per
-  round; never invoke `agy` from the shell). From Claude Code or any other
-  director, Neon stays pending and unseated until an approved external or API
-  lane exists—never launch or drive `agy` from Claude; if a non-`agy` session
-  names Neon, report it unavailable, never substitute, and continue as an
-  incomplete council. `agent-run` fixes
+  with Read/Grep/Glob/WebSearch/WebFetch only and no MCP. `agent-run` fixes
   model and effort; no seat takes a temperature: diversity is model family,
   effort and emphasis.
-  A usable `agent-run` receipt has `model_ok`, `effort_ok` and `sandbox_ok` all true:
-  Codex uses rollout evidence; Claude uses API-request effort/model and
+- Neon sits only when `agy` is the director, via Antigravity's built-in
+  `research` subagent (`Model: "inherit"`, read-only sandbox, no network, fresh
+  conversation per round; never invoke `agy` from the shell). From Claude Code
+  or any other director, Neon stays pending and unseated until an approved
+  external or API lane exists—never launch or drive `agy` from Claude; a plain
+  `council` there seats Sol, Fable and Opus cleanly, `full council` seats Sol,
+  Fable, Astra and Opus and notes Neon as `agy`-only under seat availability,
+  and a non-`agy` session that explicitly names Neon reports it unavailable,
+  never substitutes, and continues as an incomplete council.
+- A usable `agent-run` receipt has `model_ok`, `effort_ok` and `sandbox_ok` all
+  true: Codex uses rollout evidence; Claude uses API-request effort/model and
   prompt-snapshot tool evidence; local workers use session changes plus
   runner-attested bwrap. Missing evidence is unverified, not assumed. Neon's
   `research` subagent has no `agent-run` receipt (model and effort are
@@ -51,7 +55,8 @@ session where it is unavailable or refuses (`AGENT_LOCAL_ONLY`), say so and stop
   ends other than `ok`, times out, or reports a verification issue (another
   model served). Report each skip, never substitute, and continue as an
   incomplete council. `claude no-snapshot` means the Claude pool is unknown:
-  say so rather than treating it as measured.
+  say so rather than treating it as measured. Neon uses the `agy` director's
+  Google AI pool, which `agent-quota` does not measure: note it as unmeasured.
 
 ## Packet
 
@@ -72,14 +77,30 @@ tree cannot leak into a round.
   of scope, the tree id, the checks with raw output, and what stays untested.
   Pointers are labelled as pointers. Never include your reasoning, earlier
   reviews or scores, the target, or secrets.
+- For visual or UI changes, render captures from the frozen candidate tree at
+  the key viewports/states into `<run>/captures-rN/` using self-describing
+  filenames (`<tree7>-<viewport>-<state>.png`, never burned onto the image) and
+  list round-1 capture paths (with tree id, viewport and state) plus concrete
+  layout/style checks in `packet.md`. All five seats can inspect renders
+  directly (Fable and Opus via `Read`, Sol and Astra via `view_image`, Neon via
+  `read_file` with absolute paths); still keep concrete layout/style checks for
+  verifiable measurements and list uncaptured states under untested. If
+  appearance changes in a later round, render `<run>/captures-rN/` from that
+  round's tree and rerun affected layout/style checks (later briefs: see Next
+  round).
 - One concern per council. For mixed work, tell the user and suggest
   splitting the work itself; never clip a diff silently.
 - Round 0 is an optional design question before any code exists: the packet
-  holds the question, constraints and options. Seats answer with their best
-  approach, strongest objection and what to cut; no emphasis, no score schema
-  (use `{"type":"object","additionalProperties":false,"required":["approach","objection","cut"],"properties":{"approach":{"type":"string"},"objection":{"type":"string"},"cut":{"type":"string"}}}`).
+  holds the question, constraints and options. Give each seat its emphasis from
+  the table above (no score schema); name `agent-run` runs
+  `<run>-<seat>-design` (outside the scored `-rN` pattern) and save Neon's
+  reply to `<run>/neon-r0.json`. Seats answer with their best approach,
+  strongest objection, and what—if anything—to simplify or cut while preserving
+  requested capabilities (`"none"` if nothing should be cut), using
+  `{"type":"object","additionalProperties":false,"required":["approach","objection","cut"],"properties":{"approach":{"type":"string"},"objection":{"type":"string"},"cut":{"type":"string"}}}`.
   A design-only council ends there with the recommended approach, the
-  objections that stand and what to cut; scores and targets start in round 1.
+  objections that stand and what to simplify or cut; scores and targets start
+  in round 1.
 
 ## Rounds
 
@@ -95,10 +116,16 @@ agent-run ask --model <seat> --name <run>-<seat>-rN --repo <run>/tree-rN \
   --add-dir <run> --schema <run>/schema.json --brief <run>/brief-<seat>-rN.md --timeout 1800
 ```
 
+For round 0 (design question), use `--name <run>-<seat>-design` and
+`--schema <run>/schema-r0.json` (containing the round-0 schema above), passing
+`--repo <run>/tree-r0` only when the question reviews an existing repo export
+(otherwise omit `--repo` and keep `--add-dir <run>`).
+
 When `agy` directs and Neon sits, invoke
 `invoke_subagent(TypeName="research", Model="inherit", Role="Council Neon rN")`
-in the same turn with the same brief (passing absolute paths to `<run>/packet.md`
-and any tree/diff/prior-result files) plus:
+in the same turn with the same brief (passing absolute paths to `<run>/packet.md`,
+`<run>/schema.json` or the inline round-0 schema, and any
+tree/diff/captures/prior-result files) plus:
 `Return ONLY a single JSON object matching the round schema (no markdown fences, no prose).`
 Validate the reply against the schema and save it to `<run>/neon-rN.json` (or
 `<run>/neon-rN-bounce.json` on a bounce, using a fresh subagent).
@@ -141,19 +168,25 @@ seats is not proof.
 - Nit: fix it if cheap; otherwise decline it in one line and list it as
   follow-up. Out of scope: decline it the same way.
 
-Keep one ledger in `<run>/ledger.md`: id, seat, severity, disposition, evidence.
+Keep one ledger in `<run>/ledger.md`: id, seat, severity, disposition, evidence
+(when Neon sits, record the `agy` director model, or `unknown` if unavailable).
 
 **Next round.** Hold one while a seat has an open blocker or should or a fix
 to confirm, or while it is below a target and its raise names a change you
 accept. Seat those, plus any seat below a target; a seat that approved and
 meets any target sits out until the confirmation round. Nit fixes, and
-wording fixes that keep the meaning, need no round. Each brief carries only:
+wording fixes that keep the meaning, need no round. On visual work, whenever
+appearance changed since `packet.md`, carry the newest applicable capture paths
+(tree id, viewport, state) and refreshed layout/style checks into every
+later-round brief—including for returning seats when the current round itself
+is non-visual. Each brief carries only:
 
 ```
 Council seat, round N. Review only. Packet: ~/.local/state/council/<run>/packet.md.
+Emphasis: <emphasis>. Still cover correctness, scope and user outcome.
 Tree <id> in <run>/tree-rN; delta: <run>/delta-rN.patch (a seat returning
 from sitting out gets `git diff <tree it last reviewed> <tree>` instead).
-Checks: <raw output or path>.
+Checks: <raw output or path>; captures: <latest applicable paths + layout checks, if appearance changed since packet.md>.
 Your last result: <run>/<that seat's previous result.json, copied>.
 Your rows: <id, disposition, evidence>.
 Mark each of your ids resolved or open, raise new findings on changed code or
@@ -219,8 +252,10 @@ council-yield add <run> <lines> <seat>=<alone>/<shared>/<declined> ... [<name> .
 ```
 
 where `<run>` is the run directory name, with one counted entry per seat that
-sat a scored round and bare run names (`<run>-tiebreak-1`, `<run>-<seat>-r0`) for
-the rest. lines is insertions plus deletions from
+sat a scored round and bare run names (`<run>-tiebreak-1`,
+`<run>-<seat>-design` for `agent-run` round-0 runs; report Neon's local
+`neon-r0.json` separately since `council-yield` resolves bare names only from
+`agent-run` receipts) for the rest. lines is insertions plus deletions from
 `git diff --shortstat <base> <tree>` for round 1; alone and shared count the
 seat's verified blockers and shoulds; declined counts its findings you rejected or downgraded. It reads model,
 rounds, time and cost from the `agent-run` receipts (falling back to
@@ -233,6 +268,7 @@ ship or update the PR, otherwise in the final reply.
 ## Changing seats
 
 Seats are added, dropped or upgraded only through the council lane in
-`model-eval`, and the user decides. A seat is one `agent-run ask --model`
-choice: changing its model or effort is a change to `agent-run`'s model map
-and this table.
+`model-eval`, and the user decides. Each `agent-run` seat is one
+`agent-run ask --model` choice: changing its model or effort is a change to
+`agent-run`'s model map and this table (Neon instead inherits `agy`'s director
+model).

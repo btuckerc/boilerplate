@@ -19,7 +19,7 @@ skill produces the decision and its evidence.
 | Escalation consult | `agent-run ask --model sol` | Codex | GPT-6.2 Sol xhigh |
 | Release audit | `agent-run audit` | Codex | GPT-6.2 Sol xhigh |
 | Extraction | `agent-run ask --model luna` | Codex | Luna low |
-| Council seats | `agent-run ask --model sol/fable/astra/opus` | per seat | Sol xhigh, Fable high, Astra high, Opus high |
+| Council seats | `agent-run ask --model sol/fable/astra/opus`; Neon via `agy` `research` subagent | per seat | Sol xhigh, Fable high, Astra high, Opus high, Gemini 4 Neon (`agy` only, inherit) |
 | Local worker | `agent-run local`, `omp-local` | nous GPU, no quota | Qwen3.8 27B |
 | Legacy OMP roles | `config.yml` roles | Codex | Sol high default, Luna `task`/`vision` |
 
@@ -31,6 +31,7 @@ escalation, because it spreads load.
 
 1. **Discover.** `agent-run` Codex lanes and council seats use the pinned Codex
    CLI's catalog (`~/.codex/models_cache.json`, refreshed by any `codex exec`).
+   An inherited `agy` seat (Neon) is discovered with the `agy` Director lane.
    OMP roles use `omp models` after `omp-baseline check-upstream`. The Codex
    backend hides new models from older `client_version`s, and OMP sends a
    hardcoded one, so OMP can lag the Codex CLI by a release or more; an OMP
@@ -72,7 +73,12 @@ escalation, because it spreads load.
    incumbents with `council-yield summary` (from
    `~/.local/state/council/yield.tsv`): a seat with no verified blocker or
    should alone in its last 5 scored runs on its current model is a drop
-   candidate; put it to the user with its cost.
+   candidate; put it to the user with its cost. For an inherited `agy` seat
+   (Neon), evaluate the seeded/clean packet pair through fresh `research`
+   subagents with the `agy` Director lane and record its model as inherited
+   (not independently attested); because local Neon rows in `yield.tsv` all
+   record `gemini-4-neon:inherit`, apply the 5-run current-model drop rule
+   only across runs whose `ledger.md` records the same `agy` director model.
 6. **Decide.** Write a one-line verdict per lane (adopt / trial / reject) with
    the deciding number. Then adopt: an `agent-run` lane is its model map
    (`CODEX_MODELS` and the Claude ids in `executable_agent-run`) plus the

@@ -55,8 +55,12 @@ winbox <-> uplink is switched in the R7800's switch chip and never touches the A
   to it, `private-domain home.arpa,plex.direct` (exempts `*.plex.direct` from DNS rebind
   protection so LAN Plex clients resolve `10.77.78.121`), DNSSEC, prefetch, aggressive NSEC,
   serve-expired (TTL 86400, client timeout 1800 ms), msg/rrset cache 64m/128m.
-- Inbound DNAT: WAN TCP `18721` -> `10.77.78.121:32400` (`Plex Remote Access (macmini)`,
-  UUID `7039bc76-d5c9-43e0-a53a-458be5164954`, `pass=pass`, NAT reflection disabled, log on).
+- Inbound DNAT:
+  - WAN TCP `18721` -> `10.77.78.121:32400` (`Plex Remote Access (macmini)`,
+    UUID `7039bc76-d5c9-43e0-a53a-458be5164954`, `pass=pass`, NAT reflection disabled, log on).
+  - WAN UDP `41641` -> `10.77.78.120:41641` (`Tailscale direct UDP 41641 (winbox)`,
+    UUID `daa8284c-fe36-4014-bbed-7b4fccbd0f28`, `pass=pass`, NAT reflection disabled, log off;
+    enables direct Tailscale WireGuard from `clt` and cellular CGNAT without DERP).
 - Shaper: FQ-CoDel pipes 800 down / 90 up Mbit, quantum 300, ECN, one maskless queue
   each, rules WAN in/out. Pipe UUIDs: down `596234c5-83d3-46b4-b2b4-646109c2d361`, up
   `42d53d14-a647-4f92-9029-c0c3685a2d2c`. Interactive queues and rules 10-15 exist,
@@ -123,6 +127,8 @@ off; telnet/FTP/HTTP/SNMP off. All counters clean on 2026-11-16 (0 CRC, pause, c
   fine: the tunnel route is interface-scoped (`UCSI`), and the MacBook stays on en0 (checked).
 
 ## Change log
+
+- 2026-11-25 Tailscale direct UDP 41641 for `winbox`: added hitless WAN UDP `41641` -> `10.77.78.120:41641` DNAT rule (`daa8284c-fe36-4014-bbed-7b4fccbd0f28`, `pass=pass`, NAT reflection disabled, log off) so remote/cellular Tailscale peers punch direct WireGuard to `winbox` without DERP. Verified live via `opnsense-api get firewall/d_nat/search_rule` and `tailscale ping winbox` from `nous` (`via 70.175.223.206:41641`). `barn-ap` live AQL test (`2000/4000`) regressed drops/latency and was reverted to stock `5000/12000`.
 
 - 2026-11-22 Plex direct delivery: added `plex.direct` to Unbound `privatedomain` (`dig @10.77.78.1 10-77-78-121.<cert>.plex.direct` went from empty to `10.77.78.121`) and added WAN TCP `18721` -> `10.77.78.121:32400` DNAT rule (`7039bc76-d5c9-43e0-a53a-458be5164954`, `pass=pass`, reflection disabled). Verified from `nous` (`https://70.175.223.206:18721/identity` went from timeout to HTTP 200 XML; MyPlex `mappingState` went from `unknown` to `mapped`).
 

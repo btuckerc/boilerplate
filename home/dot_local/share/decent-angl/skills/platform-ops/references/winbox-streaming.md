@@ -31,15 +31,24 @@ Client settings follow `wincube-streaming.md` except the bitrates below.
   nous only). Someone has to be signed in to Windows.
 - Balanced power plan on purpose: the X3D V-Cache optimizer needs core parking.
 
-## Bitrate (measured 2026-11-14, not copied from wincube)
+## Bitrate & latency profiles (re-measured 2026-11-25 on elsie + barn-ap)
 
-- At RI, wired: not limited by the network (0% loss to 400 Mbit/s). 1080p: 50-80.
-- At RI, Wi-Fi (Orbi, good 5 GHz signal): clean to 150 Mbit/s. Use up to 100.
-- In Charlotte (RI upload to Charlotte download over Tailscale): clean to 40 Mbit/s, +3-7 ms.
-  Use about 30. Base RTT is about 52 ms.
-- Since 2026-11-15 RI runs OPNsense (elsie) with FQ-CoDel SQM, 800/90 Mbit since 2026-11-16.
-  winbox ping to 1.1.1.1: idle about 16 ms; med 20 ms under full upload, med 24 / max 34 ms
-  under full download. Other uploads share the 90 Mbit fairly with a stream, so keep remote
-  stream bitrates well under it. Outbound NAT has static port 41641 for winbox and
-  endpoint-independent UDP mapping, so Tailscale paths from away are direct. The bitrates
-  above were measured on the old Orbi network. Re-measure.
+Full A/B tables, profiles, and tools live in `~/hearth/src/game-streaming` (`profiles.toml`,
+`bench/RESULTS.md`, `bin/moonlight-play`, `bin/stream-verify`):
+
+- **Dream LAN (`elsie` / `barn-ap` 5 GHz Ch 36 VHT80 -> `btc-mbp14`):** `50 Mbps HEVC 1080p120`,
+  `Vulkan (libplacebo)` (`renderer=1`, pinned), `fullscreen` (`windowmode=0`), V-Sync & frame
+  pacing off, `double_refreshrate = enabled`, stock `fec_percentage = 20`, `barn-ap` stock AQL
+  `5000/12000`. Cut network drops 9x (`1.26% -> 0.00%`) and decode `-0.52 ms` (fullscreen) /
+  `-0.60 ms` (`80 -> 50M`). Apollo tags 100% of LAN video DSCP 40 (`WMM VI`) via `qWave`.
+- **Cross-site WAN (`elsie` -> `clt` over direct Tailscale `100.99.42.94`):** `30 Mbps HEVC 1080p120`,
+  `1160B` packet size. Direct Tailscale saves ~14 ms RTT vs `elsie` subnet router (`46` vs `60 ms`).
+  `moonlight-play` (installed on `mac` as `moonlight-play`, `moonlight-lan`, `moonlight-wan`)
+  auto-selects LAN vs WAN across active interfaces and updates `hosts.<N>.localaddress` so travel
+  neither poisons LAN nor lets Moonlight hijack WAN back through `elsie`'s subnet router.
+- **Mobile cellular (`iphone181`, provisional / untested on live cellular):** `15 Mbps HEVC 1080p60`,
+  `1024B` packet size, direct Tailscale `100.99.42.94`.
+- Since 2026-11-15 RI runs OPNsense (`elsie`) with FQ-CoDel SQM (800/90 Mbit since 2026-11-16),
+  outbound static port 41641 for `winbox`, endpoint-independent UDP mapping, and (2026-11-25)
+  inbound WAN UDP `41641 -> 10.77.78.120:41641` DNAT (`daa8284c`) for direct Tailscale from
+  `clt` and cellular CGNAT. Check drift anytime with `~/hearth/src/game-streaming/bin/stream-verify`.

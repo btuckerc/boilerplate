@@ -24,8 +24,9 @@ convention for hosts.
 - Shell user `agent` (wheel, uid 2001), keys only; sshd on LAN only, no password, no root.
   `ssh clt` is Tailscale SSH and may prompt; unattended shell is `opnsense-ssh` (fleet key
   steps in `SKILL.md`). `opnsense-ssh 'id -un; hostname'` prints `agent`, `router.home.arpa`.
-- Tailscale plugin: name `clt` (never reuse), advertises `10.77.77.0/24`, `acceptDNS` off so
-  Unbound stays LAN DNS. Do not open 22/443 on WAN.
+- Tailscale plugin: name `clt` (never reuse), listen port `41642` (WAN `41641` belongs to
+  `nous`'s static outbound NAT), advertises `10.77.77.0/24`, `acceptDNS` off so Unbound stays
+  LAN DNS. Do not open 22/443 on WAN.
 
 ## Router
 
@@ -65,6 +66,7 @@ GS305E, unmanaged in practice (no agent access recorded).
 
 ## Change log
 
+- 2026-11-24 Tailscale `listenPort` moved `41641` -> `41642` (avoiding collision with `nous`'s WAN static NAT `41641`): `btc-mbp14` -> `clt` switched from `DERP(nyc)` to direct `98.26.202.87:41642`, `10.77.77.1` ping dropped from med 261 / max 606 ms to med 57.3 / max 64.3 ms (`nous` kept direct path at 53 ms).
 - 2026-11-17 `netwatch` timer stopped and disabled on nous (no per-minute AP logins or ping bursts); code kept.
 
 - 2026-11-16 Read-only Wi-Fi audit: AP firmware 1.1.1 Build 20260113; 2.4 GHz ch 1 fixed, 5 GHz auto (149), 6 GHz auto (37) 160 MHz; Smart Connect off; OFDMA/MU-MIMO on; TWT off.

@@ -29,7 +29,7 @@ WORKER_CONTRACT = """You are a worker for a director. Stay inside the stated sco
 stage or reset (git is read-only in your worktree). Do not spawn subagents.
 {acceptance} Stop within the time limit.
 Never guess around a blocker: report it.
-Your final message must be the JSON required by the output schema.
+Your final message must be ONLY the raw JSON object required by the output schema, with no preamble, prose, or markdown fences.
 """
 RESULT_SCHEMA = {
     "type": "object", "additionalProperties": False,
@@ -1055,8 +1055,12 @@ def verify_local(run, meta):
         issues.append("local worker did not finish normally")
     final = messages[-1] if messages else {}
     text = "\n".join(p.get("text", "") for p in final.get("content", []) if p.get("type") == "text").strip()
-    if text.startswith("```json\n") and text.endswith("```"):
-        text = text[8:-3].strip()
+    if text.startswith("```") and text.endswith("```"):
+        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text).strip()
+    elif not text.startswith("{"):
+        fenced = re.findall(r"```(?:json)?\s*\n(.*?)\n```", text, re.S)
+        if fenced:
+            text = fenced[-1].strip()
     atomic_json(run / "result.json", json.loads(text))
     return verification
 

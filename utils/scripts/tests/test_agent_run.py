@@ -883,6 +883,32 @@ def test_local_transcript_model_tools_and_sandbox(tmp_path, bad):
     assert verification["sandbox_ok"] is True
 
 
+def test_verify_local_extracts_trailing_fenced_json(tmp_path):
+    run = tmp_path / "run"
+    model = "DaisyRose-27B-Quark-MXFP4"
+    result = {"paths": ["calc.py"], "checks_run": [], "summary": "fixed", "blockers": []}
+    text = f"Fix applied.\n\n```json\n{json.dumps(result)}\n```"
+    message = {"role": "assistant", "provider": "vllm", "model": model,
+               "content": [{"type": "text", "text": text}], "stopReason": "stop"}
+    records = [
+        {"type": "model_change", "model": "vllm/" + model, "resolvedModelIsFallback": False},
+        {"type": "thinking_level_change", "thinkingLevel": "medium"},
+        {"type": "message", "message": dict(message)},
+    ]
+    write_records(run / "child/sessions/time_session.jsonl", records)
+    write_records(run / "events.jsonl", [{"type": "session", "id": "session"},
+                                       {"type": "message_end", "message": message}])
+    meta = {"model": model, "effort": "medium", "sandbox": "bwrap", "sandbox_probe_ok": True,
+            "sandbox_argv": ["/usr/bin/bwrap", "--ro-bind", "/", "/", "omp-local"],
+            "child": {"transcript_path": None}}
+    verification = runner.verify_local(run, meta)
+    assert verification["issues"] == []
+    assert verification["model_ok"] is True
+    assert verification["effort_ok"] is True
+    assert verification["tools_ok"] is True
+    assert json.loads((run / "result.json").read_text()) == result
+
+
 def test_long_full_council_run_name(environment):
     _, brief = environment
     name = "2026-11-08-" + "long-council-" * 4 + "astra-r10-bounce"

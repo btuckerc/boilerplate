@@ -36,11 +36,15 @@ Client settings follow `wincube-streaming.md` except the bitrates below.
 Full A/B tables, profiles, and tools live in `~/hearth/src/game-streaming` (`profiles.toml`,
 `bench/RESULTS.md`, `bin/moonlight-play`, `bin/stream-verify`):
 
-- **Dream LAN (`elsie` / `barn-ap` 5 GHz Ch 36 VHT80 -> `btc-mbp14`):** `50 Mbps HEVC 1080p120`,
-  `Vulkan (libplacebo)` (`renderer=1`, pinned), `fullscreen` (`windowmode=0`), V-Sync & frame
-  pacing off, `double_refreshrate = enabled`, stock `fec_percentage = 20`, `barn-ap` stock AQL
-  `5000/12000`. Cut network drops 9x (`1.26% -> 0.00%`) and decode `-0.52 ms` (fullscreen) /
-  `-0.60 ms` (`80 -> 50M`). Apollo tags 100% of LAN video DSCP 40 (`WMM VI`) via `qWave`.
+- **Dream LAN (`elsie` / `barn-ap` 5 GHz Ch 36 VHT80 -> `btc-mbp14`):** `50 Mbps HEVC 1080p240`
+  (`--fps 120` optional fallback), `Vulkan (libplacebo)` (`renderer=1`, pinned), `fullscreen`
+  (`windowmode=0`), V-Sync & frame pacing off, `double_refreshrate = enabled`, stock
+  `fec_percentage = 20`, `barn-ap` kept 100% stock OpenWrt (AQL `5000/12000`, stock IRQ/RPS `3/1/1`).
+  Cut derived 1-way from `7.9 ms` (`80M borderless 120 FPS`) -> `6.8 ms` (`50M fullscreen 120 FPS`)
+  -> `5.3 ms` (`50M fullscreen 240 FPS`, paired `-1.3 ms`, decode `2.50 -> 1.50 ms`, `0.00%` median
+  net drops), and held `239.85 FPS` / `5.5 ms` / `0.05%` drops in a 60 s soak with zero thermal
+  warnings. Apollo tags 100% of LAN video DSCP 40 (`WMM VI`) via `qWave`. Quit any paused Apollo
+  app before switching FPS so SudoVDA recreates the virtual display at the new refresh rate.
 - **Cross-site WAN (`elsie` -> `clt` over direct Tailscale `100.99.42.94`):** `30 Mbps HEVC 1080p120`,
   `1160B` packet size. Direct Tailscale saves ~14 ms RTT vs `elsie` subnet router (`46` vs `60 ms`).
   `moonlight-play` (installed on `mac` as `moonlight-play`, `moonlight-lan`, `moonlight-wan`)

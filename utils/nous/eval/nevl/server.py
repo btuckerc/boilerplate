@@ -47,7 +47,29 @@ class Server:
         return [c["engine"], "--models-preset", str(preset), "--models-max", "1", "--models-autoload",
                 "--host", "127.0.0.1", "--port", str(self.port), *c["args"]]
     def start(self) -> float:
-        """Launch, wait for the model to answer one request; return seconds from spawn."""
+        """Launch, wait for the model to answer one request; return seconds from spawn.
+        If `probe_min_tps` is configured, verify decode speed on a short greedy probe and
+        redraw the process up to `probe_max_starts` times to avoid ROCm slow draws."""
+        min_tps = float(self.candidate.get("probe_min_tps", 0.0))
+        max_starts = max(1, int(self.candidate.get("probe_max_starts", 3))) if min_tps > 0 else 1
+        self.last_probe: dict | None = None
+        for attempt in range(1, max_starts + 1):
+            load_s = self._start_once()
+            if min_tps <= 0:
+                return load_s
+            tps = self._speed_probe()
+            self.last_probe = {"tps": round(tps, 2), "attempts": attempt, "min_tps": min_tps}
+            if tps >= min_tps or attempt == max_starts:
+                if tps < min_tps:
+                    with self.log_path.open("ab") as log:
+                        log.write(f"[nevl] speed probe {tps:.1f} tok/s < {min_tps:.1f} after {attempt} starts; proceeding\n".encode())
+                return load_s
+            with self.log_path.open("ab") as log:
+                log.write(f"[nevl] speed probe {tps:.1f} tok/s < {min_tps:.1f} (attempt {attempt}/{max_starts}); restarting for fast ROCm draw\n".encode())
+            self.stop()
+        return load_s
+
+    def _start_once(self) -> float:
         if _port_open(self.listen_port):
             raise ServerError(f"port {self.listen_port} is already in use; refusing to measure a stranger")
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -64,6 +86,12 @@ class Server:
             self.stop()
             raise
         return time.monotonic() - started
+
+    def _speed_probe(self, timeout: float = 120) -> float:
+        reply = Context(self.base_url, self.candidate["model"], request=self.candidate["request"]).chat(
+            {"messages": [{"role": "user", "content": "Count from 1 to 200 separated by commas, no commentary."}],
+             "max_tokens": 192, "temperature": 0.0, "reasoning_effort": "low"}, timeout=timeout)
+        return float(reply.timings.get("predicted_per_second") or 0.0)
 
     def check_alive(self) -> None:
         """Raise if the server died or stopped answering during a block.

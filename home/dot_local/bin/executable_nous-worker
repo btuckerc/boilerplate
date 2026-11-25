@@ -14,7 +14,8 @@ import time
 import urllib.request
 
 MODELS = {
-    "qwen": "nous/Qwen3.8-27B-Swift-Heretic-MXFP4",
+    "daisyrose": "nous/DaisyRose-27B-Quark-MXFP4",
+    "qwen": "nous/DaisyRose-27B-Quark-MXFP4",  # compatibility alias
 }
 # vLLM batches 8 sequences in one VRAM KV pool that other clients share; at most this many
 # workers from this workstation at once (the local profile's task.maxConcurrency).
@@ -63,7 +64,7 @@ def stop_worker(process):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model", choices=MODELS, default="qwen", help="Model: qwen (default)")
+    parser.add_argument("--model", choices=MODELS, default="daisyrose", help="Model: daisyrose (default; qwen alias)")
     parser.add_argument("--dir", type=Path, required=True)
     parser.add_argument("--session", help="Resume the exact worker session ID")
     parser.add_argument("--read-only", action="store_true")

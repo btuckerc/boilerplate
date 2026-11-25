@@ -1,0 +1,61 @@
+# Optimized RadixArk DaisyRose-27B (Quark AWQ MXFP4) + DFlash2 on vllm-sly-radiance 1.13.4.
+# Fixes 1.13.4's extensible_kv_cache ~4 GiB withholding (--no-enable-extensible-kv-cache),
+# enables the 5 verified lossless 1.13.4 kernel flags, and pins generation defaults server-side.
+rootfs = "/srv/models/engines/vllm-sly-radiance-1.13.4-rocm10.1"
+served_model_name = "DaisyRose-27B-Quark-MXFP4"
+home = "/srv/workspaces/vllm-cache/home-daisyrose-1.13.4"
+args = [
+  "--model", "/models/DaisyRose-27B-Quark-AWQ-MXFP4",
+  "--quantization", "quark",
+  "--max-model-len", "262144", "--gpu-memory-utilization", "0.98",
+  "--no-enable-extensible-kv-cache",
+  "--kv-cache-dtype", "fp8", "--mamba-ssm-cache-dtype", "bfloat16",
+  "--speculative-config.method", "dflash",
+  "--speculative-config.model", "/models/Qwen3.8-27B-DFlash2-W4A16",
+  "--speculative-config.num_speculative_tokens", "9",
+  "--speculative-config.draft_sample_method", "probabilistic",
+  "--speculative-config.attention_backend", "TRITON_ATTN",
+  "--attention-backend", "R4D_HYBRID",
+  "--max-num-seqs", "8", "--max-num-batched-tokens", "2048",
+  "--compilation-config.cudagraph_mode", "FULL_DECODE_ONLY",
+  "--compilation-config.cudagraph_capture_sizes", "[10,20,30,40,50,60,70,80]",
+  "--enable-prefix-caching",
+  "--enable-prompt-tokens-details",
+  "--limit-mm-per-prompt.image", "2", "--limit-mm-per-prompt.video", "0",
+  "--mm-processor-kwargs", '{"size": {"longest_edge": 4194304, "shortest_edge": 65536}}',
+  "--enable-auto-tool-choice", "--tool-call-parser", "qwen3_xml", "--reasoning-parser", "qwen3",
+  "--chat-template", "/opt/qwen-fixed.jinja",
+  "--default-chat-template-kwargs", '{"reasoning_effort": "medium"}',
+  "--override-generation-config", '{"temperature": 0.6, "top_p": 0.95, "top_k": 20}',
+  "--shutdown-timeout", "120",
+]
+
+[mounts]
+"/models" = "/srv/models/vllm"
+
+[env]
+HIP_VISIBLE_DEVICES = "0"
+GPU_MAX_HW_QUEUES = "1"
+RADIANCE_RUN_BWTEST = "0"
+RADIANCE_MXFP4 = "1"
+RADIANCE_MXFP4_W4A8 = "1"
+RADIANCE_MXFP4_W4A8_MIN_M = "0"
+RADIANCE_MXFP4_DECODE_MAX_M = "128"
+RADIANCE_MXFP4_A_TILED_MIN_M = "513"
+RADIANCE_MXFP4_WPERM = "1"
+RADIANCE_MXFP4_WIDE_MAX_M = "192"
+RADIANCE_LMHEAD_INT4 = "1"
+RADIANCE_FUSED_NORM_QUANT = "1"
+RADIANCE_KV_GROUP_SIZE = "8"
+RADIANCE_EMBED_INT8 = "1"
+RADIANCE_EMBED_BITS = "4"
+RADIANCE_ADAPTIVE_WIDTH = "perseq"
+RADIANCE_CACTUS_DELTA = "0"
+R4D_ATTN_HVF = "1"
+RADIANCE_ATTN_GATE_VIEW = "1"
+RADIANCE_DFLASH_AUX_FROM_RESIDUAL = "1"
+RADIANCE_GDN_EMPTY_OUT = "1"
+RADIANCE_GDN_STRIDED_GATES = "1"
+HF_HUB_OFFLINE = "1"
+VLLM_NO_USAGE_STATS = "1"
+DO_NOT_TRACK = "1"

@@ -108,6 +108,12 @@ def test_toolcall_validity_requires_json_and_the_called_tools_required_keys():
     other = score(_reply(fn('grep','{"pattern":"a"}')), item)
     assert other['valid'] == 1 and other['name_match'] == 0
     assert score(_reply([]), item)['called'] == 0
+    # Every returned call must be valid, and length-truncated calls are invalid.
+    two_bad = fn('read', '{"path":"x"}') + fn('grep', 'broken')
+    assert score(_reply(two_bad), item)['valid'] == 0
+    assert score(SimpleNamespace(tool_calls=fn('read', '{"path":"x"}'), finish_reason='length',
+                                 content='', reasoning=''), item)['valid'] == 0
+    assert score(_reply(fn('wait', '')), item)['valid'] == 0
 
 def test_needle_answer_parsing_accepts_fenced_and_trailing_json():
     assert longctx._last_json_object('Here:\n```json\n{"key_0": "value_1"}\n```') == {'key_0': 'value_1'}

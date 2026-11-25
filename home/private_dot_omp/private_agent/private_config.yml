@@ -9,9 +9,9 @@ modelRoles:
   # Cloud vision: the local model takes image input, but no visual acceptance
   # has been demonstrated on it.
   vision: openai-codex/gpt-6-luna:medium
-  commit: vllm/Qwen3.8-27B-Swift-Heretic-MXFP4:low
-  smol: vllm/Qwen3.8-27B-Swift-Heretic-MXFP4:low
-  tiny: vllm/Qwen3.8-27B-Swift-Heretic-MXFP4:low
+  commit: vllm/DaisyRose-27B-Quark-MXFP4:low
+  smol: vllm/DaisyRose-27B-Quark-MXFP4:low
+  tiny: vllm/DaisyRose-27B-Quark-MXFP4:low
   task: openai-codex/gpt-6-luna:medium
   # `astra` agent: council seat or explicit request; ~5x Sol per token (Codex).
   astra: openai-codex/gpt-6-astra:high

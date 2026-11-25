@@ -53,7 +53,9 @@ def resolve(raw: dict, *, source: str, default_label: str) -> dict:
         raise CandidateError(f"bad label {label!r}: use [a-z0-9._-]")
     env = {str(k): str(v) for k, v in raw.get("env", {}).items()}
     common = {"kind": kind, "label": label, "source": source, "env": env,
-              "request": raw.get("request", {})}
+              "request": raw.get("request", {}),
+              "probe_min_tps": float(raw.get("probe_min_tps", 0.0)),
+              "probe_max_starts": int(raw.get("probe_max_starts", 3))}
     if kind == "serve":
         spec_path = Path(raw["spec"])
         try:

@@ -927,15 +927,29 @@ check_omp_config() {
       ;;
   esac
 
+  local source_models="$REPO_ROOT/home/private_dot_omp/private_agent/private_models.yml" local_model_id="" catalog catalog_rc
+  if [ -r "$source_models" ]; then
+    local_model_id="$(awk '
+      /^  vllm:/ { in_vllm = 1; next }
+      in_vllm && /^  [^ ]/ { in_vllm = 0 }
+      in_vllm && /^[[:space:]]*- id:[[:space:]]*/ {
+        sub(/^[[:space:]]*- id:[[:space:]]*/, "")
+        gsub(/["'\''[:space:]]/, "")
+        print
+        exit
+      }
+    ' "$source_models")"
+  fi
+
   if output="$(omp_probe config get modelRoles --json 2>/dev/null)" \
-    && printf '%s' "$output" | jq -e '
+    && printf '%s' "$output" | jq -e --arg local_id "$local_model_id" '
       (.value.default | test("^openai-codex/gpt-[0-9]+(\\.[0-9]+)?-sol:high$")) and
       (.value.astra | test("^openai-codex/gpt-[0-9]+(\\.[0-9]+)?-astra:high$")) and
       (.value.slow == .value.default) and
       (.value.plan | test("^openai-codex/gpt-[0-9]+(\\.[0-9]+)?-sol:high$")) and
       (.value.task | test("^openai-codex/gpt-[0-9]+(\\.[0-9]+)?-luna:medium$")) and
       (.value.vision == .value.task) and
-      (.value.smol | test("^vllm/Qwen[^:]+:low$")) and
+      (if $local_id != "" then (.value.smol == ("vllm/" + $local_id + ":low")) else (.value.smol | test("^vllm/[^:]+:low$")) end) and
       (.value.commit == .value.smol) and
       (.value.tiny == .value.smol) and
       (.value | all(.[]; test("^(openai-codex|vllm|web)/")))
@@ -972,9 +986,8 @@ check_omp_config() {
     failures=1
   fi
 
-  local source_models="$REPO_ROOT/home/private_dot_omp/private_agent/private_models.yml" catalog catalog_rc
-  if grep -q '^  vllm:' "$source_models" && grep -q 'Qwen3.8-27B-Swift-Heretic-MXFP4' "$source_models"; then
-    printf 'CONFIG  promoted local catalog configured\n'
+  if [ -n "$local_model_id" ]; then
+    printf 'CONFIG  promoted local catalog configured (%s)\n' "$local_model_id"
   else
     printf 'CONFIG  promoted local catalog missing\n' >&2
     failures=1
@@ -986,18 +999,18 @@ check_omp_config() {
     catalog_rc=probe
   else
     # jq -e exits 1 only for an absent entry; any other nonzero status is a failed probe.
-    printf '%s' "$catalog" | jq -e '.models | if type == "array" then map(.id) | index("Qwen3.8-27B-Swift-Heretic-MXFP4") else error("no models array") end' >/dev/null 2>&1 || catalog_rc=$?
+    printf '%s' "$catalog" | jq -e --arg id "$local_model_id" '.models | if type == "array" then (if $id == "" then false else (map(.id) | index($id)) end) else error("no models array") end' >/dev/null 2>&1 || catalog_rc=$?
   fi
   if [ "$catalog_rc" != 0 ] && [ "$catalog_rc" != 1 ]; then
     printf 'MODEL   probe failed (omp models vllm --json)\n' >&2
     failures=1
   elif [ "$catalog_rc" = 0 ]; then
-    printf 'MODEL   Swift Heretic Qwen local catalog entry\n'
-  elif grep -q 'Qwen3.8-27B-Swift-Heretic-MXFP4' "$source_models"; then
+    printf 'MODEL   %s local catalog entry\n' "$local_model_id"
+  elif [ -n "$local_model_id" ]; then
     # Nonfatal: the server may be down or remote, but say what is unproven.
-    printf 'READY   vLLM discovery unavailable (Qwen3.8 configured; runtime readiness unverified)\n'
+    printf 'READY   vLLM discovery unavailable (%s configured; runtime readiness unverified)\n' "$local_model_id"
   else
-    printf 'MODEL   Qwen3.8 absent from local catalog and source\n' >&2
+    printf 'MODEL   local vLLM model absent from local catalog and source\n' >&2
     failures=1
   fi
   if omp_probe setup python --check --json >/dev/null 2>&1; then

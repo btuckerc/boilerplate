@@ -1,0 +1,13 @@
+# Optimized DaisyRose-27B at model-card temperature=1.0 (for T=1.0 vs T=0.6 comparison).
+kind = "serve"
+label = "vllm-daisyrose-1.13.4-opt-t10"
+spec = "candidates/specs/vllm-daisyrose-1.13.4-opt.toml"
+ready_timeout_s = 1800
+probe_min_tps = 145.0
+probe_max_starts = 3
+
+[overrides]
+override-generation-config = '{"temperature": 1.0, "top_p": 0.95, "top_k": 20}'
+
+[request]
+temperature = 1.0

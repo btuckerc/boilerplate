@@ -386,6 +386,8 @@ os._exit(0)
         self.assertEqual(stat.S_IMODE((agent / "auth-openai.token").stat().st_mode), 0o600)
 
     def test_vllm_probe_failure_or_empty_output_is_an_error(self):
+        models = self.repo / "home/private_dot_omp/private_agent/private_models.yml"
+        models.write_text("providers:\n  vllm:\n    models:\n      - id: Qwen3.8-27B-Swift-Heretic-MXFP4\n")
         for env in ({"VLLM_EXIT": "3"}, {"VLLM_OUT": ""}, {"VLLM_OUT": "not json"}):
             with self.subTest(**env):
                 result = self.run_baseline("validate", **env)
@@ -393,7 +395,10 @@ os._exit(0)
                 self.assertIn("MODEL   probe failed (omp models vllm --json)", result.stderr)
                 self.assertNotIn("READY   vLLM", result.stdout)
         result = self.run_baseline("validate", VLLM_OUT='{"models":[{"id":"Qwen3.8-27B-Swift-Heretic-MXFP4"}]}')
-        self.assertIn("MODEL   Swift Heretic Qwen local catalog entry", result.stdout)
+        self.assertIn("MODEL   Qwen3.8-27B-Swift-Heretic-MXFP4 local catalog entry", result.stdout)
+        models.write_text("providers:\n  vllm:\n    models:\n      - id: Inkling-2-Mini\n")
+        result = self.run_baseline("validate", VLLM_OUT='{"models":[{"id":"Inkling-2-Mini"}]}')
+        self.assertIn("MODEL   Inkling-2-Mini local catalog entry", result.stdout)
 
     def test_failed_catalog_query_is_not_a_readiness_gap(self):
         # A working catalog without the entry is the nonfatal READY gap; a failed

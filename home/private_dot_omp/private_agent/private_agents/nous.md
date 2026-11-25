@@ -2,7 +2,7 @@
 name: nous
 description: Bounded implementation with clear contract and parent-run acceptance, mechanical edits, extraction or supplied-log summary. Up to 4 at once (vLLM batches 8); medium reasoning.
 tools: [read, grep, glob, edit, write, yield]
-model: ["vllm/Qwen3.8-27B-Swift-Heretic-MXFP4"]
+model: ["vllm/DaisyRose-27B-Quark-MXFP4"]
 thinkingLevel: medium
 readSummarize: true
 blocking: false

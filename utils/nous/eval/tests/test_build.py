@@ -54,6 +54,20 @@ def test_promote_refuses_a_workload_subset(compared, capsys):
     assert "measured ['fake'] of tier t2" in capsys.readouterr().out
 
 
+def test_promote_refuses_reduced_reps_or_unreplicated_t2(compared, capsys):
+    run = compared({"incumbent": 1.0, "cand": 1.0}, tier="t2")
+    plan = run.plan
+    plan["blocks"] = ["incumbent", "cand"]
+    run.write_json("plan.json", plan)
+    assert build.promote("cand", [run.run_id]) == 1
+    assert "requires replicated blocks" in capsys.readouterr().out
+    plan["blocks"] = ["incumbent", "cand", "cand", "incumbent"]
+    plan["workloads"][0]["reps"] = 1
+    run.write_json("plan.json", plan)
+    assert build.promote("cand", [run.run_id]) == 1
+    assert "requires >=2" in capsys.readouterr().out
+
+
 def test_promote_refuses_evidence_against_an_older_production(compared, capsys, monkeypatch):
     run = compared({"incumbent": 1.0, "cand": 1.0}, tier="t2")
     monkeypatch.setattr(build, "production_identity", lambda: {"engine_sha256": "promoted since"})

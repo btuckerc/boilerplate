@@ -64,14 +64,19 @@ def plan_run(tier: str, candidates: list[dict], *, design: str | None = None, re
     spec = tiers["tiers"][tier]
     names = workloads or list(spec["workloads"])
     specs = []
+    tier_workload_specs = {}
     for name in names:
         if name not in spec["workloads"]:
             raise PlanError(f"tier {tier} has no workload {name!r}")
         options = dict(spec["workloads"][name])
+        default_items_tier = options.pop("items_tier", tier)
+        default_reps = options.pop("reps", 1)
+        default_workers = options.pop("workers", 1)
+        tier_workload_specs[name] = {"items_tier": default_items_tier, "reps": default_reps, "workers": default_workers}
         specs.append({"name": name, "version": REGISTRY[name].VERSION,
-                      "items_tier": options.pop("items_tier", tier),
-                      "reps": reps or options.pop("reps", 1),
-                      "workers": workers or options.pop("workers", 1),
+                      "items_tier": default_items_tier,
+                      "reps": reps or default_reps,
+                      "workers": workers or default_workers,
                       "opts": {k: v for k, v in options.items() if k not in ("reps", "workers")}})
     labels = [c["label"] for c in candidates]
     blocks = blocks_for(labels, design or spec.get("design", "abba"))
@@ -81,6 +86,8 @@ def plan_run(tier: str, candidates: list[dict], *, design: str | None = None, re
             "budget_s": spec["budget_s"], "blocks": blocks,
             "candidates": {c["label"]: c for c in candidates}, "workloads": specs,
             "tier_workloads": list(spec["workloads"]),  # promote refuses a --workloads subset
+            "tier_design": spec.get("design", "abba"),
+            "tier_workload_specs": tier_workload_specs,
             "sampling": DEFAULT_SAMPLING, "compare": tiers["compare"]}
 
 
@@ -430,8 +437,10 @@ def _execute(run: Run, active: dict) -> int:
             _record_attempt(run, label, block, attempt, {"started": time.time()})
             vram_before = _vram()
             load_s = server.start()
-            _record_attempt(run, label, block, attempt, {"load_s": load_s, "vram_mib_before": vram_before,
-                                                         "vram_mib_loaded": _vram()})
+            attempt_meta = {"load_s": load_s, "vram_mib_before": vram_before, "vram_mib_loaded": _vram()}
+            if getattr(server, "last_probe", None):
+                attempt_meta["speed_probe"] = server.last_probe
+            _record_attempt(run, label, block, attempt, attempt_meta)
             _run_items(run, plan, block, label, attempt, server.base_url, todo)
             server.check_alive()  # an engine that crashed mid-block fails the block by name
             _record_attempt(run, label, block, attempt, {"vram_mib_end": _vram(), "ended": time.time()})

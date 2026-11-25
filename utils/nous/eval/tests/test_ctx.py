@@ -97,3 +97,15 @@ def test_reasoning_effort_reaches_the_template_on_every_engine(monkeypatch):
     Context("http://x", "m").chat({"messages": [], "reasoning_effort": "low"})
     assert sent["body"]["reasoning_effort"] == "low"
     assert sent["body"]["chat_template_kwargs"] == {"reasoning_effort": "low"}
+
+
+def test_truncated_stream_without_done_or_finish_reason_raises(monkeypatch):
+    lines = [f"data: {json.dumps(delta(content='partial'))}\n".encode()]
+
+    class TruncatedResponse(io.BytesIO):
+        def __iter__(self):
+            return iter(lines)
+
+    monkeypatch.setattr(ctx.urllib.request, "urlopen", lambda req, timeout: TruncatedResponse())
+    with pytest.raises(RuntimeError, match="truncated stream"):
+        Context("http://x", "m").chat({"messages": []})

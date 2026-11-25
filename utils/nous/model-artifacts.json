@@ -1,5 +1,5 @@
 {
-  "date": "2026-11-06",
+  "date": "2026-11-24",
   "host": "nous",
   "models": [
     {
@@ -158,6 +158,13 @@
       "file": "/srv/models/vllm/Qwen3.8-27B-DFlash2-W4A16/model.safetensors",
       "bytes": 1280633960,
       "sha256": "ec26996e6a0745ab5edb857117220ce1e219ad524f71e6e149b703804947d8e7"
+    },
+    {
+      "repository": "abhinand/DaisyRose-27B-Quark-AWQ-MXFP4",
+      "revision": "7ed784bacc8ce980306c5762525ed72daa929b7b",
+      "file": "/srv/models/vllm/DaisyRose-27B-Quark-AWQ-MXFP4/model.safetensors",
+      "bytes": 19373796656,
+      "sha256": "34550274cdcc28786fc2e7aec3f2da8894c28d4a0e13375d8537b1f67fa48b5d"
     }
   ],
   "sha256_verified_on_host": true

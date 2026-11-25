@@ -16,7 +16,7 @@ import statistics
 from pathlib import Path
 
 NAME = "toolcall"
-VERSION = "4"
+VERSION = "5"
 METRICS = {"valid": "rate", "name_match": "rate", "called": "rate"}
 MUST_PASS = ()  # 50 checkpoints cannot certify a 4-point margin (rule of three); losses still fail
 REPORTED = ("name_match",)  # agreement with the cloud model's choice, not correctness
@@ -143,17 +143,23 @@ def items(tier, opts, data_dir):
     return rows[:10] if tier == "t1" else rows
 
 
+def _call_valid(call: dict) -> bool:
+    fn = call.get("function") or {}
+    name = fn.get("name", "")
+    raw_args = fn.get("arguments")
+    if name not in REQUIRED or not isinstance(raw_args, str) or not raw_args.strip():
+        return False
+    try:
+        args = json.loads(raw_args)
+    except (ValueError, TypeError):
+        return False
+    return isinstance(args, dict) and set(REQUIRED[name]) <= set(args)
+
+
 def score(reply, item):
     calls = reply.tool_calls or []
-    name, valid = None, False
-    if calls:
-        fn = calls[0].get("function", {})
-        try:
-            args = json.loads(fn.get("arguments") or "{}")
-        except (ValueError, TypeError):
-            args = None
-        name = fn.get("name", "")
-        valid = isinstance(args, dict) and name in REQUIRED and set(REQUIRED[name]) <= set(args)
+    name = (calls[0].get("function") or {}).get("name", "") if calls else None
+    valid = bool(calls) and reply.finish_reason != "length" and all(_call_valid(c) for c in calls)
     return {"called": int(bool(calls)), "valid": int(valid), "name_match": int(name == item["expected_name"]),
             "expected": item["expected_name"], "called_name": name, "finish_reason": reply.finish_reason,
             "content_chars": len(reply.content or ""), "reasoning_chars": len(reply.reasoning or "")}

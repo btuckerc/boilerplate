@@ -20,7 +20,7 @@ skill produces the decision and its evidence.
 | Release audit | `agent-run audit` | Codex | GPT-6.2 Sol xhigh |
 | Extraction | `agent-run ask --model luna` | Codex | Luna low |
 | Council seats | `agent-run ask --model sol/fable/astra/opus`; Neon via `agy` `research` subagent | per seat | Sol xhigh, Fable high, Astra high, Opus high, Gemini 4 Neon (`agy` only, inherit) |
-| Local worker | `agent-run local`, `omp-local` | nous GPU, no quota | Qwen3.8 27B |
+| Local worker | `agent-run local`, `omp-local` | nous GPU, no quota | DaisyRose-27B (Qwen3.8 RL) |
 | Legacy OMP roles | `config.yml` roles | Codex | Sol high default, Luna `task`/`vision` |
 
 A candidate must beat the incumbent for one lane on quality per unit of that

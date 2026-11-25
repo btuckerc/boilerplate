@@ -1,15 +1,15 @@
 # Managed by chezmoi. `omp-local` (omp --profile local): every role runs on
-# the local Swift Heretic Qwen on nous. No cloud provider has credentials or is
-# enabled here, so nothing in this profile can reach paid inference.
+# the local DaisyRose-27B Quark MXFP4 model on nous. No cloud provider has
+# credentials or is enabled here, so nothing in this profile can reach paid inference.
 modelRoles:
-  default: vllm/Qwen3.8-27B-Swift-Heretic-MXFP4:medium
-  slow: vllm/Qwen3.8-27B-Swift-Heretic-MXFP4:xhigh
-  plan: vllm/Qwen3.8-27B-Swift-Heretic-MXFP4:xhigh
-  vision: vllm/Qwen3.8-27B-Swift-Heretic-MXFP4:medium
-  task: vllm/Qwen3.8-27B-Swift-Heretic-MXFP4:medium
-  commit: vllm/Qwen3.8-27B-Swift-Heretic-MXFP4:low
-  smol: vllm/Qwen3.8-27B-Swift-Heretic-MXFP4:low
-  tiny: vllm/Qwen3.8-27B-Swift-Heretic-MXFP4:low
+  default: vllm/DaisyRose-27B-Quark-MXFP4:medium
+  slow: vllm/DaisyRose-27B-Quark-MXFP4:xhigh
+  plan: vllm/DaisyRose-27B-Quark-MXFP4:xhigh
+  vision: vllm/DaisyRose-27B-Quark-MXFP4:medium
+  task: vllm/DaisyRose-27B-Quark-MXFP4:medium
+  commit: vllm/DaisyRose-27B-Quark-MXFP4:low
+  smol: vllm/DaisyRose-27B-Quark-MXFP4:low
+  tiny: vllm/DaisyRose-27B-Quark-MXFP4:low
   # Inference stays local, but web searches contact third parties: keyless
   # APIs first (scrapers blocked as of 2026-10-14), Exa then the exact
   # fallbacks under retry.fallbackChains.web. No search credentials.

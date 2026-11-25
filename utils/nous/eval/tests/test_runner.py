@@ -579,3 +579,20 @@ def test_inside_a_lease_only_the_command_its_client_launched_runs_the_run(make_r
         claim.write_text("t0\n")
         assert not run.done() and runner.start(run, lease_token="t0") == 0 and run.done()["status"] == "ok"
         assert runner.start(run, lease_token="t0") == 1  # a second one: the claim is taken
+
+
+def test_server_speed_probe_redraws_slow_start(tmp_path, monkeypatch):
+    from nevl.server import Server
+    cand = {"kind": "command", "label": "c", "source": "t", "env": {}, "request": {},
+            "start": ["true"], "stop": [], "base_url": "http://127.0.0.1:18851",
+            "model": "m", "ready_timeout_s": 5, "probe_min_tps": 140.0, "probe_max_starts": 3}
+    srv = Server(cand, tmp_path, 18851)
+    srv.log_path.parent.mkdir(parents=True, exist_ok=True)
+    draws = iter([112.5, 158.0])
+    starts, stops = [], []
+    monkeypatch.setattr(srv, "_start_once", lambda: (starts.append(1) or 1.0))
+    monkeypatch.setattr(srv, "_speed_probe", lambda: next(draws))
+    monkeypatch.setattr(srv, "stop", lambda: stops.append(1))
+    assert srv.start() == 1.0
+    assert len(starts) == 2 and len(stops) == 1
+    assert srv.last_probe == {"tps": 158.0, "attempts": 2, "min_tps": 140.0}

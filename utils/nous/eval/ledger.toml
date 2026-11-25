@@ -371,3 +371,9 @@ id = "M68"
 what = "the vLLM cutover (2026-11-06) moved the local profile to concurrent children but left llama.cpp's one-slot assumption everywhere else clients read it: the main RULES.md ('nous serves one request at a time; parallel local children queue on the GPU'), the nous agent's description, the local-workers skill and omp-triage's criteria, and nous-worker's single workstation lock, which refused a second worker while vLLM batched eight sequences. Found 2026-11-07 while asking where parallelism was lost. nous-worker now holds four slots per workstation (the local profile's task.maxConcurrency) and the rules say four at once."
 guards = []
 tests = ["../scripts/tests/test_nous_worker.py::test_busy_and_offline_do_not_start_a_worker"]
+
+[[mistake]]
+id = "M85"
+what = "the 2026-11-24 optimization council reproduced three eval harness gaps: promote checked workload names without enforcing tier replication/design shape (--design ab on t2 or --reps 1 on t3 passed); ctx._read_stream accepted truncated EOF streams without [DONE] or finish_reason; toolcall.score checked only calls[0] and allowed length-truncated or empty-argument calls. promote now enforces tier_design and tier_workload_specs, _read_stream raises on truncated EOF, and toolcall.score validates every returned call and rejects finish_reason=length."
+guards = []
+tests = ["test_build.py::test_promote_refuses_reduced_reps_or_unreplicated_t2", "test_ctx.py::test_truncated_stream_without_done_or_finish_reason_raises", "test_workloads_text.py::test_toolcall_validity_requires_json_and_the_called_tools_required_keys"]

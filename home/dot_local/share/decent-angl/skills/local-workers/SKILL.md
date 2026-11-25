@@ -40,8 +40,8 @@ OMP may add messaging tools to a non-read-only child. Give exact input/output pa
 ask for the result via `write`/`yield`; the parent runs checks because the
 worker may not have the required verification command or tool.
 
-`nous-worker` defaults to `Qwen3.8-27B-Swift-Heretic-MXFP4` on the nous vLLM
-service (262,144 context / 8,192 output, text and image input, medium reasoning).
+`nous-worker` defaults to `DaisyRose-27B-Quark-MXFP4` on the nous vLLM
+service (262,144 context / 16,384 output, text and image input, medium reasoning).
 The local worker has no selectable smaller-model aliases. It is supervised, not
 a replacement for the director's design and acceptance decisions or a blanket
 substitute for Luna. A local pass is evidence for the checked contract only;

@@ -10,11 +10,11 @@
         "baseURL": "http://100.83.125.83:8080/v1"
       },
       "models": {
-        "Qwen3.8-27B-Swift-Heretic-MXFP4": {
-          "name": "Nous Qwen 3.8 27B Swift Heretic MXFP4",
+        "DaisyRose-27B-Quark-MXFP4": {
+          "name": "Nous DaisyRose 27B Quark MXFP4",
           "limit": {
             "context": 262144,
-            "output": 8192
+            "output": 16384
           },
           "attachment": true,
           "modalities": {

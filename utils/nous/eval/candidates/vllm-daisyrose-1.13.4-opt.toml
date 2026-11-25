@@ -1,0 +1,7 @@
+# Optimized DaisyRose-27B on vllm-sly-radiance 1.13.4 (static KV + 5 lossless flags + pinned sampling).
+kind = "serve"
+label = "vllm-daisyrose-1.13.4-opt"
+spec = "candidates/specs/vllm-daisyrose-1.13.4-opt.toml"
+ready_timeout_s = 1800
+probe_min_tps = 215.0
+probe_max_starts = 4

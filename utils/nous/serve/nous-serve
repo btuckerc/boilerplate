@@ -131,12 +131,13 @@ def command(config: dict) -> list[str]:
     return config.get("Entrypoint") or config.get("Cmd") or []
 
 
-def export(ref: str, engines: Path = ENGINES) -> Path:
+def export(ref: str, engines: Path = ENGINES, *, local: bool = False) -> Path:
     """Unpack an image into engines/<repo>-<tag>; an existing export of the same image id is reused."""
     def docker(*args, **kw):
         return subprocess.run(["docker", *args], check=True, text=True, capture_output=True, **kw).stdout.strip()
 
-    docker("pull", ref)
+    if not local:
+        docker("pull", ref)
     info = json.loads(docker("image", "inspect", ref))[0]
     repo, _, tag = ref.rpartition("/")[2].partition(":")
     dest = engines / f"{repo}-{tag or 'latest'}"
@@ -227,10 +228,11 @@ def main(argv_: list[str] | None = None) -> int:
     e = sub.add_parser("export")
     e.add_argument("image")
     e.add_argument("--engines", type=Path, default=ENGINES)
+    e.add_argument("--local", action="store_true", help="export a locally built image without docker pull")
     a = p.parse_args(argv_)
     try:
         if a.cmd == "export":
-            print(export(a.image, a.engines))
+            print(export(a.image, a.engines, local=a.local))
             return 0
         recording = a.cmd == "run" and a.record is not None
         if recording:

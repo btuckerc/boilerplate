@@ -17,6 +17,18 @@ why = "radiance-tuned quants of production's model"
 author = "StillDeadcode"
 why = "standalone radiance containers"
 
+[[hf_author]]
+author = "RadixArk"
+why = "DaisyRose pure-RL Qwen3.8 models"
+
+[[hf_author]]
+author = "thinkingmachines"
+why = "Inkling-2 models"
+
+[[hf_author]]
+author = "harness-hub"
+why = "harness-adapted coding models (pi, opencode)"
+
 [[github_release]]
 repo = "ggml-org/llama.cpp"
 why = "comparison and rollback engine"

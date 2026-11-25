@@ -2,20 +2,26 @@
 # llama.service as `nous-serve run /etc/nous-inference/serve.toml --port 8080`.
 # nous-eval derives its incumbent from this file, so every knob here is measured as served.
 #
-# Engine: vLLM "radiance", an RDNA4 fork (https://github.com/SlyBase/vllm-sly-radiance).
-# Model: Swift-1.5 Qwen3.8-27B heretic (abliterated), MXFP4 GPTQ, drafted by DFlash2.
-# Chosen over llama.cpp Vulkan on 2026-11-06 for speed: decode 1.7x, prefill 3.8x, four clients'
-# context-heavy turns 4.5x (replies capped at 128 tokens), with tool calls and images no worse.
-# Accuracy against the llama.cpp arm: t3 (docs/nous-model-evaluation-2026-09-19.md; ledger M52).
-rootfs = "/srv/models/engines/vllm-sly-radiance-1.9.1-rocm10.1"
-served_model_name = "Qwen3.8-27B-Swift-Heretic-MXFP4"
-home = "/srv/workspaces/vllm-cache/home"  # .cache/vllm, .triton, .aiter: compiled graphs and kernels
+# Engine: vLLM "radiance" 1.13.4 (vLLM 0.34.0, https://github.com/SlyBase/vllm-sly-radiance).
+# Model: RadixArk DaisyRose-27B (pure-RL fine-tune of Qwen3.8-27B), AMD Quark AWQ MXFP4,
+# drafted by DFlash2 (k=9). Selected 2026-11-25 over Swift-1.5-Qwen3.8-27B-heretic and
+# Thinking Machines Inkling-2-Mini (both vllm-redshift v0.3.1 and SlyBase PR #259):
+#   - T3 LCB 258x3 (20261124T223609Z): 56.33% vs 54.13% incumbent (+2.20 pts, PASS; Hard 38.74% vs 35.93%)
+#   - T2 ABBA (20261124T202900Z): 0 errors, 0 leaks, A/A 1.001, speed 162.4 (edits 233.6),
+#     160K decode 168.3, 4-client concurrency 7.82s (+24% faster), toolcall 100% valid, vision 14/14
+#   - 16-task coding agent eval (16K cap, 4 workers): 16/16 (100%), 554.3 verified tasks/GPU-hr
+#     (+20% vs incumbent 14/16, 3.24x vs Inkling-2-Mini PR #259 W8=1 15/16), 0/24 ops refusals.
+# Accuracy & evaluation record: docs/nous-model-evaluation-2026-09-19.md (ledger M52, M85).
+rootfs = "/srv/models/engines/vllm-sly-radiance-1.13.4-rocm10.1"
+served_model_name = "DaisyRose-27B-Quark-MXFP4"
+home = "/srv/workspaces/vllm-cache/home-daisyrose-1.13.4"  # .cache/vllm, .triton, .aiter: compiled graphs and kernels
 args = [
-  "--model", "/models/Swift-1.5-Qwen3.8-27B-heretic-MXFP4-GPTQ",
-  # 262,144 context (2026-11-07 tune, run 20261107T034535Z): decode, prefill and recall unchanged
-  # from 163,840; the KV pool grows to 399,968 tokens. Two 150K or four 84K prompts run at once
-  # without preemption, their prefills one after another (lconc sweep).
+  "--model", "/models/DaisyRose-27B-Quark-AWQ-MXFP4",
+  "--quantization", "quark",
+  # 262,144 context; --no-enable-extensible-kv-cache reclaims ~4 GiB withheld by vLLM 0.34's
+  # extensible KV allocator (299,479 -> 389,641 FP8 KV tokens, 1.49x concurrency at 262K).
   "--max-model-len", "262144", "--gpu-memory-utilization", "0.98",
+  "--no-enable-extensible-kv-cache",
   "--kv-cache-dtype", "fp8", "--mamba-ssm-cache-dtype", "bfloat16",
   "--speculative-config.method", "dflash",
   "--speculative-config.model", "/models/Qwen3.8-27B-DFlash2-W4A16",
@@ -39,6 +45,9 @@ args = [
   "--enable-auto-tool-choice", "--tool-call-parser", "qwen3_xml", "--reasoning-parser", "qwen3",
   "--chat-template", "/opt/qwen-fixed.jinja",
   "--default-chat-template-kwargs", '{"reasoning_effort": "medium"}',
+  # Pin generation defaults server-side: checkpoint defaults to T=1.0, which used 69% more tokens
+  # and ran 2.0x slower on the 16-task agentic suite with identical 16/16 pass rate.
+  "--override-generation-config", '{"temperature": 0.6, "top_p": 0.95, "top_k": 20}',
   # A stop (restart, eval lease, deploy) finishes in-flight replies for up to 120 s instead of
   # aborting them; llama.service allows 180 s (ledger M57). Output is unaffected.
   "--shutdown-timeout", "120",
@@ -72,6 +81,12 @@ RADIANCE_ADAPTIVE_WIDTH = "perseq"
 # 4096 and 16384 output tokens and caps it (repetition loops, upstream #164). Off until a t3
 # shows 0.5 non-inferior (ledger M52); its speed is a tune arm.
 RADIANCE_CACTUS_DELTA = "0"
+# Five verified lossless vllm-sly-radiance 1.13.4 kernel/graph optimizations.
+R4D_ATTN_HVF = "1"
+RADIANCE_ATTN_GATE_VIEW = "1"
+RADIANCE_DFLASH_AUX_FROM_RESIDUAL = "1"
+RADIANCE_GDN_EMPTY_OUT = "1"
+RADIANCE_GDN_STRIDED_GATES = "1"
 HF_HUB_OFFLINE = "1"  # weights are local; never reach the Hub at startup
 VLLM_NO_USAGE_STATS = "1"
 DO_NOT_TRACK = "1"

@@ -93,12 +93,14 @@ def _read_stream(lines, start: float) -> Reply:
     timings: dict = {}
     last: dict = {}
     first = last_token = None
+    saw_done = False
     for line in lines:
         line = line.decode("utf-8", "replace").strip()
         if not line.startswith("data:"):
             continue
         data = line[5:].strip()
         if data == "[DONE]":
+            saw_done = True
             break
         chunk = json.loads(data)
         if "error" in chunk:
@@ -118,6 +120,8 @@ def _read_stream(lines, start: float) -> Reply:
             for call in delta.get("tool_calls") or []:
                 _merge_tool_call(calls, call)
             finish_reason = choice.get("finish_reason") or finish_reason
+    if not saw_done and not finish_reason:
+        raise RuntimeError("truncated stream: EOF without [DONE] or finish_reason")
     end = time.monotonic()
     text, thought = "".join(content), "".join(reasoning)
     ttft = None if first is None else first - start

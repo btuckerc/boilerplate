@@ -18,7 +18,7 @@ from . import store
 from .candidate import CandidateError, incumbent, load, manifest
 from .compare import compare, pair_complete, write
 from .guards import UNIT_PATH
-from .runner import NOUS_EVAL, plan_run, start
+from .runner import NOUS_EVAL, load_tiers, plan_run, start
 
 SOURCE = Path("/srv/workspaces/repos/llama.cpp-master")
 WORKTREES = Path("/srv/workspaces/repos")
@@ -279,6 +279,10 @@ def promote(label: str, run_ids: list[str]) -> int:
         if sorted(measured) != sorted(plan["tier_workloads"]):
             print(f"{run_id}: measured {measured} of tier {plan['tier']}'s {plan['tier_workloads']}")
             return 1
+        shape_error = _check_run_shape(plan, label)
+        if shape_error:
+            print(f"{run_id}: {shape_error}")
+            return 1
         recorded, now = _identity(run.read_json("manifest.incumbent.json")), production_identity()
         if recorded != now:
             print(f"{run_id}: production has changed since this run ({_changed(recorded, now)}); measure again")
@@ -334,6 +338,31 @@ Promotion (operator-reviewed, not applied automatically):
     print(f"""Evidence: {', '.join(run_ids)} pass for {label}.
 Legacy llama.cpp build promotion is not supported for the production service.""")
     return 1
+
+
+def _check_run_shape(plan: dict, label: str) -> str | None:
+    """Enforce that a promotion run kept its tier's replication and design (no --design ab on t2,
+    no --reps 1 on t3)."""
+    tier = plan["tier"]
+    tier_cfg = load_tiers().get("tiers", {}).get(tier, {})
+    req_design = plan.get("tier_design") or tier_cfg.get("design")
+    if req_design == "abba" or tier in ("t2", "canary"):
+        for arm in ("incumbent", label):
+            count = plan["blocks"].count(arm)
+            if count < 2:
+                return f"tier {tier} requires replicated blocks (>=2) for {arm}, got {count}"
+    req_specs = plan.get("tier_workload_specs") or tier_cfg.get("workloads") or {}
+    for w in plan["workloads"]:
+        req = req_specs.get(w["name"])
+        if not req:
+            continue
+        req_reps = req.get("reps", 1)
+        if w.get("reps", 1) < req_reps:
+            return f"workload {w['name']} ran {w.get('reps', 1)} rep(s), tier {tier} requires >={req_reps}"
+        req_items = req.get("items_tier", tier)
+        if w.get("items_tier", tier) != req_items:
+            return f"workload {w['name']} used items_tier {w.get('items_tier')}, tier {tier} requires {req_items}"
+    return None
 
 
 SERVE_SPEC = Path("/etc/nous-inference/serve.toml")

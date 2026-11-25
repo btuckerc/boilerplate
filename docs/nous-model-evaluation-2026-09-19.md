@@ -618,3 +618,34 @@ contract. Local development workers are distinct from runtime reasoning calls.
 Promotion into runtime should first demonstrate grounding, abstention,
 constraint retention and independently verified outcomes on held-out cases;
 no hardware actions, save mutation or live campaigns were part of this work.
+
+---
+
+## Addendum — November 2026 Default-Model Bake-Off & Stack Optimization
+
+Evaluated `RadixArk/DaisyRose-27B` (`abhinand/DaisyRose-27B-Quark-AWQ-MXFP4`, rev `7ed784bacc8ce980306c5762525ed72daa929b7b`) and `thinkingmachines/Inkling-2-Mini` (via both `vllm-redshift:v0.3.1` and locally built `SlyBase/vllm-sly-radiance` PR #259 `feat/inkling2-mini` @ `801fc25`) against production `Qwen3.8-27B-Swift-Heretic-MXFP4` on `vllm-sly-radiance:1.9.1-rocm10.1` on `nous` (1× AMD Radeon AI PRO R9700 32 GB `gfx1201`, ROCm 10.1, kernel `7.0.0-43-generic`).
+
+### Decision
+
+Promoted **optimized `DaisyRose-27B-Quark-MXFP4`** on released `vllm-sly-radiance:1.13.4-rocm10.1` + DFlash2 (`k=9`) as the `nous` default (`utils/nous/serve/production.toml`).
+
+Key stack optimizations landed alongside the model swap:
+- **Reclaimed ~4 GiB KV cache (`299,479 → 389,641` FP8 KV tokens at 262K ctx):** vLLM 0.34.0 defaults `enable_extensible_kv_cache = True`; adding `--no-enable-extensible-kv-cache` restored full static KV capacity (`1.49×` concurrency at 262K).
+- **Five lossless `1.13.4` kernel/graph flags:** `R4D_ATTN_HVF=1`, `RADIANCE_ATTN_GATE_VIEW=1`, `RADIANCE_DFLASH_AUX_FROM_RESIDUAL=1`, `RADIANCE_GDN_EMPTY_OUT=1`, `RADIANCE_GDN_STRIDED_GATES=1`.
+- **Server-side sampling pin (`T=0.6, top_p=0.95, top_k=20`):** DaisyRose's checkpoint `generation_config.json` defaults to `T=1.0`, which ran **2.0× slower** (`210.5s` vs `103.9s`) and generated **+69% more tokens** (`2,767` vs `1,641`) on the 16-task agentic benchmark for the same `16/16` pass rate.
+- **Raised client output cap `8192 → 16384`:** The previous `8192` client cap truncated 4/10 real `agent-run local` runs and cost DaisyRose −13.7 pts on T3 LCB (`55.94% → 42.25%`). Updated across OMP (`private_models.yml` main + `local` profile) and OpenCode (`opencode.json`).
+
+### Verified Benchmark Summary
+
+| Metric | Incumbent (`Qwen3.8-27B-Swift-Heretic` / `1.9.1`) | Promoted (`DaisyRose-27B-Quark-MXFP4` / `1.13.4-opt`) | `Inkling-2-Mini` (`PR #259 W8=1`, patched ROCm) |
+| --- | --- | --- | --- |
+| **T3 LCB 258×3** (`20261124T223609Z`) | `54.13%` (Med `81.09%`, Hard `35.93%`) | **`56.33%`** (Med `82.37%`, Hard `38.74%`, **PASS +2.20 pts**) | — (excluded on T2 + agentic) |
+| **16-task coding agent** (4 workers, 16K cap) | `14/16` (`87.5%`), `109.1s`, `461.8` tasks/hr | **`16/16` (`100%`), `103.9s`, `554.3` tasks/hr** | `15/16` (`93.8%`), `315.3s`, `171.3` tasks/hr |
+| **Ops / defensive-security refusal screen** | `0/24` refusals | **`0/24` refusals** | `0/24` refusals |
+| **T2 ABBA** (`20261124T202900Z`) | `162.7` tok/s (edits `226.6`), 4-client `10.21s`, toolcall `98/100` | **`162.4` tok/s (edits `233.6`), 4-client `7.82s` (+24%), toolcall `100/100`**, 0 errors, 0 leaks, A/A `1.001` | — |
+| **Long-context 160K** (prefill / decode, recall) | `2,284` / `169.5` tok/s (1.0) | **`2,284` / `168.3` tok/s (1.0)** | `665.5` / `54.5` tok/s (1.0) |
+| **KV capacity & max context** | `399,968` FP8 tok @ 262K (`max_num_seqs=8`) | **`389,641` FP8 tok @ 262K (`max_num_seqs=8`)** | `229,567` FP8 tok @ 196K (`max_num_seqs=4`) |
+
+### Why Inkling-2-Mini Was Not Promoted as Default
+
+Inkling-2-Mini's headline `~1,000 tok/s` requires datacenter HBM (~8 TB/s) and native FP4 Tensor Cores (GB200/B200), not a single 640 GB/s GDDR6 R9700 without native FP4 MMA. Even after building `SlyBase/vllm-sly-radiance` PR #259 locally and patching two CUDA-only gaps for ROCm (Q-tiled hipBLASLt vision attention and native Triton FP8 KV unpack, achieving `66.7–69.0%` prefix-cache hit rate, `212.1 tok/s` greedy decode probe, `1.0` exact-pixel grounding on `018`/`019`, and `0` OOMs under `W8=1` with `gpu_memory_utilization=0.94`), it remained **3.24× slower** in verified agentic tasks/GPU-hr (`171.3` vs `554.3`), **3.1–3.4× slower** at 160K context, with **70% less KV capacity**, while depending on an unreleased PR branch. Inkling's clear niche advantage is ScreenSpot-v2 GUI grounding (~96% vs ~48%), so its weights and exported engine remain available on disk if a dedicated GUI-grounding workload is later wanted.

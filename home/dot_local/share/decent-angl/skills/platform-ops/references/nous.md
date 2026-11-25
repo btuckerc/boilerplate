@@ -77,18 +77,18 @@ independent auth and sessions. Read `~/src/omp-serve/README.md` and
   `~/.omp/agent/models.yml` and `~/.omp/agent/config.yml` (chezmoi sources
   `private_models.yml` and `private_config.yml` under
   `home/private_dot_omp/private_agent/`). It serves only
-  `Qwen3.8-27B-Swift-Heretic-MXFP4`: 262,144 context / 8,192 output, text and
-  image input, medium reasoning. The profile's OpenAI Chat Completions API
+  `DaisyRose-27B-Quark-MXFP4`: 262,144 context / 16,384 output, text and
+  image input, medium reasoning (`T=0.6`, `top_p=0.95`, `top_k=20` pinned server-side). The profile's OpenAI Chat Completions API
   comes from vLLM's OpenAI-compatible endpoint.
 - Service: `llama.service`; unit source `utils/nous/llama.service`; serve CLI
   source `utils/nous/serve/`, installed as `/usr/local/bin/nous-serve` and
   configured by `/etc/nous-inference/serve.toml`. It launches the vLLM image
-  rootfs `/srv/models/engines/vllm-sly-radiance-1.9.1-rocm10.1`; model weights
+  rootfs `/srv/models/engines/vllm-sly-radiance-1.13.4-rocm10.1`; model weights
   are under `/srv/models/vllm`; compile caches under
-  `/srv/workspaces/vllm-cache/home`. Service configuration is machine-local
+  `/srv/workspaces/vllm-cache/home-daisyrose-1.13.4`. Service configuration is machine-local
   under `/etc/systemd/system`, not workstation chezmoi state. No Mesa drop-in
   is used: vLLM runs ROCm/HIP.
-- vLLM batches up to 8 sequences with a shared 399,968-token VRAM KV pool;
+- vLLM batches up to 8 sequences with a shared 389,641-token VRAM KV pool (`--no-enable-extensible-kv-cache`);
   there is no host prompt cache. `llama-speedcheck.timer` restarts production
   when ROCm decode is stuck in its slow state (ROCm/ROCm#6347). A stop drains
   in-flight replies for up to 120 s; new requests meanwhile get HTTP 500.
@@ -200,7 +200,7 @@ requires the user. Preserve the existing manager rather than reinstalling it.
 
 The MacBook T3 Nous instance uses `~/.local/bin/opencode-baseline` (mise-pinned
 OpenCode) and managed `~/.config/opencode/opencode.json`. It targets the single
-Swift Heretic Qwen3.8 model (256K context / 8K output / medium reasoning), with
+DaisyRose-27B Quark MXFP4 model (256K context / 16K output / medium reasoning), with
 text and image input. These are small screening tests, not a sustained agent
 benchmark. Selecting a T3 model does not switch the host service.
 
@@ -215,12 +215,12 @@ is too large for practical local inference on this host. Keep the distinction
 between model screening and verified project performance.
 
 `omp-local` is the fully local OMP lane (profile `local`): every role on the
-promoted Swift Heretic Qwen, cloud providers disabled. It shares the built-in
+promoted DaisyRose-27B Quark MXFP4 model, cloud providers disabled. It shares the built-in
 vLLM endpoint.
 
 Local models are opt-in: the managed OpenCode config does not force a model,
 restrict other providers or tune global build/plan agents. `nous-worker`
-launches the single Qwen3.8 model with per-process settings, JSON events and
+launches the single DaisyRose-27B model with per-process settings, JSON events and
 resumable session IDs. This works from a T3 terminal-capable main thread as a
 subprocess; it is not native Codex `spawn_agent` support. Read
 `docs/nous-inference.md` for invocation and tested limits. The `local-workers`

@@ -56,6 +56,22 @@ winbox <-> uplink is switched in the R7800's switch chip and never touches the A
   to it, `private-domain home.arpa,plex.direct` (exempts `*.plex.direct` from DNS rebind
   protection so LAN Plex clients resolve `10.77.78.121`), DNSSEC, prefetch, aggressive NSEC,
   serve-expired (TTL 86400, client timeout 1800 ms), msg/rrset cache 64m/128m.
+- TV-only Unbound DNSBL & DNS enforcement (`samsung-tv`, `10.77.78.173/32` only; rest of LAN
+  unaffected):
+  - Unbound DNSBL policy (`99bbc481-29a2-484b-b4c5-623c3b1ba557`, `source_nets=10.77.78.173/32`):
+    HaGeZi Multi NORMAL (`hgz002`), HaGeZi DoH/VPN/TOR/Proxy Bypass (`hgz014`), HaGeZi Native
+    Samsung (`native.samsung-onlydomains.txt`), targeted Samsung Home-bar Sponsored-tile domains
+    (`gpm.samsungqbe.com`, `osb-*.samsungqbe.com`, `tvx.adgrx.com`, `ads.samsung.com`,
+    `samsungads.com`, `samsungadhub.com`, `samsungacr.com`, `samsungtvads.com`), with explicit
+    allowlist for core Samsung Tizen 6.0 auth/app domains (`abtauthprd/amauthprd/oempprd/cdn`
+    `samsungcloudsolution.*`, `lcprd1.samsungcloudsolution.net`, `samsungcloudplatform.com`).
+  - LAN DNAT (`0e08983b-73ec-4c1e-ac63-3da5cefbbf11`): forces `10.77.78.173/32` outbound TCP/UDP
+    `53` (`!lanip`) -> `10.77.78.1:53` (`pass=pass`, reflection disabled).
+  - LAN filter block rules ahead of default allow (bumped `c96472b5-977a-489d-a5f2-d0483cb7eb2c`
+    to seq `100`): seq `5` (`9b9c4011-4099-4bb1-ba19-8d49835e7dca`) blocks `10.77.78.173/32`
+    TCP/UDP `853` (DoT); seq `6` (`9e764594-06fe-486d-bf8a-c77d0d8a5f5b`) blocks `10.77.78.173/32`
+    TCP/UDP `443` to host alias `public_doh_resolvers` (`91e9fda4-aee7-4fcb-83be-4e910d333ccc`:
+    `8.8.8.8`, `8.8.4.4`, `1.1.1.1`, `1.0.0.1`).
 - Inbound DNAT:
   - WAN TCP `18721` -> `10.77.78.121:32400` (`Plex Remote Access (macmini)`,
     UUID `7039bc76-d5c9-43e0-a53a-458be5164954`, `pass=pass`, NAT reflection disabled, log on).
@@ -128,6 +144,8 @@ off; telnet/FTP/HTTP/SNMP off. All counters clean on 2026-11-16 (0 CRC, pause, c
   fine: the tunnel route is interface-scoped (`UCSI`), and the MacBook stays on en0 (checked).
 
 ## Change log
+
+- 2026-11-26 TV-only Samsung ad/Sponsored-tile blocking and DNS bypass enforcement for `samsung-tv` (`10.77.78.173/32`): enabled Unbound DNSBL policy `99bbc481-29a2-484b-b4c5-623c3b1ba557` (`hgz002`, `hgz014`, HaGeZi Native Samsung, targeted Samsung Sponsored-tile blocks, core Samsung app/auth allowlist), added LAN DNAT `0e08983b-73ec-4c1e-ac63-3da5cefbbf11` (port `53` -> `10.77.78.1:53` for `10.77.78.173/32`), and added LAN block rules seq `5`/`6` (`9b9c4011-4099-4bb1-ba19-8d49835e7dca` port `853` DoT, `9e764594-06fe-486d-bf8a-c77d0d8a5f5b` port `443` to alias `public_doh_resolvers`) ahead of default allow (seq `100`). Verified end-to-end: temporarily scoped to `macmini` (`ads.samsungads.com`, `gpm.samsungqbe.com`, `config.samsungads.com`, `dns.google` -> `0.0.0.0`; `lcprd1.samsungcloudsolution.net` -> `34.160.212.185`), then re-scoped strictly to `10.77.78.173/32` and confirmed `macmini` resolves `config.samsungads.com` and direct `@1.1.1.1` normally.
 
 - 2026-11-26 Static DHCP reservation for `samsung-tv` (Samsung QN55QN90AAFXZA, `10:2b:41:56:53:4c`) pinned to its existing IP `10.77.78.173` (dnsmasq host UUID `1df10c02-4780-4a63-9004-40c4761a39b1`). Verified hitless via `opnsense-api get dnsmasq/settings/searchHost` and from `macmini` (`dig +short @10.77.78.1 samsung-tv.home.arpa` -> `10.77.78.173`, PTR -> `samsung-tv.`).
 

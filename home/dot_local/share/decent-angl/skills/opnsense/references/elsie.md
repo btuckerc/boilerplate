@@ -100,6 +100,12 @@ winbox <-> uplink is switched in the R7800's switch chip and never touches the A
   set to 41642 (WAN 41641 belongs to winbox's static NAT), acceptDNS off, accept routes off, SSH
   on, SNAT on, route `10.77.78.0/24` approved. Peers see it on port 31642 (why not 41642: not
   checked; no shell on elsie yet). winbox keeps its direct path on 41641.
+- Site-to-site kernel WireGuard (`if_wg`, `wg0`, MTU `1420`, UDP `51820`): server `s2s-clt`
+  (UUID `a9a3d0fa-32a5-48ec-9fb1-6d3e9090e6d4`, `10.77.254.2/30`), peer `clt-s2s`
+  (UUID `ca6f590f-d7f9-4a10-8c83-e3dd599f60b5`, endpoint `98.26.202.87:51820`, `keepalive=25`,
+  allowed `10.77.254.1/32,10.77.77.0/24`). Firewall rules: WAN UDP `51820` pass
+  (`3837b6e8-d76f-4092-a3f4-7ef434c47d8a`), `wireguard` group pass `10.77.77.0/24 -> 10.77.78.0/24`
+  (`2d12c5c4-680a-4546-b3b6-965d9a1b27a7`), transit ICMP (`5400dc2e-fc43-482d-9faf-ef701ed3807d`).
 - Static neighbor (Interfaces > Neighbors): winbox `10.77.78.120` = `10:ff:e0:b9:a8:21`, so a
   routed magic packet reaches it asleep (its NIC does not answer ARP in S3).
 
@@ -143,6 +149,8 @@ off; telnet/FTP/HTTP/SNMP off. All counters clean on 2026-11-16 (0 CRC, pause, c
   fine: the tunnel route is interface-scoped (`UCSI`), and the MacBook stays on en0 (checked).
 
 ## Change log
+
+- 2026-11-26 Site-to-site kernel WireGuard (`if_wg`, `wg0`, UDP `51820`, MTU `1420`, `10.77.254.2/30` <-> `clt` `10.77.254.1/30`, allowed `10.77.77.0/24`) enabled hitlessly with WAN UDP `51820` pass (`3837b6e8-d76f-4092-a3f4-7ef434c47d8a`) and scoped `wireguard` pass (`2d12c5c4-680a-4546-b3b6-965d9a1b27a7`). Verified DF `1392 B` payload (`47.5-50.2 ms`, 0% loss) and 4-rep ABBA `wire_bench` (`winbox -> nous`, 30 Mbps + 256 KiB IDR): at 120 FPS frame-complete RTT `55.67 -> 54.42 ms` p50, `77.07 -> 71.01 ms` p95, `128.68 -> 106.05 ms` p99 (`-22.63 ms`), completion `98.80% -> 99.64%`; at 240 FPS p50 `52.85 -> 51.82 ms`, IDR max `115.69 -> 104.34 ms`, completion `98.91% -> 99.45%`.
 
 - 2026-11-26 `be9700` channels pinned (`5 GHz -> ch 149 / 80 MHz`, `2.4 GHz -> ch 11 / 20 MHz`, `6 GHz` left `auto (69) / 320 MHz`, `Smart Connect` on) via verified full-form AES-encrypted `application/x-www-form-urlencoded` `operation=write_spf` after `0600` backup and harmless `ledgeneral` round-trip test. Verified readback on all 3 bands (SSIDs, `psk_sae`/`4`, PSKs, `airtime_fairness=on`, `smart_enable=on` unchanged) and confirmed house clients (`iPad`, `iPhone`, `samsung-tv`, etc.) rejoined cleanly (`HP992747` drifted to `barn-ap`).
 

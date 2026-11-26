@@ -21,7 +21,7 @@ Applies to every site. Site pages link here; device pages say how to set each it
 | Site | AP | Location | 2.4 GHz | 5 GHz | 6 GHz | Notes |
 |---|---|---|---|---|---|---|
 | clt | be9700 (Archer BE9700 v1.0) 10.77.77.111 | house | ch 1, 20 MHz | auto (149), 80 MHz | `Craig_CLT_6G`, auto (37), 160 MHz | single AP, SSID `Craig_CLT`, Smart Connect off |
-| elsie | be9700 (reports Archer BE600 v1.0) 10.77.78.111 | house | auto (10), 20 MHz | auto (149), 80 MHz | `Craig Wifi 6G`, auto (69), 320 MHz | SSID `Craig WiFi`, Smart Connect on. Target: pin 5 GHz 149, 2.4 GHz 11 |
+| elsie | be9700 (reports Archer BE600 v1.0) 10.77.78.111 | house | ch 11, 20 MHz | ch 149, 80 MHz | `Craig Wifi 6G`, auto (69), 320 MHz | SSID `Craig WiFi`, Smart Connect on. Pinned 2026-11-26 |
 | elsie | barn-ap (R7800, OpenWrt) 10.77.78.110 | barn | ch 1, 20 MHz, 20 dBm | ch 36, 80 MHz, 23 dBm | none | 802.11k/v on |
 
 Values read from the devices on 2026-11-16. Re-read before relying on an `auto` channel.

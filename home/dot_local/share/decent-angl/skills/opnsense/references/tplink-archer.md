@@ -28,10 +28,11 @@ r.logout()
 
 ## Writes
 
-Untested. The web UI re-posts whole wireless forms, including the PSK, so a partial write
-can blank settings and take the site's Wi-Fi down. Before the first write: save the full
-read (0600, outside Git), test on a harmless form, read back, and have the user near the AP.
-Radio changes restart the radios and kick clients (`wifi.md`).
+Verified on elsie Archer BE600 v1.0 (`1.0.5`) on 2026-11-26 (`clt` BE9700 still needs its own pre-flight check):
+
+- **Transport gotcha:** `tplinkrouterc6u`'s `TplinkRouterJson.request()` converts payloads to JSON and appends every key to the URL query string. Archer BE600's native Vue UI actually expects **`application/x-www-form-urlencoded`** (`urlencode(..., quote_via=quote)` so spaces encode as `%20`) inside the AES-encrypted POST body, with a clean URL (no secrets in query params). Sending a JSON-only body without query params causes BE600 to ignore every field and default omitted toggles to `off`. Bypass `TplinkRouterJson.request` with `super(TplinkRouterJson, r).request(path, urlencode(payload, quote_via=quote))`.
+- **Wireless multi-band writes (`write_spf`):** Read all bands with `operation=read_spf` first — `read_spf` uses numeric `encryption` codes on 2.4/5 GHz (`"4"` = WPA2/WPA3 AES) vs `"psk_sae"` on 6 GHz. Submit all supported bands atomically to `admin/wireless?form=wireless_2g&form=wireless_5g&form=wireless_6g` with `operation=write_spf` and `wireless_<band>_*` keys (`disabled_all`, `enable`, `hidden`, `mu_mimo`, `psc`, `ssid`, `encryption`, `psk_key`, `psk_version`, `server`, `port`, `wpa_key`, `hwmode`, `htmode`, `channel`, `txpower`, `channel_mode`, `auto_channel_unii_4`, omitting empty strings).
+- **Safety protocol:** Always save a `0600` backup (outside Git) first, run a harmless `admin/ledgeneral?form=setting` write/readback pre-flight check, assert SSID/encryption/PSK before posting, wait ~20 s, and verify readback + client re-association. Radio changes restart radios and kick clients (`wifi.md`).
 
 ## Recommended settings
 

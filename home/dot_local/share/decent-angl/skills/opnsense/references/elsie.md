@@ -14,7 +14,7 @@ the user's go-ahead first. Router hardware matches clt (GMKtec NucBox M8, Ryzen 
 | Orbi CBR750 | Cox cable modem, bridge mode | admin `192.168.100.1` | - | - | (M8 WAN) | browser on the LAN | user only | user only; every Apply drops the site 2-5 min |
 | elsie (M8) | OPNsense 26.7.9_1 router | `10.77.78.1` `elsie.home.arpa` | re0 `70:70:fc:09:0d:2d` | - | 1 (2.5G) | `opnsense-api`, tunnel below | `opnsense-api-elsie` (user `agent-api`) | API |
 | xmg1915 | Zyxel XMG1915-10EP switch | `10.77.78.112` | `70:49:a2:21:1e:f5` | - | - | SSH CLI (read), HTTPS forms (write) via mini | `zyxel-elsie` (`admin`) | `zyxel-xmg1915.md` |
-| be9700 | house AP, TP-Link (reports Archer BE600 v1.0) | `10.77.78.111` | `68:7f:f0:75:f4:5b` | house | 7 (2.5G) | `tplinkrouterc6u` via mini tunnel | `be9700-elsie` | untested, `tplink-archer.md` |
+| be9700 | house AP, TP-Link (reports Archer BE600 v1.0) | `10.77.78.111` | `68:7f:f0:75:f4:5b` | house | 7 (2.5G) | `tplinkrouterc6u` via mini tunnel | `be9700-elsie` | verified `write_spf`, `tplink-archer.md` |
 | barn-ap | barn AP, NETGEAR R7800 on OpenWrt 25.12.6 | `10.77.78.110` (static) | `b0:b9:8a:73:7a:5c` | barn | 5 (1G, barn cable) | `ssh barn-ap` | root password file on nous (see Open items) | `uci`, `openwrt-ap.md` |
 | winbox | gaming PC, Apollo host; Tailscale `accept-routes=false` | `10.77.78.120` | `10:ff:e0:b9:a8:21` | barn, barn-ap `lan1` (1G) | 5 via barn-ap | `ssh winbox`, MCP `winbox` (Tailscale) | - | `platform-ops` `winbox-streaming.md` |
 | macmini | Mac mini M4, jump host, wake sender; Tailscale exit node, `accept-routes=false` | `10.77.78.121` | `d0:11:e5:81:01:6b` | - | 8 (1G) | `ssh mini` (Tailscale) | - | - |
@@ -122,7 +122,6 @@ off; telnet/FTP/HTTP/SNMP off. All counters clean on 2026-11-16 (0 CRC, pause, c
 | Phones with Tailscale on this LAN | agent | Not checked whether iOS keeps LAN traffic local once the route is approved (macOS does). |
 | Delete root's two GUI-made API keys on elsie | user (GUI: System > Access > Users > root) | The API cannot delete them. Also delete `lcri.home.arpa_root_apikey.txt` from the MacBook's Downloads. |
 | Store barn-ap secrets in 1Password | user | `! op-secret add barn-ap-r7800 password=@/home/tux/.local/share/decent-angl/secrets/barn-ap-root.txt` and `! op-secret add wifi-elsie password`. Then the AP can be rebuilt without the live AP. |
-| BE9700: pin 5 GHz 149 and 2.4 GHz 11 | agent after a tested write, or user in the GUI | Writes untested (`tplink-archer.md`). |
 | Firmware: BE9700 update offered; switch ACGP.0 -> ACGP.3 | user decides when | Each drops Wi-Fi or the whole site for minutes. |
 | `agent` SSH user on elsie; automatic recovery from a re1 TX stall | agent | Not built. |
 
@@ -144,6 +143,8 @@ off; telnet/FTP/HTTP/SNMP off. All counters clean on 2026-11-16 (0 CRC, pause, c
   fine: the tunnel route is interface-scoped (`UCSI`), and the MacBook stays on en0 (checked).
 
 ## Change log
+
+- 2026-11-26 `be9700` channels pinned (`5 GHz -> ch 149 / 80 MHz`, `2.4 GHz -> ch 11 / 20 MHz`, `6 GHz` left `auto (69) / 320 MHz`, `Smart Connect` on) via verified full-form AES-encrypted `application/x-www-form-urlencoded` `operation=write_spf` after `0600` backup and harmless `ledgeneral` round-trip test. Verified readback on all 3 bands (SSIDs, `psk_sae`/`4`, PSKs, `airtime_fairness=on`, `smart_enable=on` unchanged) and confirmed house clients (`iPad`, `iPhone`, `samsung-tv`, etc.) rejoined cleanly (`HP992747` drifted to `barn-ap`).
 
 - 2026-11-26 TV-only Samsung ad/Sponsored-tile blocking and DNS bypass enforcement for `samsung-tv` (`10.77.78.173/32`): enabled Unbound DNSBL policy `99bbc481-29a2-484b-b4c5-623c3b1ba557` (`hgz002`, `hgz014`, HaGeZi Native Samsung, targeted Samsung Sponsored-tile blocks, core Samsung app/auth allowlist), added LAN DNAT `0e08983b-73ec-4c1e-ac63-3da5cefbbf11` (port `53` -> `10.77.78.1:53` for `10.77.78.173/32`), and added LAN block rules seq `5`/`6` (`9b9c4011-4099-4bb1-ba19-8d49835e7dca` port `853` DoT, `9e764594-06fe-486d-bf8a-c77d0d8a5f5b` port `443` to alias `public_doh_resolvers`) ahead of default allow (seq `100`). Verified end-to-end: temporarily scoped to `macmini` (`ads.samsungads.com`, `gpm.samsungqbe.com`, `config.samsungads.com`, `dns.google` -> `0.0.0.0`; `lcprd1.samsungcloudsolution.net` -> `34.160.212.185`), then re-scoped strictly to `10.77.78.173/32` and confirmed `macmini` resolves `config.samsungads.com` and direct `@1.1.1.1` normally.
 

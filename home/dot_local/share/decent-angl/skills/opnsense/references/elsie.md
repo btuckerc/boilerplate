@@ -18,6 +18,7 @@ the user's go-ahead first. Router hardware matches clt (GMKtec NucBox M8, Ryzen 
 | barn-ap | barn AP, NETGEAR R7800 on OpenWrt 25.12.6 | `10.77.78.110` (static) | `b0:b9:8a:73:7a:5c` | barn | 5 (1G, barn cable) | `ssh barn-ap` | root password file on nous (see Open items) | `uci`, `openwrt-ap.md` |
 | winbox | gaming PC, Apollo host; Tailscale `accept-routes=false` | `10.77.78.120` | `10:ff:e0:b9:a8:21` | barn, barn-ap `lan1` (1G) | 5 via barn-ap | `ssh winbox`, MCP `winbox` (Tailscale) | - | `platform-ops` `winbox-streaming.md` |
 | macmini | Mac mini M4, jump host, wake sender; Tailscale exit node, `accept-routes=false` | `10.77.78.121` | `d0:11:e5:81:01:6b` | - | 8 (1G) | `ssh mini` (Tailscale) | - | - |
+| samsung-tv | Samsung QN55QN90AAFXZA 55" Neo QLED TV (2021, Tizen 6.0) | `10.77.78.173` (static DHCP) | `10:2b:41:56:53:4c` | house (BE9700 Wi-Fi) | - | `~/tv-tools/` on `mini` (ports 8001/8002, SDB 26101 when Dev Mode on) | - | TV remote / SDB |
 | Arris TM3402 | Cox phone modem | - | - | - | - | - | - | leave alone |
 
 ## Access
@@ -50,7 +51,7 @@ winbox <-> uplink is switched in the R7800's switch chip and never touches the A
 ## Router
 
 - LAN `10.77.78.1/24`, dnsmasq DHCP pool `.41-.245`, domain `home.arpa`. Host entries:
-  barn-ap .110, be9700 .111, xmg1915 .112, winbox .120, macmini .121.
+  barn-ap .110, be9700 .111, xmg1915 .112, winbox .120, macmini .121, samsung-tv .173.
 - DNS as clt: dnsmasq on 53053, Unbound forwards `home.arpa` and `78.77.10.in-addr.arpa`
   to it, `private-domain home.arpa,plex.direct` (exempts `*.plex.direct` from DNS rebind
   protection so LAN Plex clients resolve `10.77.78.121`), DNSSEC, prefetch, aggressive NSEC,
@@ -127,6 +128,8 @@ off; telnet/FTP/HTTP/SNMP off. All counters clean on 2026-11-16 (0 CRC, pause, c
   fine: the tunnel route is interface-scoped (`UCSI`), and the MacBook stays on en0 (checked).
 
 ## Change log
+
+- 2026-11-26 Static DHCP reservation for `samsung-tv` (Samsung QN55QN90AAFXZA, `10:2b:41:56:53:4c`) pinned to its existing IP `10.77.78.173` (dnsmasq host UUID `1df10c02-4780-4a63-9004-40c4761a39b1`). Verified hitless via `opnsense-api get dnsmasq/settings/searchHost` and from `macmini` (`dig +short @10.77.78.1 samsung-tv.home.arpa` -> `10.77.78.173`, PTR -> `samsung-tv.`).
 
 - 2026-11-25 Tailscale direct UDP 41641 for `winbox`: added hitless WAN UDP `41641` -> `10.77.78.120:41641` DNAT rule (`daa8284c-fe36-4014-bbed-7b4fccbd0f28`, `pass=pass`, NAT reflection disabled, log off) so remote/cellular Tailscale peers punch direct WireGuard to `winbox` without DERP. Verified live via `opnsense-api get firewall/d_nat/search_rule` and `tailscale ping winbox` from `nous` (`via 70.175.223.206:41641`). `barn-ap` live AQL test (`2000/4000`) regressed drops/latency and was reverted to stock `5000/12000`.
 

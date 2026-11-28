@@ -82,19 +82,15 @@ winbox <-> uplink is switched in the R7800's switch chip and never touches the A
   - WAN UDP `41641` -> `10.77.78.120:41641` (`Tailscale direct UDP 41641 (winbox)`,
     UUID `daa8284c-fe36-4014-bbed-7b4fccbd0f28`, `pass=pass`, NAT reflection disabled, log off;
     enables direct Tailscale WireGuard from `clt` and cellular CGNAT without DERP).
-  - WAN TCP/UDP `443` -> `10.77.78.124:443` (`Vision HTTPS Ingress (photos/drive via Caddy)`,
-    UUID `2009e3c3-55c5-405b-af47-cd838c2e66f1`, `pass=pass`, `natreflection=purenat`, log on;
-    paired with scoped LAN outbound SNAT `5ef9fe24-3397-4951-86f1-2bca50252dd4` `lan -> 10.77.78.124:443`
-    -> `lanip` so LAN browsers using DoH/cached WAN IP hairpin cleanly; direct Let's Encrypt HTTPS
-    for Immich & Nextcloud with no 100 MB Cloudflare cap; TrueNAS/HexOS stay isolated on `.122`).
+  - *(WAN TCP/UDP `443` DNAT retired 2026-11-28: `photos`/`drive` HTTPS now arrives via outbound
+    kernel WireGuard `wg1` from OCI Always Free relay `193.122.213.33` to `10.77.78.124:443`.)*
 - Shaper: FQ-CoDel pipes 800 down / 90 up Mbit, quantum 300, ECN, one maskless queue
   each, rules WAN in/out. Pipe UUIDs: down `596234c5-83d3-46b4-b2b4-646109c2d361`, up
   `42d53d14-a647-4f92-9029-c0c3685a2d2c`. Interactive queues and rules 10-15 exist,
   disabled. clt's per-host WFQ recipe made upload latency worse here (376 ms).
 - Outbound NAT hybrid: UDP static port 41641 for winbox (Tailscale direct paths), LAN UDP
-  endpoint-independent mapping, and scoped LAN hairpin SNAT (`5ef9fe24-3397-4951-86f1-2bca50252dd4`,
-  `lan -> 10.77.78.124:443` -> `lanip`) for Vision Caddy Pure NAT reflection. After a NAT change,
-  delete old UDP states (`diagnostics/firewall/del_state/<id>`) or peers stay on DERP.
+  endpoint-independent mapping. After a NAT change, delete old UDP states
+  (`diagnostics/firewall/del_state/<id>`) or peers stay on DERP.
 - Tunable `hw.re.flow_control=0` (boot time). Check that the WAN media string has no
   `rxpause,txpause`. Hardware offloads off.
 - WAN: block private networks and bogons on. Gateway `WAN_DHCP` monitored (1.1.1.1, host
@@ -116,6 +112,13 @@ winbox <-> uplink is switched in the R7800's switch chip and never touches the A
   allowed `10.77.254.1/32,10.77.77.0/24`). Firewall rules: WAN UDP `51820` pass
   (`3837b6e8-d76f-4092-a3f4-7ef434c47d8a`), `wireguard` group pass `10.77.77.0/24 -> 10.77.78.0/24`
   (`2d12c5c4-680a-4546-b3b6-965d9a1b27a7`), transit ICMP (`5400dc2e-fc43-482d-9faf-ef701ed3807d`).
+- OCI Always Free HTTPS relay kernel WireGuard (`if_wg`, `wg1`, MTU `1420`, local UDP `51821`,
+  outbound-only): server `oci-relay` (UUID `6bd0526a-91b7-43b4-856b-c400bc7d790b`,
+  `10.77.254.6/30`), peer `oci-relay` (UUID `4ac089ce-c046-47dc-ab3e-35226109df20`, endpoint
+  `193.122.213.33:51820`, `keepalive=25`, allowed `10.77.254.5/32`). Firewall rules on
+  `wireguard` group: pass TCP/UDP `10.77.254.5/32 -> 10.77.78.124/32` port `443`
+  (`e2bb1605-0ea5-48dd-88fa-876455445a11`) and transit ICMP `10.77.254.4/30`
+  (`2c073121-4412-4ad4-a52d-5405d5668c61`). Zero WAN port open on `elsie` for HTTPS.
 - Static neighbor (Interfaces > Neighbors): winbox `10.77.78.120` = `10:ff:e0:b9:a8:21`, so a
   routed magic packet reaches it asleep (its NIC does not answer ARP in S3).
 
@@ -159,6 +162,8 @@ off; telnet/FTP/HTTP/SNMP off. All counters clean on 2026-11-16 (0 CRC, pause, c
   fine: the tunnel route is interface-scoped (`UCSI`), and the MacBook stays on en0 (checked).
 
 ## Change log
+
+- 2026-11-28 Cut `photos.weavedweb.com` & `drive.weavedweb.com` over to OCI Always Free `$0/mo` stateless WireGuard TCP/UDP `:443` relay (`193.122.213.33`, `us-ashburn-1` `AD-3`, `VM.Standard.E2.1.Micro`, `nftables` DNAT + BBR + MSS clamping, zero certs on OCI): added outbound `wg1` (`6bd0526a`, peer `4ac089ce`, `10.77.254.6/30 <-> 10.77.254.5/30`) + scoped `wireguard` pass `10.77.254.5/32 -> 10.77.78.124/32:443` (`e2bb1605`), moved Cloudflare `A` records to `193.122.213.33`, disabled `elsie-ddns-sync.timer`, deleted WAN `443` DNAT (`2009e3c3`) and hairpin SNAT (`5ef9fe24`), and shipped `oci-auth-sync` + `vision-ctl relay`. Verified cold reboot of `vision-relay`: `193.122.213.33:443` HTTP/2 200 on `photos` & `drive`, old residential `70.175.223.206:443` closed (timeout), `elsie`/`clt` Split-DNS HTTP/2 200.
 
 - 2026-11-28 Fixed stale-browser Cloudflare `522` and `elsie` LAN DoH hairpin for `photos.weavedweb.com` & `drive.weavedweb.com`: switched Cloudflare `weavedweb.com` SSL/TLS mode `flexible -> full` (Cloudflare edge `104.21.24.200` coalesced/cached requests went from `HTTP/2 522` on Cox-blocked `:80` -> `HTTP/2 200` via `:443`, `LC_WebWeaver` tunnel unaffected), enabled `natreflection=purenat` on WAN 443 DNAT `2009e3c3-55c5-405b-af47-cd838c2e66f1`, and added scoped LAN outbound SNAT `5ef9fe24-3397-4951-86f1-2bca50252dd4` (`lan -> 10.77.78.124:443` -> `lanip`; `elsie` LAN curl to `70.175.223.206:443` went from OPNsense self-signed cert error -> `HTTP/2 200`).
 

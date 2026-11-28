@@ -1,0 +1,38 @@
+#!/bin/sh
+# Materialize ~/.oci/config and ~/.oci/oci_api_key.pem (0600) from 1Password item `oci-api`.
+# Never prints secrets. Safe to re-run after key rotation or on a new enrolled host.
+set -eu
+umask 077
+
+OCI_ITEM="${OCI_ITEM:-oci-api}"
+mkdir -p "$HOME/.oci"
+chmod 700 "$HOME/.oci"
+
+exec op-secret exec "$OCI_ITEM" notes OCI_KEY -- \
+  op-secret exec "$OCI_ITEM" custom:user OCI_USER -- \
+  op-secret exec "$OCI_ITEM" custom:tenancy OCI_TENANCY -- \
+  op-secret exec "$OCI_ITEM" custom:fingerprint OCI_FP -- \
+  op-secret exec "$OCI_ITEM" custom:region OCI_REGION -- \
+  python3 - <<'PY'
+import os
+
+home = os.path.expanduser("~")
+key_path = os.path.join(home, ".oci", "oci_api_key.pem")
+cfg_path = os.path.join(home, ".oci", "config")
+
+with open(key_path, "w") as f:
+    f.write(os.environ["OCI_KEY"].rstrip() + "\n")
+os.chmod(key_path, 0o600)
+
+with open(cfg_path, "w") as f:
+    f.write(
+        "[DEFAULT]\n"
+        f"user={os.environ['OCI_USER']}\n"
+        f"fingerprint={os.environ['OCI_FP']}\n"
+        f"tenancy={os.environ['OCI_TENANCY']}\n"
+        f"region={os.environ['OCI_REGION']}\n"
+        f"key_file={key_path}\n"
+    )
+os.chmod(cfg_path, 0o600)
+print(f"OK: materialized {cfg_path} (region={os.environ['OCI_REGION']})")
+PY

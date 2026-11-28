@@ -7,10 +7,17 @@ LincPlus LincStation N2 all-flash NAS at `elsie` (Intel N100 4C Quick Sync, 16 G
   - TrueNAS UI/API: `http://10.77.78.122` (nginx pinned to `10.77.78.122:80/:443`).
   - HexOS Local: `https://1cb25a3d1938d46922e0484954116494bb1fde13.local.hexos.com:43705` (HTTPS) / `http://10.77.78.122:43706` (HTTP). Both `elsie` and `clt` Unbound exempt `local.hexos.com` in `privatedomain` so local TLS resolves without DNS rebind stripping.
   - SSH: `ssh vision` (`truenas_admin@10.77.78.122`, direct over `wg0` from `nous`, fleet key `~/.ssh/id_ed25519_fleet`).
-- **Public HTTPS Ingress (`10.77.78.124:443`):** Dedicated static alias on `enp1s0` running native TrueNAS custom Compose app `caddy` (`caddy:2-alpine`, `/mnt/SSDs/apps/caddy`).
-  - `elsie` OPNsense DNAT forwards WAN TCP+UDP `443 -> 10.77.78.124:443`.
-  - Cloudflare `weavedweb.com` DNS-only (`proxied=false`) `A` records point `photos.weavedweb.com` and `drive.weavedweb.com` directly to `elsie`'s WAN IP (no 100 MB Cloudflare Free upload cap; kept synced by hourly `elsie-ddns-sync.timer` on `nous`).
-  - `elsie` and `clt` Unbound Split-DNS resolve both hostnames directly to `10.77.78.124` (full LAN / `wg0` speed, valid Let's Encrypt TLS via Caddy TLS-ALPN-01).
+- **Public HTTPS Ingress (`10.77.78.124:443` via OCI Always Free Relay `193.122.213.33`):**
+  - Dedicated static alias `10.77.78.124` on `enp1s0` runs native TrueNAS custom Compose app `caddy` (`caddy:2-alpine`, `/mnt/SSDs/apps/caddy`), terminating Let's Encrypt TLS-ALPN-01 directly on `Vision` (true end-to-end TLS, zero 100 MB cap, HTTP/2 + HTTP/3 QUIC).
+  - **OCI Always Free Relay (`vision-relay`, `$0/mo`, `us-ashburn-1` `AD-3`):**
+    - Instance: `ocid1.instance.oc1.iad.anuwcljtno6dmzic632lp7lnbh552apxm462ilyyxzg2uthkk6tvdomaql6q` (`VM.Standard.E2.1.Micro`, Ubuntu 24.04 Minimal, `skip-source-dest-check=true`, `netfilter-persistent`/`iptables-persistent` purged).
+    - VCN: `homelab-relay-vcn` (`10.88.0.0/16`, `ocid1.vcn.oc1.iad.amaaaaaano6dmzia3alpw7leicnm7c2v4cq4y6z62e5qfgur3q6cg4mzt73q`), Subnet `10.88.1.0/24` (`ocid1.subnet.oc1.iad.aaaaaaaackt2nfapkiceyctst52j52a2tcfnasvw42xvgzz4mk7rk4w4kcfq`), Security List (`ocid1.securitylist.oc1.iad.aaaaaaaankqh54skayaxnke2ygvrnib2la2fzoxsd2gxcz4ksslafwrxtgta`: TCP/UDP `443` + UDP `51820` `0.0.0.0/0`, TCP `22` restricted to `nous` + `elsie` WAN IPs).
+    - Reserved Public IPv4: `193.122.213.33` (`vision-relay-ip`, `ocid1.publicip.oc1.iad.amaaaaaano6dmziafit6y4wnciyfy6u3gtihkiwtpr66y2akgjdndsyrnriq`, survives VM rebuilds).
+    - Stateless forwarding: `nftables` DNATs TCP/UDP `443 -> 10.77.78.124:443` + masquerades on `wg0` (`10.77.254.5/30`, MTU `1420`, TCP MSS clamped to PMTU, BBR enabled). Zero certs or secrets live on OCI.
+    - Outbound WireGuard from `elsie` OPNsense `wg1` (`10.77.254.6/30 -> 193.122.213.33:51820`, `keepalive=25`); `elsie` WAN `:443` is closed and `elsie-ddns-sync.timer` is disabled. OPNsense `wireguard` group only allows `10.77.254.5/32 -> 10.77.78.124/32:443` TCP/UDP (cannot reach `.122` mgmt or any other LAN host).
+    - Agentic OCI control: `oci-auth-sync` materializes `~/.oci/{config,oci_api_key.pem}` (`0600`) from 1Password item `oci-api` (`scope: general`) for `oci` CLI (`uv tool install oci-cli`); `ssh relay` (`ubuntu@193.122.213.33`, `~/.ssh/id_ed25519_fleet`); `vision-ctl relay` checks WireGuard + WAN probes.
+  - Cloudflare `weavedweb.com` DNS-only (`proxied=false`) `A` records point `photos.weavedweb.com` and `drive.weavedweb.com` to `193.122.213.33` (residential `elsie` IP is absent from DNS).
+  - `elsie` and `clt` Unbound Split-DNS resolve both hostnames directly to `10.77.78.124` (full LAN / `wg0` speed).
   - Services: `https://photos.weavedweb.com` -> Immich (`:7772`, `go/photos`), `https://drive.weavedweb.com` -> Nextcloud (`:7771`, `go/drive`).
 
 ## Agentic Operations (`vision-ctl`)

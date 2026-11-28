@@ -1,21 +1,33 @@
 #!/bin/sh
-# Mirror nous's canonical bare repos to the mini (nightly nous-git-mirror.timer).
+# Mirror nous's canonical bare repos to macmini and Vision (nightly nous-git-mirror.timer).
 # `push --mirror` replicates force-pushes and deletions; it is a copy, not history.
 set -u
-dest="${NOUS_GIT_MIRROR:-mini:/Users/admin/srv/git}"
-host="${dest%%:*}"
-dir="${dest#*:}"
+if [ -n "${NOUS_GIT_MIRROR:-}" ]; then
+    targets="$NOUS_GIT_MIRROR"
+else
+    targets="${NOUS_GIT_MIRRORS:-mini:/Users/admin/srv/git vision:/mnt/SSDs/backup/nous-git}"
+fi
+
 rc=0
-for repo in /srv/workspaces/git/*.git; do
-    name="$(basename "$repo")"
-    # A repo without refs (fresh `new-project`) has nothing to push.
-    [ -n "$(git -C "$repo" for-each-ref --count=1)" ] || continue
-    if ssh -o BatchMode=yes "$host" "test -d '$dir/$name' || git init -q --bare '$dir/$name'" &&
-        git -C "$repo" push -q --mirror "$host:$dir/$name"; then
-        :
-    else
-        echo "mirror failed: $name" >&2
+for dest in $targets; do
+    host="${dest%%:*}"
+    dir="${dest#*:}"
+    if ! ssh -o BatchMode=yes -o ConnectTimeout=10 "$host" "test -d '$dir'" 2>/dev/null; then
+        echo "mirror target unavailable: $dest" >&2
         rc=1
+        continue
     fi
+    for repo in /srv/workspaces/git/*.git; do
+        name="$(basename "$repo")"
+        # A repo without refs (fresh `new-project`) has nothing to push.
+        [ -n "$(git -C "$repo" for-each-ref --count=1)" ] || continue
+        if ssh -o BatchMode=yes "$host" "test -d '$dir/$name' || git init -q --bare '$dir/$name'" &&
+            git -C "$repo" push -q --mirror "$host:$dir/$name"; then
+            :
+        else
+            echo "mirror failed ($dest): $name" >&2
+            rc=1
+        fi
+    done
 done
 exit "$rc"

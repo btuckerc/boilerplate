@@ -18,6 +18,7 @@ the user's go-ahead first. Router hardware matches clt (GMKtec NucBox M8, Ryzen 
 | barn-ap | barn AP, NETGEAR R7800 on OpenWrt 25.12.6 | `10.77.78.110` (static) | `b0:b9:8a:73:7a:5c` | barn | 5 (1G, barn cable) | `ssh barn-ap` | root password file on nous (see Open items) | `uci`, `openwrt-ap.md` |
 | winbox | gaming PC, Apollo host; Tailscale `accept-routes=false` | `10.77.78.120` | `10:ff:e0:b9:a8:21` | barn, barn-ap `lan1` (1G) | 5 via barn-ap | `ssh winbox`, MCP `winbox` (Tailscale) | - | `platform-ops` `winbox-streaming.md` |
 | macmini | Mac mini M4, jump host, wake sender; Tailscale exit node, `accept-routes=false` | `10.77.78.121` | `d0:11:e5:81:01:6b` | - | 8 (1G) | `ssh mini` (Tailscale) | - | - |
+| vision | LincPlus LincStation N2 all-flash NAS (TrueNAS SCALE 25.10.8 Goldeye + HexOS Local 1.4.10; Immich `:7772`, Nextcloud `:7771`, HexOS `:43706`) | `10.77.78.122` `vision.home.arpa` (static DHCP) | `24:97:ed:3a:e5:9b` | house | 2 (2.5G) | `ssh vision` (`ProxyJump mini`), direct over `wg0` (`10.77.78.122`) | `truenas-vision` (`truenas_admin`) | TrueNAS API / `midclt` |
 | samsung-tv | Samsung QN55QN90AAFXZA 55" Neo QLED TV (2021, Tizen 6.0) | `10.77.78.173` (static DHCP) | `10:2b:41:56:53:4c` | house (BE9700 Wi-Fi) | - | `~/tv-tools/` on `mini` (ports 8001/8002, SDB 26101 when Dev Mode on) | - | TV remote / SDB |
 | Arris TM3402 | Cox phone modem | - | - | - | - | - | - | leave alone |
 
@@ -40,6 +41,7 @@ the user's go-ahead first. Router hardware matches clt (GMKtec NucBox M8, Ryzen 
 ```
 Cox coax -> Orbi CBR750 (bridge) -> M8 re1 WAN (right port, power side), public DHCP + DHCPv6 /128
 M8 re0 LAN (left port, HDMI side) -> xmg1915 port 1
+  port 2 -> vision (2.5G)
   port 7 -> be9700 (house)
   port 8 -> macmini
   port 5 -> barn cable -> barn-ap wan (yellow); barn-ap lan1 -> winbox
@@ -51,7 +53,7 @@ winbox <-> uplink is switched in the R7800's switch chip and never touches the A
 ## Router
 
 - LAN `10.77.78.1/24`, dnsmasq DHCP pool `.41-.245`, domain `home.arpa`. Host entries:
-  barn-ap .110, be9700 .111, xmg1915 .112, winbox .120, macmini .121, samsung-tv .173.
+  barn-ap .110, be9700 .111, xmg1915 .112, winbox .120, macmini .121, vision .122, samsung-tv .173.
 - DNS as clt: dnsmasq on 53053, Unbound forwards `home.arpa` and `78.77.10.in-addr.arpa`
   to it, `private-domain home.arpa,plex.direct` (exempts `*.plex.direct` from DNS rebind
   protection so LAN Plex clients resolve `10.77.78.121`), DNSSEC, prefetch, aggressive NSEC,
@@ -117,7 +119,7 @@ configured from `homenet/openwrt-ap/sites/elsie-barn-ap.env`.
 
 ## Switch
 
-xmg1915, firmware V4.80(ACGP.0) 07/2023. Ports in the inventory; 2-4, 6, 9, 10 empty.
+xmg1915, firmware V4.80(ACGP.0) 07/2023. Ports in the inventory; 3-4, 6, 9, 10 empty.
 Flow control, EEE and auto power down off; loop guard on all ports; RSTP and IGMP snooping
 off; telnet/FTP/HTTP/SNMP off. All counters clean on 2026-11-16 (0 CRC, pause, collisions).
 
@@ -149,6 +151,8 @@ off; telnet/FTP/HTTP/SNMP off. All counters clean on 2026-11-16 (0 CRC, pause, c
   fine: the tunnel route is interface-scoped (`UCSI`), and the MacBook stays on en0 (checked).
 
 ## Change log
+
+- 2026-11-28 Static DHCP reservation for `vision` (LincPlus LincStation N2 NAS, `24:97:ed:3a:e5:9b`, switch port 2 at 2.5G) pinned from dynamic `.134` to `10.77.78.122` (dnsmasq host UUID `e130dca6-f330-4ed4-875d-9209d0d07a1c`, `vision.home.arpa`). Modernized `Vision` sequentially `24.10.2.4 -> 25.04.2.6 -> 25.10.8` (Goldeye), installed fresh Immich `v3.4.2` (`:7772`, Postgres 18/VectorChord, Quick Sync), Nextcloud `35.0.3` (`:7771`, Postgres 18), and HexOS Local `1.4.10` (`:43706`), retired on-box `cloudflared` (`LC_Vision`) in favor of private LAN / `wg0` / `elsie` Tailscale subnet access, and configured ZFS snapshots, NVMe SMART cronjobs, and fail-closed `macmini <-> Vision <-> nous` backups. Verified `dig +short @10.77.78.1 vision.home.arpa` -> `10.77.78.122` and HTTP 200 on `:7772`, `:7771`, `:43706`.
 
 - 2026-11-26 Site-to-site kernel WireGuard (`if_wg`, `wg0`, UDP `51820`, MTU `1420`, `10.77.254.2/30` <-> `clt` `10.77.254.1/30`, allowed `10.77.77.0/24`) enabled hitlessly with WAN UDP `51820` pass (`3837b6e8-d76f-4092-a3f4-7ef434c47d8a`) and scoped `wireguard` pass (`2d12c5c4-680a-4546-b3b6-965d9a1b27a7`). Verified DF `1392 B` payload (`47.5-50.2 ms`, 0% loss) and 4-rep ABBA `wire_bench` (`winbox -> nous`, 30 Mbps + 256 KiB IDR): at 120 FPS frame-complete RTT `55.67 -> 54.42 ms` p50, `77.07 -> 71.01 ms` p95, `128.68 -> 106.05 ms` p99 (`-22.63 ms`), completion `98.80% -> 99.64%`; at 240 FPS p50 `52.85 -> 51.82 ms`, IDR max `115.69 -> 104.34 ms`, completion `98.91% -> 99.45%`.
 

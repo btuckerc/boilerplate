@@ -11,7 +11,9 @@ VISION_HOST="${VISION_HOST:-10.77.78.122}"
 VISION_USER="${VISION_USER:-truenas_admin}"
 VISION_INGRESS="${VISION_INGRESS:-10.77.78.124}"
 VISION_ITEM="${VISION_ITEM:-truenas-vision}"
-export VISION_HOST VISION_USER VISION_INGRESS
+IMMICH_URL="${IMMICH_URL:-http://${VISION_HOST}:7772}"
+IMMICH_ITEM="${IMMICH_ITEM:-immich-agent}"
+export VISION_HOST VISION_USER VISION_INGRESS IMMICH_URL
 
 cmd="${1:-status}"
 if [ "$#" -gt 0 ]; then
@@ -30,6 +32,8 @@ Commands:
   backups                             Show Vision backup datasets and last-ok markers
   smart                               Show NVMe SMART health, temps, wear, and errors
   api <METHOD> <endpoint> [json]      Call TrueNAS /api/v2.0/<endpoint> (prints JSON)
+  immich status|config|jobs           Inspect Immich server, system-config, and queues
+  immich api <METHOD> <path> [json]   Call Immich /api/<path> using op-secret item immich-agent
 EOF
         exit 0
         ;;
@@ -114,6 +118,73 @@ PY
                 '\''
             "
         '
+        ;;
+    immich)
+        sub="${1:-status}"
+        if [ "$#" -gt 0 ]; then
+            shift
+        fi
+        exec op-secret exec "$IMMICH_ITEM" password IMMICH_KEY -- python3 - "$sub" "$@" <<'PY'
+import json, os, sys, urllib.error, urllib.request
+
+base = os.environ["IMMICH_URL"].rstrip("/")
+key = os.environ["IMMICH_KEY"]
+
+def call(method, path, data=None, timeout=20, raw_bytes=False):
+    url = f"{base}/api/{path.lstrip('/')}"
+    body = data.encode() if isinstance(data, str) else (json.dumps(data).encode() if data is not None else None)
+    headers = {"x-api-key": key, "Accept": "application/json"}
+    if body is not None:
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(url, data=body, headers=headers, method=method.upper())
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            ctype = r.headers.get("Content-Type", "")
+            raw = r.read()
+            if raw_bytes and "json" not in ctype:
+                return ("bytes", raw)
+            if not raw:
+                return ("json", None)
+            if "json" in ctype or raw[:1] in (b"{", b"["):
+                return ("json", json.loads(raw.decode()))
+            return ("bytes", raw)
+    except urllib.error.HTTPError as e:
+        sys.stderr.write(f"HTTP {e.code} {method} {path}: {e.read().decode(errors='replace')}\n")
+        sys.exit(1)
+
+sub = sys.argv[1]
+args = sys.argv[2:]
+
+if sub == "api":
+    if len(args) < 2:
+        sys.stderr.write("Usage: vision-ctl immich api <METHOD> <endpoint> [json]\n")
+        sys.exit(2)
+    kind, res = call(args[0], args[1], args[2] if len(args) > 2 else None, raw_bytes=True)
+    if kind == "bytes":
+        sys.stdout.buffer.write(res)
+    else:
+        print(json.dumps(res, indent=2))
+elif sub == "config":
+    _, cfg = call("GET", "system-config")
+    print(json.dumps(cfg, indent=2))
+elif sub == "jobs":
+    _, jobs = call("GET", "jobs")
+    for name, info in sorted(jobs.items()):
+        jc = info.get("jobCounts") or {}
+        qs = info.get("queueStatus") or {}
+        print(f"{name:22s} active={jc.get('active',0)} waiting={jc.get('waiting',0)} failed={jc.get('failed',0)} paused={qs.get('isPaused',False)}")
+elif sub == "status":
+    _, ver = call("GET", "server/version")
+    _, st = call("GET", "server/storage")
+    _, stats = call("GET", "server/statistics")
+    _, me = call("GET", "users/me")
+    print(f"immich={ver.get('major')}.{ver.get('minor')}.{ver.get('patch')} url={base} user={me.get('email')} admin={me.get('isAdmin')}")
+    print(f"storage used={st.get('diskUse')} avail={st.get('diskAvailable')} pct={st.get('diskUsagePercentage')}%")
+    print(f"stats photos={stats.get('photos')} videos={stats.get('videos')} usage={stats.get('usage')} users={len(stats.get('usageByUser') or [])}")
+else:
+    sys.stderr.write(f"Unknown immich subcommand: {sub} (status|config|jobs|api)\n")
+    sys.exit(2)
+PY
         ;;
     *)
         echo "Unknown command: $cmd (try: vision-ctl --help)" >&2

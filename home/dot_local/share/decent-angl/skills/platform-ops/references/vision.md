@@ -5,7 +5,7 @@ LincPlus LincStation N2 all-flash NAS at `elsie` (Intel N100 4C Quick Sync, 16 G
 ## Addressing & Exposure Boundary
 - **Management IP (`10.77.78.122`, `vision.home.arpa`):** Private only (LAN / `wg0` / `elsie` Tailscale subnet router; **never** exposed on WAN).
   - TrueNAS UI/API: `http://10.77.78.122` (nginx pinned to `10.77.78.122:80/:443`).
-  - HexOS Local: `https://10-77-78-122.local.hexos.com:43705` (HTTPS) / `http://10.77.78.122:43706` (HTTP). Both `elsie` and `clt` Unbound exempt `local.hexos.com` in `privatedomain` so local TLS resolves without DNS rebind stripping.
+  - HexOS Local: `https://1cb25a3d1938d46922e0484954116494bb1fde13.local.hexos.com:43705` (HTTPS) / `http://10.77.78.122:43706` (HTTP). Both `elsie` and `clt` Unbound exempt `local.hexos.com` in `privatedomain` so local TLS resolves without DNS rebind stripping.
   - SSH: `ssh vision` (`truenas_admin@10.77.78.122`, direct over `wg0` from `nous`, fleet key `~/.ssh/id_ed25519_fleet`).
 - **Public HTTPS Ingress (`10.77.78.124:443`):** Dedicated static alias on `enp1s0` running native TrueNAS custom Compose app `caddy` (`caddy:2-alpine`, `/mnt/SSDs/apps/caddy`).
   - `elsie` OPNsense DNAT forwards WAN TCP+UDP `443 -> 10.77.78.124:443`.
@@ -18,6 +18,7 @@ HexOS Local is the human Command Deck UI layer on top of TrueNAS SCALE; automate
 - `vision-ctl status` — OS, uptime, pool health/space, app states, HexOS Local & HTTPS probes.
 - `vision-ctl apps` / `pools` / `backups` / `smart` — focused operational views.
 - `vision-ctl api GET|POST|PUT|DELETE <endpoint> [json]` — direct TrueNAS `/api/v2.0/` calls.
+- `vision-ctl immich status|config|jobs` and `vision-ctl immich api <METHOD> <endpoint> [json]` — Immich service-account API via 1Password item `immich-agent` (`scope: general`, field `password`, direct `http://10.77.78.122:7772/api/`). Supports both JSON and binary asset/thumbnail reads. Admin config/job tuning uses the dedicated service account promoted via `immich-admin grant-admin`; future image access uses opt-in Album / Partner Sharing with the service account.
 - Never pass `-job` to non-job `midclt` calls (like `service.restart`), and always wrap SSH commands in `timeout`.
 
 ## Storage, Performance & Backups

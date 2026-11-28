@@ -83,16 +83,18 @@ winbox <-> uplink is switched in the R7800's switch chip and never touches the A
     UUID `daa8284c-fe36-4014-bbed-7b4fccbd0f28`, `pass=pass`, NAT reflection disabled, log off;
     enables direct Tailscale WireGuard from `clt` and cellular CGNAT without DERP).
   - WAN TCP/UDP `443` -> `10.77.78.124:443` (`Vision HTTPS Ingress (photos/drive via Caddy)`,
-    UUID `2009e3c3-55c5-405b-af47-cd838c2e66f1`, `pass=pass`, NAT reflection disabled, log on;
-    direct Let's Encrypt HTTPS for Immich & Nextcloud with no 100 MB Cloudflare cap; TrueNAS/HexOS
-    stay isolated on `.122`).
+    UUID `2009e3c3-55c5-405b-af47-cd838c2e66f1`, `pass=pass`, `natreflection=purenat`, log on;
+    paired with scoped LAN outbound SNAT `5ef9fe24-3397-4951-86f1-2bca50252dd4` `lan -> 10.77.78.124:443`
+    -> `lanip` so LAN browsers using DoH/cached WAN IP hairpin cleanly; direct Let's Encrypt HTTPS
+    for Immich & Nextcloud with no 100 MB Cloudflare cap; TrueNAS/HexOS stay isolated on `.122`).
 - Shaper: FQ-CoDel pipes 800 down / 90 up Mbit, quantum 300, ECN, one maskless queue
   each, rules WAN in/out. Pipe UUIDs: down `596234c5-83d3-46b4-b2b4-646109c2d361`, up
   `42d53d14-a647-4f92-9029-c0c3685a2d2c`. Interactive queues and rules 10-15 exist,
   disabled. clt's per-host WFQ recipe made upload latency worse here (376 ms).
 - Outbound NAT hybrid: UDP static port 41641 for winbox (Tailscale direct paths), LAN UDP
-  endpoint-independent mapping. After a NAT change, delete old UDP states
-  (`diagnostics/firewall/del_state/<id>`) or peers stay on DERP.
+  endpoint-independent mapping, and scoped LAN hairpin SNAT (`5ef9fe24-3397-4951-86f1-2bca50252dd4`,
+  `lan -> 10.77.78.124:443` -> `lanip`) for Vision Caddy Pure NAT reflection. After a NAT change,
+  delete old UDP states (`diagnostics/firewall/del_state/<id>`) or peers stay on DERP.
 - Tunable `hw.re.flow_control=0` (boot time). Check that the WAN media string has no
   `rxpause,txpause`. Hardware offloads off.
 - WAN: block private networks and bogons on. Gateway `WAN_DHCP` monitored (1.1.1.1, host
@@ -157,6 +159,8 @@ off; telnet/FTP/HTTP/SNMP off. All counters clean on 2026-11-16 (0 CRC, pause, c
   fine: the tunnel route is interface-scoped (`UCSI`), and the MacBook stays on en0 (checked).
 
 ## Change log
+
+- 2026-11-28 Fixed stale-browser Cloudflare `522` and `elsie` LAN DoH hairpin for `photos.weavedweb.com` & `drive.weavedweb.com`: switched Cloudflare `weavedweb.com` SSL/TLS mode `flexible -> full` (Cloudflare edge `104.21.24.200` coalesced/cached requests went from `HTTP/2 522` on Cox-blocked `:80` -> `HTTP/2 200` via `:443`, `LC_WebWeaver` tunnel unaffected), enabled `natreflection=purenat` on WAN 443 DNAT `2009e3c3-55c5-405b-af47-cd838c2e66f1`, and added scoped LAN outbound SNAT `5ef9fe24-3397-4951-86f1-2bca50252dd4` (`lan -> 10.77.78.124:443` -> `lanip`; `elsie` LAN curl to `70.175.223.206:443` went from OPNsense self-signed cert error -> `HTTP/2 200`).
 
 - 2026-11-28 Direct Plex-style HTTPS ingress for `photos.weavedweb.com` (Immich) & `drive.weavedweb.com` (Nextcloud): pinned `Vision` `enp1s0` static `.122` (mgmt, TrueNAS UI pinned) + `.124` (Caddy custom app `:443`, TLS-ALPN-01 Let's Encrypt certs auto-issued), added WAN TCP/UDP `443 -> 10.77.78.124:443` DNAT (`2009e3c3-55c5-405b-af47-cd838c2e66f1`), Unbound Split-DNS overrides (`17b962da`, `c948324b`) + `local.hexos.com` in `privatedomain`, switched Cloudflare DNS to unproxied `A 70.175.223.206` (deleted `LC_Vision` tunnel), enabled ZFS `autotrim=on` and `recordsize=1M` on media/backup datasets, and shipped `vision-ctl` + `vision.md`. Verified valid HTTPS from `elsie` LAN, `clt` `wg0`, and external WAN (`70.175.223.206:443` HTTP 200; unknown WAN host TLS-rejected).
 

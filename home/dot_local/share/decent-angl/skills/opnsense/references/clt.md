@@ -34,10 +34,10 @@ convention for hosts.
   nous .157, wincube .100. Unbound forwards `home.arpa` and `77.77.10.in-addr.arpa` to
   dnsmasq on 53053 (design in `SKILL.md`).
 - DHCP Option 121 (RFC 3442 classless static route, UUID `08f67009-5d72-4df1-a48c-83e87b88c8ab` on `lan`):
-  `0.0.0.0/0,10.77.77.1,10.77.78.120/32,10.77.77.1,10.77.78.122/32,10.77.77.1`. Pushes `/32` host routes for `winbox` (.120) and `vision` (.122) via `10.77.77.1`
+  `0.0.0.0/0,10.77.77.1,10.77.78.120/32,10.77.77.1,10.77.78.122/32,10.77.77.1,10.77.78.124/32,10.77.77.1`. Pushes `/32` host routes for `winbox` (.120), `vision` (.122), and `vision-ingress` (.124) via `10.77.77.1`
   so macOS/iOS clients with Tailscale `accept-routes=true` route them over `wg0` via longest-prefix
   match while preserving the `0.0.0.0/0` default gateway.
-- Unbound host overrides: `valheim.angl.gg -> 10.77.77.157`, `vision.home.arpa -> 10.77.78.122` (UUID `b0cebe83-f93b-4eb4-bb4b-7703ee0f2759`, over `wg0`).
+- Unbound `privatedomain`: `home.arpa,plex.direct,local.hexos.com`. Host overrides: `valheim.angl.gg -> 10.77.77.157`, `vision.home.arpa -> 10.77.78.122` (`b0cebe83`), `photos.weavedweb.com -> 10.77.78.124` (`95749f1c`), `drive.weavedweb.com -> 10.77.78.124` (`9e0d4bff`).
 - Site-to-site kernel WireGuard (`if_wg.ko`, `wg0`, MTU `1420`, UDP `51820`): server `s2s-elsie`
   (UUID `f118a4a6-c00d-4be2-baba-1118f6f50256`, `10.77.254.1/30`), peer `elsie-s2s`
   (UUID `6f1a8cf5-c639-45ea-af22-5eec036e9f98`, endpoint `70.175.223.206:51820`, `keepalive=25`,
@@ -78,6 +78,7 @@ GS305E, unmanaged in practice (no agent access recorded).
 
 ## Change log
 
+- 2026-11-28 Added Unbound `privatedomain` `plex.direct,local.hexos.com`, Split-DNS overrides `photos.weavedweb.com`/`drive.weavedweb.com` -> `10.77.78.124` (`95749f1c`, `9e0d4bff`), and `10.77.78.124/32` to DHCP Option 121 (`08f67009`). Verified valid HTTPS to both over `wg0`.
 - 2026-11-28 Added Unbound host override `vision.home.arpa -> 10.77.78.122` (UUID `b0cebe83-f93b-4eb4-bb4b-7703ee0f2759`) and added `10.77.78.122/32,10.77.77.1` to DHCP Option 121 (`08f67009-5d72-4df1-a48c-83e87b88c8ab`) so `clt` clients route `Vision` directly over `wg0`. Verified `dig +short @10.77.77.1 vision.home.arpa` -> `10.77.78.122` and HTTP 200 to `Vision` `:7772`/`:7771`/`:43706` over `wg0`.
 - 2026-11-26 Site-to-site kernel WireGuard (`if_wg`, `wg0`, UDP `51820`, MTU `1420`, `10.77.254.1/30` <-> `elsie` `10.77.254.2/30`) + RFC 3442 DHCP Option 121 (`08f67009-5d72-4df1-a48c-83e87b88c8ab`: `0.0.0.0/0,10.77.77.1,10.77.78.120/32,10.77.77.1`) enabled hitlessly. Verified DF `1392 B` payload (`1420 B` IP, 0% loss, `47.5-50.2 ms` to `10.77.78.121`), raw DHCP OFFER wire bytes, and 4-rep ABBA `wire_bench` (`winbox -> nous`, 30 Mbps + 256 KiB IDR): at 120 FPS frame-complete RTT dropped `55.67 -> 54.42 ms` p50 (`-1.25 ms`, 4/4 non-overlapping), `77.07 -> 71.01 ms` p95 (`-6.06 ms`), `128.68 -> 106.05 ms` p99 (`-22.63 ms`), IDR max `91.15 -> 84.52 ms`, completion `98.80% -> 99.64%`; at 240 FPS p50 `52.85 -> 51.82 ms`, p99 `128.41 -> 123.58 ms`, IDR max `115.69 -> 104.34 ms`, completion `98.91% -> 99.45%`.
 - 2026-11-24 Tailscale `listenPort` moved `41641` -> `41642` (avoiding collision with `nous`'s WAN static NAT `41641`): `btc-mbp14` -> `clt` switched from `DERP(nyc)` to direct `98.26.202.87:41642`, `10.77.77.1` ping dropped from med 261 / max 606 ms to med 57.3 / max 64.3 ms (`nous` kept direct path at 53 ms).

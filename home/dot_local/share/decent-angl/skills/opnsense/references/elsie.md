@@ -18,7 +18,7 @@ the user's go-ahead first. Router hardware matches clt (GMKtec NucBox M8, Ryzen 
 | barn-ap | barn AP, NETGEAR R7800 on OpenWrt 25.12.6 | `10.77.78.110` (static) | `b0:b9:8a:73:7a:5c` | barn | 5 (1G, barn cable) | `ssh barn-ap` | root password file on nous (see Open items) | `uci`, `openwrt-ap.md` |
 | winbox | gaming PC, Apollo host; Tailscale `accept-routes=false` | `10.77.78.120` | `10:ff:e0:b9:a8:21` | barn, barn-ap `lan1` (1G) | 5 via barn-ap | `ssh winbox`, MCP `winbox` (Tailscale) | - | `platform-ops` `winbox-streaming.md` |
 | macmini | Mac mini M4, jump host, wake sender; Tailscale exit node, `accept-routes=false` | `10.77.78.121` | `d0:11:e5:81:01:6b` | - | 8 (1G) | `ssh mini` (Tailscale) | - | - |
-| vision | LincPlus LincStation N2 all-flash NAS (TrueNAS SCALE 25.10.8 Goldeye + HexOS Local 1.4.10; Immich `:7772`, Nextcloud `:7771`, HexOS `:43706`) | `10.77.78.122` `vision.home.arpa` (static DHCP) | `24:97:ed:3a:e5:9b` | house | 2 (2.5G) | `ssh vision` (`ProxyJump mini`), direct over `wg0` (`10.77.78.122`) | `truenas-vision` (`truenas_admin`) | TrueNAS API / `midclt` |
+| vision | LincPlus LincStation N2 all-flash NAS (TrueNAS SCALE 25.10.8 Goldeye + HexOS Local 1.4.10; Immich `:7772`, Nextcloud `:7771`, HexOS `:43705/:43706`, Caddy ingress `.124:443`) | `10.77.78.122` `vision.home.arpa` (mgmt) + `10.77.78.124` (Caddy HTTPS ingress) | `24:97:ed:3a:e5:9b` | house | 2 (2.5G) | `vision-ctl`, `ssh vision` (direct over `wg0`) | `truenas-vision` (`truenas_admin`) | `vision-ctl` / TrueNAS API / `midclt` |
 | samsung-tv | Samsung QN55QN90AAFXZA 55" Neo QLED TV (2021, Tizen 6.0) | `10.77.78.173` (static DHCP) | `10:2b:41:56:53:4c` | house (BE9700 Wi-Fi) | - | `~/tv-tools/` on `mini` (ports 8001/8002, SDB 26101 when Dev Mode on) | - | TV remote / SDB |
 | Arris TM3402 | Cox phone modem | - | - | - | - | - | - | leave alone |
 
@@ -53,11 +53,13 @@ winbox <-> uplink is switched in the R7800's switch chip and never touches the A
 ## Router
 
 - LAN `10.77.78.1/24`, dnsmasq DHCP pool `.41-.245`, domain `home.arpa`. Host entries:
-  barn-ap .110, be9700 .111, xmg1915 .112, winbox .120, macmini .121, vision .122, samsung-tv .173.
+  barn-ap .110, be9700 .111, xmg1915 .112, winbox .120, macmini .121, vision .122, vision-ingress .124, samsung-tv .173.
 - DNS as clt: dnsmasq on 53053, Unbound forwards `home.arpa` and `78.77.10.in-addr.arpa`
-  to it, `private-domain home.arpa,plex.direct` (exempts `*.plex.direct` from DNS rebind
-  protection so LAN Plex clients resolve `10.77.78.121`), DNSSEC, prefetch, aggressive NSEC,
-  serve-expired (TTL 86400, client timeout 1800 ms), msg/rrset cache 64m/128m.
+  to it, `private-domain home.arpa,plex.direct,local.hexos.com` (exempts `*.plex.direct` and
+  `*.local.hexos.com` from DNS rebind protection so LAN Plex and HexOS Local TLS resolve),
+  Unbound overrides `photos.weavedweb.com` and `drive.weavedweb.com` -> `10.77.78.124` (Split-DNS
+  direct LAN HTTPS), DNSSEC, prefetch, aggressive NSEC, serve-expired (TTL 86400, client timeout
+  1800 ms), msg/rrset cache 64m/128m.
 - TV-only Unbound DNSBL & DNS enforcement (`samsung-tv`, `10.77.78.173/32` only; rest of LAN
   unaffected):
   - Unbound DNSBL policy (`99bbc481-29a2-484b-b4c5-623c3b1ba557`, `source_nets=10.77.78.173/32`):
@@ -80,6 +82,10 @@ winbox <-> uplink is switched in the R7800's switch chip and never touches the A
   - WAN UDP `41641` -> `10.77.78.120:41641` (`Tailscale direct UDP 41641 (winbox)`,
     UUID `daa8284c-fe36-4014-bbed-7b4fccbd0f28`, `pass=pass`, NAT reflection disabled, log off;
     enables direct Tailscale WireGuard from `clt` and cellular CGNAT without DERP).
+  - WAN TCP/UDP `443` -> `10.77.78.124:443` (`Vision HTTPS Ingress (photos/drive via Caddy)`,
+    UUID `2009e3c3-55c5-405b-af47-cd838c2e66f1`, `pass=pass`, NAT reflection disabled, log on;
+    direct Let's Encrypt HTTPS for Immich & Nextcloud with no 100 MB Cloudflare cap; TrueNAS/HexOS
+    stay isolated on `.122`).
 - Shaper: FQ-CoDel pipes 800 down / 90 up Mbit, quantum 300, ECN, one maskless queue
   each, rules WAN in/out. Pipe UUIDs: down `596234c5-83d3-46b4-b2b4-646109c2d361`, up
   `42d53d14-a647-4f92-9029-c0c3685a2d2c`. Interactive queues and rules 10-15 exist,
@@ -151,6 +157,8 @@ off; telnet/FTP/HTTP/SNMP off. All counters clean on 2026-11-16 (0 CRC, pause, c
   fine: the tunnel route is interface-scoped (`UCSI`), and the MacBook stays on en0 (checked).
 
 ## Change log
+
+- 2026-11-28 Direct Plex-style HTTPS ingress for `photos.weavedweb.com` (Immich) & `drive.weavedweb.com` (Nextcloud): pinned `Vision` `enp1s0` static `.122` (mgmt, TrueNAS UI pinned) + `.124` (Caddy custom app `:443`, TLS-ALPN-01 Let's Encrypt certs auto-issued), added WAN TCP/UDP `443 -> 10.77.78.124:443` DNAT (`2009e3c3-55c5-405b-af47-cd838c2e66f1`), Unbound Split-DNS overrides (`17b962da`, `c948324b`) + `local.hexos.com` in `privatedomain`, switched Cloudflare DNS to unproxied `A 70.175.223.206` (deleted `LC_Vision` tunnel), enabled ZFS `autotrim=on` and `recordsize=1M` on media/backup datasets, and shipped `vision-ctl` + `vision.md`. Verified valid HTTPS from `elsie` LAN, `clt` `wg0`, and external WAN (`70.175.223.206:443` HTTP 200; unknown WAN host TLS-rejected).
 
 - 2026-11-28 Static DHCP reservation for `vision` (LincPlus LincStation N2 NAS, `24:97:ed:3a:e5:9b`, switch port 2 at 2.5G) pinned from dynamic `.134` to `10.77.78.122` (dnsmasq host UUID `e130dca6-f330-4ed4-875d-9209d0d07a1c`, `vision.home.arpa`). Modernized `Vision` sequentially `24.10.2.4 -> 25.04.2.6 -> 25.10.8` (Goldeye), installed fresh Immich `v3.4.2` (`:7772`, Postgres 18/VectorChord, Quick Sync), Nextcloud `35.0.3` (`:7771`, Postgres 18), and HexOS Local `1.4.10` (`:43706`), retired on-box `cloudflared` (`LC_Vision`) in favor of private LAN / `wg0` / `elsie` Tailscale subnet access, and configured ZFS snapshots, NVMe SMART cronjobs, and fail-closed `macmini <-> Vision <-> nous` backups. Verified `dig +short @10.77.78.1 vision.home.arpa` -> `10.77.78.122` and HTTP 200 on `:7772`, `:7771`, `:43706`.
 

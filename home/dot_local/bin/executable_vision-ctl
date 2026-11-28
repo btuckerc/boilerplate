@@ -1,0 +1,122 @@
+#!/bin/sh
+# Lightweight fleet CLI for Vision (TrueNAS SCALE 25.10 + HexOS Local at 10.77.78.122).
+# Reads credentials via 1Password `op-secret` (`truenas-vision`, never printed).
+# Usage:
+#   vision-ctl status
+#   vision-ctl apps | pools | backups | smart
+#   vision-ctl api <GET|POST|PUT|DELETE> <endpoint> [json-body]
+set -eu
+
+VISION_HOST="${VISION_HOST:-10.77.78.122}"
+VISION_USER="${VISION_USER:-truenas_admin}"
+VISION_INGRESS="${VISION_INGRESS:-10.77.78.124}"
+VISION_ITEM="${VISION_ITEM:-truenas-vision}"
+export VISION_HOST VISION_USER VISION_INGRESS
+
+cmd="${1:-status}"
+if [ "$#" -gt 0 ]; then
+    shift
+fi
+
+case "$cmd" in
+    -h|--help|help)
+        cat <<'EOF'
+Usage: vision-ctl <command> [args...]
+
+Commands:
+  status                              Summary of OS, pools, apps, HexOS Local, HTTPS, and backups
+  apps                                List TrueNAS apps (state, version, portals)
+  pools                               List ZFS pools and usage
+  backups                             Show Vision backup datasets and last-ok markers
+  smart                               Show NVMe SMART health, temps, wear, and errors
+  api <METHOD> <endpoint> [json]      Call TrueNAS /api/v2.0/<endpoint> (prints JSON)
+EOF
+        exit 0
+        ;;
+    status|apps|pools|api)
+        exec op-secret exec "$VISION_ITEM" password TN_PASS -- python3 - "$cmd" "$@" <<'PY'
+import base64, json, os, sys, urllib.error, urllib.request
+
+host = os.environ["VISION_HOST"]
+user = os.environ["VISION_USER"]
+auth = base64.b64encode(f"{user}:{os.environ['TN_PASS']}".encode()).decode()
+
+def call(method, path, data=None, timeout=20):
+    url = f"http://{host}/api/v2.0/{path.lstrip('/')}"
+    body = data.encode() if isinstance(data, str) else (json.dumps(data).encode() if data is not None else None)
+    req = urllib.request.Request(
+        url,
+        data=body,
+        headers={"Authorization": f"Basic {auth}", "Content-Type": "application/json"},
+        method=method.upper(),
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            raw = r.read().decode()
+            return json.loads(raw) if raw else None
+    except urllib.error.HTTPError as e:
+        sys.stderr.write(f"HTTP {e.code} {method} {path}: {e.read().decode()}\n")
+        sys.exit(1)
+
+def probe(url, timeout=4):
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as r:
+            return f"HTTP {r.status}"
+    except urllib.error.HTTPError as e:
+        return f"HTTP {e.code}"
+    except Exception as e:
+        return f"ERR ({type(e).__name__})"
+
+cmd = sys.argv[1]
+args = sys.argv[2:]
+
+if cmd == "api":
+    if len(args) < 2:
+        sys.stderr.write("Usage: vision-ctl api <GET|POST|PUT|DELETE> <endpoint> [json]\n")
+        sys.exit(2)
+    res = call(args[0], args[1], args[2] if len(args) > 2 else None)
+    print(json.dumps(res, indent=2))
+elif cmd == "apps":
+    for a in call("GET", "app"):
+        print(f"{a['name']:12s} {a['state']:10s} {a.get('human_version') or '-':18s} {json.dumps(a.get('portals') or {})}")
+elif cmd == "pools":
+    for p in call("GET", "pool"):
+        free_tib = (p.get("free") or 0) / (1024**4)
+        used_gib = (p.get("allocated") or 0) / (1024**3)
+        print(f"{p['name']:10s} {p['status']:8s} healthy={p['healthy']} used={used_gib:.1f}GiB free={free_tib:.2f}TiB")
+elif cmd == "status":
+    si = call("GET", "system/info")
+    print(f"host={si['hostname']} ip={host} os={si['version']} tz={si['timezone']} uptime={si['uptime']}")
+    for p in call("GET", "pool"):
+        free_tib = (p.get("free") or 0) / (1024**4)
+        used_gib = (p.get("allocated") or 0) / (1024**3)
+        print(f"pool={p['name']} status={p['status']} healthy={p['healthy']} used={used_gib:.1f}GiB free={free_tib:.2f}TiB")
+    for a in call("GET", "app"):
+        print(f"app={a['name']} state={a['state']} ver={a.get('human_version') or '-'}")
+    print(f"probe hexos:43706={probe(f'http://{host}:43706/')} photos={probe('https://photos.weavedweb.com/api/server/ping')} drive={probe('https://drive.weavedweb.com/status.php')}")
+PY
+        ;;
+    backups)
+        exec ssh -o BatchMode=yes -o ConnectTimeout=10 vision '
+            zfs list -o name,used,avail,refer -r SSDs/backup
+            printf "vision-db last-ok:    "; cat /mnt/SSDs/backup/vision-db/last-ok 2>/dev/null || echo missing
+            printf "macmini-sync last-ok: "; cat /mnt/SSDs/backup/vision-db/macmini-sync-last-ok 2>/dev/null || echo in-progress/missing
+        '
+        ;;
+    smart)
+        exec op-secret exec "$VISION_ITEM" password TN_PASS -- sh -c '
+            printf "%s\n" "$TN_PASS" | ssh -o BatchMode=yes -o ConnectTimeout=10 vision "
+                sudo -S -p \"\" sh -c '\''
+                for d in /dev/nvme0n1 /dev/nvme1n1 /dev/nvme2n1 /dev/nvme3n1; do
+                    echo === \$d ===
+                    /usr/sbin/smartctl -H -A \"\$d\" | grep -E \"Model Number|SMART overall|Temperature:|Available Spare:|Percentage Used:|Media and Data Integrity|Power On Hours\"
+                done
+                '\''
+            "
+        '
+        ;;
+    *)
+        echo "Unknown command: $cmd (try: vision-ctl --help)" >&2
+        exit 2
+        ;;
+esac

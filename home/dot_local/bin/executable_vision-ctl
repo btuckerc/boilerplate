@@ -101,11 +101,15 @@ elif cmd == "status":
 PY
         ;;
     backups)
-        exec ssh -o BatchMode=yes -o ConnectTimeout=10 vision '
+        ssh -o BatchMode=yes -o ConnectTimeout=10 vision '
             zfs list -o name,used,avail,refer -r SSDs/backup
             printf "vision-db last-ok:    "; cat /mnt/SSDs/backup/vision-db/last-ok 2>/dev/null || echo missing
             printf "macmini-sync last-ok: "; cat /mnt/SSDs/backup/vision-db/macmini-sync-last-ok 2>/dev/null || echo in-progress/missing
         '
+        if [ -d /srv/models/backups/vision ]; then
+            printf "nous-offsite last-ok: "; cat /srv/models/backups/vision/last-ok 2>/dev/null || echo missing
+            printf "nous /srv/models:     "; df -h /srv/models | awk 'NR==2 {print "used=" $3 " avail=" $4 " (" $5 ")"}'
+        fi
         ;;
     smart)
         exec op-secret exec "$VISION_ITEM" password TN_PASS -- sh -c '
